@@ -33,7 +33,21 @@ class ModelWrapper:
             epoch = self.epoch_wrapper,
         )
 
-    def load_checkpoint(self, checkpoint_path, device):
+    def to_load(self, model_only=False):
+        if model_only:
+            print('Loading model and epoch only')
+            return dict(
+                model = self.model,
+                epoch = self.epoch_wrapper,
+            )
+        return dict(
+            model = self.model,
+            optimizer = self.optimizer,
+            lr_scheduler = self.lr_scheduler,
+            epoch = self.epoch_wrapper,
+        )
+
+    def load_checkpoint(self, checkpoint_path, device, model_only=False):
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        Checkpoint.load_objects(self.to_save(), checkpoint)
+        Checkpoint.load_objects(self.to_load(model_only), checkpoint)
         print('Checkpoint successfully loaded!')

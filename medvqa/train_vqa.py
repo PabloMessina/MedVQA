@@ -95,6 +95,9 @@ def parse_args():
     parser.add_argument('--save', dest='save', action='store_true')
     parser.add_argument('--no-save', dest='save', action='store_false')
     parser.set_defaults(save=True)
+
+    parser.add_argument('--override-lr', dest='override_lr', action='store_true')
+    parser.set_defaults(override_lr=False)
     
     return parser.parse_args()
 
@@ -107,7 +110,7 @@ def _merge_metrics(train_metrics, val_metrics):
     for met in _metric_names:
         train_value += train_metrics[met]
         val_value += val_metrics[met]
-    return train_value * 0.65 + val_value * 0.35
+    return train_value * 0.5 + val_value * 0.5
 
 def train_model(
     tokenizer_kwargs,
@@ -121,7 +124,8 @@ def train_model(
     batches_per_epoch,
     device = 'GPU',
     checkpoint_folder_path = None,
-    save = True
+    save = True,
+    override_lr = False,
 ):
     count_print = CountPrinter()
 
@@ -265,7 +269,7 @@ def train_model(
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
         count_print('Loading model from checkpoint ...')
         print('checkpoint_path = ', checkpoint_path)
-        model_wrapper.load_checkpoint(checkpoint_path, device)
+        model_wrapper.load_checkpoint(checkpoint_path, device, model_only=override_lr)
     
     score_fn = lambda _ : _merge_metrics(trainer.state.metrics, validator.state.metrics)
 
@@ -322,6 +326,7 @@ def train_from_scratch(
     device = 'GPU',
     # Other args
     save = True,
+    **unused_kwargs,
 ):
     print('----- Training model from scratch ------')
 
@@ -376,6 +381,8 @@ def resume_training(
     batches_per_epoch = 1000,
     device = 'GPU',
     save = True,
+    override_lr = False,
+    **unused_kwargs,
 ):
     print('----- Resuming training ------')
 
@@ -400,7 +407,8 @@ def resume_training(
                 batches_per_epoch,
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
-                save = save)
+                save = save,
+                override_lr = override_lr)
 
 if __name__ == '__main__':
 
@@ -411,10 +419,6 @@ if __name__ == '__main__':
         print(f'   {k}: {v}')
 
     if args.get('checkpoint_folder', None):
-        resume_training(checkpoint_folder=args['checkpoint_folder'],
-                        epochs=args['epochs'],
-                        batches_per_epoch=args['batches_per_epoch'],
-                        device=args['device'],
-                        save=args['save'])
+        resume_training(**args)
     else:
         train_from_scratch(**args)
