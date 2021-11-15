@@ -377,6 +377,9 @@ def train_from_scratch(
 
 def resume_training(
     checkpoint_folder,
+    lr,
+    lr_decay,
+    lr_decay_patience,
     epochs = 1,
     batches_per_epoch = 1000,
     device = 'GPU',
@@ -395,6 +398,15 @@ def resume_training(
     mimiccxr_vqa_train_handler_kwargs = metadata['mimiccxr_vqa_train_handler_kwargs']
     iuxray_vqa_train_handler_kwargs = metadata['iuxray_vqa_train_handler_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+
+    if override_lr:
+        optimizer_kwargs = dict(
+            lr = lr,
+        )
+        lr_scheduler_kwargs = dict(
+            factor = lr_decay,
+            patience = lr_decay_patience,
+        )
 
     train_model(tokenizer_kwargs,
                 model_kwargs,
