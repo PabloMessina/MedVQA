@@ -1,0 +1,5 @@
+\bfree\b.*\b(air|gas)\b
+focus of air
+fluid.*\bair
+pneumo( )?pericardium
+\bgasless\b

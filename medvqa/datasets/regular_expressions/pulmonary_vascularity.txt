@@ -1,0 +1,12 @@
+\bpulm.*(vascula(r|t)|vessel|venous|emboli|hemorrhage)
+pulmonary hypertension
+venous (congestion|engorgement)
+vascular (plethora|engorgement|enlargement|crossing)
+upper zone redistribution
+pulmonary arter
+\bcrowding.*\b(vascula|vessels)
+\bvascula.*\b(crowding|congestion)
+\bcongestion.*\bvascula
+mediastinal veins
+vasculitis
+vasculature

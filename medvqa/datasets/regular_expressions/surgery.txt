@@ -1,0 +1,12 @@
+surgery
+surgical
+[cos]tomy\b
+plasty\b
+\bpost-?op
+\bCABG\b
+\bbypass\b
+\bpost.*procedur
+\bsuture
+transplant
+\bresection
+\bamputat

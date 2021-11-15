@@ -1,0 +1,3 @@
+\b(peri)?hilar?\b
+\bprominen.*\bhila
+\b(right|left|the) hilu(m|s)

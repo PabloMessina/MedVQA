@@ -1,0 +1,7 @@
+\bpleural.*\b(effusion|thick|sinus|surface|plaque|abnormalit|fluid|blunting|space|collection|margin)
+\bthick.*\bpleura
+pleural(-| )based
+costophrenic
+\beffusion
+(left|right) pleura
+\bno\b.*\beffusion

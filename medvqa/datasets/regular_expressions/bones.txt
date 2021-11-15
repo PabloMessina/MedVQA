@@ -1,0 +1,69 @@
+\bshoulder
+degenerative.*(clavicular|clavicle|midfoot|joint|change)
+(clavicular|clavicle|midfoot|joint).*degenerative
+\bspin(e|al)\b
+\bDISH\b
+costochondral
+convex curvature
+lumbar curve
+\bankle
+\belbow
+\bforearm
+\bhumerus
+enthesophyte
+curve convex
+\bend( )?plate
+\bdiscs?\b
+\bfem(ur|oral)
+\bwedg.*\bvertebr
+anterior wedg
+\bspondyl
+\bcervical\b
+\bsacrum\b
+(sacroiliac|sternomanubrial|sternoclavicular|distraction|\binjury|\bwiden).*\bjoint
+\bjoint.*\b(disease|distraction|separation|space)
+\bknees?\b
+\bosteo
+\b(mid)?clavicle
+acromiohumeral interval
+\bosseous\b
+\bbon(es|y)\b
+\bbone\b.*\b(structure|abnormalit|finding|deform|demineraliz|injur|erosion|infection|element|destruction)
+\bdeformit
+\bbony thorax
+\bhumer\b
+humeral\b
+rotator cuff disease
+arthropathy
+\bvertebrae?\b
+vertebr.*(compression|collapse)
+vertebral bod
+prevertebral
+thoracolumbar
+\bjunction
+\bpectus\b
+\bsternum
+spondylolisthesis
+scolio(tic|sis\b)
+\bkypho
+\bskeletal
+\bclavicle
+cleidocranial dysostosis
+bone infarct
+\bAC separation
+acromioclavicular
+\bmyeloma
+\bdislocat
+\b(L|S|T)\d+\b
+\barthrit
+\bmalleol
+\bpelvis\b
+\bhips\b
+bone anchor
+\scaphoid
+\btrabecular
+medial compartment
+\bscapula
+\bsublux
+\bposterior.*\bfusion
+xiphoid

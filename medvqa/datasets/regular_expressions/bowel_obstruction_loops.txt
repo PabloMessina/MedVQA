@@ -1,0 +1,6 @@
+\bbowel.*obstruction
+obstruction.*\bbowel
+\bbowel.*\bloop
+\bloop.*\bbowel
+\bcolon.*\bloop
+distended.*\b(bowel|loop)

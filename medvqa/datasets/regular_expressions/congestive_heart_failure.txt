@@ -1,0 +1,4 @@
+congestive.*heart.*failure
+cardiac congestion
+\bCHF\b
+\bvolume.*\boverload

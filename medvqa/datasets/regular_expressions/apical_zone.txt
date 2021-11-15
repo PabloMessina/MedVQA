@@ -1,0 +1,3 @@
+\b(peri)?apical\b
+\bapices?\b
+\bapex\b

@@ -1,0 +1,1 @@
+cardi(ac|omediastinal|opericardial|opulmonary).*\b(silhouette|contour|margin|border)

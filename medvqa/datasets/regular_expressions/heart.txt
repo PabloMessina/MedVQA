@@ -1,0 +1,11 @@
+cardiac (configuration|enlargement|apex|decompensation|size|fluid|valve)
+cardiothymic silhouette
+\bmyocardi
+\bvalvular abnormalit
+atrial enlargement
+\batrium\b
+ventricular wall
+aortic valve
+\bheart\b
+ventricular enlargement
+dextrocardia

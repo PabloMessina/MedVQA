@@ -1,0 +1,5 @@
+\binterst.*\b(disease|abnormal)
+\b(disease|abnormal).*\binterst
+(lung|pulmon).*\bscar
+fibro(sis|tic)
+interstitial (marking|.*lung)

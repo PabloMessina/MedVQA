@@ -1,0 +1,7 @@
+\bcancer
+\bmetasta
+\btumor
+\bmyeloma
+neoplasm
+carcinomatosis
+carcinoma

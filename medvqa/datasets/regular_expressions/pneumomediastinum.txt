@@ -1,0 +1,2 @@
+pneumomediastinum
+mediastinal.*(emphysema|\bair\b)

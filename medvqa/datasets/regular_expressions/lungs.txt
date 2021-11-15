@@ -1,0 +1,15 @@
+\b(left|right|both|upper|lower|clear|expanded|inflated|aerat|sparing|ventilat|appearance|congest|(ab)?normal).*\b((mid)?lung|lobe)
+aeration.*\bbase\b
+(left|right) bas(e|al)\b
+(inspiratory|lung).*\bvolume
+volume loss
+\b(hypo|hyper|over)(inflat|expan)
+\b(pulmon|lung).*parenchyma
+parenchyma.*\blung
+\blung.*\b(inflat|expanded|clear|marking|hypoinflat|base|apice|finding|aerated|change|free|lines|stable|congest|(ab)?normal|ventilat)
+\b(pulmonary|congest)*\bpattern
+\bpattern.*\b(pulmonary|congest)
+\bpulmonary.*\b(congest|architecture)
+\bcongest.*\bpulmonary
+lobectomy
+pneumonectomy

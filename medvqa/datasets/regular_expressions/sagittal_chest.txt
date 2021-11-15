@@ -1,0 +1,2 @@
+sagittal.*(chest|diameter|thorax)
+(chest|diameter|thorax).*sagittal

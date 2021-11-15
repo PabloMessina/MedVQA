@@ -1,0 +1,40 @@
+import json
+import pickle
+import os
+
+from medvqa.utils.common import (
+    WORKSPACE_DIR,
+    get_timestamp,
+)
+
+def load_json_file(path):
+    with open(path, 'r') as f:
+        return json.load(f)
+
+def load_pickle(path):
+    try:
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return None
+
+def make_dirs_in_filepath(filepath):
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+def save_to_pickle(obj, path):
+    make_dirs_in_filepath(path)
+    with open(path, 'wb') as f:
+        pickle.dump(obj, f)
+
+def save_to_json(obj, path):
+    make_dirs_in_filepath(path)
+    with open(path, 'w') as f:
+        json.dump(obj, f)
+
+def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
+    timestamp = get_timestamp()
+    folder_name = f'{timestamp}_{dataset_name}_{model_name}'
+    if args: folder_name = f'{folder_name}_{"_".join(args)}'
+    full_path = os.path.join(WORKSPACE_DIR, 'models', task, folder_name)
+    os.makedirs(full_path, exist_ok=True)
+    return full_path

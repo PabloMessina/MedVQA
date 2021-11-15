@@ -1,0 +1,28 @@
+catheter
+\btube(s)?
+\btubing\b
+\btubular\b
+\bsideport
+\bport\b
+mediport\b
+\bport-?a-?cath
+\bPICC\b
+\b(left|right|central|PIC|jugular|EJ|sided|subclavian|tip|course|position|support)\b.*\blines?\b
+\b(line|the) tips?\b
+\btip\b.*\b(lies|terminates|projects|is)\b
+\bmidline
+pacemaker
+\bleads?\b
+\bstent(s|ing)?\b
+\bCVL\b
+\bETT\b
+\bNGT\b
+\bIJ\b
+\bintroducer\b
+\bcuffs?\b
+internal jugular vein sheath
+Dobbhoff
+endotracheal
+\bdual\b.*\blumen\b
+\bkink(ing|ed)?\b
+\bintubat

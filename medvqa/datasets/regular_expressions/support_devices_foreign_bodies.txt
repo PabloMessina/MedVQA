@@ -1,0 +1,54 @@
+\bhardware
+embolization
+\bclips?\b
+\bcoils?\b
+\bdevices?\b
+\bradiopa(q|c)
+\bpen tip
+\bwires?\b
+\bmetal(lic)?\b
+\bdrains?\b
+\bdrainage
+\banchor\b
+\bpacers?\b
+\bpacing\b
+\boral contrast
+\bscattered contrast
+\bballoon\b
+\bpump\b
+nipple (marker|shadow|ring)
+valve ring
+\bfiducial\b
+\bshadow.*\bnipple
+\bgenerator
+\bpiercing
+\bTIPS\b
+\bshunts?\b
+\breplace.*\bvalv
+\bvalv.*\breplace
+endobronchial valve
+\b(lap|gastric)\b.*\bband
+\bAICD\b
+\bICD\b
+\bLVAD\b
+prosthe(sis|ses|tic)
+\bfilters?\b
+\bstructure.*\b(courses|project)
+projecting.*\bstructure
+projectile
+\bproject(ing|s|ed)? (over|in)\b
+\bstimulator
+\bprobes?\b
+\bimplant
+defibrillator
+\bjewelry\b
+\bbarium\b
+\bfecal\b
+\bstool\b
+\bbullets?\b
+foreign bod(y|ies)
+\bscrew\b
+\bskinfold
+\bgallstone
+\bgown\b
+\bcables?\b
