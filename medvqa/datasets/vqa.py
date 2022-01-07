@@ -9,6 +9,22 @@ from medvqa.utils.files import (
 from medvqa.utils.common import CACHE_DIR
 
 def _split_data_train_val(question_ids, answers, n_vals_per_question=10, min_question_count=100):
+    """Splits questions and answers into train and val splits.
+
+    Question-answer pairs are sampled for validation in a stratified manner, by sorting answers
+    by length (for each question id), splitting answers into bins and then sampling randomly
+    from each bin.
+
+    Args:
+        question_ids (list of ints): list of question ids, each id can be mapped to the original question
+        answers (list of tokenized answers): each answer is a list of tokens
+        n_vals_per_question (int, optional): number of validation instances to sample per question. Defaults to 10.
+        min_question_count (int, optional): minimun number of examples for a question id to be considered for validation. Defaults to 100.
+
+    Returns:
+        pair of dicts: each dict maps question ids to list of indices. The actual questions
+        and answers can be recovered from these indices.
+    """
     
     tmp = dict()
     for i, (qi, a) in enumerate(zip(question_ids, answers)):
@@ -64,7 +80,7 @@ class VQADataset(Dataset):
             a=self.answers[idx],
         )
 
-class VQATrainingHandler:
+class VQA_Trainer:
     
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
@@ -165,6 +181,81 @@ class VQATrainingHandler:
                                                      collate_fn=collate_batch_fn))
         
         self.val_dataloader = DataLoader(self.val_dataset,
+                                         batch_size=batch_size,
+                                         shuffle=False,
+                                         collate_fn=collate_batch_fn)
+
+class VQA_Evaluator:
+    
+    def __init__(self, transform, batch_size, collate_batch_fn,
+                preprocessing_save_path,
+                dataset_name = None,
+        ):
+    
+        self.transform = transform
+
+        # create absolute path from relative path
+        preprocessing_save_path = os.path.join(CACHE_DIR, preprocessing_save_path)
+
+        first_time = not self._load_cached_data(preprocessing_save_path)
+
+        if first_time:
+            
+            self.dataset_name = dataset_name
+            self._preprocess_data()
+            self._save_data(preprocessing_save_path)
+        
+        self.test_indices = list(range(len(self.report_ids)))
+        self._generate_test_dataset()
+        self._generate_test_dataloader(batch_size, collate_batch_fn)
+        print('done!')
+
+    def __len__(self):
+        return len(self.report_ids)
+    
+    def _preprocess_data(self):
+        raise NotImplementedError('Make sure your especialized class implements this function')
+
+    def _load_cached_data(self, preprocessing_save_path):
+        print (f'checking if data is already cached in path {preprocessing_save_path} ...')
+        data = load_pickle(preprocessing_save_path)
+        if data is None:
+            print('\tNo, it wasn\'t :(')
+            return False        
+        self.dataset_name = data['dataset_name']
+        self.report_ids = data['report_ids']
+        self.images = data['images']
+        self.questions = data['questions']
+        self.answers = data['answers']
+        print ('\tYes, it was, data successfully loaded :)')
+        return True
+    
+    def _save_data(self, preprocessing_save_path):
+        print('saving data to', preprocessing_save_path)
+        data = dict(
+            dataset_name = self.dataset_name,
+            report_ids = self.report_ids,
+            images = self.images,
+            questions = self.questions,
+            answers = self.answers,
+        )
+        save_to_pickle(data, preprocessing_save_path)
+        print('\tdone!')
+        return True
+
+    def _generate_test_dataset(self):
+
+        print('generating test dataset ...')
+        
+        self.test_dataset = VQADataset(
+            self.images, self.questions, self.answers, self.test_indices, self.transform, self.dataset_name)
+        
+            
+    def _generate_test_dataloader(self, batch_size, collate_batch_fn):
+
+        print('generating test dataloader ...')
+        
+        self.test_dataloader = DataLoader(self.test_dataset,
                                          batch_size=batch_size,
                                          shuffle=False,
                                          collate_fn=collate_batch_fn)

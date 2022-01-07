@@ -1,4 +1,6 @@
 from ignite.handlers import Checkpoint, DiskSaver
+from ignite.engine import Events
+import operator
 
 def get_log_epoch_started_handler(model_wrapper):
     epoch_offset = model_wrapper.get_epoch()
@@ -22,7 +24,14 @@ def get_log_metrics_handlers(timer, metrics_to_print):
 
     def handler(engine):
         metrics = engine.state.metrics        
-        metrics_str = ', '.join(f'{m} {metrics.get(m)}' for m in metrics_to_print)
+        scores = []
+        for m in metrics_to_print:
+            score = metrics.get(m)
+            if hasattr(score, '__len__'):
+                score = sum(score) / len(score)
+            scores.append(score)
+
+        metrics_str = ', '.join(f'{m} {s}' for m, s in zip(metrics_to_print, scores))
         duration = timer._elapsed()
         print(f'{metrics_str}, {duration}')
     
@@ -47,3 +56,35 @@ def get_checkpoint_handler(model_wrapper, folder_path, trainer, epoch_offset, sc
     )
     return checkpoint
 
+class Accumulator():
+
+    def __init__(self, output_transform):
+        self._list = []
+        self._output_transform = output_transform
+    
+    def reset(self):
+        self._list.clear()
+
+    def update(self, output):
+        self._list.extend(self._output_transform(output))
+
+    def get_list(self):
+        return self._list
+
+def attach_accumulator(engine, output_name):
+    accumulator = Accumulator(output_transform=operator.itemgetter(output_name))
+    
+    def epoch_started_handler(engine):
+        accumulator.reset()
+    def iteration_completed_handler(engine):
+        # print('Debugging::accumulator')
+        # print('   questions[0] = ', engine.state.output['questions'][0])
+        # print('   pred_questions[0] = ', engine.state.output['pred_questions'][0])
+        accumulator.update(engine.state.output)
+    def epoch_completed_handler(engine):
+        engine.state.metrics[output_name] = accumulator.get_list()
+
+    engine.add_event_handler(Events.EPOCH_STARTED, epoch_started_handler)
+    engine.add_event_handler(Events.ITERATION_COMPLETED, iteration_completed_handler)
+    engine.add_event_handler(Events.EPOCH_COMPLETED, epoch_completed_handler)
+    

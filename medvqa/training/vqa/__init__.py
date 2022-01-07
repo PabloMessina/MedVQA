@@ -4,6 +4,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device):
     
     def step_fn(engine, batch):
 
+        idxs = batch['idx']
         images = batch['i'].to(device)
         questions = batch['q'].to(device)
         question_lengths = batch['ql']
@@ -39,6 +40,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device):
         pred_answers = pred_answer_logits.argmax(-1)        
         
         return {
+            'idxs': idxs,
             'loss': batch_loss.detach(),
             'answers': tokenizer.clean_batch(answers.detach()),
             'questions': tokenizer.clean_batch(questions.detach()),

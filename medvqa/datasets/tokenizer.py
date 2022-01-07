@@ -46,7 +46,7 @@ class Tokenizer:
         ids.append(self.token2id[self.END_TOKEN])
         return ids
 
-    def ids2strings(self, ids):
+    def ids2string(self, ids):
         return ' '.join(self.id2token[i] for i in ids)
 
     def clean_sentence(self, sentence):

@@ -6,12 +6,11 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from ignite.engine import Events, Engine
-from ignite.engine import Events, Engine
 from ignite.handlers.timing import Timer
 
 from medvqa.metrics import (
-    attach_bleu_answer,
     attach_bleu_question,
+    attach_bleu,
     attach_loss
 )
 from medvqa.models.checkpoint import (
@@ -40,11 +39,11 @@ from medvqa.datasets.dataloading_utils import (
     multi_cyclic_dataloader_sampler,
     collate_batch_fn
 )
-from medvqa.datasets.mimiccxr.vqa_training_handler import MIMICCXR_VQATrainingHandler
+from medvqa.datasets.mimiccxr.vqa import MIMICCXR_VQA_Trainer
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH,
 )
-from medvqa.datasets.iuxray.vqa_training_handler import IUXRAY_VQATrainingHandler
+from medvqa.datasets.iuxray.vqa import IUXRAY_VQA_Trainer
 from medvqa.datasets.iuxray import (
     IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH,
 )
@@ -117,8 +116,8 @@ def train_model(
     model_kwargs,
     optimizer_kwargs,
     lr_scheduler_kwargs,
-    mimiccxr_vqa_train_handler_kwargs,
-    iuxray_vqa_train_handler_kwargs,
+    mimiccxr_vqa_trainer_kwargs,
+    iuxray_vqa_trainer_kwargs,
     dataloading_kwargs,
     epochs,
     batches_per_epoch,
@@ -180,37 +179,37 @@ def train_model(
     count_print('Defining image transform ...')
     img_transform = get_image_transform()
 
-    # Create MIMIC-CXR vqa training handler
-    count_print('Creating MIMIC-CXR vqa training handler ...')
-    mimiccxr_vqa_train_handler = MIMICCXR_VQATrainingHandler(
+    # Create MIMIC-CXR vqa trainer
+    count_print('Creating MIMIC-CXR vqa trainer ...')
+    mimiccxr_vqa_trainer = MIMICCXR_VQA_Trainer(
         transform = img_transform,
         collate_batch_fn = collate_batch_fn,
         tokenizer = tokenizer,
         mimiccxr_qa_reports = mimiccxr_qa_reports,
-        **mimiccxr_vqa_train_handler_kwargs,
+        **mimiccxr_vqa_trainer_kwargs,
     )
     
-    # Create IU X-Ray vqa training handler
-    count_print('Creating IU X-Ray vqa training handler ...')
-    iuxray_vqa_train_handler = IUXRAY_VQATrainingHandler(
+    # Create IU X-Ray vqa trainer
+    count_print('Creating IU X-Ray vqa trainer ...')
+    iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
         transform = img_transform,
         collate_batch_fn = collate_batch_fn,
         tokenizer = tokenizer,
         iuxray_qa_reports = iuxray_qa_reports,
-        **iuxray_vqa_train_handler_kwargs,
+        **iuxray_vqa_trainer_kwargs,
     )
 
     # Create dataloaders
     count_print('Creating dataloaders ...')
-    mimiccxr_balanced_dataloader = question_balanced_train_dataloader_generator(mimiccxr_vqa_train_handler)
-    iuxray_balanced_dataloader = question_balanced_train_dataloader_generator(iuxray_vqa_train_handler)
+    mimiccxr_balanced_dataloader = question_balanced_train_dataloader_generator(mimiccxr_vqa_trainer)
+    iuxray_balanced_dataloader = question_balanced_train_dataloader_generator(iuxray_vqa_trainer)
     mimic_iuxray_freqs = dataloading_kwargs['mimic_iuxray_freqs']    
-    train_loader = multi_cyclic_dataloader_sampler(
+    train_dataloader = multi_cyclic_dataloader_sampler(
         [mimiccxr_balanced_dataloader, iuxray_balanced_dataloader],
         mimic_iuxray_freqs,
         shuffle=True,
     )
-    val_dataloaders = [mimiccxr_vqa_train_handler.val_dataloader, iuxray_vqa_train_handler.val_dataloader]
+    val_dataloaders = [mimiccxr_vqa_trainer.val_dataloader, iuxray_vqa_trainer.val_dataloader]
     val_dataloader_size = sum(len(d) for d in val_dataloaders)
     val_dataloader = multi_cyclic_dataloader_sampler(val_dataloaders)
 
@@ -221,8 +220,8 @@ def train_model(
     attach_bleu_question(trainer, device)
     attach_bleu_question(validator, device)
 
-    attach_bleu_answer(trainer, device)
-    attach_bleu_answer(validator, device)
+    attach_bleu(trainer, device)
+    attach_bleu(validator, device)
 
     # losses
     attach_loss('loss', trainer, device)
@@ -262,8 +261,8 @@ def train_model(
                         model_kwargs = model_kwargs,
                         optimizer_kwargs = optimizer_kwargs,
                         lr_scheduler_kwargs = lr_scheduler_kwargs,
-                        mimiccxr_vqa_train_handler_kwargs = mimiccxr_vqa_train_handler_kwargs,
-                        iuxray_vqa_train_handler_kwargs = iuxray_vqa_train_handler_kwargs,
+                        mimiccxr_vqa_trainer_kwargs = mimiccxr_vqa_trainer_kwargs,
+                        iuxray_vqa_trainer_kwargs = iuxray_vqa_trainer_kwargs,
                         dataloading_kwargs = dataloading_kwargs)        
     else: # resuming
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
@@ -294,7 +293,7 @@ def train_model(
 
     # Start training
     count_print('Running trainer engine ...')
-    trainer.run(train_loader,
+    trainer.run(train_dataloader,
                 max_epochs = epochs,
                 epoch_length = batches_per_epoch)
 
@@ -351,11 +350,11 @@ def train_from_scratch(
         n_val_examples_per_question = n_val_examples_per_question,
         min_train_examples_per_question = min_train_examples_per_question,
     )
-    mimiccxr_vqa_train_handler_kwargs = dict(
+    mimiccxr_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
     )
-    iuxray_vqa_train_handler_kwargs = dict(
+    iuxray_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
     )
@@ -367,8 +366,8 @@ def train_from_scratch(
                 model_kwargs,
                 optimizer_kwargs,
                 lr_scheduler_kwargs,
-                mimiccxr_vqa_train_handler_kwargs,
-                iuxray_vqa_train_handler_kwargs,
+                mimiccxr_vqa_trainer_kwargs,
+                iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
                 epochs,
                 batches_per_epoch,
@@ -395,8 +394,8 @@ def resume_training(
     model_kwargs = metadata['model_kwargs']
     optimizer_kwargs = metadata['optimizer_kwargs']
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']
-    mimiccxr_vqa_train_handler_kwargs = metadata['mimiccxr_vqa_train_handler_kwargs']
-    iuxray_vqa_train_handler_kwargs = metadata['iuxray_vqa_train_handler_kwargs']
+    mimiccxr_vqa_trainer_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
+    iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
 
     if override_lr:
@@ -412,8 +411,8 @@ def resume_training(
                 model_kwargs,
                 optimizer_kwargs,
                 lr_scheduler_kwargs,
-                mimiccxr_vqa_train_handler_kwargs,
-                iuxray_vqa_train_handler_kwargs,
+                mimiccxr_vqa_trainer_kwargs,
+                iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
                 epochs,
                 batches_per_epoch,

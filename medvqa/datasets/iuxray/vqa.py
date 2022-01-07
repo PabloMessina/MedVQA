@@ -1,6 +1,6 @@
 import os
 from medvqa.utils.files import load_json_file
-from medvqa.datasets.vqa_training_handler import VQATrainingHandler
+from medvqa.datasets.vqa import VQA_Trainer
 from medvqa.datasets.iuxray import (
     IUXRAY_DATASET_DIR,
     IUXRAY_REPORTS_MIN_JSON_PATH,
@@ -13,7 +13,7 @@ _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
 def _get_iuxray_image_path(image_name):
     return _IUXRAY_IMAGE_PATH_TEMPLATE.format(image_name)
 
-class IUXRAY_VQATrainingHandler(VQATrainingHandler):
+class IUXRAY_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
                 split_kwargs = None,

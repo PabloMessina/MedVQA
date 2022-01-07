@@ -5,7 +5,7 @@
     },
     {
         "question": "what about the lungs?",
-        "files": ["lungs.txt", "atelectasis.txt", "kerley_lines.txt", "edema.txt", "interstitial_lung_disease.txt", "parenchyma.txt", "abscess_cavitation.txt"]
+        "files": ["lungs.txt", "atelectasis.txt", "kerley_lines.txt", "interstitial_lung_disease.txt", "parenchyma.txt", "abscess_cavitation.txt"]
     },
     {
         "question": "what about pleural space?",

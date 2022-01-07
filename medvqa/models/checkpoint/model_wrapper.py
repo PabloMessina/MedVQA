@@ -13,7 +13,7 @@ class EpochWrapper:
 
 
 class ModelWrapper:
-    def __init__(self, model, optimizer, lr_scheduler, epoch=0):
+    def __init__(self, model, optimizer=None, lr_scheduler=None, epoch=0):
         self.model = model
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
