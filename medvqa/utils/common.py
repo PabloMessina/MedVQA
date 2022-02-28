@@ -8,6 +8,7 @@ import os
 SOURCE_DIR = os.environ['MEDVQA_SOURCE_DIR']
 WORKSPACE_DIR = os.environ['MEDVQA_WORKSPACE_DIR']
 CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
+TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
 
 def get_timestamp():
     return datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')

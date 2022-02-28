@@ -15,6 +15,7 @@ from medvqa.metrics import (
     attach_ciderd,
     attach_loss
 )
+from medvqa.metrics.labeler.chexpert import ChexpertLabeler
 from medvqa.models.checkpoint import (
     get_checkpoint_filepath,
     load_metadata,
@@ -31,6 +32,8 @@ from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
 from medvqa.utils.files import (
     load_json_file,
+    get_results_folder_path,
+    save_to_pickle,
 )
 from medvqa.training.vqa import get_step_fn
 from medvqa.datasets.dataloading_utils import (
@@ -46,6 +49,14 @@ from medvqa.datasets.iuxray import (
 )
 from medvqa.utils.images import get_image_transform
 from medvqa.utils.logging import CountPrinter
+from medvqa.evaluation.vqa import compute_aggregated_metrics
+
+_NLP_METRIC_NAMES = [
+    'bleu_question',
+    'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
+    'rougeL',
+    'ciderD',
+]
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -62,6 +73,26 @@ def parse_args():
     
     return parser.parse_args()
 
+def _append_chexpert_labels(metrics_dict, pred_answers, gt_dataset, idxs, tokenizer):
+    gt_answers = [tokenizer.ids2string(tokenizer.clean_sentence(gt_dataset.answers[i])) for i in idxs]
+    pred_answers = [tokenizer.ids2string(x) for x in pred_answers]
+    labeler = ChexpertLabeler()
+    metrics_dict['chexpert_labels_gt'] = labeler.get_labels(gt_answers,
+                                                            update_cache_on_disk=True)
+    metrics_dict['chexpert_labels_gen'] = labeler.get_labels(pred_answers)
+
+def _compute_and_save_aggregated_metrics(results_dict, dataset_name, tokenizer, nlp_metric_names,
+                                         results_folder_path):    
+    agg_metrics = compute_aggregated_metrics(metrics_dict=results_dict[f'{dataset_name}_metrics'],
+                                             dataset=results_dict[f'{dataset_name}_dataset'],
+                                             tokenizer=tokenizer,
+                                             nlp_metric_names=nlp_metric_names)
+    save_path = os.path.join(results_folder_path, f'{dataset_name}_metrics.pkl')
+    save_to_pickle(agg_metrics, save_path)
+    print (f'Aggregated metrics successfully saved to {save_path}')
+    return agg_metrics
+
+
 def _evaluate_model(
     tokenizer_kwargs,
     model_kwargs,
@@ -70,7 +101,12 @@ def _evaluate_model(
     device = 'GPU',
     checkpoint_folder_path = None,
     return_results = False,
+    eval_iuxray = True,
+    eval_mimiccxr = True,
 ):
+
+    assert eval_iuxray or eval_mimiccxr
+    
     count_print = CountPrinter()
 
     # device
@@ -136,7 +172,7 @@ def _evaluate_model(
 
     # metrics
     attach_bleu_question(evaluator, device, record_scores=return_results)
-    attach_bleu(evaluator, device, record_scores=return_results)
+    attach_bleu(evaluator, device, record_scores=return_results, ks=[1,2,3,4])
     attach_rougel(evaluator, device, record_scores=return_results)
     attach_ciderd(evaluator, device, record_scores=return_results)
     if return_results:
@@ -153,7 +189,8 @@ def _evaluate_model(
     
     # logging
     log_metrics_handler = get_log_metrics_handlers(
-        timer, metrics_to_print=['loss', 'bleu_question', 'bleu', 'rougeL', 'ciderD'])
+        timer, metrics_to_print=['loss', 'bleu_question', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
+                                 'rougeL', 'ciderD'])
     log_iteration_handler = get_log_iteration_handler()
 
     # load saved checkpoint
@@ -170,38 +207,65 @@ def _evaluate_model(
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
 
     # Run evaluation
-    print('\n========================')
-    count_print('Running evaluator engine on IU X-Ray validation split ...')
-    print('len(dataset) =', len(iuxray_vqa_trainer.val_dataset))
-    print('len(dataloader) =', len(iuxray_vqa_trainer.val_dataloader))
-    evaluator.run(iuxray_vqa_trainer.val_dataloader)
-    iuxray_metrics = deepcopy(evaluator.state.metrics)
-
-    print('\n========================')
-    count_print('Running evaluator engine on MIMIC-CXR test split ...')
-    print('len(dataset) =', len(mimiccxr_vqa_evaluator.test_dataset))
-    print('len(dataloader) =', len(mimiccxr_vqa_evaluator.test_dataloader))
-    evaluator.run(mimiccxr_vqa_evaluator.test_dataloader)
-    mimiccxr_metrics = deepcopy(evaluator.state.metrics)
 
     if return_results:
-        return dict(
-            iuxray_dataset = iuxray_vqa_trainer.val_dataset,
-            iuxray_metrics = iuxray_metrics,
-            mimiccxr_dataset = mimiccxr_vqa_evaluator.test_dataset,
-            mimiccxr_metrics = mimiccxr_metrics,
-            tokenizer = tokenizer,
-        )
+        results_dict = dict(tokenizer = tokenizer)
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+    if eval_iuxray:
+        print('\n========================')
+        count_print('Running evaluator engine on IU X-Ray validation split ...')
+        print('len(dataset) =', len(iuxray_vqa_trainer.val_dataset))
+        print('len(dataloader) =', len(iuxray_vqa_trainer.val_dataloader))
+        evaluator.run(iuxray_vqa_trainer.val_dataloader)
+        if return_results:
+            results_dict['iuxray_metrics'] = deepcopy(evaluator.state.metrics)            
+            results_dict['iuxray_dataset'] = iuxray_vqa_trainer.val_dataset
+            _append_chexpert_labels(
+                results_dict['iuxray_metrics'],
+                results_dict['iuxray_metrics']['pred_answers'],
+                results_dict['iuxray_dataset'],
+                results_dict['iuxray_metrics']['idxs'],
+                tokenizer,
+            )
+            results_dict['iuxray_agg_metrics'] = _compute_and_save_aggregated_metrics(
+                                                    results_dict, 'iuxray', tokenizer,
+                                                    _NLP_METRIC_NAMES, results_folder_path)
+
+    if eval_mimiccxr:
+        print('\n========================')
+        count_print('Running evaluator engine on MIMIC-CXR test split ...')
+        print('len(dataset) =', len(mimiccxr_vqa_evaluator.test_dataset))
+        print('len(dataloader) =', len(mimiccxr_vqa_evaluator.test_dataloader))
+        evaluator.run(mimiccxr_vqa_evaluator.test_dataloader)
+        if return_results:
+            results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
+            results_dict['mimiccxr_dataset'] = mimiccxr_vqa_evaluator.test_dataset
+            _append_chexpert_labels(
+                results_dict['mimiccxr_metrics'],
+                results_dict['mimiccxr_metrics']['pred_answers'],
+                results_dict['mimiccxr_dataset'],
+                results_dict['mimiccxr_metrics']['idxs'],
+                tokenizer,
+            )
+            results_dict['mimiccxr_agg_metrics'] = _compute_and_save_aggregated_metrics(
+                                                    results_dict, 'mimiccxr', tokenizer,
+                                                    _NLP_METRIC_NAMES, results_folder_path)
+
+    if return_results:
+        return results_dict
 
 def evaluate_model(
     checkpoint_folder,
     batch_size = 100,
     device = 'GPU',
     return_results = False,
+    eval_iuxray = True,
+    eval_mimiccxr = True,
 ):
     print('----- Evaluating model ------')
 
-    checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
+    checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)    
     metadata = load_metadata(checkpoint_folder)
     tokenizer_kwargs = metadata['tokenizer_kwargs']
     model_kwargs = metadata['model_kwargs']
@@ -217,7 +281,10 @@ def evaluate_model(
                 iuxray_vqa_trainer_kwargs,
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
-                return_results = return_results)
+                return_results = return_results,
+                eval_iuxray = eval_iuxray,
+                eval_mimiccxr = eval_mimiccxr,
+            )
 
 if __name__ == '__main__':
 

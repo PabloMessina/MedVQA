@@ -15,10 +15,16 @@ def attach_bleu_question(engine, device, record_scores=False):
                 device = device, record_scores=record_scores)
     blue.attach(engine, 'bleu_question')
 
-def attach_bleu(engine, device, record_scores=False):
-    blue = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
-                device = device, record_scores=record_scores)
-    blue.attach(engine, 'bleu')
+def attach_bleu(engine, device, record_scores=False, ks=None):
+    if ks is None:
+        blue = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
+                    device = device, record_scores=record_scores)
+        blue.attach(engine, 'bleu')
+    else:
+        for k in ks:
+            blue = Bleu(k = k, output_transform = _get_output_transform('pred_answers', 'answers'),
+                    device = device, record_scores=record_scores)
+            blue.attach(engine, f'bleu-{k}')
 
 def attach_rougel(engine, device, record_scores=False):
     rougel = RougeL(output_transform = _get_output_transform('pred_answers', 'answers'),

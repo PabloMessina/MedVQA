@@ -52,7 +52,8 @@ class Tokenizer:
     def clean_sentence(self, sentence):
         clean = []
         for id in sentence:
-            id = id.item()
+            if not isinstance(id, int):
+                id = id.item()
             if id == self.token2id[self.END_TOKEN]:
                 break
             if id >= 3:

@@ -38,3 +38,8 @@ def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
     full_path = os.path.join(WORKSPACE_DIR, 'models', task, folder_name)
     os.makedirs(full_path, exist_ok=True)
     return full_path
+
+def get_results_folder_path(checkpoint_folder_path):
+    results_folder_path = checkpoint_folder_path.replace(f'{os.path.sep}models{os.path.sep}',
+                                                         f'{os.path.sep}results{os.path.sep}')
+    return results_folder_path

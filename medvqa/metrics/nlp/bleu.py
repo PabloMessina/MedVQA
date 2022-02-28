@@ -1,16 +1,22 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
-from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 import warnings
 warnings.simplefilter('ignore', UserWarning)
 
 class Bleu(Metric):
 
-    def __init__(self, output_transform=lambda x: x, device=None, record_scores=False):
+    def __init__(self, k=None, output_transform=lambda x: x, device=None, record_scores=False):
         self._acc_bleu = 0
         self._count = 0
-        self._smoothing_function = None
+        if k is None:
+            self._weights = (0.25, 0.25, 0.25, 0.25)
+            self._smoothing_function = SmoothingFunction().method1
+        else:
+            self._weights = [0] * k
+            self._weights[k-1] = 1
+            self._smoothing_function = None        
         self.record_scores = record_scores
         if record_scores:
             self._scores = []
@@ -30,8 +36,8 @@ class Bleu(Metric):
                 bleu = 0
             else:
                 bleu = sentence_bleu((gt_s,), pred_s,
-                        smoothing_function = self._smoothing_function,
-                        auto_reweigh=True)
+                        weights=self._weights,
+                        smoothing_function = self._smoothing_function)
             self._acc_bleu += bleu
             if self.record_scores:
                 self._scores.append(bleu)
