@@ -1,1 +1,2 @@
-pneumonia
+pn(eu|ue)mon
+\bpna\b

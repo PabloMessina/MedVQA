@@ -4,7 +4,7 @@ embolization
 \bcoils?\b
 \bdevices?\b
 \bradiopa(q|c)
-\bpen tip
+\bpens?\b
 \bwires?\b
 \bmetal(lic)?\b
 \bdrains?\b
@@ -14,16 +14,18 @@ embolization
 \bpacing\b
 \boral contrast
 \bscattered contrast
+contrast agent
 \bballoon\b
 \bpump\b
 nipple (marker|shadow|ring)
+\bornament
 valve ring
 \bfiducial\b
 \bshadow.*\bnipple
 \bgenerator
 \bpiercing
 \bTIPS\b
-\bshunts?\b
+\bshunt(s|ing)?\b
 \breplace.*\bvalv
 \bvalv.*\breplace
 endobronchial valve
@@ -38,7 +40,6 @@ projecting.*\bstructure
 projectile
 \bproject(ing|s|ed)? (over|in)\b
 \bstimulator
-\bprobes?\b
 \bimplant
 defibrillator
 \bjewelry\b
@@ -47,8 +48,45 @@ defibrillator
 \bstool\b
 \bbullets?\b
 foreign bod(y|ies)
-\bscrew\b
+\bscrews?\b
 \bskinfold
 \bgallstone
 \bgown\b
 \bcables?\b
+appliances
+\bavr\b
+battery
+\bbbs?\b
+\bcbd stent
+\bcement\b
+\bcerclage\b
+\bchains?\b
+\bexpander
+\bmask\b
+\bgraft
+grafts?\b
+\bhair(pin)?
+\bpins?\b
+neurostimulator
+\bpack
+\bpellet
+penumonia pneumonia
+penumothorax pneumothorax
+perforated perforation
+\bpills?\b
+\bporcine
+\brecorder\b
+\brods?\b
+\bsaline\b
+\bscratch
+shrapnel
+\bspacer
+\bsponge
+\bspoon
+\bspring
+stylet
+\bsu(tur|rg).*\bmaterial
+\btacks\b
+\btooth\b
+\bunit\b
+\bvns\b

@@ -1,3 +1,5 @@
 \blesion
 hematoma
 \bcontusion
+\binjur(y|i)
+\bwound

@@ -1,4 +1,4 @@
-(air|gas).*(collection|(sub)?cutaneous)
-(collection|(sub)?cutaneous).*(air|gas)
+(air|gas).*(collection|(sub)?cutaneous|pocket|trapp)
+(collection|(sub)?cutaneous|pocket|trapp).*(air|gas)
 \bgas\b.*contain
 \bblebs?\b

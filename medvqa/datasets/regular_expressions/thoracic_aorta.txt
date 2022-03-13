@@ -1,6 +1,6 @@
 thoracic aort
-\b(unfold|tortuous|atherosclero|ecta).*\baort
-\baort.*\b(unfold|tortuous|calci|enlarg|contour)
+\b(unfold|tort|atherosclero|ecta).*\baort
+\baort.*\b(unfold|tort|calci|enlarg|contour)
 aortic (wall|arch|knob)
 \bin the aort(a|ic)
 elongation.*\baorta

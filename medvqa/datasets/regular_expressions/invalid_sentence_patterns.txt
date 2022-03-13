@@ -185,3 +185,9 @@ notification
 ^otherwise.*\b(no|little)\b.*\bchange
 \bhospital
 \btechnique
+\balcohol(ic)
+\bamplatz
+\bplugs?\b
+\bbenefi(t|c)
+consultation
+\bdegrade

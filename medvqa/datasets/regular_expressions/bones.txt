@@ -67,3 +67,11 @@ medial compartment
 \bsublux
 \bposterior.*\bfusion
 xiphoid
+anterolisthesis
+glenoid
+\bremodel
+resorption
+\bshaft\b
+\bspur(s|ring)?\b
+syndesmophyte
+\bsynovial

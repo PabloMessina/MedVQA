@@ -13,9 +13,11 @@ from medvqa.metrics import (
     attach_bleu,
     attach_rougel,
     attach_ciderd,
+    attach_medical_completeness,
+    attach_weighted_medical_completeness,
     attach_loss
 )
-from medvqa.metrics.labeler.chexpert import ChexpertLabeler
+from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.models.checkpoint import (
     get_checkpoint_filepath,
     load_metadata,
@@ -51,11 +53,15 @@ from medvqa.utils.images import get_image_transform
 from medvqa.utils.logging import CountPrinter
 from medvqa.evaluation.vqa import compute_aggregated_metrics
 
-_NLP_METRIC_NAMES = [
+_METRIC_NAMES = [
     'bleu_question',
     'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
     'rougeL',
     'ciderD',
+    'chexpert_accuracy',
+    'chexpert_prf1s',
+    'medcomp',
+    'wmedcomp',
 ]
 
 def parse_args():
@@ -81,12 +87,12 @@ def _append_chexpert_labels(metrics_dict, pred_answers, gt_dataset, idxs, tokeni
                                                             update_cache_on_disk=True)
     metrics_dict['chexpert_labels_gen'] = labeler.get_labels(pred_answers)
 
-def _compute_and_save_aggregated_metrics(results_dict, dataset_name, tokenizer, nlp_metric_names,
+def _compute_and_save_aggregated_metrics(results_dict, dataset_name, tokenizer, metric_names,
                                          results_folder_path):    
     agg_metrics = compute_aggregated_metrics(metrics_dict=results_dict[f'{dataset_name}_metrics'],
                                              dataset=results_dict[f'{dataset_name}_dataset'],
                                              tokenizer=tokenizer,
-                                             nlp_metric_names=nlp_metric_names)
+                                             metric_names=metric_names)
     save_path = os.path.join(results_folder_path, f'{dataset_name}_metrics.pkl')
     save_to_pickle(agg_metrics, save_path)
     print (f'Aggregated metrics successfully saved to {save_path}')
@@ -175,6 +181,8 @@ def _evaluate_model(
     attach_bleu(evaluator, device, record_scores=return_results, ks=[1,2,3,4])
     attach_rougel(evaluator, device, record_scores=return_results)
     attach_ciderd(evaluator, device, record_scores=return_results)
+    attach_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
+    attach_weighted_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
     if return_results:
         attach_accumulator(evaluator, 'idxs')
         attach_accumulator(evaluator, 'pred_answers')
@@ -190,7 +198,7 @@ def _evaluate_model(
     # logging
     log_metrics_handler = get_log_metrics_handlers(
         timer, metrics_to_print=['loss', 'bleu_question', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
-                                 'rougeL', 'ciderD'])
+                                 'rougeL', 'ciderD', 'medcomp', 'wmedcomp'])
     log_iteration_handler = get_log_iteration_handler()
 
     # load saved checkpoint
@@ -230,7 +238,7 @@ def _evaluate_model(
             )
             results_dict['iuxray_agg_metrics'] = _compute_and_save_aggregated_metrics(
                                                     results_dict, 'iuxray', tokenizer,
-                                                    _NLP_METRIC_NAMES, results_folder_path)
+                                                    _METRIC_NAMES, results_folder_path)
 
     if eval_mimiccxr:
         print('\n========================')
@@ -250,7 +258,7 @@ def _evaluate_model(
             )
             results_dict['mimiccxr_agg_metrics'] = _compute_and_save_aggregated_metrics(
                                                     results_dict, 'mimiccxr', tokenizer,
-                                                    _NLP_METRIC_NAMES, results_folder_path)
+                                                    _METRIC_NAMES, results_folder_path)
 
     if return_results:
         return results_dict

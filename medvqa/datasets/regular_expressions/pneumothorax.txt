@@ -1,2 +1,8 @@
-pneumothora
 deep sulcus sign
+pnemothorax
+pneumothorax
+pneumothroax
+pneumothoraces
+pnuemothorax
+\bptx\b
+\btension

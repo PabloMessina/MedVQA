@@ -1,2 +1,1 @@
-\bscarring
-\bscars?\b
+\bscar(s|ing|red|ring)?\b

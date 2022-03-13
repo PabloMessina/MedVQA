@@ -2,6 +2,8 @@
 \bmetasta
 \btumor
 \bmyeloma
+hamartoma
 neoplasm
 carcinomatosis
 carcinoma
+enchondroma

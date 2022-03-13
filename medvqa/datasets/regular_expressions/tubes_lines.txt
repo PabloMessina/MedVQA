@@ -26,3 +26,8 @@ endotracheal
 \bdual\b.*\blumen\b
 \bkink(ing|ed)?\b
 \bintubat
+\bogt?\b
+\bptbd\b
+\bstaple\b
+\bprobes?\b
+\bvp\b

@@ -9,3 +9,5 @@ aortic valve
 \bheart\b
 ventricular enlargement
 dextrocardia
+systolic
+tamponade

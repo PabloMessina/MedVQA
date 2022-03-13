@@ -1,7 +1,9 @@
 \bpulm.*(vascula(r|t)|vessel|venous|emboli|hemorrhage)
+\bpe\b
 pulmonary hypertension
 venous (congestion|engorgement)
 vascular (plethora|engorgement|enlargement|crossing)
+\bplethor
 upper zone redistribution
 pulmonary arter
 \bcrowding.*\b(vascula|vessels)

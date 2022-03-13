@@ -8,15 +8,22 @@ from medvqa.models.vqa.answer_decoder import AnswerDecoder
 class OpenEndedVQA(nn.Module):
 
     def __init__(self, vocab_size, start_idx, embed_size, hidden_size,
-                 question_vec_size, image_local_feat_size, dropout_prob, device):
+                 question_vec_size, image_local_feat_size, dropout_prob, device,
+                 densenet_pretrained_weights_path=None):
         super().__init__()
         self.name = 'oevqa(densenet121+bilstm+lstm)'
         self.embedding_table = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=embed_size,
             padding_idx=0,
-        )
-        densenet = models.densenet121(pretrained=True)
+        )        
+        if densenet_pretrained_weights_path is None:
+            print('Using densenet121 with ImageNet pretrained weights')
+            densenet = models.densenet121(pretrained=True)
+        else:
+            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
+            densenet = models.densenet121(pretrained=False)
+            densenet.load_state_dict(torch.load(densenet_pretrained_weights_path, map_location='cuda'))
         self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
         self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
                                                        embed_size,

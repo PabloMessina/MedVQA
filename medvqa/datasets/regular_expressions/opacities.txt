@@ -1,2 +1,2 @@
-\bopaci[tf]
-\bopaque
+\b(radi)?opaci[tf]
+\b(radio?)?opaque

@@ -334,5 +334,33 @@
     {
         "question": "what about airways?",
         "files": ["airways.txt"]
+    },
+    {
+        "question": "what about ascites?",
+        "files": ["ascites.txt"]
+    },
+    {
+        "question": "what about bleeding?",
+        "files": ["bleeding.txt"]
+    },
+    {
+        "question": "what about sarcoidosis?",
+        "files": ["sarcoidosis.txt"]
+    },
+    {
+        "question": "what about shadow?",
+        "files": ["shadow.txt"]
+    },
+    {
+        "question": "what about tendon?",
+        "files": ["tendon.txt"]
+    },
+    {
+        "question": "what about pneumatocele?",
+        "files": ["pneumatocele.txt"]
+    },
+    {
+        "question": "what about fluid?",
+        "files": ["fluid.txt"]
     }
 ]

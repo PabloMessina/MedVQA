@@ -1,7 +1,6 @@
 import random
 import numpy as np
 import pandas as pd
-from tabulate import tabulate
 from PIL import Image
 from sklearn.metrics import (
     precision_recall_fscore_support as prf1s,
@@ -14,7 +13,7 @@ from medvqa.utils.constants import (
     METRIC2SHORT,
 )
 
-def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, nlp_metric_names):
+def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
     
     idxs = metrics_dict['idxs']
     questions = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[i])) for i in idxs]
@@ -28,43 +27,52 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, nlp_metric_name
         overall = dict(),
         per_question = { q:dict() for q in unique_questions },
     )
-    
-    # NLP metrics overall
-    for name in nlp_metric_names:
-        output['overall'][name] = sum(metrics_dict[name]) / len(metrics_dict[name])
-    
-    # NLP metrics per question
-    for i, q in enumerate(unique_questions):
-        tmp = output['per_question'][q]
-        for name in nlp_metric_names:
-            tmp[name] = sum(metrics_dict[name][j] for j in idxs_per_q[i]) / len(idxs_per_q[i])
 
-    # Chexpert metrics overall
-    gt_labels = metrics_dict['chexpert_labels_gt']
-    gen_labels = metrics_dict['chexpert_labels_gen']
+    for name in metric_names:
 
-    output['overall']['chexpert_accuracy'] = np.array([
-        accuracy_score(gt_labels[:, i], gen_labels[:, i])
-        for i in range(len(CHEXPERT_LABELS))
-    ])
-    output['overall']['chexpert_prf1s'] = np.array([
-        prf1s(gt_labels[:, i], gen_labels[:, i], zero_division=0, labels=[0, 1])
-        for i in range(len(CHEXPERT_LABELS))
-    ])
+        if name == 'chexpert_accuracy':
+            gt_labels = metrics_dict['chexpert_labels_gt']
+            gen_labels = metrics_dict['chexpert_labels_gen']            
+            # overall
+            output['overall'][name] = np.array([
+                accuracy_score(gt_labels[:, i], gen_labels[:, i])
+                for i in range(len(CHEXPERT_LABELS))
+            ])
+            # per question
+            for i, q in enumerate(unique_questions):
+                tmp = output['per_question'][q]
+                q_gt_labels = gt_labels[idxs_per_q[i]]
+                q_gen_labels = gen_labels[idxs_per_q[i]]
+                tmp[name] = np.array([
+                    accuracy_score(q_gt_labels[:, i], q_gen_labels[:, i])
+                    for i in range(len(CHEXPERT_LABELS))
+                ])
 
-    # Chexpert metrics per question
-    for i, q in enumerate(unique_questions):
-        tmp = output['per_question'][q]
-        q_gt_labels = gt_labels[idxs_per_q[i]]
-        q_gen_labels = gen_labels[idxs_per_q[i]]
-        tmp['chexpert_accuracy'] = np.array([
-            accuracy_score(q_gt_labels[:, i], q_gen_labels[:, i])
-            for i in range(len(CHEXPERT_LABELS))
-        ])
-        tmp['chexpert_prf1s'] = np.array([
-            prf1s(q_gt_labels[:, i], q_gen_labels[:, i], zero_division=0, labels=[0, 1])
-            for i in range(len(CHEXPERT_LABELS))
-        ])
+        elif name == 'chexpert_prf1s':
+            gt_labels = metrics_dict['chexpert_labels_gt']
+            gen_labels = metrics_dict['chexpert_labels_gen']
+            # overall
+            output['overall']['chexpert_prf1s'] = np.array([
+                prf1s(gt_labels[:, i], gen_labels[:, i], zero_division=0, labels=[0, 1])
+                for i in range(len(CHEXPERT_LABELS))
+            ])
+            # per question
+            for i, q in enumerate(unique_questions):
+                tmp = output['per_question'][q]
+                q_gt_labels = gt_labels[idxs_per_q[i]]
+                q_gen_labels = gen_labels[idxs_per_q[i]]                
+                tmp['chexpert_prf1s'] = np.array([
+                    prf1s(q_gt_labels[:, i], q_gen_labels[:, i], zero_division=0, labels=[0, 1])
+                    for i in range(len(CHEXPERT_LABELS))
+                ])
+        
+        else:
+            # overall
+            output['overall'][name] = sum(metrics_dict[name]) / len(metrics_dict[name])
+            # per question
+            for i, q in enumerate(unique_questions):
+                tmp = output['per_question'][q]
+                tmp[name] = sum(metrics_dict[name][j] for j in idxs_per_q[i]) / len(idxs_per_q[i])
     
     # count per question
     for i, q in enumerate(unique_questions):

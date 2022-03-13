@@ -1,1 +1,7 @@
-atelecta(sis|ses|tic)
+atelecta(sis|ses|tic|is)
+atalectasis
+atelctasis
+atelecasis
+atelecatsis
+ateletasis
+atlectasis
