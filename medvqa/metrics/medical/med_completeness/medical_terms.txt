@@ -134,7 +134,6 @@ aorto
 aortopulmonary
 aortopulmonic
 aortosclerosis
-ap
 apex
 apical
 apically
@@ -493,7 +492,6 @@ channel
 chemo
 chemoembolization
 chemotherapy
-chest
 chf
 chiladiti
 chilaiditi
@@ -2251,6 +2249,7 @@ probe
 procedural
 procedure
 procedures
+process
 product
 products
 project
@@ -2382,6 +2381,8 @@ residual
 residuals
 residue
 resistance
+resolution
+resolved
 resorbed
 resorption
 restricted

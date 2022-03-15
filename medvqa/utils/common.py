@@ -12,3 +12,11 @@ TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
 
 def get_timestamp():
     return datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+
+def parsed_args_to_dict(verbose=True):
+    args = {k : v for k, v in vars(args).items() if v is not None}
+    if verbose:
+        print('script\'s arguments:')
+        for k, v in args.items():
+            print(f'   {k}: {v}')
+

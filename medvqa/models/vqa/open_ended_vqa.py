@@ -16,15 +16,16 @@ class OpenEndedVQA(nn.Module):
             num_embeddings=vocab_size,
             embedding_dim=embed_size,
             padding_idx=0,
-        )        
+        )
         if densenet_pretrained_weights_path is None:
-            print('Using densenet121 with ImageNet pretrained weights')
             densenet = models.densenet121(pretrained=True)
+            print('Using densenet121 with ImageNet pretrained weights')
         else:
-            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
             densenet = models.densenet121(pretrained=False)
             densenet.load_state_dict(torch.load(densenet_pretrained_weights_path, map_location='cuda'))
-        self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
+            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
+        # self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
+        self.image_encoder = densenet.features
         self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
                                                        embed_size,
                                                        hidden_size,

@@ -1,59 +1,27 @@
-(sub|more )optimal
-\bif\b.*\b(patient|desired|concern|suspect)
-\b(prior|next|preceding|recent).*\b(study|examination|film|report|cta\b|ct\b|mri\b)
+\b(prior|next|preceding|recent|earl).*\b(stud(y|ies)|exam|film|cta\b|ct\b|mri\b|x\-ray)
 \b(day|week|month|year)s? \b(ago|earlier)\b
 \bmonths\b
 \b(two|three|four|five|six|seven|eight|[2-8])\b.*\b(views|images|films|days|weeks|months|years)
-\bno longer visualized
 \bno.*\bavailable
-\bsimilar to prior\b
 \b(morning|noon|afternoon|evening|night)\b
-unchanged.*\b(compared|radiograph)
-\b(is|are) probably unchanged
-\bis obtained
-\bI will\b
-\bas before\b
-\b(correlation|repeat|comparison|radiograph|evaluation).*(requested|suggested|advised|recommended|required|indicated)
+\bobtained\b
+\b(correlation|repeat|comparison|radiograph|evaluation|read|view).*(requested|suggested|advised|required|indicated|needed)
 \b(correlation|comparison).*\b(stud(y|ies)|examination|film)
 \brequest.*\bview
 \bsuggest.*\bimaging
 \bcompar.*\d+:\d+
 \bat \d+:\d+
 \b\d+(:\d+)? \b[ap]\.?m\.?\b
-\binterval (change|increase|progression|improvement|removal)
-possibly slight improvement
-\bsuch possibility
-\bpatient.*(amenable|position|rotation|rotated|complaint|over the years|examination|evaluation|studies|body habit|turned.*(right|left)|\bview|could not|informed)
-(\bamenable|view|position|rotation|rotated|complaint|over the years|examination|evaluation|studies|body habit|turned.*(right|left)).*\bpatient
-\bchanges.*(already.*present|unaltered)
-\b(consider|recommend).*\b(treatment|followup|repeat|dedicated|imag|evaluat|HRCT|exam)
-\blimits?( the)?(.*significance| evaluation| assessment)
-\b(assessment|exam|study|evaluation|film|appearance|view).*consider
-\blimit(ed|ation|ing)\b
-not well assessed
-\bno explanation for
+\b(consider).*\b(treatment|followup|repeat|dedicated|imag|evaluat|HRCT|exam)
 \bnurse\b
-\bis advised
-is needed$
 ^\d+\.?$
-^single.*(view|radiograph)
-^unexplained
-^unchanged appearance from
-\bcompar.* since
-\bsince\b.*\b(prior|previous|earlier|exam(ination)?)
 \bhistory
-can't be sure
-(upright|frontal|lateral|supine|portable|single).*\b(view|radiograph)s?.*\b(obtained|provided|attempted|submitted)
-(\bslightly|\bmore\b|increased|\bchanged|\bimproved).*compared with
-(similar|compared) (with|to).*\b(prior|previous|earlier|older|radiograph|film|x\-ray|through|exam|stud(y|ies))
-(new|was|were|chest) compared (with|to)
+(upright|frontal|lateral|supine|portable|single).*\b(view|radiograph)s?.*\b(provided|attempted)
 \bfollow(-| )?up
-be warranted
-referring.*physician
-(radiograph|\bimage).*\b(unremarkable|obtained|repeat)
+(radiograph|\bimage).*\b(repeat)
 \brepeat.*\b(view|image|radiograph)
-\b(prior|previous).*\b(radiograph|film\b|CT\b|CTA\b|x-?ray|x ray|study|studies|exam|scan|day)
-time of dictation
+\b(prior|previous).*\b(film\b|CT\b|CTA\b|x-?ray|x ray|study|studies|exam|scan|day)
+\bdictation
 \be-?mail
 \bplease\b
 \byour\b
@@ -66,112 +34,57 @@ correlate (with|for)
 best correlate
 \bdr\.
 \bby dr\b
-(left|right) arm raised
-(would be|\bis|\bare|retraction.*) recommended
+\binvok
 \bwould (have|need) to\b
-^recommend
-\bshort(-| )term
-\b(could|may|might|would) (.*\bbe( more)? (helpful|reliable|of use|revealing)|position|confirm)
+\b(could|may|might|would).*\bbe\b.*(helpful|reliable|of use|revealing|confirm)
 \b(may|might|could) (help|be related.*findings|be informative)
-\bcould (demonstrate|be (performed|advanced|anywhere))
-\b(additional|further|more\b|subsequent).*\b(imaging|evaluat|exam|assess|investigat|characterization|radiograph)
-assess.*radiograph
-radiograph.*(assess|comparison)
-(assess|comparison).*radiograph
-indeterminate acuity
-by a chest x-ray
-chest x-ray from
-(view|image|radiograph)s? of the chest\.?$
-(view|image|radiograph).*\b(reviewed|performed|provided)\.?$
-positioning\.?$
-\b(has|have) there been.*\?
-previously seen
+\b(additional|further|more\b|subsequent|better).*\b(imaging|evaluat|exam|assess|investigat|characterization|radiograph|detail)
 clinically (warranted|indicated)
 (warranted|indicated) clinically
 \b(CTA?|MRI|ultrasound)\b
 \bbetter (position|assess)
 necessary for evaluation
-would not explain
-\bnot adequate\b
 (was|were|ha(s|ve) been) (discussed|reported|reviewed)
 \bphone\b
 \btelephone\b
-existed already.*\btime
 \bpaged (at|to|for)\b
-(should|may|might|could) be (withdrawn|requested|considered|performed|pulled|able|correlated|inserted)
-\bit should be
-^final report
-^no\b.*\b(change|previous|prior)
-^(comparison|compared).*\b(to|with|can be)
-attention be paid to
-for interpretation
-\bimages are presented
-\bour records
-\bno previous.*examination
+(should|may|might|could) be .*(withdrawn|requested|considered|performed|able|correlated|inserted|evaluated)
+\breport\b
+\brecords
 \bfor detail.*\bsee
 \bdashboard
-\bdoubtful.*\bclinical
-clinical setting
 similar to.*\bfilm from
-\breason.*\buncertain
-\bsupine position
-makes it (difficult|hard) to
-difficult to exclude
-(impossible|difficult|cannot be).*\b(assess|identif|demonstrat|see\b|evaluat|compar)
+\bif uncertain
 \bcan be\b.*\b(evaluated|performed)
 \bhelp\b.*\bevaluat
 \?$
-\bfor (direct)? comparison\b
-findings likely relate to
-report reported
+\bfor( direct)? comparison\b
 \byesterday
 preceding day
 dating back to
-has improved\.?$
 ^\.$
-^patient\b
-^the patient\b
-^(AP|PA|frontal|lateral)\b.*\b(radiograph|view)
-^rotated position
-\bfrom today\b
-radiology technologist
+technologist
 on the outside study
-(findings?|is|are|was|were) submitted
-\bsubmitted to
+\bsubmitted
 radiologist
-difference.*in technique
-difference.*positioning
-short interval
-examination interval
 acqui(sition|red)
 \bstarted to
 above information
-exam.*\bunder.*penetrated
-unfortunately
 \bphysician
 \d* hours?\b
 during the.*\bday
 \bmid( )?day\b
-position.*appropriate
-\bappropriate.*\b(clinical|context)\b
 over this period
-\bchange.*\bover.*time
+\bchange.*\bover.*\btime
 \binstitution\b
-controller med
-rescue inhaler
 \bdementia
-states that (he|she)
-^(he|she)\b
-\b(he|she) would
 \bemergency\b
 \bdepartment\b
 \bcough
 \brunny nose
 \bsore throat
-\bunless\b.*\b(clinical|test)
-addended
-notification
-\bend of report
+\baddended
+\bnotification
 \b(fe)?male\b
 \b(wo)?man\b
 \byear(-| )old\b
@@ -181,13 +94,11 @@ notification
 \bfor (more|further)\b
 \bnot tailored
 \bteam\b
-^(the )?(remainder|rest)
-^otherwise.*\b(no|little)\b.*\bchange
 \bhospital
 \btechnique
-\balcohol(ic)
-\bamplatz
-\bplugs?\b
+\balcohol
 \bbenefi(t|c)
 consultation
 \bdegrade
+reassessment
+feasible

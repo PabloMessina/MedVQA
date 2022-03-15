@@ -12,7 +12,9 @@ mediport\b
 \btip\b.*\b(lies|terminates|projects|is)\b
 \bmidline
 pacemaker
-\bleads?\b
+\blead\b
+\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin).*\bleads\b
+\bleads\b.*\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin)
 \bstent(s|ing)?\b
 \bCVL\b
 \bETT\b

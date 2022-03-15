@@ -77,12 +77,14 @@ breast breasts
 calcific calcification calcifications calcified calcium
 cap capping caps
 cardia cardiac cardial cardio
+cardiopulmonary cardiopulmoanry
 cath catheter catheterization catheters cathter
 cava caval
 cavitary cavitated cavitating cavitation cavitations
 cavities cavity
 cavoatrial thecavoatrial
 center centered central centralized centrally
+cephalization cephalized
 chain chains
 clamped clamping
 clavicle clavicles clavicular
@@ -404,6 +406,7 @@ replaced replacement replacements replaces replacing
 reposition repositioned repositioning
 resected resection resections
 residua residual residuals residue
+resolved resolution
 retained retention
 reticular reticulated reticulation reticulations
 retract retracted retracting retraction

@@ -17,6 +17,19 @@ def load_pickle(path):
             return pickle.load(f)
     except FileNotFoundError:
         return None
+    
+def read_lines_from_txt(path):
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    clean_lines = [None] * len(lines)
+    i = 0
+    for line in lines:
+        line = line.strip()
+        if line:
+            clean_lines[i] = line
+            i += 1
+    clean_lines = clean_lines[:i]
+    return clean_lines
 
 def make_dirs_in_filepath(filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)

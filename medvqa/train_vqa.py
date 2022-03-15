@@ -10,7 +10,8 @@ from ignite.handlers.timing import Timer
 
 from medvqa.metrics import (
     attach_bleu_question,
-    attach_bleu,
+    attach_ciderd,
+    attach_weighted_medical_completeness,
     attach_loss
 )
 from medvqa.models.checkpoint import (
@@ -19,7 +20,10 @@ from medvqa.models.checkpoint import (
     save_metadata,
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
-from medvqa.utils.common import WORKSPACE_DIR
+from medvqa.utils.common import (
+    WORKSPACE_DIR,
+    parsed_args_to_dict,
+)
 from medvqa.utils.handlers import (
     get_log_metrics_handlers,
     get_log_iteration_handler,
@@ -74,6 +78,8 @@ def parse_args():
                         help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
     parser.add_argument('--dropout-prob', type=int, default=0,
                         help='Dropout probability')
+    parser.add_argument('--densenet-pretrained-weights-path', type=str, default=None,
+                        help='Path to densenet 121 pretrained weights')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate')
     parser.add_argument('--lr-decay', type=float, default=0.76,
@@ -101,14 +107,19 @@ def parse_args():
     return parser.parse_args()
 
 
-_metric_names = ['bleu_question', 'bleu_answer']
+_metric_names = ['bleu_question', 'ciderD', 'wmedcomp']
+_metric_weights = {
+    'bleu_question': 1,
+    'ciderD': 0.1,
+    'wmedcomp': 1,
+}
 
 def _merge_metrics(train_metrics, val_metrics):
     train_value = 0
     val_value = 0
     for met in _metric_names:
-        train_value += train_metrics[met]
-        val_value += val_metrics[met]
+        train_value += train_metrics[met] * _metric_weights[met]
+        val_value += val_metrics[met] * _metric_weights[met]
     return train_value * 0.5 + val_value * 0.5
 
 def train_model(
@@ -220,8 +231,11 @@ def train_model(
     attach_bleu_question(trainer, device)
     attach_bleu_question(validator, device)
 
-    attach_bleu(trainer, device)
-    attach_bleu(validator, device)
+    attach_ciderd(trainer, device)
+    attach_ciderd(validator, device)
+    
+    attach_weighted_medical_completeness(trainer, device, tokenizer)
+    attach_weighted_medical_completeness(validator, device, tokenizer)
 
     # losses
     attach_loss('loss', trainer, device)
@@ -234,8 +248,7 @@ def train_model(
     
     # logging
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=[
-        'loss', 'bleu_question', 'bleu_answer'
-    ])
+        'loss', 'bleu_question', 'ciderD', 'wmedcomp'])
     log_iteration_handler = get_log_iteration_handler()
 
     # learning rate scheduler
@@ -307,6 +320,7 @@ def train_from_scratch(
     question_vec_size,
     image_local_feat_size,
     dropout_prob,
+    densenet_pretrained_weights_path,
     # Optimizer's args
     lr,
     # lr_scheduler's args
@@ -338,6 +352,7 @@ def train_from_scratch(
         question_vec_size = question_vec_size,
         image_local_feat_size = image_local_feat_size,
         dropout_prob = dropout_prob,
+        densenet_pretrained_weights_path = densenet_pretrained_weights_path,
     )
     optimizer_kwargs = dict(
         lr = lr,
@@ -424,10 +439,7 @@ def resume_training(
 if __name__ == '__main__':
 
     args = parse_args()
-    args = {k : v for k, v in vars(args).items() if v is not None}
-    print('script\'s arguments:')
-    for k, v in args.items():
-        print(f'   {k}: {v}')
+    args = parsed_args_to_dict(args)
 
     if args.get('checkpoint_folder', None):
         resume_training(**args)

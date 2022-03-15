@@ -4,9 +4,9 @@ aeration.*\bbase\b
 (inspiratory|lung).*\bvolume
 volume loss
 \b(hypo|hyper|over)(inflat|expan).*\b((mid)?lung|lobe)
-\b(pulmon|lung).*parenchyma
+\b(pulmon|lung).*(parenchyma|abnormal)
 parenchyma.*\blung
-\blung.*\b(inflat|expanded|clear|marking|hypoinflat|base|apice|finding|aerated|change|free|lines|stable|congest|(ab)?normal|ventilat)
+\blung.*\b(.*inflat|expanded|clear|marking|hypoinflat|base|apice|finding|aerated|change|free|lines|stable|congest|(ab)?normal|ventilat)
 \b(pulmonary|congest)*\bpattern
 \bpattern.*\b(pulmonary|congest)
 \bpulmonary.*\b(congest|architecture)
@@ -14,3 +14,4 @@ parenchyma.*\blung
 lobectomy
 pneumonectomy
 \bpcp\b
+cardiopulm

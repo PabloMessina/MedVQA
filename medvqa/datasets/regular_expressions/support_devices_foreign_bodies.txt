@@ -38,7 +38,6 @@ prosthe(sis|ses|tic)
 \bstructure.*\b(courses|project)
 projecting.*\bstructure
 projectile
-\bproject(ing|s|ed)? (over|in)\b
 \bstimulator
 \bimplant
 defibrillator
