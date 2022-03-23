@@ -12,3 +12,5 @@ dextrocardia
 systolic
 tamponade
 cardiopulm
+central vein
+\bpericard

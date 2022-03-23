@@ -102,3 +102,7 @@ consultation
 \bdegrade
 reassessment
 feasible
+\bsuboptimal
+\b(limit|difficult).*\b(assess|evaluat|study|underpen|exam)
+\b(assess|evaluat|study|underpen|exam).*\b(limit|difficult)
+communicated

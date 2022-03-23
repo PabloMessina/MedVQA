@@ -1,0 +1,1586 @@
+Preguntas ordenadas por frecuencia (decreciente)
+
+191641, what about the lungs?
+184260, what about pleural space?
+144619, what about pneumothorax?
+129244, what about the heart?
+117811, what about the mediastinum?
+108717, what about support devices and foreign bodies?
+97824, what about the cardiac silhouette?
+88610, what about tubes and lines?
+72867, what about bones?
+69556, what about opacities?
+69505, what about consolidation?
+69001, what about atelectasis?
+65524, what about edema?
+54153, what about pulmonary hila?
+53740, what about pulmonary vascularity?
+52914, what about pneumonia?
+31810, what about cardiomegaly?
+28096, what about surgery?
+25534, what about the diaphragm?
+22222, what about thoracic aorta?
+20327, what about vena cava?
+17058, what about the stomach?
+16204, what about the trachea?
+15391, what about interstitial lung disease?
+14336, what about calcification?
+13946, what about the apical zone?
+13616, what about fractures?
+13425, what about infection?
+11897, what about the carina?
+11465, what about lung parenchyma?
+11200, what about the ribs?
+11120, what about tortuosity?
+10721, what about prominence?
+9560, what about free air?
+9184, what about fluid?
+8704, what about the bronchus?
+8331, what about aspiration?
+7628, what about scarring?
+6981, what about densities?
+6901, what about nodules?
+5485, what about emphysema?
+5371, what about markings?
+5371, what about congestive heart failure CHF?
+4781, what about infiltrate?
+4594, what about the esophagus?
+4186, what about air collections?
+4064, what about masses?
+3935, what about soft tissue?
+3750, what about lesions?
+3252, what about bronchovascular crowding?
+3028, what about fluid overload?
+2990, what about hernias?
+2978, what about haze?
+2975, what about gas distension?
+2828, what about cancer or tumor?
+2720, what about loculation?
+2425, what about adenopathy?
+2391, what about COPD?
+2189, what about granumola?
+2183, what about fissures?
+1908, what about lucencies?
+1797, what about bleeding?
+1732, what about fibrosis?
+1688, what about pneumomediastinum?
+1290, what about the bowel?
+1188, what about shadow?
+1146, what about lymph nodes?
+1039, what about bronchogram?
+1015, what about the thyroid?
+989, what about peribronchial cuffing?
+939, what about trauma?
+932, what about pneumoperitoneum?
+902, what about airways?
+891, what about bowel obstruction and loops?
+874, what about sulci?
+840, what about bronchiectasis?
+715, what about air-fluid level?
+709, what about radiation?
+615, what about azygos vein?
+540, what about contrast?
+534, what about the colon?
+507, what about air space disease?
+478, what about abscess and cavitation?
+476, what about ARDS?
+448, what about bullae and blebs?
+385, what about skinfold?
+311, what about sarcoidosis?
+304, what about the liver?
+263, what about blurring?
+251, what about kerley lines?
+162, what about azygos lobe?
+104, what about ascites?
+75, what about ossification?
+59, what about pneumatocele?
+42, what about tendon?
+16, what about cholelithiasis?
+10, what about sagittal chest?
+
+Ejemplos de respuestas por pregunta:
+
+1) what about the lungs?:
+
+    A: Lungs are clear
+    A: The lungs remain otherwise essentially clear
+    A: There is minimal bibasilar atelectasis. Minimal bibasilar atelectasis
+    A: A granuloma is seen in the right lung. No acute cardiopulmonary abnormality
+    A: Lung volumes are low. There is minimal bibasilar atelectasis. Minimal bibasilar atelectasis
+    A: The lungs are hyperinflated and the diaphragm is flattened , suggestive of COPD. Hyperinflated lungs suggestive of COPD
+    A: There are stable bibasilar patchy opacities which could reflect atelectasis , pneumonia or aspiration in the appropriate clinical setting
+    A: The lungs are clear. There are no focal consolidations , pleural effusions , pulmonary vascular congestion or pneumothorax. No radiographic evidence of an acute cardiopulmonary process
+    A: Lung fields are more inflated. The right base is improved with reduction of the atelectasis. The small pleural effusion persists on the right base. The left lung is clear. The atelectasis of the right base is improved , with persistent small pleural effusion
+    A: there is new presumed right and left basilar atelectasis with small left pleural effusion. There are also bilateral small areas of opacification in the mid and lower lungs , which could represent areas of pneumonia or hemorrhage. Bilateral basilar atelectasis and left pleural effusion with bilateral small areas of opacification possibly representing hemorrhage or pneumonia
+
+
+2) what about pleural space?:
+
+    A: Probable small left effusion
+    A: There are no large pleural effusions
+    A: There is no pneumothorax or pleural effusion
+    A: There is no pleural effusion or pneumothorax
+    A: There is no appreciable pleural effusion or pneumothorax
+    A: There is no pleural effusion , pneumothorax or focal airspace consolidation
+    A: No evidence of vascular congestion , pleural effusion , or acute focal pneumonia
+    A: the left pleural effusion has essentially cleared , as has most of the atelectatic changes in the retrocardiac region
+    A: There is increasing right pleural effusion and adjacent right lower lobe opacity. Moderate left pleural effusion and left lower lobe atelectasis are stable
+    A: Small right and large left pleural effusions are associated with adjacent atelectasis. No bilateral pleural effusions larger on the left side associated with adjacent consolidations likely atelectasis , superimposed infection cannot be totally excluded
+
+
+3) what about pneumothorax?:
+
+    A: No pneumothorax
+    A: There is no pneumothorax
+    A: There is no pneumothorax
+    A: No pleural effusion or pneumothorax is seen
+    A: No pleural effusion or pneumothorax is seen
+    A: There is no pneumothorax or pleural effusion
+    A: lungs and pleura with no interval increase in pneumothorax
+    A: There is no focal consolidation , pleural effusion , or pneumothorax
+    A: No focal consolidation , pleural effusion , or evidence of pneumothorax is seen
+    A: Moderate-sized left pneumothorax is unchanged. Unchanged moderate left pneumothorax , pneumomediastinum , extensive subcutaneous emphysema
+
+
+4) what about the heart?:
+
+    A: Heart size is normal
+    A: Cardiomegaly is substantial
+    A: No acute cardiopulmonary process
+    A: No acute cardiopulmonary process
+    A: No acute cardiopulmonary abnormality
+    A: Otherwise no acute cardiopulmonary abnormality
+    A: there is little change and no acute cardiopulmonary disease
+    A: Frontal and lateral radiographs of the chest demonstrate normal heart size
+    A: The heart is severely enlarged but increased compared to radiograph from. Severe cardiomegaly
+    A: Heart size and mediastinum are unchanged , there is interval progression of left lower lobe opacity most likely reflecting either interval development of aspiration or interval development of pneumonia
+
+
+5) what about the mediastinum?:
+
+    A: Heart size and mediastinum are stable
+    A: The mediastinal contour appears unchanged
+    A: The cardiomediastinal silhouette is normal
+    A: The mediastinal and hilar contours are stable
+    A: Cardiomediastinal contours are stable in appearance
+    A: Heart size normal , no mediastinal or hilar abnormality
+    A: The cardiac , mediastinal and hilar contours appear stable
+    A: The cardiomediastinal and hilar contours are within normal limits
+    A: The cardiomediastinal silhouette , hilar contours and pleural surfaces are normal
+    A: The hilar and mediastinal contours are unchanged , with enlargement of the main pulmonary artery suggestive of pulmonary arterial hypertension
+
+
+6) what about support devices and foreign bodies?:
+
+    A: Sternal wires in unchanged position
+    A: The monitoring and support devices remain in place
+    A: A left chest wall port catheter terminates in the low SVC
+    A: Tracheostomy tube in standard placement. Gastrostomy tube in place
+    A: A right internal jugular central venous catheter terminates in the lower superior vena cava
+    A: Tip of left PICC has been withdrawn slightly , now terminating in the proximal to mid superior vena cava
+    A: Cardiomediastinal contours are normal and midline. Lines and tubes are in unchanged standard position. Catheter projects in the upper abdomen
+    A: Patient is status post median sternotomy and cardiac valve replacement. Right-sided Port-A-Cath is seen with catheter terminating in the low SVC/ cavoatrial junction
+    A: The left chest wall internal jugular approach central venous catheter is unchanged in position , terminating in the mid SVC. Unchanged position of the left chest wall Port-A-Cath terminating in the mid SVC
+    A: The endotracheal tube terminates approximately 3 cm above the level of the carina. Nasogastric tube is seen coursing below the level of the diaphragm , with the side port at the GE junction and distal tip likely terminating within the stomach , suggest advancement so that the side port is well within the stomach. Left-sided AICD is stable in position
+
+
+7) what about the cardiac silhouette?:
+
+    A: The cardiac silhouette is enlarged
+    A: Borderline size of the cardiac silhouette
+    A: The cardiomediastinal silhouette is normal
+    A: The cardiomediastinal silhouette is unremarkable
+    A: Cardiac , mediastinal and hilar contours are normal
+    A: The cardiac , mediastinal and hilar contours are normal
+    A: Cardiomediastinal and hilar contours are within normal limits
+    A: The cardiomediastinal contours are normal , no pleural abnormality
+    A: Frontal and lateral views of the chest demonstrate normal cardiomediastinal silhouette
+    A: Continued elevation of pulmonary venous pressure with substantial chronic enlargement of the cardiac silhouette
+
+
+8) what about tubes and lines?:
+
+    A: Right PICC tip is in the lower SVC
+    A: The right-sided chest tube is been removed
+    A: Endotracheal and nasogastric tubes remain in good position
+    A: No pleural effusions , Right Port-A-Cath terminates in the right atrium
+    A: Midline sternotomy wires again noted. Interval removal of a right IJ introducer and right PICC line
+    A: Tip of the intra-aortic balloon pump is still close to the aortic apex in , 5 cm for standard placement
+    A: No substantial change in widespread parenchymal opacities , cardiomediastinal silhouette , position of tubes and lines is demonstrated
+    A: A dual-lead pacemaker/ICD device is in place , with leads terminating in the right atrium and ventricle. An aortic stent graft is partly visualized along the upper abdomen
+    A: A Swan-Ganz catheter was introduced over the left internal jugular vein. The course of the line is unremarkable , the tip projects over the outflow tract of the right ventricle
+    A: The nasogastric tube is coiled within the distal esophagus , re-positioning would be advised. On a subsequent abdominal plain film performed at , the nasogastric tube does course below the diaphragm , the tip projects over the stomach
+
+
+9) what about bones?:
+
+    A: Bony structures appear intact
+    A: Left rib fractures are again noted
+    A: Imaged osseous structures are intact
+    A: There are no acute osseous abnormalities
+    A: No acute osseous abnormalities are demonstrated
+    A: There are no concerning osseous or soft tissue lesions
+    A: A left-sided PICC line is again seen with the tip at the cavoatrial junction
+    A: No visualized acute osseous abnormalities. Old lateral left clavicular fracture is noted
+    A: No displaced rib fractures are identified on these routine PA and lateral views. No evidence of displaced rib fracture
+    A: Kyphotic angulation of the spine is centered at the thoracolumbar junction at the site of an apparent thoracic vertebral body compression deformity. Bony demineralization is noted diffusely. Lower thoracic compression deformity partially imaged with associated kyphotic angulation of the chest
+
+
+10) what about opacities?:
+
+    A: of diffuse interstitial opacities
+    A: Patchy right basilar opacity may reflect atelectasis or infection
+    A: Increasing bibasilar opacities , which may reflect aspiration and /or atelectasis
+    A: There are bibasilar airspace opacities and small bilateral pleural effusions , left greater than right
+    A: Severe heterogeneous opacification of the right lung has progressed dramatically between , inferior to the apical mass
+    A: a new subtle opacity in the right middle lobe has developed. Subtle right middle lobe opacity , concerning for an early focus of pneumonia
+    A: There also is continued blunting of the right costophrenic angle with increased opacification at the left base consistent with pleural effusion
+    A: Bilateral , heterogeneous opacities , predominantly in the lower lobes. Given low lung volumes and long standing opacities , it likely represents an organizing fibrosing stage or ARDS
+    A: Hazy opacity in left cardiophrenic angle region probably represents an enlarged cardiac fat pad in the setting of mediastinal lipomatosis. Adjacent linear opacity at the left lung base favors atelectasis
+    A: Lung volume is unchanged with stable right mid and lower lung opacification due to a combination of consolidation and pleural effusion , mildly enlarged since ; likely for involvement now also of the right upper lobe. Stable left upper lobe 1 , 5 cm opacity
+
+
+11) what about consolidation?:
+
+    A: No new consolidations
+    A: The lungs are clear without focal consolidation
+    A: No focal consolidation , pleural effusion or pneumothorax
+    A: The lungs are clear without focal consolidation or pneumothorax
+    A: There is no pneumothorax , focal consolidation , or pleural effusion
+    A: The lungs are clear of focal consolidation , effusion or vascular congestion
+    A: The lungs are hyperinflated , The lungs are clear without focal consolidation
+    A: No interval development of focal consolidation to suggest infectious process demonstrated
+    A: No evidence of focal consolidation , pleural effusion , or pneumothorax. No focal consolidation concerning for pneumonia
+    A: Frontal and lateral chest radiographs demonstrate a normal cardiomediastinal silhouette and well-aerated lungs which are without focal consolidation , pleural effusion , or pneumothorax
+
+
+12) what about atelectasis?:
+
+    A: Left basilar atelectasis is minimal
+    A: A retrocardiac opacity , likely atelectasis
+    A: There are low lung volumes with minimal atelectasis at the right base
+    A: New bibasilar opacities may represent pneumonia , aspiration , or atelectasis
+    A: Somewhat linear opacity is seen in the right mid lung , most suggestive of atelectasis
+    A: Patchy bibasilar opacities , which could reflect atelectasis , aspiration , or early infectious pneumonia
+    A: There are again bilateral layering pleural effusions , more prominent on the right with compressive atelectasis at the bases
+    A: Mild opacity in the right upper lung might potentially reflect area of focal atelectasis and unlikely to represent aspiration given its location
+    A: There is right perihilar opacity and bibasilar opacities , potentially atelectasis given adjacent effusions. Nonspecific bibasilar opacities potentially atelectasis , underlying infection is not excluded
+    A: small right and moderate left pleural effusions are improving revealing stable moderate size consolidation at the right lung base that could be atelectasis or pneumonia and improved left lower lobe atelectasis. Heart is probably moderately enlarged so substantially obscured by pleural effusion and atelectasis
+
+
+13) what about edema?:
+
+    A: No pulmonary edema
+    A: There is no pulmonary edema
+    A: There is no large effusion or edema
+    A: Previous mild basal pulmonary edema has resolved
+    A: Borderline size of the cardiac silhouette without pulmonary edema
+    A: No focal consolidation , pneumothorax , pleural effusion , or pulmonary edema
+    A: Mild worsening of the interstitial pulmonary edema and basilar opacities , right greater than left
+    A: Pulmonary edema has resolved. mild to moderate interstitial edema has resolve. Resolution of interstitial edema
+    A: Mild to moderate pulmonary edema , mediastinal venous engorgement , moderate bilateral pleural effusions have increased progressively
+    A: Interval decreased width of cardiomediastinal contours likely reflects improving volume status of the patient , is accompanied by improvement in the extent of pulmonary edema and slight reduction in size of bilateral pleural effusions
+
+
+14) what about pulmonary hila?:
+
+    A: The bilateral hila are normal
+    A: The hilar and mediastinal contours are normal
+    A: Cardiomediastinal and hilar contours are normal
+    A: The cardiomediastinal and hilar contours are stable
+    A: Cardiomediastinal and hilar contours are unremarkable
+    A: Mediastinal and hilar contours are otherwise unremarkable
+    A: The cardiomediastinal and hilar contours are within normal limits
+    A: Upper lung fibrosis with superior retraction of the hila is unchanged
+    A: Mediastinal and hilar contours are similar with a large left sided hiatal hernia again noted
+    A: The cardiac , mediastinal and hilar contours appear stable including mild cardiomegaly with a left ventricular configuration to the heart shape
+
+
+15) what about pulmonary vascularity?:
+
+    A: Pulmonary vasculature is normal
+    A: The pulmonary vasculature is normal
+    A: Mild vascular congestion has increased
+    A: There is no evidence of pulmonary vascular congestion
+    A: Pulmonary vasculature is normal and there is no pleural effusion
+    A: Cardiomediastinal silhouette , pulmonary vasculature , aorta are within normal limits
+    A: there is continued enlargement of cardiac silhouette with mild elevation of pulmonary venous pressure
+    A: The left hemithorax does not show any evidence of acute infiltrates or pulmonary vascular congestive pattern
+    A: The heart is mildly enlarged and upper lobe pulmonary vasculature equal to the lower lobe , there is no pulmonary edema or pleural effusion
+    A: There is central vascular congestion with minimal interstitial pulmonary edema. Stable mild cardiomegaly with central vascular congestion and mild interstitial pulmonary edema
+
+
+16) what about pneumonia?:
+
+    A: No pneumonia
+    A: No convincing signs of pneumonia
+    A: Emphysema without superimposed pneumonia
+    A: There is no focal consolidation concerning for pneumonia
+    A: Lungs are clear bilaterally without signs of pneumonia or CHF
+    A: There is no vascular congestion , pleural effusion , or acute focal pneumonia
+    A: Bibasilar consolidation is new , at least on the left , more severe than the right , probable pneumonia
+    A: Left basilar opacification reflecting an effusion and probably atelectasis , potentially pneumonia , in the left lower lobe
+    A: There are probable atelectatic changes at the left base without definite pleural effusion , pulmonary vascular congestion or acute focal pneumonia
+    A: Moderate right pleural effusion has increased in size and is accompanied by increasing right mid and lower lung opacities , which may be due to atelectasis with or without co-existing aspiration or infectious pneumonia
+
+
+17) what about cardiomegaly?:
+
+    A: Cardiomegaly
+    A: Cardiomegaly is stable
+    A: Cardiomegaly is substantial
+    A: Moderate cardiomegaly persists
+    A: Degree of cardiomegaly is unchanged
+    A: Mild cardiomegaly is unchanged. Stable mild cardiomegaly
+    A: Moderate cardiomegaly is unchanged. Stable moderate cardiomegaly
+    A: Moderate cardiomegaly is again seen as well as tortuosity of the descending thoracic aorta
+    A: Severe cardiomegaly is present. Severe cardiomegaly with mild pulmonary edema and small bilateral pleural effusions
+    A: There is moderate to moderately severe cardiomegaly , with a calcified unfolded aorta. COPD , cardiomegaly , slight upper zone redistribution
+
+
+18) what about surgery?:
+
+    A: Tracheostomy tube is midline
+    A: Tracheostomy tube is in standard position
+    A: Patient is status post median sternotomy and CABG
+    A: There is no evidence of a post-procedural pneumothorax
+    A: The patient is status post CABG as well as median sternotomy
+    A: The patient is status post median sternotomy and mitral valve replacement
+    A: Known status post bilateral healed rib fractures , status post left humeral repair
+    A: Tracheostomy tube is still in place The left subclavian central line is in standard position an unchanged
+    A: Tracheostomy tube , right supraclavicular dual channel central venous dialysis catheter in standard placements respectively
+    A: Surgical clips are present in the right infrahilar region with associated expected volume loss and scarring in this region. prior postoperative radiographs are poorly defined , relatively symmetrical nodular opacities in the periphery of the lower lobes just above the diaphragm level. the appearance of the lungs and pleura are similar to the prior postoperative chest radiographs
+
+
+19) what about the diaphragm?:
+
+    A: There is no free air below the diaphragm
+    A: No free air below the right hemidiaphragm
+    A: No free air below the right hemidiaphragm is seen
+    A: There is no free air below the right hemidiaphragm
+    A: Obscuration of the left hemidiaphragm may indicate a small left effusion
+    A: A feeding tube is seen coursing below the diaphragm with the tip not identified
+    A: Elevation of the right hemidiaphragm and linear scarring in the right mid hemi thorax are unchanged
+    A: Enteric tube is seen to pass below the diaphragm , tip at the gastric fundus , side-port past the GE junction
+    A: Elevation of the right hemidiaphragmatic contour persists with opacification at the right base consistent with atelectatic change
+    A: lateral chest compared to chest radiographs : Distortion of the right anterior diaphragmatic interface is responsible for hazy opacification at the base of the right hemithorax. Left lung is hyperinflated , there may be a diaphragmatic pleural calcification
+
+
+20) what about thoracic aorta?:
+
+    A: The aorta is calcified
+    A: The aorta is mildly tortuous
+    A: Aortic calcifications are present
+    A: Aortic knob calcification is again seen
+    A: Aortic arch calcification appears similar to prior
+    A: There is tortuosity of the descending thoracic aorta
+    A: The heart is mildly enlarged and there is mild tortuosity of the aorta
+    A: Minimal tortuosity of the thoracic aorta , borderline size of the cardiac silhouette
+    A: Heart size is moderately enlarged with mild unfolding of the thoracic aorta. Aortic knob calcifications are moderate
+    A: Lines and Tubes : Intra-aortic balloon pump terminates 2 cm from the apex of the aortic arch. Intra-aortic balloon pump terminates 2 cm from the apex of the aortic arch
+
+
+21) what about vena cava?:
+
+    A: SVC stent is again noted
+    A: new left PICC with the tip in the low SVC
+    A: A right PICC line terminates in the lower SVC
+    A: A right-sided Port-A-Cath terminates in the low SVC
+    A: Right-sided Port-A-Cath tip terminates in the upper SVC
+    A: Right internal jugular central line has its tip in the distal SVC
+    A: Left-sided Port-A-Cath is in unchanged position and terminates in the low SVC
+    A: Right-sided Port-A-Cath tip terminates at the junction of the SVC and right atrium
+    A: The right PICC line has been retracted and now ends in appropriate position at the mid SVC. Right PICC line ends at the mid SVC
+    A: Tip of endotracheal tube terminates 6 cm above the carina , left PICC terminates in the distal left brachiocephalic vein near the junction with the superior vena cava
+
+
+22) what about the stomach?:
+
+    A: The stomach is midely dilated
+    A: Feeding tube ends in the upper stomach
+    A: Nasogastric tube extends to the distal stomach
+    A: A Dobbhoff tube is noted with tip in the fundus of the stomach
+    A: The orogastric tube extends to the lower-to-mid body of the stomach
+    A: New feeding tube with the wire stylet in place ends in the distal stomach
+    A: Nasogastric tube tip is within the stomach , though the side port is in the distal esophagus
+    A: An orogastric tube traverses the esophagus , enters the stomach , passes inferiorly out of the field of view
+    A: Nasogastric tube passes into the distal stomach where either it loops , or passes into the duodenum to the ligament of Treitz
+    A: Subsequently this tube is removed , a new nasogastric feeding tube is positioned with its tip in the region of the stomach. Nasogastric tube ultimately ends in the region of the stomach
+
+
+23) what about the trachea?:
+
+    A: The endotracheal tube remains in situ
+    A: Endotracheal tube tip is 4 cm above the carina
+    A: Endotracheal tube is in the lower trachea , 7 cm above the carina
+    A: The endotracheal tube tip terminates approximately 8 cm above the carina
+    A: Endotracheal tube terminates in the midtrachea about 4 , 8 cm above the Carina
+    A: The endotracheal tube , the nasogastric tube and the right venous introduction sheath persist
+    A: Endotracheal tube is directed towards the right main stem bronchus and is only 6 mm above the carina
+    A: Endotracheal tube tip terminates approximately 4 , 5 cm from the carina. Endotracheal tube in standard position
+    A: The endotracheal tube is positioned with its tip approximately 2 cm above the carina. Improved positioning of the endotracheal tube
+    A: The tip of the endotracheal tube projects over the lower trachea at the level of the carina. The tip of the endotracheal tube projects at the level of the carina , pointing towards the right mainstem bronchus and retraction by approximately 2
+
+
+24) what about interstitial lung disease?:
+
+    A: Mild interstitial pulmonary edema may be present
+    A: There may have been mild interstitial edema in the right lung
+    A: There is likely mild interstitial edema which has developed in the interval
+    A: Persistent low lung volumes and bibasilar subsegmental atelectasis and -or scarring
+    A: There is mild cardiomegaly with central hilar engorgement and mild interstitial pulmonary edema
+    A: There is also interval development of diffuse interstitial markings in the left lung with perihilar predominance
+    A: Large opacity right midlung and surrounding interstitial abnormality have worsened substantially , less so. Mild interstitial edema is present
+    A: lateral chest radiographs demonstrate resolution of mild interstitial edema with a small , persistent pleural effusion. Improvement of interstitial edema from
+    A: Diffusely increased interstitial markings most notable at the lower lungs suggesting chronic interstitial lung disease , have not significantly changed , there is no focal area of consolidation
+    A: Increased interstitial markings are seen in the lungs , particularly at the bases. This could be due to chronic underlying interstitial process. Increased interstitial markings which could be due to chronic underlying interstitial process
+
+
+25) what about calcification?:
+
+    A: The aortic knob is calcified
+    A: No a valvular calcifications are seen
+    A: The aorta is mildly tortuous and calcified
+    A: Atherosclerotic calcification is noted at the arch
+    A: 2 mm calcified granuloma is noted in the left upper lung
+    A: Mild atherosclerotic calcifications are noted at the aortic arch
+    A: The mediastinal contour is normal , though calcification along the aortic knob is noted
+    A: Calcifications in the right upper quadrant of the abdomen likely reflect cholelithiasis
+    A: Left apical calcified scarring is seen as well as a calcified AP window node suggestive of previous granulomatous disease
+    A: Within the limits of plain film radiography , no hilar or mediastinal lymphadenopathy , pulmonary nodule , calcified granuloma , or apical infiltrate is identified
+
+
+26) what about the apical zone?:
+
+    A: with increased opacity at left apex
+    A: Two left apical chest tubes remain in place
+    A: A calcified granuloma projects over the right apex
+    A: A right apical skin fold should not be mistaken for pneumothorax
+    A: there is again evidence of severe COPD with apparent bullous changes in the apices
+    A: The pleural effusion and left atelectasis as well as minimal left apical cap is also unchanged
+    A: Frontal and lateral radiographs of the chest show a small left apical pneumothorax. Small left apical pneumothorax
+    A: On the left there is a small apical pneumothorax but no appreciable pleural effusion since removal of the left pleural drain
+    A: There is a left apical pneumothorax that measures up to 1 , 4 cm from the thoracic cage. Acute mildly displaced left 8th rib fracture , 4 cm left apical pneumothorax
+    A: There is a persistent small left apical pneumothorax in the vicinity of suture chains related to prior blebectomy. Persistent small left apical pneumothorax status post chest tube removal
+
+
+27) what about fractures?:
+
+    A: No displaced fracture is seen
+    A: No displaced rib fracture is seen
+    A: Multiple rib fractures are again seen
+    A: There is no pneumothorax , fracture or dislocation
+    A: The lateral radiograph reveals a status post vertebroplasty
+    A: No rib fractures are identified. no rib fractures are identified
+    A: No acute osseous abnormalities , compression deformity of likely T12 is unchanged
+    A: There is exaggerated kyphotic curvature and a similar severe lower thoracic compression deformity
+    A: Again seen is a non-united fracture at the distal end of the right clavicle. Chronic non-united fracture of the distal right clavicle
+    A: The lung volumes are reduced , there is increased AP diameter of the chest secondary to known severe kyphosis of the thoracic spine with evidence of old compression fractures at multiple levels. There is also evidence of old rib fractures on the left
+
+
+28) what about infection?:
+
+    A: Evaluate for infectious process
+    A: Asymmetric opacity in the left apex suggests developing infection
+    A: Bilateral parenchymal opacities , potentially due to edema or bilateral infection
+    A: it is difficult to distinguish pulmonary edema , pleural fluid , infectious infiltrates , even ARDS
+    A: Bibasilar streaky airspace opacities likely represent atelectasis , infection cannot be entirely excluded
+    A: More focal opacities in the lung bases may reflect atelectasis , though infection in these regions cannot be completely excluded
+    A: There is patchy right base opacity which could be due to infection or aspiration. Patchy right base opacity is concerning for infection and /or aspiration
+    A: Persistent patchy opacity at the left lung base could be due to infection and /or aspiration. Persistent patchy opacity at the left lung base may be due to infection and /or aspiration
+    A: Worsening heterogeneous opacity at right lung base with adjacent apparent bronchial wall thickening could reflect aspiration or developing infectious pneumonia in the appropriate clinical setting
+    A: There are also superimposed widespread opacities , suspicious for edema , blood , or atypical infection. Widespread pulmonary opacities superimposed on the background of known pulmonary interstitial fibrosis , concerning for atypical infection , edema , or hemorrhage
+
+
+29) what about the carina?:
+
+    A: The ET tube is 5 cm above the Carina
+    A: The ET tube tip is 6 , 5 cm above the carina
+    A: Endotracheal tube terminates 4 , 7 cm above the carina
+    A: An ET tube terminates approximately 4 , 5 cm above the carina
+    A: The endotracheal tube is in adequate position at 3 , 2 cm above the carina
+    A: Endotracheal tube terminates approximately 3 cm above the level of the carina
+    A: ET tube terminates 1 , 7 cm above the carina and is directed towards the right mainstem bronchus
+    A: The endotracheal tube ends 1 , 8 cm above the carina. Endotracheal tube ends 1 , 8 cm above the carina
+    A: Tip of the endotracheal tube no less than 3 cm from the carina with the chin elevated is probably 2 cm below optimal placement
+    A: Interval placement of nasogastric tube with the tip projecting at the level just below the carina. Interval placement of nasogastric tube with tip projecting at the level of the carina
+
+
+30) what about lung parenchyma?:
+
+    A: No new focal parenchymal opacities
+    A: Unchanged appearance of the lung parenchyma
+    A: The diffuse bilateral parenchymal opacities have decreased
+    A: The multifocal parenchymal opacities are constant in appearance
+    A: The lung volumes are low but there are no focal or diffuse parenchymal opacities
+    A: The visualized lung parenchyma is clear and the cardiac and mediastinal contours are normal
+    A: A parenchymal opacity seen on a previous image on the right , at the lung basis , is no longer present
+    A: Blunting of the left costophrenic angle reflects unchanged localized pleural and parenchymal scarring with volume loss
+    A: Increased transparent see of the lung parenchyma suggests improved ventilation. the pre-existing parenchymal opacities bilaterally are still severe
+    A: there has been interval worsening of bilateral diffuse parenchymal opacities , most pronounced in the right upper and lower lung zones. Slight worsening of bilateral parenchymal opacities , particularly on the right , likely worsening pulmonary edema
+
+
+31) what about the ribs?:
+
+    A: No definite rib fracture identified
+    A: No displaced rib fracture identified
+    A: Displaced left rib fractures are again visualized
+    A: Remote left posterior rib fracture is again noted
+    A: Unchanged fracture deformity of the posterior right fifth rib
+    A: No evidence of acute cardiopulmonary process or displaced rib fractures
+    A: Multiple bilateral healing rib fractures are noted. Healing multiple bilateral rib fractures
+    A: Remote right-sided rib fractures are again demonstrated along with mild degenerative changes in the thoracic spine
+    A: There is no convincing evidence for the presence of a left rib lesion or other abnormality explaining the clinical complaints of the patient
+    A: A single frontal AP view of the chest shows a defomities of the right and 7th ribs , accounting for a hazy ill-defined opacity overlying the right mid lung. Stable right and 7th rib deformities
+
+
+32) what about tortuosity?:
+
+    A: The aorta is tortuous
+    A: The aorta is tortuous
+    A: Thoracic aorta is mildly tortuous
+    A: The aorta is calcified and tortuous
+    A: Thoracic aorta is tortuous and calcified
+    A: Ascending thoracic aorta is dilated or tortuous
+    A: Calcifications and tortuosity of the aorta are again seen
+    A: The cardiomediastinal silhouette is stable , noting a tortuous thoracic aorta
+    A: Borderline size of the cardiac silhouette with minimal tortuosity of the thoracic aorta
+    A: Heart and mediastinal contours are stable , with top normal heart size , aortic tortuosity and calcification
+
+
+33) what about prominence?:
+
+    A: Bronchovascular markings are prominent
+    A: There is mild prominence of the pulmonary interstitial markings
+    A: The interstitium is also moderately prominent in the mid-to-lower lungs
+    A: Allowing for slightly increased lung volumes and the central vasculature is less prominent
+    A: There is mild prominence of the pulmonary interstitial markings without overt pulmonary edema
+    A: There continues to be mild interstitial prominence which may reflect residual mild interstitial edema
+    A: Mild prominence of the pulmonary vasculature is evident and which may be in part indicative of underlying interstitial edema
+    A: Increased interstitial markings are seen in the lungs with a predominantly peripheral distribution , more prominent on the right than on the left
+    A: There is diffuse mildly increased prominence of the pulmonary vasculature. The mediastinal contours remain prominent with unfolding of the thoracic aorta
+    A: There is slight prominence of the central pulmonary vasculature may be due to mild central pulmonary vascular engorgement without overt pulmonary edema. Slight prominence of the central pulmonary vasculature may be due to mild central pulmonary vascular engorgement , without overt pulmonary edema
+
+
+34) what about free air?:
+
+    A: There is no free air
+    A: No free air seen beneath the diaphragms
+    A: No free air below the right hemidiaphragm
+    A: There is no evidence of free intraperitoneal gas
+    A: No free air below the right hemidiaphragm is seen
+    A: No free air below the right hemidiaphragm is seen
+    A: No free air below the right hemidiaphragm is seen
+    A: There is no free air below the right hemidiaphragm
+    A: There is no subdiaphragmatic free air. No subdiaphragmatic free air
+    A: The remainder of the study is unchanged except for evidence of free intraperitoneal gas beneath the right hemidiaphragm
+
+
+35) what about fluid?:
+
+    A: Worsened fluid status
+    A: Mild fluid overload but no overt pulmonary edema
+    A: Left apical loculated air-fluid level is stable at 60 x 22 mm
+    A: There continues to be some loculated fluid within the horizontal fissure
+    A: Unchanged mild fluid overload and areas of atelectasis at both the right and left lung bases
+    A: Opacification at the left base is consistent with pleural fluid and volume loss in the left lower lobe
+    A: Continued retrocardiac opacification is consistent with a combination of pleural fluid and volume loss in the left lower lobe
+    A: There is bronchial cuffing in the perihilar regions , perihilar opacities and fluid in the fissures suggesting mild-to-moderate pulmonary edema
+    A: there is new pulmonary vascular congestion , increased density at the lung bases which may reflect increasing pleural fluid bilaterally or possibly bilateral atelectasis or pneumonia
+    A: There is no recent change in the appearance of the moderate-sized persistent right apical pleural space , containing air medially and superiorly and loculated fluid or pleural thickening laterally
+
+
+36) what about the bronchus?:
+
+    A: The patient is of the bronchoscopy
+    A: The lungs are underinflated , resulting in bronchovascular crowding
+    A: Central airways such as trachea and central bronchi are unremarkable
+    A: The lung volumes are markedly low , resulting in substantial bronchovascular crowding
+    A: AP of the chest demonstrates low lung volumes , which accentuate bronchovascular markings
+    A: Mild bronchial wall thickening is noted in the right lung base , No acute cardiopulmonary abnormality
+    A: Portable semi-upright radiograph of the chest demonstrates low lung volumes with resultant bronchovascular crowding
+    A: Patchy opacification primarily involving the lingula but possibly also the left lower lobe some extent suggests bronchopneumonia
+    A: represents now a total obliteration of the diaphragmatic contour on the left side , including evidence of spontaneous air bronchogram in the corresponding central airways
+    A: A metallic stent is seen within the expected region of the bronchus intermedius. New collapse of the right upper lobe status post stenting of the bronchus intermedius. was explained that the stent needed to be positioned in such a way that it excluded the right upper lobe bronchus
+
+
+37) what about aspiration?:
+
+    A: No evidence of pneumonia or aspiration
+    A: Rapidly improving bibasilar opacities favor either aspiration or atelectasis
+    A: Large hiatus hernia is more distended , now fluid filled and raises possibility of aspiration
+    A: Left basilar patchy opacity is noted , worrisome for aspiration. Aspiration pneumonia within the lung bases
+    A: PERIBRONCHIAL OPACIFICATION AT THE BASE OF THE RIGHT LUNG COULD BE ATELECTASIS OR EARLY EDEMA , EVEN ASPIRATION PNEUMONIA
+    A: Peripheral opacities in the right lower lobe and right upper lobe perihilar opacities are worrisome for pneumonia/aspiration
+    A: may represent atelectasis , aspiration is a consideration. Increased opacification of right lung base , atelectasis versus aspiration pneumonitis
+    A: Worsening bibasilar opacities larger on the left side are worrisome for aspiration. These could be part of aspiration but septic embolism is not excluded given the nodular appearance
+    A: Bibasilar lung opacities may reflect a combination of pleural effusion and atelectasis , secondary superimposed process such as aspiration or infection is also possible in the appropriate clinical setting
+    A: Moderate-to-large left-sided pleural effusion and moderate right-sided pleural effusion with associated bibasilar airspace disease , most likely representing partial lower lobe atelectasis , pneumonia or aspiration cannot be entirely excluded
+
+
+38) what about scarring?:
+
+    A: Biapical scarring is again noted
+    A: There is biapical scarring left greater than right
+    A: Note is made of stable biapical scarring , worse on the left
+    A: Linear opacity at the left lung base is consistent with scarring
+    A: Biapical scarring and appearance of a prominent right hilus are also stable
+    A: Streaky opacities in the lingula are most consistent with minor scarring or atelectasis
+    A: There is also linear opacity at the lateral right lung base also likely relating to atelectasis/scarring
+    A: Multifocal scarring is noted in the right upper and mid lung along with bilateral foci of bronchial wall thickening
+    A: Blunting of right costophrenic angle may be due to a small pleural effusion or scarring. Right lower lobe atelectasis and possible small right pleural effusion or scarring
+    A: Blunting along the left costophrenic sulcus , probably due to scarring. Patchy subpleural opacification at each lung apex , more extensive on the right than left and suggests minor scarring. Streaky linear opacities in the right lung are probably due to atelectasis or scarring. Findings suggesting chronic obstructive pulmonary disease and areas of chronic minor scarring , no definite evidence for pneumonia
+
+
+39) what about densities?:
+
+    A: High-density material projects over the stomach
+    A: Dense retrocardiac opacity may represent dependent atelectasis
+    A: increased retrocardiac density deflecting left lower lung atelectasis has improved
+    A: There is minimal retrocardiac linear density which may represent mild scarring or atelectasis
+    A: There is associated increased density in the right lung , likely attributable to progressive collapse
+    A: Retrocardiac density is most compatible with a hiatal hernia. Retrocardiac density , most compatible with a hiatal hernia
+    A: Apparent shift in the mediastinal silhouette due to patient rotation resulting in increased density in the left lower mid thorax
+    A: known areas of bronchiectasis , predominating in the right lung base , have increased in radiodensity , suggesting mucous plugging or super infection
+    A: An ovoid calcified density projects over the left upper abdomen measuring 5 , 4 cm in size , which is compatible with peripherally calcified left renal structure which has not yet been fully characterized
+    A: Dense left basilar opacity is compatible with combination of left lower lobe collapse and parenchymal opacities in the left upper lobe. Dense left basilar opacity compatible with left lower lobe collapse and opacity in the left upper lobe as well
+
+
+40) what about nodules?:
+
+    A: No lung nodules or masses
+    A: Right lower lobe lung nodule measuring 8 mm is stable
+    A: A nodular density in the left upper lung zone is likely an engorged vessel
+    A: A dense nodular opacity at the left apex is unchanged consistent with a granuloma
+    A: Previous right lung base nodule is presumed to be the nipple and not seen anymore on this chest x-ray
+    A: Underlying consolidation cannot be completely excluded given significant residual pulmonary edema nodular opacities
+    A: Portable AP chest radiograph demonstrates diffuse nodularity in a miliary pattern with focal consolidation of the right upper lobe , worsened
+    A: Nodular opacity at the right base may reflect the nipple or less likely pulmonary nodule. Nodular opacity at the right base likely reflecting the nipple shadow
+    A: Multifocal , indistinct opacities correspond to diffuse tree in nodularity and foci of dense consolidation , particularly in the right lung base , worse compared to the outside prior radiograph
+    A: Patchy and ill-defined nodular opacities are noted in both perihilar regions with peribronchial cuffing , more pronounced on the left. Patchy and ill-defined perihilar nodular opacities , more pronounced on the left , worrisome for multifocal pneumonia
+
+
+41) what about emphysema?:
+
+    A: Subcutaneous emphysema has resolved
+    A: Mild right subcutaneous emphysema has improved
+    A: The lungs are hyperexpanded likely secondary to emphysema
+    A: Subcutaneous emphysema in the right neck and chest wall is decreasing
+    A: Unchanged appearance of subcutaneous emphysema in the left lateral chest wall
+    A: Small amount of subcutaneous emphysema in the supraclavicular regions is seen bilaterally
+    A: The lungs are hyperinflated and a paucity of vasculature in the upper lobes is consistent with severe emphysema
+    A: Patient has severe emphysema much more extensive and confluent consolidation has developed in the right lower lung
+    A: There is unchanged extensive subcutaneous emphysema as well as pneumomediastinum. No significant interval change with extensive subcutaneous emphysema and pneumomediastinum
+    A: Underlying emphysematous changes are most pronounced within the lung apices. Persistent multifocal airspace opacities , most pronounced within the left upper lung field , on a background of emphysema , concerning for multifocal pneumonia
+
+
+42) what about markings?:
+
+    A: fluid marking of the fissures
+    A: There are low lung volumes which accentuate the bronchovascular markings
+    A: Interstitial markings are more prominent , likely related to low lung volumes
+    A: Prominence of the interstitial markings may be related to patient's underlying emphysema
+    A: Given low lung volumes , the lungs are grossly clear noting crowding in the bronchovascular markings
+    A: Increased interstitial markings are seen projecting over the lung apices and perihilar and retrocardiac regions
+    A: There is engorgement of the central pulmonary vasculature with indistinct pulmonary vascular markings peripherally
+    A: lateral chest radiograph demonstrates diffuse interstitial markings bilaterally in keeping with chronic interstitial lung disease
+    A: There is increased pulmonary vascular congestion and interstitial markings likely representing pulmonary edema and possibly chronic interstitial lung disease
+    A: Increased interstitial markings are seen throughout the lungs bilaterally. Increased interstitial markings in the lungs , potentially due to interstitial edema , chronic underlying interstitial process is also possible
+
+
+43) what about congestive heart failure CHF?:
+
+    A: Doubt CHF
+    A: No CHF or pneumothorax
+    A: No evidence of congestive heart failure
+    A: Cardiomegaly with CHF and interstitial edema
+    A: No evidence of congestive heart failure or pneumonia
+    A: Low lung volumes with signs of mild interstitial fluid overload
+    A: The lung volumes are somewhat low , though no convincing signs of pneumonia or CHF
+    A: There is no pneumothorax , effusion or CHF. The PICC line is unchanged and there is no pneumothorax or CHF
+    A: there are residual interstitial opacities which likely represent chronic interstitial changes from multiple prior CHF exacerbations
+    A: Again seen is CHF with interstitial edema , bilateral small to moderate effusions and underlying collapse and /or consolidation. CHF findings are probably slightly improved. CHF with interstitial edema , small to mild bilateral effusions and underlying collapse and /or consolidation remains present. Possible mild improvement in CHF findings
+
+
+44) what about infiltrate?:
+
+    A: no focal infiltrate
+    A: No infiltrates or signs of acute heart failure
+    A: No focal opacity to suggest acute pneumonic infiltrate
+    A: No focal infiltrate or consolidation identified to suggest pneumonia
+    A: Lung volumes are slightly low and there is volume loss/ early infiltrate at the bases
+    A: Possibility of early pneumonic infiltrates cannot be entirely excluded , no frank consolidation is identified
+    A: There are opacities at the lung bases most compatible with atelectasis , early infiltrate would be difficult to exclude
+    A: The pulmonary findings are practically unchanged , there remain still a few linear atelectatic changes bilaterally on the bases , no new infiltrates are present
+    A: There is a new right lower lobe infiltrate with associated area of volume loss is a small left effusion. New areas of infiltrate and volume loss in both lower lungs
+    A: No evidence of acute pulmonary infiltrates remain and the lateral and posterior pleural sinuses are free. These densities were identified as possibly representing local edema , atelectasis or inflammatory infiltrate
+
+
+45) what about the esophagus?:
+
+    A: Evaluation of the patient after esophagectomy
+    A: Esophageal drainage tube ends in the upper stomach
+    A: Esophageal drainage tube passes into the stomach and out of view
+    A: The tube ends in the mid esophagus and needs to be advanced by at least -15 cm
+    A: Normal postoperative appearance to the mediastinum and neo esophagus following esophagectomy
+    A: a nasogastric tube has been placed , coiling within the esophagus , with distal tip directed cephalad
+    A: the patient has received an additional esophageal device. The tip of the device projects over the distal esophagus
+    A: NG tube is malpositioned with tip ending in upper esophagus. NG tube is malpositioned , ending in the upper esophagus and has to be pushed down
+    A: THE DOBBHOFF TUBE HAS BEEN ADVANCED , IS STILL TOO HIGH , THE TIP IS ABOVE THE GE JUNCTION STILL IN THE ESOPHAGUS. DOBBHOFF TUBE ABOVE THE GE JUNCTION , IN THE ESOPHAGUS
+    A: The Dobbhoff feeding tube is seen coursing down into the stomach and then courses back up into the upper esophagus where the tip is positioned. The endotracheal tube remains in place and the tip is difficult to identify as this is the location where the Dobbhoff feeding tube appears to be coiled within the esophagus
+
+
+46) what about air collections?:
+
+    A: There is no free intraperitoneal air
+    A: there has been reduction in the subcutaneous gas
+    A: Subcutaneous gas again projects over the right axilla
+    A: There is subcutaneous air in the chest wall developed in the interim
+    A: Subcutaneous gas is seen along the right lateral chest wall extending into the neck
+    A: Surgical along the right lateral chest wall and subcutaneous air relate to recent surgery
+    A: the large right pneumothorax and the air collection in the right lateral soft tissues are unchanged
+    A: There is increasing loculated air surrounding the pigtail catheter. Loculated left hydro pneumothorax , with increased locules of air
+    A: In addition to numerous persistent air and fluid loculations in the right pneumonectomy space , there is now a dominant air-fluid interface
+    A: there has been the development of a large amount of subcutaneous gas along the right lateral chest and abdomen wall with extension into the pectoral muscles as well as in the cervical region bilaterally
+
+
+47) what about masses?:
+
+    A: No pulmonary nodules or masses
+    A: There is no consolidation or mass elsewhere
+    A: The known right middle lobe mass is now more conspicuous
+    A: Trachea is deviated substantially to left by a known thyroid mass
+    A: No focal consolidations to suggest infectious process or mass in the demonstrated
+    A: There again is impression on the lower right cervical trachea , raising the possibility of a thyroid mass
+    A: Opacity at the right lung base raises concern for overlying pneumonia , underlying pulmonary mass is not excluded on this study
+    A: Patient has known right lower lobe mass , right lower lobe lymphangitic spread , mediastinal , hilar lymphadenopathy and pleural metastasis
+    A: Collapse of at least 2 segments of the right upper lobe accompanied with fullness in the right paratracheal station of the mediastinum could be explained by central hilar mass and mediastinal adenopathy
+    A: A right cardiophrenic angle mass correlates to a heterogeneous mass seen at this location on and in not appreciably changed allowing for differences in modality. Large right cardiophrenic angle mass , not appreciably changed
+
+
+48) what about soft tissue?:
+
+    A: The bones and soft tissues are unchanged
+    A: Osseous and soft tissue structures are unremarkable
+    A: Osseous and soft tissue structures are unremarkable
+    A: Osseous and soft tissue structures are unremarkable
+    A: Overlying soft tissue attenuation obscures parenchymal detail
+    A: Osseous and soft tissue structures are notable for hypertrophic changes in the spine
+    A: The costophrenic angles are not sharp , particularly on the left , this may relate to overlying soft tissue
+    A: the mediastinal contours are stable , with right paratracheal soft tissue , most likely related to prominent vascular structures
+    A: Soft tissue calcifications are noted lateral to the chest on the right , not fully imaged and likely relating to the presence of an arteriovenous fistula
+    A: the lungs appear clear with blunting of the bilateral costophrenic sulci potentially related to overlying soft tissue or pleural thickening particularly given the presence of numerous bilateral old rib fractures
+
+
+49) what about lesions?:
+
+    A: possibly representing contusion
+    A: Underlying lung lesions are unlikely
+    A: Known sclerotic bone lesion in the second left rib
+    A: Interval increase in size of right apical primary lung lesion
+    A: Nodular right pleural thickening and lesions scattered in the right lung also unchanged
+    A: Aeration in the left upper lobe has improved , probably with some decrease in upper mediastinal hematoma
+    A: No radiographic evidence of left upper lobe lesion , pneumonia , or other significant cardiopulmonary abnormalities
+    A: Severe degenerative changes are present at the right glenohumeral and acromioclavicular joints with a probable chronic rotator cuff injury
+    A: no acute fracture or other chest wall lesion is seen , conventional chest radiographs are not sufficient for detection or characterization of most such abnormalities
+    A: Left perihilar and bibasilar opacities , left greater than right and minimal opacities in the right upper lobe are grossly unchanged , are consistent with atelectasis on the right base , contusion in the left perihilar region and laceration and contusion in the left lower lobe
+
+
+50) what about bronchovascular crowding?:
+
+    A: Low lung volumes result in bronchovascular crowding
+    A: Low lung volumes cause crowding of the bronchovascular markings
+    A: Lung volumes are slightly low , resulting in bronchovascular crowding
+    A: Low lung volumes are again noted with crowding of the bronchovascular markings
+    A: There are low lung volumes with crowding of the normal bronchovascular structures
+    A: There is crowding of bronchovascular structures with mild pulmonary vascular engorgement
+    A: Superior mediastinal contours are widened , there is crowding of the bronchovascular structures
+    A: Frontal and lateral chest radiographs demonstrate bilateral lung volumes with resultant bronchovascular crowding
+    A: Crowding of bronchovascular structures is likely due to the presence of low lung volumes without overt pulmonary edema
+    A: lung volumes remain relatively low , accentuating the cardiac silhouette and resulting in crowding bronchovascular structures , particularly at the lung bases
+
+
+51) what about fluid overload?:
+
+    A: No fluid overload
+    A: signs of mild fluid overload are present
+    A: Mild fluid overload but no overt pulmonary edema
+    A: Minimal fluid overload but no overt pulmonary edema
+    A: the signs indicative of fluid overload have markedly improved
+    A: No radiographic evidence of CHF , cardiac enlargement or fluid overload
+    A: There is prominence of the pulmonary interstitial markings suggestive of fluid overload
+    A: Worsening pulmonary venous congestion and severe cardiomegaly consistent with fluid overload
+    A: suggestive of mild fluid overload. Stable severe cardiomegaly , with redistribution suggestive of mild fluid overload
+    A: Pulmonary vascular engorgement is accompanied by new perihilar haziness and widespread interstitial opacities , in keeping with clinically suspected diagnosis of fluid overload
+
+
+52) what about hernias?:
+
+    A: Hiatal hernia is again noted
+    A: Stable right Bochdalek's hernia
+    A: There is a hiatal hernia. Small hiatal hernia
+    A: there is unchanged depiction of a large hiatal hernia
+    A: Again seen is a moderate to large hiatal hernia. Hiatal hernia
+    A: This appearance may correspond to a Bochdalek hernia , does not appear changed
+    A: Again seen is a large hiatal hernia containing stomach elevating the lower lobe of the right lung
+    A: the large known hiatal hernia now filled with air. They Dobbhoff catheter is located at the bottom of the hernia
+    A: Cardiac silhouette appears to be enlarged which might reflect the fluctuations in size of the large hiatal hernia containing most of the stomach
+    A: There is again a poorly visualized substantial , possibly large , hiatal hernia with streaky left basilar opacification suggesting associated minor atelectasis. Substantial hiatal hernia
+
+
+53) what about haze?:
+
+    A: There is hazy opacity in both lungs
+    A: There is persistent moderate interstitial pulmonary edema with perihilar haziness
+    A: There are hazy opacities at lung bases suggestive of developing infiltrate or atelectasis
+    A: Some haziness along the right cardiac border is secondary to previously seen pectus excavatum deformity
+    A: There is engorgement of the pulmonary vasculature , with perihilar haziness compatible with pulmonary edema
+    A: Again seen is hazy somewhat patchy opacity at the right base medially , consistent with less pronounced atelectasis/infiltrate
+    A: There is a new hazy bilateral lung opacification with indistinct pulmonary vascularity , most consistent with moderate pulmonary edema
+    A: there is again hazy opacification of both hemithoraces , more prominent on the right , consistent with layering pleural effusions and compressive atelectasis
+    A: The lungs are well expanded with increasing ground glass hazy density in the left mid lung zone , sequela of treated breast cancer. Increased haziness of the left mid lung zone
+    A: lateral views of the chest demonstrate a nodular opacity in the right midlung and a hazy opacity in the left lung base posteriorly , both possibly reflecting an infectious etiology in the appropriate clinical setting
+
+
+54) what about gas distension?:
+
+    A: The stomach remains very distended
+    A: There is mild gaseous distension of the stomach
+    A: Azygous distention could be due to supine positioning alone
+    A: Heart size is normal and mediastinal veins are not distended
+    A: Upper enteric drainage tube passes into a non-distended stomach and out of view
+    A: Prominent gaseous distention of colonic loops of bowel in the left upper quadrant are noted
+    A: Within the imaged portion of the upper abdomen , mild-to-moderate gastric distension has developed
+    A: There is on going elevation of the left hemi diaphragm but the over distension of the stomach , has substantially decreased
+    A: Borderline interstitial edema worsened slightly , accompanied by azygos distention suggesting biventricular decompensation or volume overload
+    A: Severe widening of the mediastinum could a variety of abnormalities including adenopathy and a dilated aorta , either aneurysm or dissection , it could also be due to a combination of distended mediastinal veins and benign fat deposition
+
+
+55) what about cancer or tumor?:
+
+    A: Known lung cancer
+    A: Extensive pulmonary metastasis is only partially visible
+    A: Metastatic lung cancer without evidence of underlying acute process
+    A: Extensive bilateral metastatic pulmonary lesions , not significantly changed
+    A: Several lytic bone lesions are seen involving the ribs consistent with known metastatic disease
+    A: Again seen is expansion and sclerosis of a few right lower ribs consistent with patient's diagnosis of myeloma
+    A: Multifocal poorly defined nodular opacities , which may be infectious such as septic emboli and less likely metastatic
+    A: There is some less dense consolidation in the right upper lobe , potentially due to tumor extension , not significantly changed from prior
+    A: Left retrocardiac opacity is again seen which likely reflect pneumonia/aspiration versus metastasis. Retrocardiac opacity may represent pneumonia/ aspiration versus metastasis
+    A: Ill-defined pleural and parenchymal nodular opacities are seen diffusely throughout the lungs bilaterally with continued diffuse increased interstitial opacities worrisome for lymphangitic spread of tumor. Diffuse pulmonary and pleural nodules compatible with metastases as well as lymphangitic carcinomatosis as seen previously
+
+
+56) what about loculation?:
+
+    A: A large loculated right pleural effusion
+    A: NO CHANGE IN MOST LIKELY PARTIALLY LOCULATED RIGHT PLEURAL EFFUSION , MODERATE
+    A: This could be a pleural fluid loculation or a lung lesion , including pneumonia or lung abscess
+    A: No definitive pneumothorax is seen , lucency at the left lower lung might reflect loculated pneumothorax
+    A: Again seen is a small right apical pneumothorax as well as a probable small loculated pneumothorax at the right lung base
+    A: There is increased density within the right upper lobe , which may be due to right upper lobe collapse versus loculated pleural fluid
+    A: The partially loculated left pleural effusion is stable since , however, is increased. The partially loculated left pleural effusion is stable since , but increased
+    A: A possible air-fluid level is also seen , representing a small loculated hydro pneumothorax. Interval removal of the right-sided pigtail catheter with stable likely loculated hydro pneumothorax
+    A: Note is also made of improved aeration in the right lower lobe , with residual incompletely marginated opacity adjacent to the right hilum , possibly representing an area of loculated pleural fluid with adjacent right basilar atelectasis
+    A: lateral chest compared to chest radiographs : Large left pleural effusion loculated laterally since pleural drainage on. The even larger right pleural effusion , loculated , both anteriorly and posteriorly , has not changed since , the following earlier drainage and reaccumulation
+
+
+57) what about adenopathy?:
+
+    A: There is no evidence of hilar adenopathy
+    A: Previous right hilar adenopathy has improved
+    A: No evidence of hilar lymphadenopathy or cavitary lesions
+    A: Heart size , mediastinal contour and hila are normal without lymphadenopathy
+    A: Lungs are clear and there is no pleural abnormality or evidence of central adenopathy
+    A: Bilateral symmetric hilar enlargement and widening of the right paratracheal stripe are known adenopathy
+    A: Within the limits of plain film radiography , no hilar or mediastinal lymphadenopathy or pulmonary nodule is detected
+    A: Widening of the mediastinal contours corresponds with patient's known adenopathy. Known mediastinal adenopathy and pulmonary masses appear stable
+    A: The mediastinal and hilar contours are unchanged with lymphadenopathy again noted. Mediastinal and hilar contours are unchanged compatible with known lymphadenopathy
+    A: There is no significant change in the large conglomerates of fibrosis and lymphadenopathy in both mid lungs , There is no new focal consolidation. Unchanged fibrotic conglomerates and lymphadenopathy in both mid lungs
+
+
+58) what about COPD?:
+
+    A: Suspect background COPD
+    A: Hyperinflated lungs suggestive of COPD
+    A: The lungs are hyperinflated consistent with COPD
+    A: There is background hyperinflation , compatible with COPD
+    A: Hyperinflation of the lungs is compatible with underlying COPD
+    A: The lungs remain hyperinflated , suggesting chronic obstructive pulmonary disease. COPD
+    A: The lungs are mildly hyperexpanded , which can be seen in chronic obstructive pulmonary disease
+    A: The lungs remain hyperinflated with flattening of the diaphragms , suggesting chronic obstructive pulmonary disease
+    A: The lungs are hyperinflated consistent with underlying COPD/emphysema. COPD/emphysema without acute cardiopulmonary process
+    A: Lungs are hyperinflated , suggesting chronic obstructive pulmonary disease. There is diffuse mild increased interstitial markings bilaterally which may relate to chronic obstructive pulmonary disease or other chronic lung disease with possible minimal interstitial edema superimposed. Hyperinflated lungs with mild prominence of the interstitium suggests chronic obstructive pulmonary disease
+
+
+59) what about granumola?:
+
+    A: A right granuloma is unchanged
+    A: Known small calcified left upper lobe granuloma
+    A: There is a stable right lower lung calcified granuloma
+    A: A calcified granuloma in the left mid to upper lung is unchanged
+    A: There is a calcified granuloma again seen projecting over the right upper lung
+    A: The lungs bilaterally demonstrate nodular densities , likely secondary to granulomas
+    A: These findings are compatible with prior granulomatous disease. Evidence of prior granulomatous disease
+    A: A punctate rounded density projecting over the left upper lobe may represent a vessel on end or calcified granuloma
+    A: Small calcification overlying left lung apex , of uncertain etiology or significance -- the appearance is not typical for a calcified granuloma
+    A: Note is again made of a 10 mm calcified nodular density in the left lower lobe most likely representing a calcified granuloma. Stable left lower lobe calcified nodule compatible with a granuloma
+
+
+60) what about fissures?:
+
+    A: Persistent fluid along the minor fissure
+    A: Mild continued elevation of the minor fissure
+    A: Fluid is also seen tracking along the right-sided fissures
+    A: Vague opacity in the right mid lung field represents fluid in the fissure
+    A: The right-sided effusion has significantly decreased as well as the fluid along the minor fissure
+    A: There is linear right upper lobe opacity with associated volume loss with elevation of the minor fissure
+    A: A small quantity of fluid is present along the right major fissure , there is no suspicion for substantial pleural effusion
+    A: The change could be reflecting resolving pneumonia , based on the slight deviation of the minor fissure , the change is very likely not recent
+    A: The right lung base appears slightly denser than on the previous radiograph , might be caused by partial atelectasis of the middle lobe , given a deviation of the minor fissure
+    A: Right hemidiaphragm is not readily visilble and the opacity extends to the edge of the right major fissure on the lateral view , reflecting collapse of the lower lobe with possible sparing of the superior segment
+
+
+61) what about lucencies?:
+
+    A: Upper lungs are hyperlucent due to emphysema
+    A: There is an unusual lucency seen in the left lower chest medially
+    A: Small lucency underneath the right hemidiaphragm is equivocal for with free air
+    A: A lucent stripe paralleling the right lateral chest wall is caused by soft tissues of the arm
+    A: There is a retrocardiac opacity with subtle central air lucency which could represent a hiatal hernia
+    A: Slight lucency is seen capping the left lung apex but no pleural line is identified to suggest a definite pneumothorax
+    A: A minimal sub-millimetric hyperlucent line along the aortopulmonary window could represent a small portion of the known pneumomediastinum
+    A: There is greater lucency at the periphery of the right lung compared to the left , there is no discrete pleural line , there could be pneumothorax
+    A: There is decreased lucency of the lungs bilaterally , which likely reflects in large part increased layering effusions , though increased pulmonary edema is also likely present
+    A: There is a persistent lucency in the lung parenchyma adjacent to the left hilum that appears stable since , which maybe suggestive of an underlying structural abnormality , congenital or otherwise. Persistent lucent underlying structural abnormality in the lung parenchyma adjacent to the left hilum
+
+
+62) what about bleeding?:
+
+    A: NO PULMONARY HEMORRHAGE OR PLEURAL EFFUSION
+    A: Bleeding into the left pleural space is certainly possible
+    A: Relative contributions of edema , hemorrhage , pneumonia radiographically indeterminate
+    A: if there is clinical concern that mediastinal bleeding is the underlying cause of dropping hematocrit
+    A: there is improving patchy opacities throughout the right lung likely representing hemorrhage , still extensive
+    A: Evaluation of the patient with right-sided pneumothorax and hemorrhagic pleural effusion , now after pigtail placement
+    A: raises concern for alveolar hemorrhage. Ground-glass opacities in the lower lungs are concerning for hemorrhage in the setting of hemoptysis
+    A: Extensive bilateral pulmonary consolidation with which worsened dramatically between and has improved somewhat consistent with treated pneumonia or pulmonary hemorrhage
+    A: Severe global pulmonary consolidation has worsened considerably over the course of the day , due to worsening pulmonary hemorrhage , drug toxicity or the development of non cardiogenic pulmonary edema
+    A: There diffuse bilateral airspace opacities with differential diagnosis including severe noncardiogenic pulmonary edema , ARDS , severe multifocal infection or aspiration , pulmonary hemorrhage not excluded. Diffuse bilateral airspace opacities with differential diagnosis including severe noncardiogenic pulmonary edema , ARDS , severe multifocal infection or aspiration , pulmonary hemorrhage not excluded
+
+
+63) what about fibrosis?:
+
+    A: Interstitial fibrosis
+    A: Scarring/fibrotic changes in the left apex are similar
+    A: Upper lung fibrosis with superior retraction of the hila is unchanged
+    A: Some may represent chronic fibrotic changes while some may represent resolving infection
+    A: Bilateral reticular opacities and volume loss related to chronic fibrotic interstitial lung disease
+    A: Again seen are extensive fibrotic changes. Grossly stable to slightly progressed extensive fibrotic changes bilaterally
+    A: There are some left paramediastinal parenchymal opacities with fibrotic or atelectatic streaks extending to the left lateral wall
+    A: The right and the left lung show subpleural reticulations , consistent with pulmonary fibrosis. No evidence of acute lung disease overlaying the fibrotic changes
+    A: there is little overall change in the appearance of the heart and lungs with evidence of chronic lung disease compatible with the patient's known interstitial fibrosis
+    A: Frontal and lateral radiographs of the chest demonstrate increased diffuse interstitial lung markings , consistent with the patient's known diagnosis of interstitial pulmonary fibrosis. Increased diffuse interstitial lung markings consistent with the patient's known diagnosis of interstitial pulmonary fibrosis
+
+
+64) what about pneumomediastinum?:
+
+    A: No signs of pneumomediastinum
+    A: No mediastinal air is demonstrated
+    A: No definite pneumomediastinum or pneumothorax
+    A: No pneumothorax or pneumomediastinum is detected
+    A: I do not see pneumomediastinum for certain , no pneumothorax
+    A: There may be a small pneumomediastinum which , there is no pneumothorax
+    A: Streaky lucencies overlying the mediastinum noted concerning for pneumomediastinum. Pneumomediastinum
+    A: There is no evidence of pneumomediastinum or pneumothorax. No evidence of pneumomediastinum or pneumothorax
+    A: Pneumomediastinum and subcutaneous emphysema in the right neck are stable , new in the left neck. Pneumomediastinum developed on , has increased slowly ever
+    A: There are streaky linear lucencies projecting over the neck , mediastinum , along the cardiac border concerning for pneumomediastinum. Pneumomediastinum with extension into the soft tissues of the neck
+
+
+65) what about the bowel?:
+
+    A: There is a paucity of bowel gas
+    A: There is prominent small and large bowel gas seen
+    A: There are multiple gas-filled loops of bowel partially imaged
+    A: Mildly distended colonic loops of bowel are seen within the upper abdomen
+    A: The visualized upper abdomen again demonstrates air distended loops of bowel
+    A: Gaseous distension of loop of bowel , presumably stomach noted in the left upper quadrant
+    A: Again seen is a large hiatal hernia which contains multiple loops of bowel and an air-fluid level
+    A: There remains a mild elevation of the left diaphragm , apparently related to this gas-distended stomach and -or large bowel
+    A: New elevation of the right hemidiaphragm probably facilitates migration of a loop of large bowel above the liver , Chilaiditi's sign
+    A: Multiple air-fluid levels are noted in the bowel in the upper abdomen , not well assessed. Oval air-fluid levels noted in the bowel in the upper abdomen , not well assessed on this study
+
+
+66) what about shadow?:
+
+    A: The cardiomediastinal shadow is normal
+    A: The cardiomediastinal shadow is enlarged
+    A: thus most likely reflecting summation of shadows
+    A: On the lateral , a thin-walled ring shadow unlikely be of significance is seen
+    A: Focal nodular opacities projecting over the lung bases likely to represent nipple shadows
+    A: Shadowing of the left hemidiaphragm is likely due to the atelectasis and a small pleural effusion
+    A: It is unclear if this represents overlapping shadows , area of scar tissue , a new infiltrate or less likely a mass
+    A: Well-circumscribed 5 cm wide ring shadow in the left midlung is more readily visible than it was on , on both days it appears cavitated
+    A: There has been significant interval increase in vascular congestion along with loss of definition of both hemidiaphragms and increased cardiac shadow size , suggestive of a new mild interstitial edema
+    A: A curvilinear shadow continues to project over the right upper lung. Persistent shadow projecting over the right upper thorax , which raises concern for the possibility of an unusual imaging appearance of pneumothorax
+
+
+67) what about lymph nodes?:
+
+    A: Calcified infrahilar lymph nodes are again noted
+    A: Calcified lymph nodes within the AP window are again noted
+    A: Status post bronchoalveolar lavage and lymph node dissection
+    A: Large calcified lymph node present in the right lower paratracheal station
+    A: The increased density in the subcarinal areas is caused by a large lymph node
+    A: Calcified hilar and mediastinal lymph nodes and granulomas in the left lower lung are unchanged
+    A: An ovoid 1 , 3 cm calcified left paratracheal structure may represent a calcified mediastinal lymph node
+    A: Calcified lymph nodes at the aortopulmonic window are re- demonstrated , consistent with prior granulomatous exposure
+    A: Calcified lymph nodes are again seen in the perihilar regions. Increase in perihilar opacity likely due to vascular engorgement or lymph node enlargement
+    A: Cardiomediastinal and hilar silhouettes and pleural surfaces are normal aside from what might be small granulomatous calcification in hilar lymph nodes , not clinically significant currently
+
+
+68) what about bronchogram?:
+
+    A: This region also shows minimal air bronchograms
+    A: Internal rounded lucencies may reflect dilated air bronchograms
+    A: The pneumonia also shows minimally more air bronchograms than on the previous image
+    A: Stable small left pleural effusion with adjacent left retrocardiac opacity with air bronchograms
+    A: New is a minimal left basal opacity with air bronchograms of similar appearance , lesser extent and severity
+    A: Minimal decrease in extent and severity of the pre-existing right upper lobe parenchymal opacity with air bronchograms
+    A: The patchy opacification and air bronchogram in the right upper lobe could be combination of acute pneumonia and bronchiectasis
+    A: There is minimal blunting of the CP angles but no definite pleural effusion there is retrocardiac opacity with air bronchograms the right IJ Cordis is unchanged
+    A: There is increasing opacity with air bronchograms in the left lower lobe , consistent with developing pneumonia or aspiration in the appropriate clinical setting
+    A: The previously seen right medial basal parenchymal opacity with possibly air bronchograms is less apparent. The previously seen right medial basal parenchymal opacity with possibly air bronchograms is smaller
+
+
+69) what about the thyroid?:
+
+    A: Surgical clips related to prior thyroidectomy
+    A: Thyroid enlargement with impression on right aspect of trachea
+    A: Tracheal shift to the left is most likely due to thyroid enlargement
+    A: Tiny clips project over the superior mediastinum likely due reflect prior thyroidectomy
+    A: There are tiny surgical clips in the left base of neck , likely indicating prior thyroid surgery
+    A: Mild indentation of the right lateral wall of the upper trachea may be due to an enlarged right thyroid lobe
+    A: The patient is status post right thyroidectomy with superior mediastinal surgical clips and mediastinal wires noted
+    A: there is suggestion of impression on the lower right side of the cervical trachea , raising the possibility of a thyroid mass
+    A: Indentation on the left side of the trachea may be due to an enlarged left thyroid. The indentation on the left side of the trachea may be due to an enlarged left thyroid
+    A: A large calcified thyroid goiter is re- demonstrated with retrosternal extension and rightward deviation of the superior trachea at the level of the thoracic inlet. Re-demonstrated enlarged mediastinal thyroid goiter with rightward deviation of the superior trachea
+
+
+70) what about peribronchial cuffing?:
+
+    A: Peribronchial cuffing is again noted
+    A: Bronchial wall thickening is a mild , may relate to acute bronchial inflammation
+    A: A couple of bronchi seen on end demonstrate mild bronchial cuffing. Very mild peribronchial cuffing
+    A: Mildly increased interstitial markings are chronic and may represent bronchiolar thickening/inflammation
+    A: Peribronchial cuffing seen best in the right hilar is present. Peribronchial cuffing related to asthma/bronchiolitis
+    A: Minimal interstitial prominence is noted and lateral view shows bronchial thickening and mild dilatation projecting over the heart
+    A: Bronchial wall thickening in the right lower lobe could be due to very mild bronchiectasis , there has been no change , bronchiectasis is rarely a cause of fever
+    A: Again seen is left-greater-than-right lower lung bronchial wall thickening and bronchiectasis. Stable bilateral lower lung bronchial wall thickening and bronchiectasis
+    A: Linear opacities are present in the left lower lobe and may represent a combination of bronchial wall thickening related to known bronchiectasis in this region as well as adjacent linear atelectasis or scarring
+    A: Again seen is diffuse bronchial wall thickening , bronchial mucous impaction and bronchiectasis. New multifocal airspace opacities superimposed on chronic diffuse bronchial wall thickening and bronchiectasis , concerning for multifocal infection
+
+
+71) what about trauma?:
+
+    A: No evidence of trauma
+    A: No evidence of acute traumatic injury
+    A: Deformity of the left clavicle relates to remote trauma
+    A: Scattered metallic densities in the chest may be from prior trauma
+    A: A single frontal view of the chest is somewhat limited by overlying trauma board
+    A: Conventional chest radiographs are not sensitive for detecting subtle chest wall trauma
+    A: Unchanged left pleural thickening and old healed left rib fractures are likely due to old trauma
+    A: Bilateral parenchymal opacities could indicate atelectasis , infection , or contusions in the setting of any trauma
+    A: Mild scoliosis is probably positional or otherwise unrelated to trauma , if there are clinical findings related to spinal injury dedicated neurospinal imaging
+    A: Of incidental note is evidence of old fractures of the eighth and ninth posterior ribs on the right as well as opacification in the region of the coracoclavicular ligament , which may relate to previous trauma
+
+
+72) what about pneumoperitoneum?:
+
+    A: NO PNEUMOPERITONEUM
+    A: No pneumoperitoneum is seen
+    A: No evidence of pneumoperitoneum
+    A: Severe pneumoperitoneum could be larger
+    A: Possible pneumoperitoneum under the right hemidiaphragm
+    A: Pneumoperitoneum is becoming progressively less apparent
+    A: There is new pneumoperitoneum since , likely related to recent G-tube placement
+    A: There is no evidence of pneumoperitoneum and osseous structures are grossly unchanged
+    A: Subcutaneous emphysema and pneumoperitoneum in the left upper abdominal quadrant reflect the recent abdominal surgery
+    A: Evidence of pneumoperitoneum is seen beneath the right hemidiaphragm and possibly under the left , presumed from recent surgery. Pneumoperitoneum , presumed from recent abdominal surgery
+
+
+73) what about airways?:
+
+    A: or lesions in the airways
+    A: Hyperinflation with possible central airways inflammation
+    A: Mild hyperinflation is unchanged , indicating small airway obstruction
+    A: Lungs are hyperinflated consistent with emphysema or obstructive airways disease
+    A: Lungs are mildly hyperinflated but clear since , suggesting small airway obstruction or even emphysema
+    A: Interval development of right lower lobe atelectasis , likely from aspiration and mucoid impaction of the airway
+    A: Similar mild interstitial process , chronic vascular congestion or airway inflammation could account for this appearance
+    A: Severe bronchiectasis with bronchial wall thickening and ill-defined nodular opacities most pronounced in the lung bases likely reflective of chronic airways infection
+    A: The only possible abnormality is hyperinflation of the chest which could be due to small airways disease or sulcal emphysema. Possible small airway obstruction or emphysema
+    A: Bronchial wall thickening and peribronchial opacities involving the lower lobes is re- demonstrated compatible with bronchiectasis and airways inflammation. Chronic bilateral lower lobe bronchiectasis with slight interval worsening of patchy opacities in both lower lobes which may suggest worsening chronic airways inflammation or infection
+
+
+74) what about bowel obstruction and loops?:
+
+    A: Visualized bowel loops appear nondistended
+    A: Small-bowel obstruction status post NG tube placement
+    A: Air-filled , nondilated loops of bowel are seen in the abdomen
+    A: Gas-filled distended of loops of bowel seen in the right upper quadrant
+    A: Prominent loops of what appears be large bowel are seen in the left upper quadrant
+    A: On the lateral view , multiple prominent loops of bowel are seen with air-fluid levels
+    A: Gaseous distention of the imaged portion of the small and large bowel loops in the abdomen is unchanged
+    A: Otherwise the exam is unchanged noting massively distended loops of bowel , portal venous gas and right basilar opacity
+    A: There are several prominent loops of bowel , predominantly large bowel in the left upper quadrant. Prominent loops of gas-filled bowel in the upper abdomen
+    A: Curvilinear opacities in the region of the bilateral hemidiaphragms are suspicious for subdiaphragmatic free air but could also reflect air within loops of bowel
+
+
+75) what about sulci?:
+
+    A: Costophrenic sulcus blunting is unchanged
+    A: Blunting of the costophrenic sulci suggests tiny bilateral pleural effusions
+    A: Blunting of the lateral right pleural sulcus is chronic due to scarring , not effusion
+    A: There is chronic blunting of the right costophrenic sulcus the lungs are otherwise clear
+    A: Unchanged mild blunting of right lateral costophrenic sulcus is attributed to focal pleural thickening
+    A: There is a lucency adjacent to the left heart border extending inferiorly deep into the left lateral sulcus
+    A: The patient has prominent epicardial fat pads with blunting of the left pleural sulcus and the right cardiophrenic angle
+    A: Persist mild opacification of the right lung , more dense in the lateral costodiaphragmatic sulcus probably for known chronic pleural effusion
+    A: There is blunting of the right costophrenic sulcus , suggesting scarring. To a lesser degree , there is also blunting of the left costophrenic sulcus that appears unchanged
+    A: There is a new opacity at the left base partially obscuring the left hemidiaphragm and blunting of the left posterior costophrenic sulcus , concerning for pneumonia and small pleural effusion. New opacity at the left base and blunting of the left posterior costophrenic sulcus , concerning for pneumonia with possible small pleural effusion
+
+
+76) what about bronchiectasis?:
+
+    A: there is a most in keeping with lower lobe bronchiectasis
+    A: I do not see any evidence of progression of bronchiectasis
+    A: Bibasal consolidations are unchanged and represent known infected bronchiectasis
+    A: There is possible mild bronchiectasis in the right middle lobe. Mild bronchiectasis in the right middle lobe
+    A: Chronic bibasilar bronchiectasis and atelectasis appears unchanged. Chronic bibasilar bronchiectasis and atelectasis
+    A: Left apical pleural thickening is also noted , along with a suggestion of consolidation around mild bronchiectasis in the left apex
+    A: Again there is extremely severe interstitial pulmonary disease with prominent bronchiectasis and possible concurrent pulmonary edema throughout both lungs
+    A: New irregularly shaped opacity in the right mid lung laterally at the level of the third anterior rib is probably an area of bronchiectasis or peribronchial inflammation
+    A: Mild chronic abnormality at the base of either right or left lung best seen on lateral view could represent scarring or bronchiectasis. Mild chronic abnormality at left lung base could be scarring or bronchiectasis
+    A: Bronchiectasis with architectural distortion , scarring , calcifications involving the right apex and left mid lung field as well as superior retraction of the right hila are again noted along with calcified mediastinal and right hilar lymph nodes , findings compatible with the sequela of prior granulomatous infection
+
+
+77) what about air-fluid level?:
+
+    A: Also resolved are the multiple air-fluid levels
+    A: Large air-fluid level is incidentally noted in the stomach
+    A: Both the apical component and the basal air-fluid level are constant
+    A: A retrocardiac density containing an air-fluid level likely represents a hiatal hernia
+    A: A subtle an air-fluid level at the right lung base may reflect a loculated hydro pneumothorax
+    A: A left anterior air-fluid level and retrocardiac lucency are new small pleural air and fluid loculations
+    A: Several air-fluid levels are noted in the upper abdomen. Incidental note is made of multiple air-fluid levels in the upper abdomen
+    A: There is mild distention of proximal small bowel with several air-fluid levels on the lateral view , not necessarily significant clinically
+    A: Retrocardiac lucency with air-fluid level is seen , consistent with a likely large hiatal hernia which may also be accentuating the cardiac silhouette size in part
+    A: Suggestion of air-fluid level seen in the right lung base likely relates to this large hiatal hernia. Right base opacity with air-fluid level likely corresponds to known large hiatal hernia seen on prior imaging with adjacent atelectasis
+
+
+78) what about radiation?:
+
+    A: Bilateral post radiation changes are again noted
+    A: Redemonstrated are stable postradiation changes in the right lung
+    A: Scatter radiation related to the size of the patient somewhat obscures detail
+    A: Mild improvement of left lung opacities which , likely related to prior radiation treatments
+    A: Right apical post-radiation change is stable and multiple metastases to the rib and the spine are unchanged
+    A: Post-treatment related changes involving the right hemithorax including paramediastinal radiation fibrosis is unchanged
+    A: Unchanged abnormal appearance of the hilar contours , reflective of prior radiation treatment and known soft tissue encasement
+    A: The cardiomediastinal silhouette is unchanged including the bilateral paramediastinal parenchymal opacities , consistent with post-radiation changes
+    A: Cardiomediastinal contours are stable in appearance , with post-radiation changes noted in the right paramediastinal and hilar regions resulting in geographically marginated opacity in this region
+    A: Opacities in the right lung apex with associated traction bronchiectasis and upward retraction of the hilum is consistent with post radiation changes. Post radiation treatment changes in the right upper lobe and mild interstitial edema
+
+
+79) what about azygos vein?:
+
+    A: Mild prominence of the azygos vein is noted
+    A: The left-sided PICC terminates in the azygos vein
+    A: Prominence of the azygos vein is in consistency with pulmonary edema
+    A: The left PICC line is now malpositioned in the azygos vein and needs to be repositioned
+    A: Fullness in the right tracheobronchial angle is unchanged since , presumably a dilated azygos vein
+    A: Of note is that the PICC line currently is coiled most likely continuing into the azygos vein instead of SVC
+    A: enlargement of the azygous vein with indistinctness of the pulmonary vasculature is consistent with congestive failure
+    A: In the right hila , there is a small rounded smooth opacity which likely represents the confluence of a prominent azygos vein and the SVC
+    A: heart size is normal , pulmonary vasculature is not engorged , there is mild distention of the azygos vein so that bibasilar pulmonary opacification could represent edema
+    A: New mild interstitial abnormality and distention of the azygos vein raise possibility that patient may have received a volume challenge , perhaps with transfusion of blood products which could account for fever
+
+
+80) what about contrast?:
+
+    A: preferably with intravenous contrast
+    A: Oral contrast is noted throughout the colon
+    A: Excreted contrast is noted within the renal pelves
+    A: There is residual contrast material seen within the colon
+    A: Contrast material is noted in the left renal collecting system
+    A: Dense contrast material is seen within loops of bowel in the upper abdomen
+    A: Residual enteric contrast material was seen within loops of bowel in the upper abdomen
+    A: Oral contrast material is seen within colonic loops of bowel in the left upper quadrant of the abdomen
+    A: The line is of rather poor contrast , can still identify the line to reach the right-sided mediastinal structures , some 2 cm above the level of the carina
+    A: Given previous radiographic evidence of slow neo-esophageal/gastric emptying , it is possible that patient had aspirated contrast material. poor gastric emptying , opacity represent aspirated contrast material
+
+
+81) what about the colon?:
+
+    A: There is residual contrast in the colon
+    A: Air is seen within non-dilated loops of colon
+    A: Residual contrast material is again noted in the colon
+    A: Contrast is seen within the descending and transverse colon
+    A: A moderate amount of air is seen within the included views of the colon
+    A: Gaseous distention of the colon resulting in left hemidiaphragmatic elevation
+    A: No lesion suspicious for pulmonary metastases in patient with newly diagnosed colon carcinoma
+    A: There is persistent elevation of the right hemidiaphragm with interposition of the colon superior to the liver
+    A: The colon appears interposed beneath the right hemidiaphragm which probably explains lucency beneath the diaphragm
+    A: The colon is interposed between the dome of the liver and a chronically elevated right hemidiaphragm , there is no free subdiaphragmatic gas
+
+
+82) what about air space disease?:
+
+    A: Patchy bibasilar airspace disease likely reflects atelectasis
+    A: Left basilar airspace disease may be due to pneumonia , malignancy is difficult to exclude
+    A: There continues to be a diffuse bilateral airspace process with more consolidative components in both lower lobes
+    A: Airspace opacities in the lower lungs bilaterally likely represent atelectasis , a superimposed infectious process is not excluded
+    A: New confluent opacities in the right perihilar and basilar region probably represent a combination of airspace disease and solid masses
+    A: Interval appearance of small layering bilateral effusions with patchy bibasilar airspace disease , left greater than right , favoring compressive atelectasis
+    A: Diffuse bilateral airspace process does not appear to be significantly changed and could reflect moderate-to-severe pulmonary edema or bilateral infectious process
+    A: Cardiac and mediastinal contours cannot be assessed due to an interval worsening of the bilateral airspace process which likely reflects pulmonary edema superimposed on underlying ARDS
+    A: Diffuse bilateral airspace opacities with sparing of the right mid/upper lung would be a somewhat unusual pattern for asymmetric pulmonary edema and it is thought to be concerning for a multifocal infectious process
+    A: There is likely a layering left effusion with associated airspace opacity which most likely reflects partial lower lobe atelectasis , an acute infectious process cannot be excluded. There continues to be diffuse bilateral airspace process which is slightly improved but persistent moderate pulmonary edema
+
+
+83) what about abscess and cavitation?:
+
+    A: There is no cavitation or frank consolidation
+    A: The generalized opacification obscures the region of the lung abscess
+    A: End-stage renal disease , coronary artery disease presenting with flank abscess
+    A: Unchanged right lower lobe round opacities measuring up to to 4 , likely abscesses
+    A: Within the right upper lobe , an opacification is identified which corresponds to resolving lung abscess
+    A: There is no radiographic evidence of large chest wall mass or abscess , to be correlated with cross-sectional imaging
+    A: Several discrete mass like lesions better more clearly visible on which could be due to multiple pulmonary metastases or abscesses
+    A: There are areas of consolidation throughout both lung fields , worse within the right upper lobe where there is also volume loss with areas of cavitation
+    A: there has been no change in the collapsed , largeley cavitated right upper lobe distal to bronchial obstruction. Chronic cavitated , collapsed right upper lobe due to bronchial obstruction
+    A: New widening of the superior mediastinum may be related to central line placement , may represent hematoma or abscess. Interval widening of the superior mediastinum may be related to recent central line placement , may represent hematoma or abscess
+
+
+84) what about ARDS?:
+
+    A: presented to MICU with ARDS
+    A: The possibility of superimposed pneumonia or even ARDS
+    A: in the appropriate clinical setting , as would be the development of ARDS
+    A: Differential diagnosis includes multifocal pneumonic infiltrates , ARDS and CHF
+    A: These findings could be due to multifocal infection , asymmetrical edema or clinically suspected ARDS
+    A: Bilateral parenchymal opacities , potentially moderate to severe pulmonary edema , ARDS or diffuse infection
+    A: In the appropriate clinical setting , widespread pneumonia or even ARDS could present a somewhat similar appearance
+    A: there is no relevant change in appearance of the massive bilateral diffuse parenchymal opacities , consistent with the clinical diagnosis of ARDS
+    A: No interval change in small bilateral pleural effusions or bilateral diffuse opacities with air bronchograms suggestive of an alveolar process and likely represents ARDS
+    A: There diffuse bilateral airspace opacities with differential diagnosis including severe noncardiogenic pulmonary edema , ARDS , severe multifocal infection or aspiration , pulmonary hemorrhage not excluded. Diffuse bilateral airspace opacities with differential diagnosis including severe noncardiogenic pulmonary edema , ARDS , severe multifocal infection or aspiration , pulmonary hemorrhage not excluded
+
+
+85) what about bullae and blebs?:
+
+    A: There are biapical pleural blebs
+    A: Apical pleural thickening and blebs are again noted
+    A: There is no residual pneumothorax after blebectomy and pleurodesis
+    A: Suspect distorted parenchymal markings , suggestive of possible bullous change
+    A: Scarring and bullous changes are visible at the right lung apex greater than left
+    A: Biapical bullous emphysematous changes are again noted. Biapical bullous emphysematous changes
+    A: Severe emphysematous and bullous changes are unchanged , particularly at the bilateral bases with associated scarring
+    A: There is opacity in the right lung apex with central lucency raising concern for a cavitary lesion or consolidation around a bleb
+    A: rather advanced emphysematous findings were noted including several areas of local increased aeration , bullae. It is noteworthy that such bullae on the right lung base are now more marked
+    A: A bleb like lucency is also now visible along the edge of the elevated right hemidiaphragm. Small bleb like lucency at the right lung base is of uncertain etiology , not clearly part of the pneumothorax
+
+
+86) what about skinfold?:
+
+    A: Skin project over the left neck
+    A: Several skin folds overlie the right hemithorax
+    A: Right skinfolds should not be mistaken for pneumothorax
+    A: The lucent line crossing the right lung apex is caused by a skin fold
+    A: Skin folds overlie the chest bilaterally without definite pneumothorax
+    A: Several skin folds are noted overlying the left chest without definite pneumothorax seen
+    A: The curvilinear line that mimics a pleural line on the left is merely due to overlying skin fold
+    A: I do not think there is no pneumothorax but skin folds and anatomic distortion make that determination difficult
+    A: On the right side a linear vertical peripheral abnormality at ribs is likely a skin fold , I doubt this represent a pneumothorax
+    A: Two adjacent linear opacities projecting over the right axillary soft tissues may reflect skin folds. Linear opacities projecting over the right axillary soft tissues could be skin folds or less likely an unusual appearance for fracture of the humerus
+
+
+87) what about sarcoidosis?:
+
+    A: No radiologic evidence of sarcoidosis
+    A: These findings are compatible with stage II of sarcoid
+    A: No radiographic findings to suggest the diagnosis of sarcoidosis
+    A: Prominent hilar lymphadenopathy is again seen , suggestive of sarcoidosis
+    A: no evidence of hilar adenopathy or interstitial prominence to radiographically suggest sarcoidosis
+    A: Extensive hilar and mediastinal lymphadenopathy is noted and may be reactive disease overlying known Sarcoidosis
+    A: there again there is evidence of upper low fibrosis and traction bronchiectasis consistent with the clinical diagnosis of sarcoidosis
+    A: There is slight interval improvement in widespread parenchymal opacities consistent with known pre-existing micro nodularity due to sarcoidosis
+    A: There are no features about this condition to elevate sarcoidosis as the likely cause , that does not exclude the diagnosis since there appears to be adenopathy in the left hilus and perhaps AP window
+    A: There is bilateral hilar enlargement and mediastinal lymphadenopathy which could be compatible with sarcoidosis versus infection versus malignancy. Bilateral hilar enlargement and mediastinal lymphadenopathy which could be compatible sarcoidosis though an infectious or malignant etiology cannot be excluded
+
+
+88) what about the liver?:
+
+    A: Liver transplant
+    A: projecting over the stomach and the liver
+    A: Hypodensity material projecting over the liver are again noted
+    A: Evaluation of the patient with liver cirrhosis and likely aspiration
+    A: This suggestion is supported by the increased density of the liver from to
+    A: fudicial seeds are seen within the right upper quadrant of the abdomen , within the liver
+    A: Again there is evidence of colonic interposition between the liver and right hemidiaphragm
+    A: the patient has been suffering from hepatic hydrothorax secondary to liver cirrhosis with two recent thoracentesis on
+    A: There is focal anterior elevation of the right hemidiaphragm , suggestive of eventration or liver abnormality. Right diaphragmatic eventration or liver enlargement
+    A: the patient at that time was status post liver transplant and had bilateral pleural densities. Right-sided lateral and posterior pleural densities representing post-operative pleural scars in this patient status post liver transplant
+
+
+89) what about blurring?:
+
+    A: There is ongoing left hilar blurring
+    A: There is upper zone redistribution and diffuse vascular blurring , consistent with CHF
+    A: There is upper zone redistribution and blurring of vascular detail consistent with CHF
+    A: There is mild vascular and plethora and vascular blurring , consistent with interstitial edema
+    A: There is cardiomegaly , upper zone redistribution and blurring of vascular detail suggesting CHF
+    A: there is prominence of vascular markings with vascular blurring consistent with CHF and interstitial edema
+    A: There is mild vascular plethora and vascular blurring , with thickening of the minor fissure , consistent with CHF
+    A: Hazy opacity in the left lower lung with slight blurring of the left hemidiaphragm suggests moderate left dependent pleural effusion
+    A: There is upper zone redistribution and mild vascular blurring , without overt CHF. Mild upper zone redistribution and slight vascular blurring , without overt CHF
+    A: Upper zone redistribution , a vascular plethora and blurring , scattered airspace opacities are present. Upper zone redistribution , vascular plethora and blurring , patchy bilateral airspace opacities , consistent with CHF and pulmonary edema
+
+
+90) what about kerley lines?:
+
+    A: Scattered septal lines are identified
+    A: Kerley B lines and pulmonary vascular redistribution is present
+    A: There are small bilateral effusions , right greater than left and Kerley B lines
+    A: There is now increased visualization of Kerley B lines and slightly increased pleural effusions
+    A: There is mild vascular congestion and some Kerley B lines at the left base , suggestive of volume overload
+    A: There are Kerley B lines consistent with smooth septal thickening as well as trace fluid tracking along the pleural fissure
+    A: Hazy opacification throughout the lungs and some interstitial/Kerley B lines , particularly at the periphery of the left lung suggest pulmonary edema
+    A: Bilateral hilar engorgement with associated diffuse bilateral interstitial thickening , alveolar infiltrates and Kerley B lines suggest interstitial pulmonary edema
+    A: Mildly enlarged heart with interstitial and alveolar prominence , mild azygos vein prominence , peribronchial cuffing , Kerley B lines is consistent with moderate pulmonary edema
+    A: There is persistent widening of the vascular pedicle , accompanied by increasing pulmonary vascular engorgement , worsening perihilar haziness and bilateral septal lines. Worsening confluent opacities in the right middle and left lower lobe accompanied by increasing perihilar haziness and peripheral septal lines
+
+
+91) what about azygos lobe?:
+
+    A: Note is made of an azygos lobe
+    A: Azygos lobe is incidentally noted
+    A: An azygos lobe is incidentally noted
+    A: Known azygous lobe as anatomic variant
+    A: Incidental note is made of an azygos lobe
+    A: Azygos lobe is anatomically normal variant
+    A: An azygos fissure and azygos lobe are noted
+    A: The lungs are notable for an azygos lobe and fissure
+    A: Of incidental note is an azygos lobe , of no clinical significance
+    A: No change in the appearance of the azygos lobe , of no clinical significance
+
+
+92) what about ascites?:
+
+    A: Suspected anasarca and ascites
+    A: Diffuse ascites is present in the upper abdomen
+    A: He seen is in the imaged upper abdomen suggests possible ascites
+    A: Diffuse haziness of the imaged upper abdomen is suggestive of ascites
+    A: Haziness of the abdomen with separation of bowel loops suggests underlying ascites
+    A: Diffuse haziness throughout the imaged portion of the upper abdomen is suggestive of ascites
+    A: No acute cardiopulmonary process , possible ascites. Opacity of the visualized abdomen suggests ascites
+    A: Diffuse haziness in the upper abdomen suggestive of ascites , note is also made of moderate gastric distention
+    A: The rest of the pulmonary opacities are unchanged as well as substantially elevated right hemidiaphragm most likely due to the presence of ascites
+    A: There is elevation of the right hemidiaphragm which is more prominent , query subpulmonic effusion or ascites. Elevation of the right hemidiaphragm , could be due to underlying subpulmonic effusion or ascites
+
+
+93) what about ossification?:
+
+    A: Splenic ossification is again seen
+    A: Ossification of the anterior longitudinal ligament is re- demonstrated
+    A: Heterotopic ossification is again noted along the inferior margin of the right glenoid
+    A: Incidental note is made of ossification of the anterior longitudinal ligament of the thoracic spine
+    A: Endplate osteophytes and ossification of the anterior longitudinal ligament are noted in the thoracic spine
+    A: There is diffuse demineralization of the osseous structures with apparent ossification of the anterior longitudinal ligament
+    A: Chronic degenerative changes noted at the shoulders bilaterally as well as ossification of the anterior longitudinal ligament
+    A: Heterotopic ossification about the mid and distal left clavicle are again noted along with a chronic type 3 left AC joint separation
+    A: Ossification of the anterior longitudinal ligament throughout the majority of the thoracic spine is indicative of diffuse idiopathic skeletal hyperostosis
+    A: Bilateral narrowing of the AC joint and high-riding humerus as well as heterotopic ossification superolateral to the right humeral head , suggesting chronic rotator cuff tear and severe osteoarthritis/post-trauma changes , are overall similar to prior shoulder radiographs
+
+
+94) what about pneumatocele?:
+
+    A: Traumatic pneumatocele is , left lung stable
+    A: Fluid containing pneumatocele left midlung resolving slowly
+    A: Small focal lucencies in the region of biopsy could be small pneumatoceles
+    A: Small cystic lucency at right lung base may represent a pneumatocele from barotrauma
+    A: Right upper lobe pneumatocele size is unchanged , there is perhaps less internal fluid component
+    A: At the apex of the left hemithorax it is difficult to distinguish large pneumatoceles from any pneumothorax
+    A: Stable air density at right lung base in this patient who is known to have a large pneumatocele. Stable right pneumatocele
+    A: Lower border of pneumatocele on the right is visible and linear subsegmental atelectasis at the left base and right perihilar regions persist
+    A: These developments could be due to either pneumatocele formation , air trapping , or increase positive pressure ventilation , perhaps even improvement in the diffuse pulmonary abnormality
+    A: Extensive pulmonary pneumatocele formation is now evident , the largest is residual abscess or cavitary pneumonia is at the base of the left lung where there is also persistent small left pleural effusion
+
+
+95) what about tendon?:
+
+    A: A tendon anchor is present in the right humeral head
+    A: This suggests dense calcification in tendons of the rotator cuff
+    A: Suspected calcium hydroxyapatite/calcific tendinitis of the left shoulder
+    A: Tenodesis screws are noted in the right humeral head from prior biceps tendon repair
+    A: Incidental note of probable calcific tendinitis overlying the left humeral head is made
+    A: Small focus of hydroxyapatite it is seen adjacent to the left shoulder , consistent with calcific tendinitis
+    A: Incidental note is made of degenerative change at the left shoulder , with focal hydroxyapatite/calcific tendonitis
+    A: Calcific density contiguous to the greater tuberosity of the right humerus may be related to remote trauma or the presence of calcific tendinitis
+    A: Small amount of free air is seen underlying the central tendon of the diaphragm. Small amount of subdiaphragmatic free air under the central tendon
+    A: Incidental note are extensive changes in the region of the greater tuberosity of the humerus on the left , suggesting inflammatory changes in the tendons of the rotator cuff
+
+
+96) what about cholelithiasis?:
+
+    A: Cholelithiasis
+    A: Cholelithiasis
+    A: Cholelithiasis
+    A: Cholelithiasis
+    A: Cholelithiasis
+    A: Cholelithiasis is demonstrated
+    A: Note is made of cholelithiasis. Cholelithiasis
+    A: Calcifications in the right upper quadrant are likely due to known cholelithiasis
+    A: Calcifications in the right upper quadrant suggest cholelithiasis. Probable cholelithiasis
+    A: Calcifications in the right upper quadrant of the abdomen likely reflect cholelithiasis. Cholelithiasis
+
+
+97) what about sagittal chest?:
+
+    A: Mild to moderate cardiomegaly is exaggerated by an narrow sagittal thoracic diameter
+    A: Sagittal diameter cannot be assessed from this view alone , it was normal on and neck
+    A: The sagittal diameter of the thorax is slightly increased , potentially suggesting overinflation
+    A: There is increased sagittal diameter of the thorax as well as an increase of the retrosternal space
+    A: The sagittal diameter of the chest is very narrow. Narrow sagittal chest may predispose to mitral regurgitation
+    A: extremely narrow sagittal diameter of the chest and extensive fat deposition , also explaining thickening of the pleural margins bilaterally
+    A: Note is also made of a large trachea , approaching 2 , 5 cm in coronal and 2 cm in the sagittal diameter in this patient with known tracheomalacia
+    A: lateral chest compared to : Hyperinflation and the sagittal elongation of the trachea suggests chronic obstructive lung disease , particularly emphysema
+    A: The sagittal diameter of the thorax is slightly increased , with flattening of the hemidiaphragms on the lateral view , potentially suggestive of mild to moderate overinflation
+    A: Configuration of the trachea , sagittal elongation of the greatest diameter , is due to chronic lung disease and the may be focal narrowing from a prior tracheostomy at the level of the thoracic inlet , there has been no change in any of these findings
+
+
+Total oraciones inválidas: 121074
+Total oraciones sin match: 74071
+
+
+Ejemplos de oraciones válidas que no hicieron match con ninguna pregunta
+
+    small
+    No failure
+    This region
+    HETEROGENEOUS
+    is now smaller
+    Asthma , dyspnea
+    ETOH intoxication
+    Known middle lobe
+    worse on the right
+    Disseminated zoster
+    Decreased saturation
+    Asthma and hemoptysis
+    Page was placed to Dr
+    Lung are hyperexpanded
+    not seen on the lateral
+    remains mildly enlarged
+    patient had a PEG placed
+    normal chest radiographs
+    lateral films can be done
+    Acute drop in oxygenation
+    Assessment of the cardiac
+    Mild vascular distribution
+    It is now at least moderate
+    Seizure of unclear etiology
+    Breast asymmetry again noted
+    Mediastinal set is unchanged
+    Top normal cardiac sillouette
+    exclude underlying malignancy
+    Hypotension and unstable gait
+    hypoxia , left chest wall pain
+    Possible slight hyperinflation
+    Within the imaged upper abdomen
+    The chest appears hyperinflated
+    that the line has been exchanged
+    Very lordotic patient's position
+    Single portable view of the ches
+    Portable AP approach vessel at 07
+    Unchanged right staghorn calculus
+    No discontinuities are identified
+    Advancement by 4 cm is recommended
+    Minimal peribronchial inflammation
+    Cardiogenic shock , line placement
+    There is no recent or non-recent TB
+    The patient is rotated on the table
+    Chest pressure , non-ST elevation MI
+    Otherwise no relevant change is seen
+    It was not present on the radiograph
+    There has been no change in the chest
+    Hyperinflation consistent with asthma
+    The right is best seen superolaterally
+    No configurational abnormality is seen
+    Left ventricular hypertrophy is stable
+    No evidence of chest wall abnormalities
+    Extensive chronic changes appear stable
+    Little overall change from the study of
+    unchanged pulmonary and cardiac findings
+    the extent of the process has progressed
+    The appearance is less pronounced than on
+    No significant change compared with at 22
+    Relatively low inspiratory effort is seen
+    There is mild left ventricular hypertrophy
+    Diffuse severe demineralization is present
+    The cardiac silhouute is top normal in size
+    The right hemithorax is incompletely imaged
+    Postsurgical changes are noted on the right
+    The Swan-Ganz can be pulled back around 4 cm
+    plain radiographs show no significant change
+    This may be accentuated by supine positioning
+    Portable AP semi-erect chest radiograph at 08
+    No significant change from chest radiograph on
+    cardiac and differences in patient positioning
+    Comparison is made with the frontal view of AP
+    Single portable supine radiograph was performed
+    No evidence of intrathoracic amiodarone toxicity
+    Severe chronic pulmonary changes are again noted
+    No acute abnormality of the upper abdomen is seen
+    Semi-erect AP view of the chest and upper abdomen
+    therefore is better visualized on the lateral film
+    The patient has taken a somewhat better inspiration
+    No change in the appearance of the right hemithorax
+    The left lateral sinus is not included in the image
+    On the right there is more other similar abnormality
+    On the lateral projection , it may be slightly coiled
+    Its size has not undergone any significant alteration
+    most likely due to differences in the patient position
+    preferably with standard PA when clinically appropriate
+    Obliquity of the patient again somewhat obscures detail
+    Otherwise unchanged appearance of the right hemi thorax
+    both the frontal and the lateral radiograph are unchanged
+    This decrease is more obvious on the right and on the left
+    This could be pulled back 2-3 cm as recommended previously
+    the location of any focal findings should be clearly marked
+    Resolution of the change should be monitoring by chest x-ray
+    There are no acute changes currently visualized on the image
+    these findings suggest supine positioning may be contributory
+    Tip needs to be pulled back 4 cm to be in appropriate position
+    There is no evidence of complications visible on the radiograph
+    Ruptured pancreatic pseudocyst and currently oxygen desaturation
+    Oblique radiographs recommended initially to confirm this finding
+    This could in part be related to positional change of the patient
+    there has been no appreciable change to the appearance of the chest
+    lower abdominal pain , evaluate for etiology of lower abdominal pain
+    allowances are made for slight patient rotation on the current study
+    It can be withdrawn approximately 4 cm to be in more standard position
+    Radiograph in weeks after treatment is recommended to assess resolution
+    The lateral view is underpenetrated , likely due to patient body habitus
+    The lateral view is limited by patient's inability to raise her right arm
+    Of note the upper portion of the chest was not included on the field of view
+    Given short interval development , these are thought to be external in nature
+    projection , there has not been a substantial change in appearance of the chest
+    cannot determine whether findings have increased , decreased or remained the same
+    Chest findings remain normal and have not undergone any significant interval change
+    Single portable chest radiograph excluding portion of the right hemithorax from view
+    particularly as the patient's neck appears to be turned towards the right on this exam
+    projection , there has been no significant interval change in the appearance of the chest
+    Otherwise unchanged appearance of the thorax compared with radiograph performed 3 hr earlier
+    The lungs are mildly hyperexpanded , which may be due to vigorous inspiration in this young person
+    Evaluation of the patient after ventricular fibrillation arrest with cardiogenic shock and currently hypoxemic
+    Evaluation of the patient with chronic ventilation and sepsis from uncertain origin as well as change in respiratory status
+    It shows change in position with change in the patient position , its location is not fully characterized on the basis of this

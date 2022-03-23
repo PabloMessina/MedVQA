@@ -37,7 +37,8 @@ class Bleu(Metric):
             else:
                 bleu = sentence_bleu((gt_s,), pred_s,
                         weights=self._weights,
-                        smoothing_function = self._smoothing_function)
+                        smoothing_function = self._smoothing_function,
+                        auto_reweigh=True)
             self._acc_bleu += bleu
             if self.record_scores:
                 self._scores.append(bleu)

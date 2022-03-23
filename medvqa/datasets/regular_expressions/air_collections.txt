@@ -1,4 +1,4 @@
-(air|gas).*(collection|(sub)?cutaneous|pocket|trapp)
-(collection|(sub)?cutaneous|pocket|trapp).*(air|gas)
+\b(air|gas).*\b(collection|(sub)?cutaneous|pocket|trapp|chest|wall|outlin|locul|intra|abdom)
+\b(collection|(sub)?cutaneous|pocket|trapp|chest|wall|outlin|locul|intra|abdom).*\b(air|gas)
 \bgas\b.*contain
 \bblebs?\b

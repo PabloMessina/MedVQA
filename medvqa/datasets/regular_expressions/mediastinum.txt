@@ -1,3 +1,3 @@
-\b(cardio|para)?mediasti.*\b(silhouette|contour|margin|border|(ab)?normal|wide(ned)?|enlarge?ment|shift|structure|surface|shadow|configuration|(post)?radiation|venous|vascul)
+\b(cardio|para)?mediasti.*\b(silhouette|contour|margin|border|(ab)?normal|wide(ned)?|enlarge?ment|shift|structure|surface|shadow|configuration|(post)?radiation|venous|vascul|vein)
 \b(shift|convex).*mediasti
 mediastinum

@@ -1,13 +1,16 @@
-from tqdm import tqdm
+from matplotlib.pyplot import get
 from medvqa.utils.files import (
     load_json_file,
-    save_to_json
+    save_to_json,
 )
 from medvqa.datasets.qa_pairs_extractor import QuestionAnswerExtractor
 from medvqa.datasets.iuxray import (
     IUXRAY_REPORTS_JSON_PATH,
-    IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH,
+    IUXRAY_CACHE_DIR,
 )
+from medvqa.utils.common import get_timestamp
+from tqdm import tqdm
+import os
 
 if __name__ == '__main__':
 
@@ -40,7 +43,8 @@ if __name__ == '__main__':
         'reports': qa_adapted_reports,
     }
 
-    print(f'Saving qa adapted reports to {IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH}')
-    save_to_json(qa_dataset, IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH)
+    output_path = os.path.join(IUXRAY_CACHE_DIR, f'qa_adapted_reports__{get_timestamp()}.json')
+    print(f'Saving qa adapted reports to {output_path}')
+    save_to_json(qa_dataset, output_path)
     print('Done!')
 

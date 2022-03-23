@@ -10,7 +10,8 @@ MIMICCXR_JPG_IMAGES_SMALL_DIR = os.environ['MIMICCXR_JPG_IMAGES_SMALL_DIR']
 MIMICCXR_JPG_DIR = os.environ['MIMICCXR_JPG_DIR']
 MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-metadata.csv')
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
-MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH = os.path.join(CACHE_DIR, 'mimiccxr', 'qa_adapted_reports.json')
+# MIMICCXR_MEDICAL_TAGS_PATH = os.path.join(CACHE_DIR, 'mimiccxr', 'medical_tags_per_report.pkl')
+MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 
 # def preprocess_mimiccxr_data(self, tokenizer, mimiccxr_qa_reports, mimiccxr_metadata, mimiccxr_split):
         

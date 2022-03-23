@@ -4,8 +4,8 @@ import pandas as pd
 from tqdm import tqdm
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
+    MIMICCXR_CACHE_DIR,
     MIMICCXR_JPG_IMAGES_SMALL_DIR,
-    MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH,
     MIMICCXR_METADATA_CSV_PATH,
     MIMICCXR_SPLIT_CSV_PATH,
 )
@@ -29,7 +29,26 @@ _MIMICCXR_BROKEN_IMAGES = set([
 def _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
     return _MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
 
-def _preprocess_data(self, split_lambda):
+def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer):
+    m = split_kwargs['min_train_examples_per_question']
+    n = split_kwargs['n_val_examples_per_question']
+    strings = [
+        f'dataset={qa_adapted_reports_filename}',
+        f'split_params=({m},{n})',
+        f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
+    ]
+    return os.path.join('mimiccxr',
+            f'mimiccxr_preprocessed_train_data__({";".join(strings)}).pkl')
+
+def _get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):
+    strings = [
+        f'dataset={qa_adapted_reports_filename}',
+        f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
+    ]
+    return os.path.join('mimiccxr',
+            f'mimiccxr_preprocessed_test_data__({";".join(strings)}).pkl')
+
+def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
 
     tokenizer = self.tokenizer
     mimiccxr_qa_reports = self.mimiccxr_qa_reports
@@ -37,13 +56,14 @@ def _preprocess_data(self, split_lambda):
     mimiccxr_split = self.mimiccxr_split
 
     if mimiccxr_qa_reports is None:
-        print('reading ', MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH)
-        mimiccxr_qa_reports = load_json_file(MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH)
+        file_path = os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename)
+        print(f'Loading {file_path}')
+        mimiccxr_qa_reports = load_json_file(file_path)
     if mimiccxr_metadata is None:
-        print('reading ', MIMICCXR_METADATA_CSV_PATH)
+        print(f'Loading {MIMICCXR_METADATA_CSV_PATH}')
         mimiccxr_metadata = pd.read_csv(MIMICCXR_METADATA_CSV_PATH)
     if mimiccxr_split is None:
-        print('reading ', MIMICCXR_SPLIT_CSV_PATH)
+        print(f'Loading {MIMICCXR_SPLIT_CSV_PATH}')
         mimiccxr_split = pd.read_csv(MIMICCXR_SPLIT_CSV_PATH)
     
     self.report_ids = []
@@ -104,7 +124,7 @@ def _preprocess_data(self, split_lambda):
             for q_idx, a_idxs in report['qa'].items():
                 q_idx = int(q_idx)
                 question = question_list[q_idx]
-                answer = ' '.join(sentences[i] for i in a_idxs)
+                answer = '. '.join(sentences[i] for i in a_idxs)
                 self.report_ids.append(ri)
                 self.question_ids.append(q_idx)
                 self.images.append(image_path)
@@ -114,6 +134,9 @@ def _preprocess_data(self, split_lambda):
 class MIMICCXR_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
+                qa_adapted_reports_filename,
+                use_tags = False,
+                medical_tags_per_report_filename = None,
                 split_kwargs = None,
                 tokenizer = None,
                 mimiccxr_qa_reports = None,
@@ -124,23 +147,29 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
         self.mimiccxr_metadata = mimiccxr_metadata
         self.mimiccxr_split = mimiccxr_split
+        self.qa_adapted_reports_filename = qa_adapted_reports_filename
         
-        m = split_kwargs['min_train_examples_per_question'] 
-        n = split_kwargs['n_val_examples_per_question']
-        preprocessing_save_path = os.path.join('mimiccxr',
-             f'mimiccxr_preprocessing_data({m},{n},{tokenizer.vocab_size}).pickle')
+        preprocessing_save_path = _get_train_preprocessing_save_path(
+                        qa_adapted_reports_filename, split_kwargs, tokenizer)
+
+        rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        use_tags = use_tags,
+                        rid2tags_path = rid2tags_path,
                         dataset_name = 'MIMIC-CXR',
                         split_kwargs = split_kwargs)
 
     def _preprocess_data(self):
-        _preprocess_data(self, lambda split : split != 'test')
+        _preprocess_data(self, self.qa_adapted_reports_filename, lambda split : split != 'test')
 
 class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
+                qa_adapted_reports_filename,
+                use_tags = False,
+                medical_tags_per_report_filename = None,
                 tokenizer = None,
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
@@ -151,13 +180,18 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
         self.mimiccxr_metadata = mimiccxr_metadata
         self.mimiccxr_split = mimiccxr_split
-
-        preprocessing_save_path = os.path.join('mimiccxr',
-             f'mimiccxr_preprocessing_data(test_split,vocab_size={tokenizer.vocab_size}).pickle')
+        self.qa_adapted_reports_filename = qa_adapted_reports_filename
+        
+        preprocessing_save_path = _get_test_preprocessing_save_path(
+                        qa_adapted_reports_filename, tokenizer)
+        
+        rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        use_tags = use_tags,
+                        rid2tags_path = rid2tags_path,
                         dataset_name = 'MIMIC-CXR')
 
     def _preprocess_data(self):
-        _preprocess_data(self, lambda split : split == 'test')        
+        _preprocess_data(self, self.qa_adapted_reports_filename, lambda split : split == 'test')        

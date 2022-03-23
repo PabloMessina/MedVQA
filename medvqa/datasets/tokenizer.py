@@ -9,8 +9,13 @@ from medvqa.datasets.preprocessing import get_sentences
 from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.utils.common import CACHE_DIR
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
+from medvqa.utils.hashing import hash_string
 import os
 import re
+
+def _get_vocab_filepath(qa_adapted_filenames, min_freq):
+    filename = f'vocab__min_freq={min_freq}__from({";".join(qa_adapted_filenames)}).pkl'
+    return os.path.join(CACHE_DIR, filename)    
 
 class Tokenizer:
     
@@ -19,11 +24,14 @@ class Tokenizer:
     END_TOKEN = '</s>'
     ignore_regex = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
     
-    def __init__(self, vocab_filepath, qa_adapted_datasets=None, min_freq=4, overwrite=False):
+    def __init__(self, qa_adapted_filenames, qa_adapted_datasets=None, min_freq=5, overwrite=False):
 
-        vocab_filepath = os.path.join(CACHE_DIR, vocab_filepath)
+        assert type(qa_adapted_datasets) is list, type(qa_adapted_filenames)
 
-        if not overwrite:            
+        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq)
+
+        if not overwrite:
+            print(f'Loading {vocab_filepath} ...')
             self.id2token = load_pickle(vocab_filepath)
 
         if overwrite or self.id2token is None:
@@ -54,10 +62,18 @@ class Tokenizer:
             self.id2token = [self.PAD_TOKEN, self.START_TOKEN, self.END_TOKEN]
             self.id2token.extend(filtered_vocab)
             save_to_pickle(self.id2token, vocab_filepath)
+            print (f'Vocabulary saved to {vocab_filepath}')
         
         self.token2id = {t:i for i,t in enumerate(self.id2token)}
         self.vocab_size = len(self.id2token)
         self.vocab = set(self.id2token)
+        self._hash = None
+
+    @property
+    def hash(self):
+        if self._hash is None:
+            self._hash = hash_string(''.join(self.id2token))
+        return self._hash
 
     def string2ids(self, s):
         ids = [self.token2id[self.START_TOKEN]]

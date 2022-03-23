@@ -8,10 +8,14 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from ignite.engine import Events, Engine
 from ignite.handlers.timing import Timer
 
+from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
     attach_bleu_question,
     attach_ciderd,
     attach_weighted_medical_completeness,
+    attach_medical_tags_f1score,
     attach_loss
 )
 from medvqa.models.checkpoint import (
@@ -20,10 +24,7 @@ from medvqa.models.checkpoint import (
     save_metadata,
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
-from medvqa.utils.common import (
-    WORKSPACE_DIR,
-    parsed_args_to_dict,
-)
+from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.handlers import (
     get_log_metrics_handlers,
     get_log_iteration_handler,
@@ -41,16 +42,14 @@ from medvqa.training.vqa import get_step_fn
 from medvqa.datasets.dataloading_utils import (
     question_balanced_train_dataloader_generator,
     multi_cyclic_dataloader_sampler,
-    collate_batch_fn
+    get_collate_batch_fn
 )
-from medvqa.datasets.mimiccxr.vqa import MIMICCXR_VQA_Trainer
-from medvqa.datasets.mimiccxr import (
-    MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH,
+from medvqa.metrics.utils import (
+    get_merge_metrics_fn,
+    get_hybrid_score_name,
 )
-from medvqa.datasets.iuxray.vqa import IUXRAY_VQA_Trainer
-from medvqa.datasets.iuxray import (
-    IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH,
-)
+from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Trainer
+from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
 from medvqa.utils.images import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
@@ -65,8 +64,10 @@ def parse_args():
 
     # optional arguments
     parser.add_argument('--checkpoint-folder', type=str,
-                        help='Relative path to folder with checkpoint to resume training from')
-    parser.add_argument('--vocab-min-freq', type=int, default=4,
+                        help='Relative path to folder with checkpoint to resume training from')    
+    parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
+    parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
+    parser.add_argument('--vocab-min-freq', type=int, default=5,
                         help='Min frequency of tokens in vocabulary')
     parser.add_argument('--embed-size', type=int, default=128,
                         help='Size of word embeddings')
@@ -78,7 +79,7 @@ def parse_args():
                         help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
     parser.add_argument('--dropout-prob', type=int, default=0,
                         help='Dropout probability')
-    parser.add_argument('--densenet-pretrained-weights-path', type=str, default=None,
+    parser.add_argument('--densenet-pretrained-weights-path', type=str, default='',
                         help='Path to densenet 121 pretrained weights')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate')
@@ -103,24 +104,24 @@ def parse_args():
 
     parser.add_argument('--override-lr', dest='override_lr', action='store_true')
     parser.set_defaults(override_lr=False)
+
+    # Auxiliary tasks arguments
+    
+    parser.add_argument('--use-tags', dest='use_tags', action='store_true')
+    parser.set_defaults(use_tags=False)
+    parser.add_argument('--n-medical-tags', type=int, default=None,
+                        help='Number of medical tags (for tag prediction auxiliary task)')
+    parser.add_argument('--iuxray-medical-tags-per-report-filename', type=str, default=None)
+    parser.add_argument('--mimiccxr-medical-tags-per-report-filename', type=str, default=None)
     
     return parser.parse_args()
 
-
-_metric_names = ['bleu_question', 'ciderD', 'wmedcomp']
-_metric_weights = {
+_METRIC_WEIGHTS = {
     'bleu_question': 1,
     'ciderD': 0.1,
     'wmedcomp': 1,
+    'medtagf1': 1,
 }
-
-def _merge_metrics(train_metrics, val_metrics):
-    train_value = 0
-    val_value = 0
-    for met in _metric_names:
-        train_value += train_metrics[met] * _metric_weights[met]
-        val_value += val_metrics[met] * _metric_weights[met]
-    return train_value * 0.5 + val_value * 0.5
 
 def train_model(
     tokenizer_kwargs,
@@ -130,6 +131,7 @@ def train_model(
     mimiccxr_vqa_trainer_kwargs,
     iuxray_vqa_trainer_kwargs,
     dataloading_kwargs,
+    auxiliary_tasks_kwargs,
     epochs,
     batches_per_epoch,
     device = 'GPU',
@@ -138,6 +140,21 @@ def train_model(
     override_lr = False,
 ):
     count_print = CountPrinter()
+    
+    # Pull out some args from kwargs    
+    use_tags = auxiliary_tasks_kwargs['use_tags']
+    n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
+    iuxray_medical_tags_per_report_filename = auxiliary_tasks_kwargs['iuxray_medical_tags_per_report_filename']
+    mimiccxr_medical_tags_per_report_filename = auxiliary_tasks_kwargs['mimiccxr_medical_tags_per_report_filename']
+    if use_tags:
+        assert n_medical_tags is not None
+        assert iuxray_medical_tags_per_report_filename is not None
+        assert mimiccxr_medical_tags_per_report_filename is not None
+    
+    iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
+    mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_trainer_kwargs['qa_adapted_reports_filename']
+    assert iuxray_qa_adapted_reports_filename is not None
+    assert mimiccxr_qa_adapted_reports_filename is not None
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -145,13 +162,16 @@ def train_model(
 
     # Load qa adapted reports
     count_print('Loading iuxray and mimiccxr QA adapted reports ...')
-    iuxray_qa_reports = load_json_file(IUXRAY_QA_ADAPTED_REPORTS_JSON_PATH)
-    mimiccxr_qa_reports = load_json_file(MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH)
+    iuxray_qa_adapted_reports_path = os.path.join(IUXRAY_CACHE_DIR, iuxray_qa_adapted_reports_filename)
+    mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)
+    iuxray_qa_reports = load_json_file(iuxray_qa_adapted_reports_path)
+    mimiccxr_qa_reports = load_json_file(mimiccxr_qa_adapted_reports_path)
 
     # Init tokenizer
     count_print('Initializing tokenizer ...')
     vocab_min_freq = tokenizer_kwargs['vocab_min_freq']
-    tokenizer = Tokenizer(vocab_filepath=f'vocab/id2tokens_vqa_mimiccxr+iuxray_minf={vocab_min_freq}.pickle',
+    tokenizer = Tokenizer(qa_adapted_filenames=[iuxray_qa_adapted_reports_filename,
+                                                mimiccxr_qa_adapted_reports_filename],
                           qa_adapted_datasets=[iuxray_qa_reports, mimiccxr_qa_reports],
                           min_freq=vocab_min_freq)
     
@@ -159,7 +179,8 @@ def train_model(
     count_print('Creating instance of OpenEndedVQA model ...')    
     model = OpenEndedVQA(vocab_size=tokenizer.vocab_size,
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
-                         device=device,
+                         device=device, 
+                         n_medical_tags=n_medical_tags,
                          **model_kwargs)
     model = model.to(device)
 
@@ -175,20 +196,34 @@ def train_model(
     # Criterion
     count_print('Defining loss criterion ...')
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
+    
+    if use_tags: # auxiliary task
+        tags_criterion = nn.BCEWithLogitsLoss()
+    else:
+        tags_criterion = None
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')
     train_step = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                             training=True, device=device)
+                             training=True, device=device,
+                             # tags auxiliary task
+                             use_tags=use_tags,
+                             tags_criterion=tags_criterion)
     trainer = Engine(train_step)
 
     val_step = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                           training=False, device=device)
+                           training=False, device=device,
+                           # tags auxiliary task
+                           use_tags=use_tags,
+                           tags_criterion=tags_criterion)
     validator = Engine(val_step)
 
     # Default image transform
     count_print('Defining image transform ...')
     img_transform = get_image_transform()
+
+    # define collate_batch_fn
+    collate_batch_fn = get_collate_batch_fn(use_tags = use_tags, n_tags = n_medical_tags)
 
     # Create MIMIC-CXR vqa trainer
     count_print('Creating MIMIC-CXR vqa trainer ...')
@@ -197,6 +232,8 @@ def train_model(
         collate_batch_fn = collate_batch_fn,
         tokenizer = tokenizer,
         mimiccxr_qa_reports = mimiccxr_qa_reports,
+        use_tags = use_tags,
+        medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
         **mimiccxr_vqa_trainer_kwargs,
     )
     
@@ -205,12 +242,14 @@ def train_model(
     iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
         transform = img_transform,
         collate_batch_fn = collate_batch_fn,
-        tokenizer = tokenizer,
+        tokenizer = tokenizer,        
         iuxray_qa_reports = iuxray_qa_reports,
+        use_tags = use_tags,
+        medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
         **iuxray_vqa_trainer_kwargs,
     )
 
-    # Create dataloaders
+    # Create complex dataloaders
     count_print('Creating dataloaders ...')
     mimiccxr_balanced_dataloader = question_balanced_train_dataloader_generator(mimiccxr_vqa_trainer)
     iuxray_balanced_dataloader = question_balanced_train_dataloader_generator(iuxray_vqa_trainer)
@@ -227,7 +266,7 @@ def train_model(
     # Attach metrics, losses, timer and events to engines    
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
-    # metrics
+    # Metrics
     attach_bleu_question(trainer, device)
     attach_bleu_question(validator, device)
 
@@ -236,25 +275,38 @@ def train_model(
     
     attach_weighted_medical_completeness(trainer, device, tokenizer)
     attach_weighted_medical_completeness(validator, device, tokenizer)
+    
+    if use_tags:
+        attach_medical_tags_f1score(trainer, device)
+        attach_medical_tags_f1score(validator, device)
 
-    # losses
+    # Losses
     attach_loss('loss', trainer, device)
     attach_loss('loss', validator, device)
     
-    # timer
+    # Timer
     timer = Timer()
     timer.attach(trainer, start=Events.EPOCH_STARTED)
     timer.attach(validator, start=Events.EPOCH_STARTED)
     
-    # logging
-    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=[
-        'loss', 'bleu_question', 'ciderD', 'wmedcomp'])
+    # Logging
+    metrics_to_print=['loss', 'bleu_question', 'ciderD', 'wmedcomp']
+    if use_tags:
+        metrics_to_print.append('medtagf1')
+
+    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()
 
-    # learning rate scheduler
-    lr_sch_handler = get_lr_sch_handler(trainer, validator, lr_scheduler, _merge_metrics)
+    # Learning rate scheduler
+    metrics_to_merge = ['bleu_question', 'ciderD', 'wmedcomp']
+    if use_tags:
+        metrics_to_merge.append('medtagf1')
+    
+    merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.5, 0.5)
 
-    # checkpoint saving    
+    lr_sch_handler = get_lr_sch_handler(trainer, validator, lr_scheduler, merge_metrics_fn)
+
+    # Checkpoint saving    
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
     
     if checkpoint_folder_path is None: # first time
@@ -266,7 +318,9 @@ def train_model(
                 f'q-vec-size={model_kwargs["question_vec_size"]}',
                 f'img-loc-feat-size={model_kwargs["image_local_feat_size"]}',
                 f'drop-prob={model_kwargs["dropout_prob"]}',
-                f'mimic-iuxray-freqs={",".join(map(str, mimic_iuxray_freqs))}'
+                f'cnn-pretrained={bool(model_kwargs["densenet_pretrained_weights_path"])}',
+                f'mimic-iuxray-freqs={",".join(map(str, mimic_iuxray_freqs))}',
+                f'use_tags={use_tags}',
             )
             print('checkpoint_folder_path =', checkpoint_folder_path)
             save_metadata(checkpoint_folder_path,
@@ -276,21 +330,23 @@ def train_model(
                         lr_scheduler_kwargs = lr_scheduler_kwargs,
                         mimiccxr_vqa_trainer_kwargs = mimiccxr_vqa_trainer_kwargs,
                         iuxray_vqa_trainer_kwargs = iuxray_vqa_trainer_kwargs,
-                        dataloading_kwargs = dataloading_kwargs)        
+                        dataloading_kwargs = dataloading_kwargs,
+                        auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
     else: # resuming
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
         count_print('Loading model from checkpoint ...')
         print('checkpoint_path = ', checkpoint_path)
         model_wrapper.load_checkpoint(checkpoint_path, device, model_only=override_lr)
     
-    score_fn = lambda _ : _merge_metrics(trainer.state.metrics, validator.state.metrics)
+    score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
 
     if save: # only if we want to save checkpoints to disk
         checkpoint_handler = get_checkpoint_handler(model_wrapper, checkpoint_folder_path, trainer,
                                                     epoch_offset=model_wrapper.get_epoch(),
-                                                    score_name='bleu(q+a)', score_fn=score_fn)
+                                                    score_name=get_hybrid_score_name(metrics_to_merge),
+                                                    score_fn=score_fn)
 
-    # attaching handlers
+    # Attaching handlers
     trainer.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
     trainer.add_event_handler(Events.EPOCH_STARTED, lambda : print('(1) Training stage ...'))
     trainer.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
@@ -326,15 +382,22 @@ def train_from_scratch(
     # lr_scheduler's args
     lr_decay,
     lr_decay_patience,
-    # Dataset split args
+    # Dataset args
     n_val_examples_per_question,
     min_train_examples_per_question,
+    iuxray_qa_adapted_reports_filename,
+    mimiccxr_qa_adapted_reports_filename,
     # Dataloading args
     batch_size,
     mimic_iuxray_freqs = [20 * 10, 10],
     # Traning args
     epochs = 1,
     batches_per_epoch = 1000,
+    # Auxiliary tasks args
+    use_tags = False,
+    n_medical_tags = None,
+    iuxray_medical_tags_per_report_filename = None,
+    mimiccxr_medical_tags_per_report_filename = None,
     # GPU
     device = 'GPU',
     # Other args
@@ -368,13 +431,21 @@ def train_from_scratch(
     mimiccxr_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
+        qa_adapted_reports_filename = mimiccxr_qa_adapted_reports_filename,
     )
     iuxray_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
+        qa_adapted_reports_filename = iuxray_qa_adapted_reports_filename,
     )
     dataloading_kwargs = dict(
         mimic_iuxray_freqs = mimic_iuxray_freqs,
+    )
+    auxiliary_tasks_kwargs = dict(
+        use_tags = use_tags,
+        n_medical_tags = n_medical_tags,
+        iuxray_medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
+        mimiccxr_medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
     )
 
     train_model(tokenizer_kwargs,
@@ -384,6 +455,7 @@ def train_from_scratch(
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
+                auxiliary_tasks_kwargs,
                 epochs,
                 batches_per_epoch,
                 device = device,
@@ -412,6 +484,7 @@ def resume_training(
     mimiccxr_vqa_trainer_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+    auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
 
     if override_lr:
         optimizer_kwargs = dict(
@@ -429,6 +502,7 @@ def resume_training(
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
+                auxiliary_tasks_kwargs,
                 epochs,
                 batches_per_epoch,
                 device = device,

@@ -1,4 +1,4 @@
-catheter
+\bcath
 \btube(s)?
 \btubing\b
 \btubular\b
@@ -10,11 +10,10 @@ mediport\b
 \b(left|right|central|PIC|jugular|EJ|sided|subclavian|tip|course|position|support)\b.*\blines?\b
 \b(line|the) tips?\b
 \btip\b.*\b(lies|terminates|projects|is)\b
-\bmidline
 pacemaker
 \blead\b
-\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin).*\bleads\b
-\bleads\b.*\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin)
+\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin|cours|overl).*\bleads\b
+\bleads\b.*\b(dual|pace|maker|devic|correc|positi|stand|place|aicd|termin|cours|overl)
 \bstent(s|ing)?\b
 \bCVL\b
 \bETT\b

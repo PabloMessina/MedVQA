@@ -2,6 +2,7 @@ import random
 import numpy as np
 import pandas as pd
 from PIL import Image
+from sklearn import metrics
 from sklearn.metrics import (
     precision_recall_fscore_support as prf1s,
     accuracy_score,
@@ -111,15 +112,17 @@ def extend_columns(columns, metric_name):
         except KeyError:
             columns.append(metric_name)
 
-def update_row_ranker(row_ranker, metric_name):
+def update_row_ranker(row_ranker, metric_name, metrics_to_rank = None):
     if metric_name == 'chexpert_prf1s':
         for _ in range(4):
             row_ranker.offset += 1
-            row_ranker.indices.append(row_ranker.offset)
-            row_ranker.weights.append(1)
+            if metrics_to_rank is None or metric_name in metrics_to_rank:
+                row_ranker.indices.append(row_ranker.offset)
+                row_ranker.weights.append(1)
             row_ranker.offset += 1
     else:
-        if metric_name in NLP_METRICS or 'chexpert' in metric_name:
+        if (metrics_to_rank is None and metric_name in METRIC2SHORT) or\
+            (metrics_to_rank is not None and metric_name in metrics_to_rank):
             row_ranker.indices.append(row_ranker.offset)
             row_ranker.weights.append(1)
         row_ranker.offset += 1
@@ -137,10 +140,11 @@ def extend_row(row, metrics_dict, metric_name):
     else:
         row.append(met)
 
-def get_overall_metrics_dataframe(aggregated_metrics):
+def get_overall_metrics_dataframe(aggregated_metrics, metric_names = None):
     metrics_dict = aggregated_metrics['overall']
-    metric_names = list(metrics_dict.keys())
-    metric_names.sort(key=_rank_metric_name)    
+    if metric_names is None:
+        metric_names = list(metrics_dict.keys())
+    metric_names.sort(key=_rank_metric_name)
     columns = []
     data = [[]]
     for mn in metric_names:
@@ -148,10 +152,12 @@ def get_overall_metrics_dataframe(aggregated_metrics):
         extend_row(data[0], metrics_dict, mn)    
     return pd.DataFrame(data=data, columns=columns)
 
-def get_per_question_metrics_dataframe(aggregated_metrics):
+def get_per_question_metrics_dataframe(aggregated_metrics, metrics_to_ignore=None, metrics_to_rank=None):
     q2metrics = aggregated_metrics['per_question']
     questions = list(q2metrics.keys())
     metric_names = list(q2metrics[questions[0]].keys())
+    if metrics_to_ignore is not None:
+        metric_names = [x for x  in metric_names if x not in metrics_to_ignore]
     metric_names.sort(key=_rank_metric_name)
     columns = []
     data = [[] for _ in range(len(questions))]
@@ -160,20 +166,24 @@ def get_per_question_metrics_dataframe(aggregated_metrics):
     columns.append('Q')
     for mn in metric_names:
         extend_columns(columns, mn)
-        update_row_ranker(row_ranker, mn)
+        update_row_ranker(row_ranker, mn, metrics_to_rank)
     for i, q in enumerate(questions):
         data[i].append(q)
         for mn in metric_names:
             extend_row(data[i], q2metrics[q], mn)
     data.sort(key=row_ranker, reverse=True)
     return pd.DataFrame(data=data, columns=columns)
+
+def _chexpert_label_array_to_string(label_array):
+    return ', '.join(CHEXPERT_LABELS[i] for i, label in enumerate(label_array) if label == 1)
+
    
 class VQAExamplePlotter:
-    def __init__(self, dataset_name, results):
+    def __init__(self, dataset_name, results, medical_tags_extractor=None):
         dataset = results[f'{dataset_name}_dataset']
         tokenizer = results['tokenizer']
         metrics_dict = results[f'{dataset_name}_metrics'] 
-        idxs = metrics_dict['idxs']
+        idxs = metrics_dict['idxs']        
 
         self.idxs = idxs
         self.metrics_dict = metrics_dict
@@ -183,7 +193,14 @@ class VQAExamplePlotter:
         self.pred_questions = [tokenizer.ids2string(x) for x in metrics_dict['pred_questions']]
         self.pred_answers = [tokenizer.ids2string(x) for x in metrics_dict['pred_answers']]
 
-    def inspect_example(self, metrics_to_inspect, idx=None, question=None, mode='random'):
+        # optional
+        if medical_tags_extractor is not None:
+            assert 'pred_tags' in metrics_dict
+            tags = medical_tags_extractor.tags
+            self.tags = [[tags[i] for i in dataset.rid2tags[dataset.report_ids[i]]] for i in idxs]
+            self.pred_tags = [[tags[i] for i,b in enumerate(x) if b] for x in metrics_dict['pred_tags']]
+
+    def inspect_example(self, metrics_to_inspect, metrics_to_rank=None, idx=None, question=None, mode='random'):
 
         if idx is None:
             indices = [i for i, q in enumerate(self.questions) if q == question]
@@ -192,7 +209,9 @@ class VQAExamplePlotter:
             if mode == 'random':
                 idx = random.choice(indices)
             else:
-                indices.sort(key=lambda i : sum(self.metrics_dict[m][i] for m in metrics_to_inspect))
+                if metrics_to_rank is None:
+                    metrics_to_rank = metrics_to_inspect
+                indices.sort(key=lambda i : sum(self.metrics_dict[m][i] for m in metrics_to_rank))
                 if mode == 'best':
                     idx = indices[-1]
                 else:
@@ -206,8 +225,13 @@ class VQAExamplePlotter:
         print('pred_question:', self.pred_questions[idx])
         print('pred_answer:', self.pred_answers[idx])
         print('--')
+        print('tags:', self.tags[idx])
+        print('pred tags:', self.pred_tags[idx])
+        print('--')
         print('chexpert_labels_gt:', self.metrics_dict['chexpert_labels_gt'][idx])
         print('chexpert_labels_gen:', self.metrics_dict['chexpert_labels_gen'][idx])
+        print('chexpert_labels_gt (verbose):', _chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gt'][idx]))
+        print('chexpert_labels_gen (verbose):', _chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gen'][idx]))
         print('--')
         for m in metrics_to_inspect:
             print(f'{m}:', self.metrics_dict[m][idx])

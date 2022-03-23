@@ -2,6 +2,7 @@ import random
 import math
 import torch
 import torch.nn as nn
+from sklearn.preprocessing import MultiLabelBinarizer
 
 def cyclic_dataloader_generator(dataloader):
     while True:
@@ -62,20 +63,30 @@ def multi_cyclic_dataloader_sampler(dataloaders, frequencies=None, shuffle=False
 #     batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
 #     return batch_dict
 
-def collate_batch_fn(batch):
-    indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
-    batch_dict = dict()
-    batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
-    batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
-    batch_dict['q'] = nn.utils.rnn.pad_sequence(
-        sequences = [torch.tensor(batch[i]['q']) for i in indexes],
-        batch_first=True,
-        padding_value=0,
-    )
-    batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
-    batch_dict['a'] = nn.utils.rnn.pad_sequence(
-        sequences = [torch.tensor(batch[i]['a']) for i in indexes],
-        batch_first=True,
-        padding_value=0,
-    )
-    return batch_dict
+def get_collate_batch_fn(use_tags=False, n_tags=None):
+
+    if use_tags:
+        mlb = MultiLabelBinarizer(list(range(n_tags)))
+
+    def collate_batch_fn(batch):
+        indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
+        batch_dict = dict()
+        batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
+        batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+        batch_dict['q'] = nn.utils.rnn.pad_sequence(
+            sequences = [torch.tensor(batch[i]['q']) for i in indexes],
+            batch_first=True,
+            padding_value=0,
+        )
+        batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
+        batch_dict['a'] = nn.utils.rnn.pad_sequence(
+            sequences = [torch.tensor(batch[i]['a']) for i in indexes],
+            batch_first=True,
+            padding_value=0,
+        )
+        if use_tags:
+            batch_dict['tags'] = torch.tensor(mlb.fit_transform([batch[i]['tags'] for i in indexes]))
+            
+        return batch_dict
+
+    return collate_batch_fn

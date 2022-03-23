@@ -9,7 +9,8 @@ class OpenEndedVQA(nn.Module):
 
     def __init__(self, vocab_size, start_idx, embed_size, hidden_size,
                  question_vec_size, image_local_feat_size, dropout_prob, device,
-                 densenet_pretrained_weights_path=None):
+                 densenet_pretrained_weights_path=None,
+                 n_medical_tags=None):
         super().__init__()
         self.name = 'oevqa(densenet121+bilstm+lstm)'
         self.embedding_table = nn.Embedding(
@@ -17,13 +18,19 @@ class OpenEndedVQA(nn.Module):
             embedding_dim=embed_size,
             padding_idx=0,
         )
-        if densenet_pretrained_weights_path is None:
+        if densenet_pretrained_weights_path:
+            densenet = models.densenet121(pretrained=False)
+            pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
+            # begin HACK
+            del pretrained_weights["prediction.weight"]
+            del pretrained_weights["prediction.bias"]            
+            densenet.classifier = None
+            # end HACK
+            densenet.load_state_dict(pretrained_weights)
+            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
+        else:
             densenet = models.densenet121(pretrained=True)
             print('Using densenet121 with ImageNet pretrained weights')
-        else:
-            densenet = models.densenet121(pretrained=False)
-            densenet.load_state_dict(torch.load(densenet_pretrained_weights_path, map_location='cuda'))
-            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
         # self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
         self.image_encoder = densenet.features
         self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
@@ -45,6 +52,13 @@ class OpenEndedVQA(nn.Module):
                                             start_idx,
                                             vocab_size,
                                             dropout_prob)
+        # optional auxiliary tasks
+        if n_medical_tags is not None:
+            self.W_tags = nn.Linear(image_local_feat_size * 2, n_medical_tags)
+            self.tags_aux_task = True
+        else:
+            self.tags_aux_task = False
+
     def forward(
         self,
         images,
@@ -77,4 +91,14 @@ class OpenEndedVQA(nn.Module):
         else:
             pred_answers = self.answer_decoder(local_feat, global_feat, question_vectors, max_answer_length=max_answer_length, mode=mode)
 
-        return pred_answers, pred_questions
+        output = {
+            'pred_answers': pred_answers,
+            'pred_questions': pred_questions,
+        }
+
+        # auxiliary tasks (optional)
+        if self.tags_aux_task:
+            tags_logits = self.W_tags(global_feat)
+            output['pred_tags'] = tags_logits
+
+        return output

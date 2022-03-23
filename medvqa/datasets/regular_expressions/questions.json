@@ -1,366 +1,390 @@
 [
     {
-        "question": "what about tubes and lines?",
+        "question": "tubes and lines?",
         "files": ["tubes_lines.txt"]
     },
     {
-        "question": "what about the lungs?",
+        "question": "lungs?",
         "files": ["lungs.txt", "atelectasis.txt", "kerley_lines.txt", "interstitial_lung_disease.txt", "parenchyma.txt", "abscess_cavitation.txt"]
     },
     {
-        "question": "what about pleural space?",
+        "question": "pleural space?",
         "files": ["pleural_space.txt"]
     },
     {
-        "question": "what about pneumothorax?",
+        "question": "pneumothorax?",
         "files": ["pneumothorax.txt"]
     },
     {
-        "question": "what about the heart?",
+        "question": "heart?",
         "files": ["heart.txt", "congestive_heart_failure.txt", "cardiomegaly.txt"]
     },
     {
-        "question": "what about congestive heart failure CHF?",
+        "question": "congestive heart failure CHF?",
         "files": ["congestive_heart_failure.txt"]
     },
     {
-        "question": "what about densities?",
+        "question": "densities?",
         "files": ["densities.txt"]
     },
     {
-        "question": "what about cardiomegaly?",
+        "question": "cardiomegaly?",
         "files": ["cardiomegaly.txt"]
     },
     {
-        "question": "what about thoracic aorta?",
+        "question": "thoracic aorta?",
         "files": ["thoracic_aorta.txt"]
     },
     {
-        "question": "what about pulmonary vascularity?",
+        "question": "pulmonary vascularity?",
         "files": ["pulmonary_vascularity.txt"]
     },
     {
-        "question": "what about pulmonary hila?",
+        "question": "pulmonary hila?",
         "files": ["pulmonary_hila.txt"]
     },
     {
-        "question": "what about ossification?",
+        "question": "ossification?",
         "files": ["ossification.txt"]
     },
     {
-        "question": "what about atelectasis?",
+        "question": "atelectasis?",
         "files": ["atelectasis.txt"]
     },
     {
-        "question": "what about consolidation?",
+        "question": "consolidation?",
         "files": ["consolidation.txt"]
     },
     {
-        "question": "what about fractures?",
+        "question": "fractures?",
         "files": ["fracture.txt"]
     },
     {
-        "question": "what about bones?",
+        "question": "bones?",
         "files": ["bones.txt", "fracture.txt", "ribs.txt"]
     },
     {
-        "question": "what about the ribs?",
+        "question": "ribs?",
         "files": ["ribs.txt"]
     },
     {
-        "question": "what about the cardiac silhouette?",
+        "question": "cardiac silhouette?",
         "files": ["cardiac_silhouette.txt"]
     },
     {
-        "question": "what about the mediastinum?",
+        "question": "mediastinum?",
         "files": ["mediastinum.txt"]
     },
     {
-        "question": "what about hernias?",
+        "question": "hernias?",
         "files": ["hernia.txt"]
     },
     {
-        "question": "what about support devices and foreign bodies?",
+        "question": "support devices and foreign bodies?",
         "files": ["support_devices_foreign_bodies.txt", "tubes_lines.txt"]
     },
     {
-        "question": "what about COPD?",
+        "question": "COPD?",
         "files": ["COPD.txt"]
     },
     {
-        "question": "what about kerley lines?",
+        "question": "kerley lines?",
         "files": ["kerley_lines.txt"]
     },
     {
-        "question": "what about infiltrate?",
+        "question": "infiltrate?",
         "files": ["infiltrate.txt"]
     },
     {
-        "question": "what about opacities?",
+        "question": "opacities?",
         "files": ["opacities.txt"]
     },
     {
-        "question": "what about pneumonia?",
+        "question": "pneumonia?",
         "files": ["pneumonia.txt"]
     },
     {
-        "question": "what about lucencies?",
+        "question": "lucencies?",
         "files": ["lucency.txt"]
     },
     {
-        "question": "what about the diaphragm?",
+        "question": "diaphragm?",
         "files": ["diaphragm.txt"]
     },
     {
-        "question": "what about scarring?",
+        "question": "scarring?",
         "files": ["scarring.txt"]
     },
     {
-        "question": "what about edema?",
+        "question": "edema?",
         "files": ["edema.txt"]
     },
     {
-        "question": "what about fissures?",
+        "question": "fissures?",
         "files": ["fissure.txt"]
     },
     {
-        "question": "what about adenopathy?",
+        "question": "adenopathy?",
         "files": ["adenopathy.txt"]
     },
     {
-        "question": "what about lesions?",
+        "question": "lesions?",
         "files": ["lesion.txt"]
     },
     {
-        "question": "what about the thyroid?",
+        "question": "thyroid?",
         "files": ["thyroid.txt"]
     },
     {
-        "question": "what about peribronchial cuffing?",
+        "question": "peribronchial cuffing?",
         "files": ["peribronchial_cuffing.txt"]
     },
     {
-        "question": "what about tortuosity?",
+        "question": "tortuosity?",
         "files": ["tortuosity.txt"]
     },
     {
-        "question": "what about bowel obstruction and loops?",
+        "question": "bowel obstruction and loops?",
         "files": ["bowel_obstruction_loops.txt"]
     },
     {
-        "question": "what about pneumomediastinum?",
+        "question": "pneumomediastinum?",
         "files": ["pneumomediastinum.txt"]
     },
     {
-        "question": "what about masses?",
+        "question": "masses?",
         "files": ["masses.txt"]
     },
     {
-        "question": "what about prominence?",
+        "question": "prominence?",
         "files": ["prominence.txt"]
     },
     {
-        "question": "what about the esophagus?",
+        "question": "esophagus?",
         "files": ["esophagus.txt"]
     },
     {
-        "question": "what about pneumoperitoneum?",
+        "question": "pneumoperitoneum?",
         "files": ["pneumoperitoneum.txt"]
     },
     {
-        "question": "what about the trachea?",
+        "question": "trachea?",
         "files": ["trachea.txt"]
     },
     {
-        "question": "what about blurring?",
+        "question": "blurring?",
         "files": ["blurring.txt"]
     },
     {
-        "question": "what about cholelithiasis?",
+        "question": "cholelithiasis?",
         "files": ["cholelithiasis.txt"]
     },
     {
-        "question": "what about calcification?",
+        "question": "calcification?",
         "files": ["calcification.txt"]
     },
     {
-        "question": "what about free air?",
+        "question": "free air?",
         "files": ["free_air.txt"]
     },
     {
-        "question": "what about bronchiectasis?",
+        "question": "bronchiectasis?",
         "files": ["bronchiectasis.txt"]
     },
     {
-        "question": "what about interstitial lung disease?",
+        "question": "interstitial lung disease?",
         "files": ["interstitial_lung_disease.txt"]
     },
     {
-        "question": "what about emphysema?",
+        "question": "emphysema?",
         "files": ["emphysema.txt"]
     },
     {
-        "question": "what about cancer or tumor?",
+        "question": "cancer or tumor?",
         "files": ["cancer_tumor.txt"]
     },
     {
-        "question": "what about surgery?",
+        "question": "surgery?",
         "files": ["surgery.txt"]
     },
     {
-        "question": "what about the carina?",
+        "question": "carina?",
         "files": ["carina.txt"]
     },
     {
-        "question": "what about nodules?",
+        "question": "nodules?",
         "files": ["nodules.txt"]
     },
     {
-        "question": "what about gas distension?",
+        "question": "gas distension?",
         "files": ["gas_distension.txt"]
     },
     {
-        "question": "what about aspiration?",
+        "question": "aspiration?",
         "files": ["aspiration.txt"]
     },
     {
-        "question": "what about lymph nodes?",
+        "question": "lymph nodes?",
         "files": ["lymph_nodes.txt"]
     },
     {
-        "question": "what about haze?",
+        "question": "haze?",
         "files": ["haze.txt"]
     },
     {
-        "question": "what about air collections?",
+        "question": "air collections?",
         "files": ["air_collections.txt"]
     },
     {
-        "question": "what about the bowel?",
+        "question": "bowel?",
         "files": ["bowel.txt"]
     },
     {
-        "question": "what about granumola?",
+        "question": "granumola?",
         "files": ["granuloma.txt"]
     },
     {
-        "question": "what about bullae and blebs?",
+        "question": "bullae and blebs?",
         "files": ["bullae_bleb.txt"]
     },
     {
-        "question": "what about air-fluid level?",
+        "question": "air-fluid level?",
         "files": ["air_fluid_level.txt"]
     },
     {
-        "question": "what about fluid overload?",
+        "question": "fluid overload?",
         "files": ["fluid_overload.txt"]
     },
     {
-        "question": "what about the colon?",
+        "question": "colon?",
         "files": ["colon.txt"]
     },
     {
-        "question": "what about lung parenchyma?",
+        "question": "lung parenchyma?",
         "files": ["parenchyma.txt"]
     },
     {
-        "question": "what about the liver?",
+        "question": "liver?",
         "files": ["liver.txt"]
     },
     {
-        "question": "what about the apical zone?",
+        "question": "apical zone?",
         "files": ["apical_zone.txt"]
     },
     {
-        "question": "what about sagittal chest?",
+        "question": "sagittal chest?",
         "files": ["sagittal_chest.txt"]
     },
     {
-        "question": "what about the stomach?",
+        "question": "stomach?",
         "files": ["stomach.txt"]
     },
     {
-        "question": "what about bronchogram?",
+        "question": "bronchogram?",
         "files": ["bronchogram.txt"]
     },
     {
-        "question": "what about bronchovascular crowding?",
+        "question": "bronchovascular crowding?",
         "files": ["bronchovascular_crowding.txt"]
     },
     {
-        "question": "what about contrast?",
+        "question": "contrast?",
         "files": ["contrast.txt"]
     },
     {
-        "question": "what about air space disease?",
+        "question": "air space disease?",
         "files": ["air_space_disease.txt"]
     },
     {
-        "question": "what about soft tissue?",
+        "question": "soft tissue?",
         "files": ["soft_tissue.txt"]
     },
     {
-        "question": "what about sulci?",
+        "question": "sulci?",
         "files": ["sulci.txt"]
     },
     {
-        "question": "what about azygos lobe?",
+        "question": "azygos lobe?",
         "files": ["azygos_lobe.txt"]
     },
     {
-        "question": "what about azygos vein?",
+        "question": "azygos vein?",
         "files": ["azygos_vein.txt"]
     },
     {
-        "question": "what about markings?",
+        "question": "markings?",
         "files": ["markings.txt"]
     },
     {
-        "question": "what about abscess and cavitation?",
+        "question": "abscess and cavitation?",
         "files": ["abscess_cavitation.txt"]
     },
     {
-        "question": "what about vena cava?",
+        "question": "vena cava?",
         "files": ["vena_cava.txt"]
     },
     {
-        "question": "what about the bronchus?",
+        "question": "bronchus?",
         "files": ["bronchus.txt"]
     },
     {
-        "question": "what about trauma?",
+        "question": "trauma?",
         "files": ["trauma.txt"]
     },
     {
-        "question": "what about airways?",
+        "question": "airways?",
         "files": ["airways.txt"]
     },
     {
-        "question": "what about ascites?",
+        "question": "ascites?",
         "files": ["ascites.txt"]
     },
     {
-        "question": "what about bleeding?",
+        "question": "bleeding?",
         "files": ["bleeding.txt"]
     },
     {
-        "question": "what about sarcoidosis?",
+        "question": "sarcoidosis?",
         "files": ["sarcoidosis.txt"]
     },
     {
-        "question": "what about shadow?",
+        "question": "shadow?",
         "files": ["shadow.txt"]
     },
     {
-        "question": "what about tendon?",
+        "question": "tendon?",
         "files": ["tendon.txt"]
     },
     {
-        "question": "what about pneumatocele?",
+        "question": "pneumatocele?",
         "files": ["pneumatocele.txt"]
     },
     {
-        "question": "what about fluid?",
+        "question": "fluid?",
         "files": ["fluid.txt"]
+    },
+    {
+        "question": "skinfold?",
+        "files": ["skinfold.txt"]
+    },
+    {
+        "question": "infection?",
+        "files": ["infection.txt"]
+    },
+    {
+        "question": "loculation?",
+        "files": ["loculation.txt"]
+    },
+    {
+        "question": "ARDS?",
+        "files": ["ARDS.txt"]
+    },
+    {
+        "question": "fibrosis?",
+        "files": ["fibrosis.txt"]
+    },
+    {
+        "question": "radiation?",
+        "files": ["radiation.txt"]
     }
 ]

@@ -5,6 +5,7 @@ from medvqa.metrics.medical.med_completeness import (
     MedicalCompleteness,
     WeightedMedicalCompleteness,
 )
+from medvqa.metrics.classification import MultiLabelF1score
 
 from ignite.metrics import RunningAverage
 import operator
@@ -37,7 +38,7 @@ def attach_rougel(engine, device, record_scores=False):
 
 def attach_ciderd(engine, device, record_scores=False):
     ciderd = CiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
-                    device = device, record_scores=record_scores)
+                    device=device, record_scores=record_scores)
     ciderd.attach(engine, 'ciderD')
 
 def attach_medical_completeness(engine, device, tokenizer, record_scores=False):
@@ -51,6 +52,11 @@ def attach_weighted_medical_completeness(engine, device, tokenizer, record_score
                 output_transform = _get_output_transform('pred_answers', 'answers'),
                 device = device, record_scores=record_scores)
     medcomp.attach(engine, 'wmedcomp')
+
+def attach_medical_tags_f1score(engine, device, record_scores=False):
+    medtagf1 = MultiLabelF1score(output_transform = _get_output_transform('pred_tags', 'tags'),
+                                device=device, record_scores=record_scores)
+    medtagf1.attach(engine, 'medtagf1')
 
 def attach_loss(loss_name, engine, device):
     metric = RunningAverage(

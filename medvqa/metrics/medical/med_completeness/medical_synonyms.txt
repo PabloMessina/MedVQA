@@ -124,7 +124,8 @@ dens dense densely denser densities density
 deposit deposited deposition deposits
 descend descending descends
 deviate deviated deviates deviating deviation
-device devices devise
+device devices devise equipment
+dextroconvex dextrocurvature dextroscoliosis dextroscoliotic
 diaphgrams diaphragm diaphragmatic diaphragms
 diffuse diffusely diffusion
 dilatation dilated dilation
@@ -163,6 +164,7 @@ extend extended extending extends
 extensive extensively
 extremities extremity
 extubated extubation
+fibrosing fibrosis fibrotic
 fiducial fiducials
 field fields
 fill filled filling fills
@@ -288,6 +290,7 @@ midclavicle midclavicular
 migrated migration
 mild milder mildly mildy
 moderate moderated moderately moderatly modest modestly
+monitor monitoring
 morgagni morgani
 move moved movement
 mucoid mucosal mucous mucus
@@ -343,6 +346,8 @@ pectoral pectoralis pectorally
 pedicle pedicles
 pelves pelvic pelvis
 pen pens
+penumonia pna pneumonia pneumoniae pneumonias pneumonic pnuemonia
+penumothorax pnemothorax pneumothoraces pneumothorax pneumothroax pnuemothorax ptx
 perfused perfusion
 peribronchial peribronchiolar
 pericardiac pericardial
@@ -360,8 +365,6 @@ plerual pleura pleural pleurally pleuritic pleuro plueral plural
 plethora plethoric
 pleur pleurex pleurx
 plug plugging plugs
-pna pneumonia pneumoniae pneumonias pneumonic pnuemonia
-pnemothorax pneumothoraces pneumothorax pneumothroax pnuemothorax ptx
 pneumatocele pneumatoceles
 pocket pockets
 pool pooled pooling

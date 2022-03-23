@@ -1,11 +1,10 @@
 \bpulm.*(vascula(r|t)|vessel|venous|emboli|hemorrhage|hypertens|arter)
 \bpe\b
-venous (congestion|engorgement)
-vascular (plethora|engorgement|enlargement|crossing)
+venous engorgement
+vascular (engorgement|enlargement|crossing)
 \bplethor
 upper zone redistribution
 \bcrowding.*\b(vascula|vessels)
-\bvascula.*\b(crowding|congestion)
-\bcongestion.*\bvascula
-mediastinal veins
+\bvascula.*\b(crowding)
 vasculitis
+\bconges[it]

@@ -1,12 +1,13 @@
-from tqdm import tqdm
 from medvqa.utils.files import save_to_json
 from medvqa.datasets.qa_pairs_extractor import QuestionAnswerExtractor
-from medvqa.datasets.mimiccxr import MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.datasets.mimiccxr.preprocessing import (
     extract_findings_and_impression,
     report_paths_generator,
-    
 )
+from medvqa.utils.common import get_timestamp
+from tqdm import tqdm
+import os
 
 if __name__ == '__main__':
     
@@ -29,7 +30,8 @@ if __name__ == '__main__':
         'reports': qa_adapted_reports,
     }
 
-    print(f'Saving qa adapted reports to {MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH}')
-    save_to_json(qa_dataset, MIMICCXR_QA_ADAPTED_REPORTS_JSON_PATH)
+    output_path = os.path.join(MIMICCXR_CACHE_DIR, f'qa_adapted_reports__{get_timestamp()}.json')
+    print(f'Saving qa adapted reports to {output_path}')
+    save_to_json(qa_dataset, output_path)
     print('Done!')
 

@@ -1,5 +1,2 @@
-\binterst.*\b(disease|abnormal)
-\b(disease|abnormal).*\binterst
+\binters[it]
 (lung|pulmon).*\bscar
-fibro(sis|tic)
-interstitial (marking|.*lung)

@@ -5,6 +5,23 @@ CHEXPERT_LABELS = [
     'Pleural Other', 'Fracture', 'Support Devices',
 ]
 
+CHEXPERT_LABEL2SHORT = {
+    'No Finding': 'NF',
+    'Cardiomegaly': 'Card',
+    'Enlarged Cardiomediastinum': 'EC',
+    'Consolidation': 'Cons',
+    'Lung Opacity': 'LO',
+    'Atelectasis': 'A',
+    'Support Devices': 'SD',
+    'Pleural Effusion': 'PE',
+    'Pleural Other': 'PO',
+    'Pneumonia': 'Pn',
+    'Pneumothorax': 'Pt',
+    'Edema': 'E',
+    'Lung Lesion': 'LL',
+    'Fracture': 'F',
+}
+
 CHEXPERT_METRICS = [
     'chexpert_accuracy',
     'chexpert_prf1s',
@@ -24,12 +41,15 @@ NLP_METRICS = [
 METRIC2SHORT = {
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',   
-    'bleu_question': 'b_q',
+    'bleu_question': 'bq',
     'bleu': 'b',
     'bleu-1': 'b1',
     'bleu-2': 'b2',
     'bleu-3': 'b3',
     'bleu-4': 'b4',
     'rougeL': 'rg-L',
-    'ciderD': 'c-D',
+    'ciderD': 'cD',
+    'medcomp': 'mdcmp',
+    'wmedcomp': 'wmdcmp',
+    'medtagf1': 'mtf1',    
 }

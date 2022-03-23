@@ -4,14 +4,15 @@ degenerative.*(clavicular|clavicle|midfoot|joint|change)
 \bspin(e|al)\b
 \bDISH\b
 costochondral
-convex curvature
-lumbar curve
+convex\b.*\bcurv
+\bcurv.*convex\b
+\blumbar\b.*\bcurve
+dextroconvex
 \bankle
 \belbow
 \bforearm
 \bhumerus
 enthesophyte
-curve convex
 \bend( )?plate
 \bdiscs?\b
 \bfem(ur|oral)

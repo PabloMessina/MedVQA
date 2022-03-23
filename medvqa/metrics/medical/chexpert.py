@@ -53,7 +53,8 @@ class ChexpertLabeler:
                 if hash not in unlabeled_hashes_set:
                     unlabeled_hashes_set.add(hash)
                     unlabeled_hashes.append(hash)
-                    unlabeled_texts.append(text)
+                    unlabeled_texts.append(text if len(text) > 0 else " ") # HACK for corner case
+                    # chexpert labeler explodes with the empty string
 
         if len(unlabeled_texts) > 0:
             labels = self._invoke_chexpert_labeler_process(unlabeled_texts, tmp_suffix)
@@ -118,4 +119,61 @@ class ChexpertLabeler:
 
         return out_df[CHEXPERT_LABELS].to_numpy().astype(np.int8)
 
+    # def _invoke_chexpert_labeler_process(self, texts, tmp_suffix='', n_processes = 1):
 
+    #     n = len(texts)
+    #     if n < 100:
+    #         n_processes = 1
+
+    #     chunk_size = n // n_processes
+    #     processes = []
+    #     output_paths = []
+
+    #     if self.verbose:
+    #         print(f'Chexpert labeler: running {n_processes} processes in parallel')
+
+    #     start = time.time()
+    #     custom_env = _get_custom_env()
+
+    #     for i in range(n_processes):
+    #         # Define chunk range
+    #         b = i * chunk_size
+    #         e = n if i + 1 == n_processes else b + chunk_size
+    #         # print(f'i={i}, b={b}, e={e}, n={n}, chunk_size={chunk_size}')
+            
+    #         # Define input & output paths for i-th chunk
+    #         input_path = os.path.join(TMP_FOLDER, f'labeler-input{tmp_suffix}_{i}.csv')
+    #         output_path = os.path.join(TMP_FOLDER, f'labeler-output{tmp_suffix}_{i}.csv')
+    #         output_paths.append(output_path)
+
+    #         # Create input file
+    #         os.makedirs(TMP_FOLDER, exist_ok=True)
+    #         in_df = pd.DataFrame(texts[b:e])
+    #         in_df.to_csv(input_path, header=False, index=False, quoting=csv.QUOTE_ALL)
+
+    #         # Build command & call chexpert labeler process
+    #         cmd_cd = f'cd {CHEXPERT_FOLDER}'
+    #         cmd_call = f'{CHEXPERT_PYTHON} label.py --reports_path {input_path} --output_path {output_path}'
+    #         cmd = f'{cmd_cd} && {cmd_call}'
+    #         if self.verbose:
+    #             print(f'\t{i+1}) Running chexpert labeler over {len(in_df)} texts ...')
+    #             # print(f'\tCommand = {cmd}')
+    #         processes.append(subprocess.Popen(cmd, shell=True, env=custom_env))
+        
+    #     out_labels = np.empty((n, len(CHEXPERT_LABELS)), np.int8)
+        
+    #     offset = 0        
+    #     for i, p in enumerate(processes):
+    #         # Wait for subprocess to finish
+    #         if p.poll() is None:
+    #             p.wait()                
+    #         if self.verbose: print(f'\tprocess {i} finished, elapsed time = {time.time() - start}')
+    #         # Read chexpert-labeler output
+    #         out_df = pd.read_csv(output_paths[i])
+    #         out_df = out_df.fillna(-2)
+    #         out_labels[offset : offset + len(out_df)] = out_df[CHEXPERT_LABELS].to_numpy().astype(np.int8)
+    #         offset += len(out_df)
+        
+    #     assert offset == n
+        
+    #     return out_labels
