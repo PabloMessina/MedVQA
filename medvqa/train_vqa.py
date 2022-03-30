@@ -8,6 +8,10 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from ignite.engine import Events, Engine
 from ignite.handlers.timing import Timer
 
+from medvqa.utils.constants import (
+    IUXRAY_DATASET_ID,
+    MIMICCXR_DATASET_ID,
+)
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import WORKSPACE_DIR
@@ -16,6 +20,7 @@ from medvqa.metrics import (
     attach_ciderd,
     attach_weighted_medical_completeness,
     attach_medical_tags_f1score,
+    attach_dataset_aware_orientation_accuracy,
     attach_loss
 )
 from medvqa.models.checkpoint import (
@@ -107,12 +112,16 @@ def parse_args():
 
     # Auxiliary tasks arguments
     
+    # medical tags prediction
     parser.add_argument('--use-tags', dest='use_tags', action='store_true')
     parser.set_defaults(use_tags=False)
     parser.add_argument('--n-medical-tags', type=int, default=None,
                         help='Number of medical tags (for tag prediction auxiliary task)')
     parser.add_argument('--iuxray-medical-tags-per-report-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-medical-tags-per-report-filename', type=str, default=None)
+
+    parser.add_argument('--use-orientation', dest='use_orientation', action='store_true')
+    parser.set_defaults(use_orientation=False)
     
     return parser.parse_args()
 
@@ -121,6 +130,7 @@ _METRIC_WEIGHTS = {
     'ciderD': 0.1,
     'wmedcomp': 1,
     'medtagf1': 1,
+    'orienacc': 1,
 }
 
 def train_model(
@@ -141,7 +151,9 @@ def train_model(
 ):
     count_print = CountPrinter()
     
-    # Pull out some args from kwargs    
+    # Pull out some args from kwargs
+
+    # auxiliary task: medical tags prediction
     use_tags = auxiliary_tasks_kwargs['use_tags']
     n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
     iuxray_medical_tags_per_report_filename = auxiliary_tasks_kwargs['iuxray_medical_tags_per_report_filename']
@@ -151,6 +163,10 @@ def train_model(
         assert iuxray_medical_tags_per_report_filename is not None
         assert mimiccxr_medical_tags_per_report_filename is not None
     
+    # auxiliary task: orientation classification
+    use_orientation = auxiliary_tasks_kwargs['use_orientation']
+    
+    # QA dataset filenames
     iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
     mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_trainer_kwargs['qa_adapted_reports_filename']
     assert iuxray_qa_adapted_reports_filename is not None
@@ -181,6 +197,7 @@ def train_model(
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
                          device=device, 
                          n_medical_tags=n_medical_tags,
+                         classify_orientation=use_orientation,
                          **model_kwargs)
     model = model.to(device)
 
@@ -201,6 +218,13 @@ def train_model(
         tags_criterion = nn.BCEWithLogitsLoss()
     else:
         tags_criterion = None
+    
+    if use_orientation: # auxiliary task
+        iuxray_orientation_criterion = nn.CrossEntropyLoss()
+        mimiccxr_orientation_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore unknown
+    else:
+        iuxray_orientation_criterion = None
+        mimiccxr_orientation_criterion = None
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')
@@ -208,32 +232,48 @@ def train_model(
                              training=True, device=device,
                              # tags auxiliary task
                              use_tags=use_tags,
-                             tags_criterion=tags_criterion)
+                             tags_criterion=tags_criterion,
+                             # orientation auxiliary task
+                             use_orientation=use_orientation,
+                             iuxray_orientation_criterion=iuxray_orientation_criterion,
+                             mimiccxr_orientation_criterion=mimiccxr_orientation_criterion)
     trainer = Engine(train_step)
 
     val_step = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
                            training=False, device=device,
                            # tags auxiliary task
                            use_tags=use_tags,
-                           tags_criterion=tags_criterion)
+                           tags_criterion=tags_criterion,
+                           # orientation auxiliary task
+                           use_orientation=use_orientation,
+                           iuxray_orientation_criterion=iuxray_orientation_criterion,
+                           mimiccxr_orientation_criterion=mimiccxr_orientation_criterion)
     validator = Engine(val_step)
 
     # Default image transform
     count_print('Defining image transform ...')
     img_transform = get_image_transform()
 
-    # define collate_batch_fn
-    collate_batch_fn = get_collate_batch_fn(use_tags = use_tags, n_tags = n_medical_tags)
+    # Define collate_batch_fn
+    mimiccxr_collate_batch_fn = get_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                                    use_tags = use_tags,
+                                                    n_tags = n_medical_tags,
+                                                    use_orientation = use_orientation)
+    iuxray_collate_batch_fn = get_collate_batch_fn(IUXRAY_DATASET_ID,
+                                                   use_tags = use_tags,
+                                                   n_tags = n_medical_tags,
+                                                   use_orientation = use_orientation)
 
     # Create MIMIC-CXR vqa trainer
     count_print('Creating MIMIC-CXR vqa trainer ...')
     mimiccxr_vqa_trainer = MIMICCXR_VQA_Trainer(
         transform = img_transform,
-        collate_batch_fn = collate_batch_fn,
+        collate_batch_fn =     mimiccxr_collate_batch_fn,
         tokenizer = tokenizer,
         mimiccxr_qa_reports = mimiccxr_qa_reports,
         use_tags = use_tags,
         medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
+        use_orientation = use_orientation,
         **mimiccxr_vqa_trainer_kwargs,
     )
     
@@ -241,11 +281,12 @@ def train_model(
     count_print('Creating IU X-Ray vqa trainer ...')
     iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
         transform = img_transform,
-        collate_batch_fn = collate_batch_fn,
+        collate_batch_fn = iuxray_collate_batch_fn,
         tokenizer = tokenizer,        
         iuxray_qa_reports = iuxray_qa_reports,
         use_tags = use_tags,
         medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
+        use_orientation = use_orientation,
         **iuxray_vqa_trainer_kwargs,
     )
 
@@ -280,6 +321,10 @@ def train_model(
         attach_medical_tags_f1score(trainer, device)
         attach_medical_tags_f1score(validator, device)
 
+    if use_orientation:
+        attach_dataset_aware_orientation_accuracy(trainer)
+        attach_dataset_aware_orientation_accuracy(validator)
+
     # Losses
     attach_loss('loss', trainer, device)
     attach_loss('loss', validator, device)
@@ -290,9 +335,11 @@ def train_model(
     timer.attach(validator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss', 'bleu_question', 'ciderD', 'wmedcomp']
+    metrics_to_print=['loss', 'bleu_question', 'ciderD', 'wmedcomp']    
     if use_tags:
         metrics_to_print.append('medtagf1')
+    if use_orientation:
+        metrics_to_print.append('orienacc')
 
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()
@@ -301,6 +348,8 @@ def train_model(
     metrics_to_merge = ['bleu_question', 'ciderD', 'wmedcomp']
     if use_tags:
         metrics_to_merge.append('medtagf1')
+    if use_orientation:
+        metrics_to_merge.append('orienacc')
     
     merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.5, 0.5)
 
@@ -321,6 +370,7 @@ def train_model(
                 f'cnn-pretrained={bool(model_kwargs["densenet_pretrained_weights_path"])}',
                 f'mimic-iuxray-freqs={",".join(map(str, mimic_iuxray_freqs))}',
                 f'use_tags={use_tags}',
+                f'use_orien={use_orientation}',
             )
             print('checkpoint_folder_path =', checkpoint_folder_path)
             save_metadata(checkpoint_folder_path,
@@ -346,7 +396,7 @@ def train_model(
                                                     score_name=get_hybrid_score_name(metrics_to_merge),
                                                     score_fn=score_fn)
 
-    # Attaching handlers
+    # Attach handlers
     trainer.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
     trainer.add_event_handler(Events.EPOCH_STARTED, lambda : print('(1) Training stage ...'))
     trainer.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
@@ -398,6 +448,7 @@ def train_from_scratch(
     n_medical_tags = None,
     iuxray_medical_tags_per_report_filename = None,
     mimiccxr_medical_tags_per_report_filename = None,
+    use_orientation = False,
     # GPU
     device = 'GPU',
     # Other args
@@ -442,10 +493,13 @@ def train_from_scratch(
         mimic_iuxray_freqs = mimic_iuxray_freqs,
     )
     auxiliary_tasks_kwargs = dict(
+        # medical tags prediction
         use_tags = use_tags,
         n_medical_tags = n_medical_tags,
         iuxray_medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
         mimiccxr_medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
+        # image orientation classification
+        use_orientation = use_orientation,
     )
 
     train_model(tokenizer_kwargs,

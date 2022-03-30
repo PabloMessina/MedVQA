@@ -1,6 +1,10 @@
 from ignite.handlers import Checkpoint, DiskSaver
 from ignite.engine import Events
+from torch import Tensor
 import operator
+
+from medvqa.utils.constants import METRIC2SHORT
+from medvqa.utils.metrics import average_ignoring_nones
 
 def get_log_epoch_started_handler(model_wrapper):
     epoch_offset = model_wrapper.get_epoch()
@@ -27,13 +31,17 @@ def get_log_metrics_handlers(timer, metrics_to_print):
         scores = []
         for m in metrics_to_print:
             score = metrics.get(m)
-            if hasattr(score, '__len__'):
-                score = sum(score) / len(score)
+            if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
+                try:
+                    score = average_ignoring_nones(score)
+                except TypeError:
+                    print(f'm = {m}, score = {score}, type(score) = {type(score)}')
+                    raise
             scores.append(score)
 
-        metrics_str = ', '.join(f'{m} {s}' for m, s in zip(metrics_to_print, scores))
+        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metrics_to_print, scores))
         duration = timer._elapsed()
-        print(f'{metrics_str}, {duration}')
+        print(f'{metrics_str}, {duration:.2f} secs')
     
     return handler
 
@@ -74,13 +82,15 @@ class Accumulator():
 def attach_accumulator(engine, output_name):
     accumulator = Accumulator(output_transform=operator.itemgetter(output_name))
     
-    def epoch_started_handler(engine):
+    def epoch_started_handler(unused_engine):
         accumulator.reset()
+
     def iteration_completed_handler(engine):
         # print('Debugging::accumulator')
         # print('   questions[0] = ', engine.state.output['questions'][0])
         # print('   pred_questions[0] = ', engine.state.output['pred_questions'][0])
         accumulator.update(engine.state.output)
+
     def epoch_completed_handler(engine):
         engine.state.metrics[output_name] = accumulator.get_list()
 

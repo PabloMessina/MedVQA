@@ -8,6 +8,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_JPG_IMAGES_SMALL_DIR,
     MIMICCXR_METADATA_CSV_PATH,
     MIMICCXR_SPLIT_CSV_PATH,
+    MIMICCXR_IMAGE_ORIENTATIONS,
 )
 from medvqa.utils.files import load_json_file
 
@@ -48,6 +49,12 @@ def _get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):
     return os.path.join('mimiccxr',
             f'mimiccxr_preprocessed_test_data__({";".join(strings)}).pkl')
 
+def _get_orientation_id(orientation):
+    try:
+        return MIMICCXR_IMAGE_ORIENTATIONS.index(orientation)
+    except ValueError:
+        return 0
+
 def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
 
     tokenizer = self.tokenizer
@@ -71,6 +78,7 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
     self.images = []
     self.questions = []
     self.answers = []
+    self.orientations = []
     
     print('reading MIMIC-CXR splits ...')
     
@@ -112,15 +120,18 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
         dicom_id = None
         if len(views) == 1:
             dicom_id = views[0][0]
+            orientation = views[0][1]
         else:
             for view in views:
                 if view[1] == 'PA' or view[1] == 'AP':
                     dicom_id = view[0]
+                    orientation = view[1]
                     break
             
-        if (dicom_id and split_lambda(split_dict[(subject_id, study_id, dicom_id)]) and
+        if (dicom_id is not None and split_lambda(split_dict[(subject_id, study_id, dicom_id)]) and
                 (subject_id, study_id, dicom_id) not in broken_images):
             image_path = _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
+            orientation_id = _get_orientation_id(orientation)
             for q_idx, a_idxs in report['qa'].items():
                 q_idx = int(q_idx)
                 question = question_list[q_idx]
@@ -130,18 +141,21 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
                 self.images.append(image_path)
                 self.questions.append(tokenizer.string2ids(question.lower()))
                 self.answers.append(tokenizer.string2ids(answer.lower()))
+                self.orientations.append(orientation_id)
 
 class MIMICCXR_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
                 qa_adapted_reports_filename,
+                split_kwargs,
+                tokenizer,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
-                split_kwargs = None,
-                tokenizer = None,
+                use_orientation = False,
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
-                mimiccxr_split = None):
+                mimiccxr_split = None,
+                debug = False):
         
         self.tokenizer = tokenizer
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
@@ -158,8 +172,10 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         preprocessing_save_path,
                         use_tags = use_tags,
                         rid2tags_path = rid2tags_path,
+                        use_orientation = use_orientation,
                         dataset_name = 'MIMIC-CXR',
-                        split_kwargs = split_kwargs)
+                        split_kwargs = split_kwargs,
+                        debug = debug)
 
     def _preprocess_data(self):
         _preprocess_data(self, self.qa_adapted_reports_filename, lambda split : split != 'test')
@@ -170,6 +186,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 qa_adapted_reports_filename,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
+                use_orientation = False,
                 tokenizer = None,
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
@@ -190,6 +207,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         use_tags = use_tags,
+                        use_orientation = use_orientation,
                         rid2tags_path = rid2tags_path,
                         dataset_name = 'MIMIC-CXR')
 

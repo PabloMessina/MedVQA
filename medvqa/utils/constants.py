@@ -51,5 +51,9 @@ METRIC2SHORT = {
     'ciderD': 'cD',
     'medcomp': 'mdcmp',
     'wmedcomp': 'wmdcmp',
-    'medtagf1': 'mtf1',    
+    'medtagf1': 'mtf1',
+    'orienacc': 'oracc',
 }
+
+IUXRAY_DATASET_ID = 0
+MIMICCXR_DATASET_ID = 1

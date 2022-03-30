@@ -6,6 +6,7 @@ from medvqa.datasets.iuxray import (
     IUXRAY_CACHE_DIR,
     IUXRAY_REPORTS_MIN_JSON_PATH,
     IUXRAY_IMAGE_INFO_JSON_PATH,
+    IUXRAY_IMAGE_ORIENTATIONS,
 )
 
 _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
@@ -28,10 +29,11 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
                 qa_adapted_reports_filename,
+                split_kwargs,
+                tokenizer,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
-                split_kwargs = None,
-                tokenizer = None,
+                use_orientation = False,
                 iuxray_metadata = None,
                 iuxray_image_info = None,
                 iuxray_qa_reports = None):
@@ -50,6 +52,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         use_tags = use_tags,
+                        use_orientation = use_orientation,
                         rid2tags_path = rid2tags_path,
                         dataset_name = 'IU X-Ray',
                         split_kwargs = split_kwargs)
@@ -76,7 +79,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         self.question_ids = []        
         self.images = []
         self.questions = []
-        self.answers = []                       
+        self.answers = []
+        self.orientations = []                     
         
         print('loading IU X-ray vqa dataset ...')
 
@@ -106,6 +110,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         break
 
             if image_path:
+                orientation_id = IUXRAY_IMAGE_ORIENTATIONS.index(iuxray_image_info['classification'][image_name])
                 for q_idx, a_idxs in report['qa'].items():
                     q_idx = int(q_idx)
                     question = question_list[q_idx]
@@ -115,3 +120,4 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                     self.images.append(image_path)
                     self.questions.append(tokenizer.string2ids(question.lower()))
                     self.answers.append(tokenizer.string2ids(answer.lower()))
+                    self.orientations.append(orientation_id)

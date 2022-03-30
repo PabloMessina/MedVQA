@@ -1,19 +1,34 @@
 import torch
 
+from medvqa.utils.constants import MIMICCXR_DATASET_ID
+
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
-        use_tags=False, tags_criterion=None):
+            # tags aux task
+            use_tags=False,
+            tags_criterion=None,
+            # orientation aux task
+            use_orientation=False,
+            iuxray_orientation_criterion=None,
+            mimiccxr_orientation_criterion=None,
+    ):
     
     def step_fn(unused_engine, batch):
 
+        # Extract elements from batch
         idxs = batch['idx']
         images = batch['i'].to(device)
         questions = batch['q'].to(device)
         question_lengths = batch['ql']
         answers = batch['a'].to(device)        
+        
         if use_tags:
             tags = batch['tags'].to(device)
+        
+        if use_orientation:
+            dataset_id = batch['dataset_id']
+            orientation = batch['orientation'].to(device)
 
-        # zero grad if training
+        # Zero grad if training
         if training:
             optimizer.zero_grad()
         
@@ -21,24 +36,56 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
             model.train(training)
 
-            # forward pass
+            # Prepare args for model forward
+            model_kwargs = {
+                'images': images,
+                'questions': questions,
+                'question_lengths': question_lengths,
+            }
+
             if training:
-                output = model(images, questions, question_lengths, answers=answers, mode='train')
+                model_kwargs['answers'] = answers
+                model_kwargs['mode'] = 'train'
             else:
-                output = model(images, questions, question_lengths, max_answer_length=answers.size(1), mode='eval')                    
+                model_kwargs['max_answer_length'] = answers.size(1)
+                model_kwargs['mode'] = 'eval'
+
+            if use_orientation:
+                if dataset_id == MIMICCXR_DATASET_ID:
+                    model_kwargs['mimiccxr_foward'] = True
+                else:
+                    model_kwargs['iuxray_foward'] = True
+
+            # Forward pass
+            model_output = model(**model_kwargs)
+
+            pred_answer_logits = model_output['pred_answers']
+            pred_question_logits = model_output['pred_questions']
             
-            pred_answer_logits = output['pred_answers']
-            pred_question_logits = output['pred_questions']
             if use_tags:
-                pred_tags_logits = output['pred_tags']
+                pred_tags_logits = model_output['pred_tags']
+            
+            if use_orientation:
+                if dataset_id == MIMICCXR_DATASET_ID:
+                    pred_orientation_logits = model_output['mimiccxr_pred_orientation']
+                else:
+                    pred_orientation_logits = model_output['iuxray_pred_orientation']
 
             # compute losses
             answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
             question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
             batch_loss = answer_loss + question_loss
+            
             if use_tags:
                 tags_loss = tags_criterion(pred_tags_logits, tags.float())
                 batch_loss += tags_loss
+
+            if use_orientation:
+                if dataset_id == MIMICCXR_DATASET_ID:
+                    orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
+                else:
+                    orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
+                batch_loss += orientation_loss
 
             # backward pass + optimizer step if training
             if training:
@@ -60,6 +107,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if use_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
+        if use_orientation:
+            output['orientation'] = orientation.detach()
+            output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
+            output['dataset_id'] = dataset_id
 
         return output
     

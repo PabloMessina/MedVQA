@@ -2,7 +2,6 @@ import random
 import numpy as np
 import pandas as pd
 from PIL import Image
-from sklearn import metrics
 from sklearn.metrics import (
     precision_recall_fscore_support as prf1s,
     accuracy_score,
@@ -13,6 +12,7 @@ from medvqa.utils.constants import (
     NLP_METRICS,
     METRIC2SHORT,
 )
+from medvqa.utils.metrics import average_ignoring_nones     
 
 def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
     
@@ -69,11 +69,11 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
         
         else:
             # overall
-            output['overall'][name] = sum(metrics_dict[name]) / len(metrics_dict[name])
+            output['overall'][name] =  average_ignoring_nones(metrics_dict[name])
             # per question
             for i, q in enumerate(unique_questions):
                 tmp = output['per_question'][q]
-                tmp[name] = sum(metrics_dict[name][j] for j in idxs_per_q[i]) / len(idxs_per_q[i])
+                tmp[name] = average_ignoring_nones(metrics_dict[name][j] for j in idxs_per_q[i])
     
     # count per question
     for i, q in enumerate(unique_questions):
@@ -179,7 +179,10 @@ def _chexpert_label_array_to_string(label_array):
 
    
 class VQAExamplePlotter:
-    def __init__(self, dataset_name, results, medical_tags_extractor=None):
+    def __init__(self, dataset_name, results,
+                medical_tags_extractor=None,
+                orientation_names=None,
+        ):
         dataset = results[f'{dataset_name}_dataset']
         tokenizer = results['tokenizer']
         metrics_dict = results[f'{dataset_name}_metrics'] 
@@ -192,13 +195,23 @@ class VQAExamplePlotter:
         self.answers = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.answers[i])) for i in idxs]
         self.pred_questions = [tokenizer.ids2string(x) for x in metrics_dict['pred_questions']]
         self.pred_answers = [tokenizer.ids2string(x) for x in metrics_dict['pred_answers']]
+        self.dataset = dataset
 
         # optional
         if medical_tags_extractor is not None:
             assert 'pred_tags' in metrics_dict
-            tags = medical_tags_extractor.tags
-            self.tags = [[tags[i] for i in dataset.rid2tags[dataset.report_ids[i]]] for i in idxs]
-            self.pred_tags = [[tags[i] for i,b in enumerate(x) if b] for x in metrics_dict['pred_tags']]
+            self.tags = medical_tags_extractor.tags
+            self.pred_tags = metrics_dict['pred_tags']
+        else:
+            self.tags = None
+        
+        if orientation_names is not None:
+            assert 'pred_orientation' in metrics_dict
+            self.orientation_names = orientation_names
+            self.orientations = [dataset.orientations[i] for i in idxs]
+            self.pred_orientations = metrics_dict['pred_orientation']
+        else:
+            self.orientations = None
 
     def inspect_example(self, metrics_to_inspect, metrics_to_rank=None, idx=None, question=None, mode='random'):
 
@@ -220,14 +233,23 @@ class VQAExamplePlotter:
         print('idx:', idx)
         print('--')
         print('question:', self.questions[idx])
-        print('answer:', self.answers[idx])
-        print('--')
         print('pred_question:', self.pred_questions[idx])
+        print('--')
+        print('answer:', self.answers[idx])
         print('pred_answer:', self.pred_answers[idx])
         print('--')
-        print('tags:', self.tags[idx])
-        print('pred tags:', self.pred_tags[idx])
-        print('--')
+        if self.orientation_names:
+            orien = self.orientation_names[self.orientations[idx]]
+            pred_orien = self.orientation_names[self.pred_orientations[idx]]
+            print('orientation:', orien)
+            print('pred orientation:', pred_orien)
+            print('--')
+        if self.tags:
+            tags = [self.tags[i] for i in self.dataset.rid2tags[self.dataset.report_ids[self.idxs[idx]]]]
+            pred_tags = [self.tags[i] for i,b in enumerate(self.pred_tags[idx]) if b]
+            print('tags:', tags)
+            print('pred tags:', pred_tags)
+            print('--')
         print('chexpert_labels_gt:', self.metrics_dict['chexpert_labels_gt'][idx])
         print('chexpert_labels_gen:', self.metrics_dict['chexpert_labels_gen'][idx])
         print('chexpert_labels_gt (verbose):', _chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gt'][idx]))

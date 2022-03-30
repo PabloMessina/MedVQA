@@ -21,10 +21,10 @@ class MultiLabelF1score(Metric):
 
     def update(self, output):
         pred_tags, gt_tags = output
-        assert pred_tags.shape == gt_tags.shape
-        assert pred_tags.size(1) == 1956, pred_tags.shape
-        assert gt_tags.size(1) == 1956, gt_tags.shape
-        assert len(pred_tags.shape) == 2
+        # assert pred_tags.shape == gt_tags.shape
+        # assert pred_tags.size(1) == 1956, pred_tags.shape
+        # assert gt_tags.size(1) == 1956, gt_tags.shape
+        # assert len(pred_tags.shape) == 2
         n = pred_tags.size(0)
         for i in range(n):
             pred = pred_tags[i]
@@ -37,7 +37,7 @@ class MultiLabelF1score(Metric):
 
     def compute(self):
         if self._count == 0:
-            raise NotComputableError('Medical Completness needs at least one example before it can be computed.')
+            raise NotComputableError('MultiLabel f1score needs at least one example before it can be computed.')
         if self.record_scores:
             return self._scores
         return self._acc_score / self._count

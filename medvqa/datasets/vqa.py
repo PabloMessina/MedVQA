@@ -61,7 +61,11 @@ def _split_data_train_val(question_ids, answers, n_vals_per_question=10, min_que
 class VQADataset(Dataset):
     
     def __init__(self, report_ids, images, questions, answers, indices, transform, source_dataset_name,
-                use_tags = False, rid2tags = None):
+                # aux task: medical tags
+                use_tags = False, rid2tags = None,
+                # aux task: image orientation
+                use_orientation = False, orientations = None,
+        ):
         self.report_ids = report_ids
         self.images = images
         self.questions = questions
@@ -70,9 +74,11 @@ class VQADataset(Dataset):
         self.transform = transform
         self.source_dataset_name = source_dataset_name
         
-        # optional auxilariy tasks
+        # optional auxiliary tasks
         self.use_tags = use_tags
         self.rid2tags = rid2tags
+        self.use_orientation = use_orientation
+        self.orientations = orientations
     
     def __len__(self):
         return len(self.indices)
@@ -87,45 +93,57 @@ class VQADataset(Dataset):
         )
         if self.use_tags:
             output['tags'] = self.rid2tags[self.report_ids[idx]]
+        if self.use_orientation:
+            output['orientation'] = self.orientations[idx]
         return output
 
-class VQA_Trainer:
-    
-    def __init__(self, transform, batch_size, collate_batch_fn,
+class VQA_Base:
+
+    def __init__(self, training, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 use_tags = False,
+                use_orientation = False,
                 rid2tags_path = None,
                 dataset_name = None,
                 split_kwargs = None,
+                debug = False,
         ):
     
+        self.training = training
         self.transform = transform
         self.use_tags = use_tags
+        self.use_orientation = use_orientation
         
         if use_tags:
             assert rid2tags_path is not None
             self.rid2tags = load_pickle(rid2tags_path)
 
         # create absolute path from relative path
-        preprocessing_save_path = os.path.join(CACHE_DIR, preprocessing_save_path)
+        if not debug:
+            preprocessing_save_path = os.path.join(CACHE_DIR, preprocessing_save_path)
+            first_time = not self._load_cached_data(preprocessing_save_path)
 
-        first_time = not self._load_cached_data(preprocessing_save_path)
-
-        if first_time:
+        if debug or first_time:
             
-            self.dataset_name = dataset_name            
+            self.dataset_name = dataset_name
             self._preprocess_data()
-            self._split_data_train_val(**split_kwargs)
-            self._save_data(preprocessing_save_path)
+
+            if training:
+                self._split_data_train_val(**split_kwargs)
+            
+            if not debug:
+                self._save_data(preprocessing_save_path)
         
-        self._generate_train_val_datasets(batch_size)
-        self._generate_train_val_dataloaders(batch_size, collate_batch_fn)
+        self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn)        
         print('done!')
 
     def __len__(self):
         return len(self.report_ids)
     
     def _preprocess_data(self):
+        raise NotImplementedError('Make sure your specialized class implements this function')
+    
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):
         raise NotImplementedError('Make sure your specialized class implements this function')
 
     def _load_cached_data(self, preprocessing_save_path):
@@ -139,8 +157,11 @@ class VQA_Trainer:
         self.images = data['images']
         self.questions = data['questions']
         self.answers = data['answers']
-        self.train_indices = data['train_indices']
-        self.val_indices = data['val_indices']
+        if self.training:
+            self.train_indices = data['train_indices']
+            self.val_indices = data['val_indices']
+        if self.use_orientation:
+            self.orientations = data['orientations']
         print ('\tYes, it is, data successfully loaded :)')
         return True
     
@@ -152,9 +173,12 @@ class VQA_Trainer:
             images = self.images,
             questions = self.questions,
             answers = self.answers,
-            train_indices = self.train_indices,
-            val_indices = self.val_indices,
         )
+        if self.training:
+            data['train_indices'] = self.train_indices
+            data['val_indices'] = self.val_indices
+        if self.use_orientation:
+            data['orientations'] = self.orientations
         save_to_pickle(data, preprocessing_save_path)
         print('\tdone!')
         return True
@@ -171,6 +195,31 @@ class VQA_Trainer:
                                                           min_train_examples_per_question)                
         self.train_indices = train_indices
         self.val_indices = val_indices
+
+class VQA_Trainer(VQA_Base):
+    
+    def __init__(self, transform, batch_size, collate_batch_fn,
+                preprocessing_save_path,
+                use_tags = False,
+                use_orientation = False,
+                rid2tags_path = None,
+                dataset_name = None,
+                split_kwargs = None,
+                debug = False,
+        ):
+    
+        super().__init__(True, transform, batch_size, collate_batch_fn,
+                preprocessing_save_path,
+                use_tags = use_tags,
+                use_orientation = use_orientation,
+                rid2tags_path = rid2tags_path,
+                dataset_name = dataset_name,
+                split_kwargs = split_kwargs,
+                debug = debug)
+
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):        
+        self._generate_train_val_datasets(batch_size)
+        self._generate_train_val_dataloaders(batch_size, collate_batch_fn)
 
     def _generate_train_val_datasets(self, batch_size):
 
@@ -192,8 +241,13 @@ class VQA_Trainer:
                 self.train_datasets.append(VQADataset(
                     self.report_ids, self.images, self.questions, self.answers,
                     indices, self.transform, self.dataset_name,
+                    # aux task: medical tags prediction
                     use_tags = self.use_tags,
-                    rid2tags = self.rid2tags if self.use_tags else None))
+                    rid2tags = self.rid2tags if self.use_tags else None,
+                    # aux task: orientation
+                    use_orientation = self.use_orientation,
+                    orientations = self.orientations if self.use_orientation else None,
+                ))
                 if len(acc_indices) > 0:
                     acc_indices = []
         print(f'\tlen(self.train_datasets) = {len(self.train_datasets)}')
@@ -202,8 +256,13 @@ class VQA_Trainer:
         self.val_dataset = VQADataset(
             self.report_ids, self.images, self.questions, self.answers, self.val_indices,
             self.transform, self.dataset_name,
+            # aux task: medical tags prediction
             use_tags = self.use_tags,
-            rid2tags = self.rid2tags if self.use_tags else None)
+            rid2tags = self.rid2tags if self.use_tags else None,
+            # aux task: orientation
+            use_orientation = self.use_orientation,
+            orientations = self.orientations if self.use_orientation else None,
+        )
         
             
     def _generate_train_val_dataloaders(self, batch_size, collate_batch_fn):
@@ -222,70 +281,29 @@ class VQA_Trainer:
                                          shuffle=False,
                                          collate_fn=collate_batch_fn)
 
-class VQA_Evaluator:
+class VQA_Evaluator(VQA_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,                
                 use_tags = False,
+                use_orientation = False,
                 rid2tags_path = None,
                 dataset_name = None,
+                debug = False,
         ):
     
-        self.transform = transform
-        self.use_tags = use_tags
-        
-        if use_tags:
-            assert rid2tags_path is not None
-            self.rid2tags = load_pickle(rid2tags_path)
+        super().__init__(False, transform, batch_size, collate_batch_fn,
+                preprocessing_save_path,
+                use_tags = use_tags,
+                use_orientation = use_orientation,
+                rid2tags_path = rid2tags_path,
+                dataset_name = dataset_name,
+                debug = debug)
 
-        # create absolute path from relative path
-        preprocessing_save_path = os.path.join(CACHE_DIR, preprocessing_save_path)
-
-        first_time = not self._load_cached_data(preprocessing_save_path)
-
-        if first_time:
-            
-            self.dataset_name = dataset_name
-            self._preprocess_data()
-            self._save_data(preprocessing_save_path)
-        
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):
         self.test_indices = list(range(len(self.report_ids)))
         self._generate_test_dataset()
         self._generate_test_dataloader(batch_size, collate_batch_fn)
-        print('done!')
-
-    def __len__(self):
-        return len(self.report_ids)
-    
-    def _preprocess_data(self):
-        raise NotImplementedError('Make sure your especialized class implements this function')
-
-    def _load_cached_data(self, preprocessing_save_path):
-        print (f'checking if data is already cached in path {preprocessing_save_path} ...')
-        data = load_pickle(preprocessing_save_path)
-        if data is None:
-            print('\tNo, it wasn\'t :(')
-            return False        
-        self.dataset_name = data['dataset_name']
-        self.report_ids = data['report_ids']
-        self.images = data['images']
-        self.questions = data['questions']
-        self.answers = data['answers']
-        print ('\tYes, it was, data successfully loaded :)')
-        return True
-    
-    def _save_data(self, preprocessing_save_path):
-        print('saving data to', preprocessing_save_path)
-        data = dict(
-            dataset_name = self.dataset_name,
-            report_ids = self.report_ids,
-            images = self.images,
-            questions = self.questions,
-            answers = self.answers,
-        )
-        save_to_pickle(data, preprocessing_save_path)
-        print('\tdone!')
-        return True
 
     def _generate_test_dataset(self):
 
@@ -294,8 +312,13 @@ class VQA_Evaluator:
         self.test_dataset = VQADataset(
             self.report_ids, self.images, self.questions, self.answers, self.test_indices,
             self.transform, self.dataset_name,
+            # aux task: medical tags prediction
             use_tags = self.use_tags,
-            rid2tags = self.rid2tags if self.use_tags else None)
+            rid2tags = self.rid2tags if self.use_tags else None,
+            # aux task: orientation
+            use_orientation = self.use_orientation,
+            orientations = self.orientations if self.use_orientation else None,
+        )
         
             
     def _generate_test_dataloader(self, batch_size, collate_batch_fn):
