@@ -71,7 +71,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 else:
                     pred_orientation_logits = model_output['iuxray_pred_orientation']
 
-            # compute losses
+            # Compute losses
             answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
             question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
             batch_loss = answer_loss + question_loss
@@ -87,12 +87,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
                 batch_loss += orientation_loss
 
-            # backward pass + optimizer step if training
+            # Backward pass + optimizer step if training
             if training:
                 batch_loss.backward()
                 optimizer.step()
 
-        # computed predicted Q & A
+        # Compute predicted Q & A
         pred_questions = pred_question_logits.argmax(-1)
         pred_answers = pred_answer_logits.argmax(-1)        
         

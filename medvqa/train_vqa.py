@@ -268,7 +268,7 @@ def train_model(
     count_print('Creating MIMIC-CXR vqa trainer ...')
     mimiccxr_vqa_trainer = MIMICCXR_VQA_Trainer(
         transform = img_transform,
-        collate_batch_fn =     mimiccxr_collate_batch_fn,
+        collate_batch_fn = mimiccxr_collate_batch_fn,
         tokenizer = tokenizer,
         mimiccxr_qa_reports = mimiccxr_qa_reports,
         use_tags = use_tags,

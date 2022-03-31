@@ -70,9 +70,9 @@ class OpenEndedVQA(nn.Module):
         if classify_orientation:
             self.W_ori_mimiccxr = nn.Linear(image_local_feat_size * 2, len(MIMICCXR_IMAGE_ORIENTATIONS))
             self.W_ori_iuxray = nn.Linear(image_local_feat_size * 2, len(IUXRAY_IMAGE_ORIENTATIONS))
-            self.ori_aux_task = True
+            self.orien_aux_task = True
         else:
-            self.ori_aux_task = False
+            self.orien_aux_task = False
 
     def forward(
         self,
@@ -119,7 +119,7 @@ class OpenEndedVQA(nn.Module):
             tags_logits = self.W_tags(global_feat)
             output['pred_tags'] = tags_logits
         
-        if self.ori_aux_task:            
+        if self.orien_aux_task:            
             if iuxray_foward:
                 output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
             if mimiccxr_foward:

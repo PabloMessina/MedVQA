@@ -11,7 +11,7 @@ from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 
 REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
 
-_LINKING_WORDS = ['when', 'and', 'but', 'however', 'although', 'should', 'since', 'unless', 'nevertheless', 'although']
+_LINKING_WORDS = ['when', 'and', 'but', 'however', 'although', 'should', 'since', 'unless', 'nevertheless']
 _aux = '('+'|'.join(f'\\b{x}\\b' for x in _LINKING_WORDS)+'|[,;.:])'
 _aux = f'{_aux}+(\\s+{_aux}+)*'
 _SEP_REGEX = re.compile(_aux, re.IGNORECASE)
