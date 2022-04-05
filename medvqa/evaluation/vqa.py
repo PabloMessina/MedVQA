@@ -12,6 +12,7 @@ from medvqa.utils.constants import (
     NLP_METRICS,
     METRIC2SHORT,
 )
+from medvqa.utils.files import load_json_file
 from medvqa.utils.metrics import average_ignoring_nones     
 
 def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
@@ -140,10 +141,12 @@ def extend_row(row, metrics_dict, metric_name):
     else:
         row.append(met)
 
-def get_overall_metrics_dataframe(aggregated_metrics, metric_names = None):
+def get_overall_metrics_dataframe(aggregated_metrics, metric_names = None, metrics_to_ignore=None):
     metrics_dict = aggregated_metrics['overall']
     if metric_names is None:
         metric_names = list(metrics_dict.keys())
+    if metrics_to_ignore is not None:
+        metric_names = [x for x  in metric_names if x not in metrics_to_ignore]
     metric_names.sort(key=_rank_metric_name)
     columns = []
     data = [[]]
@@ -182,6 +185,8 @@ class VQAExamplePlotter:
     def __init__(self, dataset_name, results,
                 medical_tags_extractor=None,
                 orientation_names=None,
+                use_chexpert=False,
+                qa_adapted_reports_file_path=None,
         ):
         dataset = results[f'{dataset_name}_dataset']
         tokenizer = results['tokenizer']
@@ -198,6 +203,7 @@ class VQAExamplePlotter:
         self.dataset = dataset
 
         # optional
+
         if medical_tags_extractor is not None:
             assert 'pred_tags' in metrics_dict
             self.tags = medical_tags_extractor.tags
@@ -212,6 +218,17 @@ class VQAExamplePlotter:
             self.pred_orientations = metrics_dict['pred_orientation']
         else:
             self.orientations = None
+
+        if use_chexpert:
+            assert 'pred_chexpert' in metrics_dict
+            self.use_chexpert = use_chexpert
+            self.pred_chexpert_labels = metrics_dict['pred_chexpert']
+
+        if qa_adapted_reports_file_path is not None:
+            self.reports = load_json_file(qa_adapted_reports_file_path)
+        else:
+            self.reports is None
+
 
     def inspect_example(self, metrics_to_inspect, metrics_to_rank=None, idx=None, question=None, mode='random'):
 
@@ -229,6 +246,14 @@ class VQAExamplePlotter:
                     idx = indices[-1]
                 else:
                     idx = indices[0]
+        
+        if self.reports:
+            rid = self.dataset.report_ids[self.idxs[idx]]
+            report = self.reports['reports'][rid]
+            report = '. '.join(report['sentences'][i] for i in report['matched'])
+            print('Report:\n')
+            print(report)
+            print("\n===================")
         
         print('idx:', idx)
         print('--')
@@ -249,6 +274,12 @@ class VQAExamplePlotter:
             pred_tags = [self.tags[i] for i,b in enumerate(self.pred_tags[idx]) if b]
             print('tags:', tags)
             print('pred tags:', pred_tags)
+            print('--')
+        if self.use_chexpert:
+            chexpert_labels = _chexpert_label_array_to_string(self.dataset.chexpert_labels[self.dataset.report_ids[self.idxs[idx]]])
+            pred_chexpert_labels = _chexpert_label_array_to_string(self.pred_chexpert_labels[idx])
+            print('chexpert_labels:', chexpert_labels)
+            print('pred_chexpert_labels:', pred_chexpert_labels)
             print('--')
         print('chexpert_labels_gt:', self.metrics_dict['chexpert_labels_gt'][idx])
         print('chexpert_labels_gen:', self.metrics_dict['chexpert_labels_gen'][idx])

@@ -1,2 +1,3 @@
 from .multilabel_f1score import MultiLabelF1score
+from .multilabel_accuracy import MultiLabelAccuracy
 from .orientation_accuracy import DatasetAwareOrientationAccuracy

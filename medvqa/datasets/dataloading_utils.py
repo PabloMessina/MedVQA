@@ -63,7 +63,8 @@ def multi_cyclic_dataloader_sampler(dataloaders, frequencies=None, shuffle=False
 #     batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
 #     return batch_dict
 
-def get_collate_batch_fn(dataset_id, use_tags=False, n_tags=None, use_orientation=False):
+def get_collate_batch_fn(dataset_id, use_tags=False, n_tags=None,
+                         use_orientation=False, use_chexpert=False):
 
     if use_tags:
         mlb = MultiLabelBinarizer(list(range(n_tags)))
@@ -91,6 +92,9 @@ def get_collate_batch_fn(dataset_id, use_tags=False, n_tags=None, use_orientatio
         if use_orientation:
             batch_dict['orientation'] = torch.tensor([batch[i]['orientation'] for i in indexes])
             batch_dict['dataset_id'] = dataset_id
+        
+        if use_chexpert:
+            batch_dict['chexpert'] = torch.tensor([batch[i]['chexpert'] for i in indexes])
             
         return batch_dict
 

@@ -152,6 +152,8 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_filename = None,
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
                 mimiccxr_split = None,
@@ -167,12 +169,15 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         qa_adapted_reports_filename, split_kwargs, tokenizer)
 
         rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
+        chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         use_tags = use_tags,
                         rid2tags_path = rid2tags_path,
                         use_orientation = use_orientation,
+                        use_chexpert = use_chexpert,
+                        chexpert_labels_path = chexpert_labels_path,
                         dataset_name = 'MIMIC-CXR',
                         split_kwargs = split_kwargs,
                         debug = debug)
@@ -187,6 +192,8 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_filename = None,
                 tokenizer = None,
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
@@ -203,12 +210,15 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         qa_adapted_reports_filename, tokenizer)
         
         rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
+        chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         use_tags = use_tags,
-                        use_orientation = use_orientation,
                         rid2tags_path = rid2tags_path,
+                        use_orientation = use_orientation,
+                        use_chexpert = use_chexpert,
+                        chexpert_labels_path = chexpert_labels_path,
                         dataset_name = 'MIMIC-CXR')
 
     def _preprocess_data(self):

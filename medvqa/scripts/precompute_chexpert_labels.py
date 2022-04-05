@@ -1,4 +1,3 @@
-from tokenize import Token
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import CACHE_DIR

@@ -34,6 +34,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_filename = None,
                 iuxray_metadata = None,
                 iuxray_image_info = None,
                 iuxray_qa_reports = None):
@@ -48,12 +50,15 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         qa_adapted_reports_filename, split_kwargs, tokenizer)
 
         rid2tags_path = os.path.join(IUXRAY_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
+        chexpert_labels_path = os.path.join(IUXRAY_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         use_tags = use_tags,
-                        use_orientation = use_orientation,
                         rid2tags_path = rid2tags_path,
+                        use_orientation = use_orientation,
+                        use_chexpert = use_chexpert,
+                        chexpert_labels_path = chexpert_labels_path,
                         dataset_name = 'IU X-Ray',
                         split_kwargs = split_kwargs)
         

@@ -6,6 +6,7 @@ from medvqa.models.vqa.question_decoder import QuestionDecoder
 from medvqa.models.vqa.answer_decoder import AnswerDecoder
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
+from medvqa.utils.constants import CHEXPERT_LABELS
 
 class OpenEndedVQA(nn.Module):
 
@@ -13,7 +14,9 @@ class OpenEndedVQA(nn.Module):
                  question_vec_size, image_local_feat_size, dropout_prob, device,
                  densenet_pretrained_weights_path=None,                 
                  n_medical_tags=None,
-                 classify_orientation=False):
+                 classify_orientation=False,
+                 classify_chexpert=False,
+                 ):
         super().__init__()
         self.name = 'oevqa(densenet121+bilstm+lstm)'
         self.embedding_table = nn.Embedding(
@@ -74,6 +77,13 @@ class OpenEndedVQA(nn.Module):
         else:
             self.orien_aux_task = False
 
+        # 3) chexpert classifiction
+        if classify_chexpert:
+            self.W_chx = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_LABELS))
+            self.chx_aux_task = True
+        else:
+            self.chx_aux_task = False
+
     def forward(
         self,
         images,
@@ -116,13 +126,15 @@ class OpenEndedVQA(nn.Module):
         # auxiliary tasks (optional)
         
         if self.tags_aux_task:
-            tags_logits = self.W_tags(global_feat)
-            output['pred_tags'] = tags_logits
+            output['pred_tags'] = self.W_tags(global_feat)
         
         if self.orien_aux_task:            
             if iuxray_foward:
                 output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
             if mimiccxr_foward:
                 output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)
+        
+        if self.chx_aux_task:
+            output['pred_chexpert'] = self.W_chx(global_feat)
 
         return output

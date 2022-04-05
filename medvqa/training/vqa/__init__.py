@@ -1,5 +1,6 @@
 import torch
-
+import torch.nn as nn
+from ignite.engine import Engine
 from medvqa.utils.constants import MIMICCXR_DATASET_ID
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
@@ -10,6 +11,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             use_orientation=False,
             iuxray_orientation_criterion=None,
             mimiccxr_orientation_criterion=None,
+            # chexpert aux task
+            use_chexpert=False,
+            chexpert_criterion=None,
     ):
     
     def step_fn(unused_engine, batch):
@@ -22,11 +26,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         answers = batch['a'].to(device)        
         
         if use_tags:
-            tags = batch['tags'].to(device)
-        
+            tags = batch['tags'].to(device)        
         if use_orientation:
             dataset_id = batch['dataset_id']
             orientation = batch['orientation'].to(device)
+        if use_chexpert:
+            chexpert = batch['chexpert'].to(device)
 
         # Zero grad if training
         if training:
@@ -63,13 +68,14 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             pred_question_logits = model_output['pred_questions']
             
             if use_tags:
-                pred_tags_logits = model_output['pred_tags']
-            
+                pred_tags_logits = model_output['pred_tags']            
             if use_orientation:
                 if dataset_id == MIMICCXR_DATASET_ID:
                     pred_orientation_logits = model_output['mimiccxr_pred_orientation']
                 else:
                     pred_orientation_logits = model_output['iuxray_pred_orientation']
+            if use_chexpert:
+                pred_chexpert_logits = model_output['pred_chexpert']
 
             # Compute losses
             answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
@@ -79,13 +85,14 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             if use_tags:
                 tags_loss = tags_criterion(pred_tags_logits, tags.float())
                 batch_loss += tags_loss
-
             if use_orientation:
                 if dataset_id == MIMICCXR_DATASET_ID:
                     orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
                 else:
                     orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
-                batch_loss += orientation_loss
+                batch_loss += orientation_loss            
+            if use_chexpert:
+                batch_loss += chexpert_criterion(pred_chexpert_logits, chexpert.float())
 
             # Backward pass + optimizer step if training
             if training:
@@ -111,7 +118,48 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['orientation'] = orientation.detach()
             output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
             output['dataset_id'] = dataset_id
+        if use_chexpert:
+            output['chexpert'] = chexpert.detach().cpu()
+            output['pred_chexpert'] = (pred_chexpert_logits.detach() > 0).cpu()
 
         return output
     
     return step_fn
+
+def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
+               device, training=False, optimizer=None):
+    # Criterion
+    nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
+    
+    if use_tags: # auxiliary task
+        tags_criterion = nn.BCEWithLogitsLoss()
+    else:
+        tags_criterion = None
+    
+    if use_orientation: # auxiliary task
+        iuxray_orientation_criterion = nn.CrossEntropyLoss()
+        mimiccxr_orientation_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore unknown
+    else:
+        iuxray_orientation_criterion = None
+        mimiccxr_orientation_criterion = None
+
+    if use_chexpert: # auxiliary task
+        chexpert_criterion = nn.BCEWithLogitsLoss()
+    else:
+        chexpert_criterion = None
+
+    # Create engine
+    step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
+                          training=training, device=device,
+                          # tags auxiliary task
+                          use_tags=use_tags,
+                          tags_criterion=tags_criterion,
+                          # orientation auxiliary task
+                          use_orientation=use_orientation,
+                          iuxray_orientation_criterion=iuxray_orientation_criterion,
+                          mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
+                          # chexpert auxiliary task
+                          use_chexpert=use_chexpert,
+                          chexpert_criterion=chexpert_criterion)
+    engine = Engine(step_fn)
+    return engine

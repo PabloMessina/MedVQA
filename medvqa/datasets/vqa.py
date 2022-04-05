@@ -65,6 +65,8 @@ class VQADataset(Dataset):
                 use_tags = False, rid2tags = None,
                 # aux task: image orientation
                 use_orientation = False, orientations = None,
+                # aux task: chexpert labels
+                use_chexpert = False, chexpert_labels = None,
         ):
         self.report_ids = report_ids
         self.images = images
@@ -79,6 +81,8 @@ class VQADataset(Dataset):
         self.rid2tags = rid2tags
         self.use_orientation = use_orientation
         self.orientations = orientations
+        self.use_chexpert = use_chexpert
+        self.chexpert_labels = chexpert_labels
     
     def __len__(self):
         return len(self.indices)
@@ -95,6 +99,8 @@ class VQADataset(Dataset):
             output['tags'] = self.rid2tags[self.report_ids[idx]]
         if self.use_orientation:
             output['orientation'] = self.orientations[idx]
+        if self.use_chexpert:
+            output['chexpert'] = self.chexpert_labels[self.report_ids[idx]]
         return output
 
 class VQA_Base:
@@ -102,8 +108,10 @@ class VQA_Base:
     def __init__(self, training, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 use_tags = False,
-                use_orientation = False,
                 rid2tags_path = None,
+                use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_path = None,
                 dataset_name = None,
                 split_kwargs = None,
                 debug = False,
@@ -113,10 +121,15 @@ class VQA_Base:
         self.transform = transform
         self.use_tags = use_tags
         self.use_orientation = use_orientation
+        self.use_chexpert = use_chexpert
         
         if use_tags:
             assert rid2tags_path is not None
             self.rid2tags = load_pickle(rid2tags_path)
+
+        if use_chexpert:
+            assert chexpert_labels_path is not None
+            self.chexpert_labels = load_pickle(chexpert_labels_path)
 
         # create absolute path from relative path
         if not debug:
@@ -201,8 +214,10 @@ class VQA_Trainer(VQA_Base):
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 use_tags = False,
-                use_orientation = False,
                 rid2tags_path = None,
+                use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_path = None,
                 dataset_name = None,
                 split_kwargs = None,
                 debug = False,
@@ -211,8 +226,10 @@ class VQA_Trainer(VQA_Base):
         super().__init__(True, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 use_tags = use_tags,
-                use_orientation = use_orientation,
                 rid2tags_path = rid2tags_path,
+                use_orientation = use_orientation,
+                use_chexpert = use_chexpert,
+                chexpert_labels_path = chexpert_labels_path,
                 dataset_name = dataset_name,
                 split_kwargs = split_kwargs,
                 debug = debug)
@@ -241,12 +258,15 @@ class VQA_Trainer(VQA_Base):
                 self.train_datasets.append(VQADataset(
                     self.report_ids, self.images, self.questions, self.answers,
                     indices, self.transform, self.dataset_name,
-                    # aux task: medical tags prediction
+                    # aux task: medical tags
                     use_tags = self.use_tags,
                     rid2tags = self.rid2tags if self.use_tags else None,
                     # aux task: orientation
                     use_orientation = self.use_orientation,
                     orientations = self.orientations if self.use_orientation else None,
+                    # aux task: chexpert labels
+                    use_chexpert = self.use_chexpert,
+                    chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
                 ))
                 if len(acc_indices) > 0:
                     acc_indices = []
@@ -256,12 +276,15 @@ class VQA_Trainer(VQA_Base):
         self.val_dataset = VQADataset(
             self.report_ids, self.images, self.questions, self.answers, self.val_indices,
             self.transform, self.dataset_name,
-            # aux task: medical tags prediction
+            # aux task: medical tags
             use_tags = self.use_tags,
             rid2tags = self.rid2tags if self.use_tags else None,
             # aux task: orientation
             use_orientation = self.use_orientation,
             orientations = self.orientations if self.use_orientation else None,
+            # aux task: chexpert labels
+            use_chexpert = self.use_chexpert,
+            chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
         )
         
             
@@ -286,8 +309,10 @@ class VQA_Evaluator(VQA_Base):
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,                
                 use_tags = False,
-                use_orientation = False,
                 rid2tags_path = None,
+                use_orientation = False,
+                use_chexpert = False,
+                chexpert_labels_path = None,
                 dataset_name = None,
                 debug = False,
         ):
@@ -295,8 +320,10 @@ class VQA_Evaluator(VQA_Base):
         super().__init__(False, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 use_tags = use_tags,
-                use_orientation = use_orientation,
                 rid2tags_path = rid2tags_path,
+                use_orientation = use_orientation,
+                use_chexpert = use_chexpert,
+                chexpert_labels_path = chexpert_labels_path,
                 dataset_name = dataset_name,
                 debug = debug)
 
@@ -318,6 +345,9 @@ class VQA_Evaluator(VQA_Base):
             # aux task: orientation
             use_orientation = self.use_orientation,
             orientations = self.orientations if self.use_orientation else None,
+            # aux task: chexpert labels
+            use_chexpert = self.use_chexpert,
+            chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
         )
         
             

@@ -53,6 +53,7 @@ METRIC2SHORT = {
     'wmedcomp': 'wmdcmp',
     'medtagf1': 'mtf1',
     'orienacc': 'oracc',
+    'chxlabelacc': 'chxlacc',
 }
 
 IUXRAY_DATASET_ID = 0

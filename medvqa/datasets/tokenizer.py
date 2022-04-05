@@ -26,7 +26,7 @@ class Tokenizer:
     
     def __init__(self, qa_adapted_filenames, qa_adapted_datasets=None, min_freq=5, overwrite=False):
 
-        assert type(qa_adapted_datasets) is list, type(qa_adapted_filenames)
+        assert type(qa_adapted_filenames) is list, type(qa_adapted_filenames)
 
         vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq)
 

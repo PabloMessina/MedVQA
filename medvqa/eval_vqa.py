@@ -3,9 +3,8 @@ import argparse
 from copy import deepcopy
 
 import torch
-import torch.nn as nn
 
-from ignite.engine import Events, Engine
+from ignite.engine import Events
 from ignite.handlers.timing import Timer
 
 from medvqa.utils.constants import (
@@ -22,6 +21,7 @@ from medvqa.metrics import (
     attach_medical_completeness,
     attach_weighted_medical_completeness,
     attach_medical_tags_f1score,
+    attach_chexpert_labels_accuracy,
     attach_dataset_aware_orientation_accuracy,
     attach_loss
 )
@@ -48,10 +48,8 @@ from medvqa.utils.files import (
     get_results_folder_path,
     save_to_pickle,
 )
-from medvqa.training.vqa import get_step_fn
-from medvqa.datasets.dataloading_utils import (
-    get_collate_batch_fn
-)
+from medvqa.training.vqa import get_engine
+from medvqa.datasets.dataloading_utils import get_collate_batch_fn
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Evaluator
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
 from medvqa.utils.images import get_image_transform
@@ -141,6 +139,11 @@ def _evaluate_model(
     
     # auxiliary task: orientation classification
     use_orientation = auxiliary_tasks_kwargs['use_orientation']
+
+    # auxiliary task: chexpert labels
+    use_chexpert = auxiliary_tasks_kwargs['use_chexpert']
+    iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
+    mimiccxr_chexpert_labels_filename = auxiliary_tasks_kwargs['mimiccxr_chexpert_labels_filename']
     
     # QA dataset filenames
     iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
@@ -176,37 +179,15 @@ def _evaluate_model(
                          device=device, 
                          n_medical_tags=n_medical_tags,
                          classify_orientation=use_orientation,
+                         classify_chexpert=use_chexpert,
                          **model_kwargs)
     model = model.to(device)
 
-    # Criterion
-    count_print('Defining loss criterion ...')
-    nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
-    
-    if use_tags: # auxiliary task
-        tags_criterion = nn.BCEWithLogitsLoss()
-    else:
-        tags_criterion = None
-
-    if use_orientation: # auxiliary task
-        iuxray_orientation_criterion = nn.CrossEntropyLoss()
-        mimiccxr_orientation_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore unknown
-    else:
-        iuxray_orientation_criterion = None
-        mimiccxr_orientation_criterion = None
-
-    # Create evaluator engine
+    # Criterion    
     count_print('Creating evaluator engine ...')
-    eval_step = get_step_fn(model, None, nlg_criterion, tokenizer,
-                             training=False, device=device,
-                             # tags auxiliary task
-                             use_tags=use_tags,
-                             tags_criterion=tags_criterion,
-                             # orientation auxiliary task
-                             use_orientation=use_orientation,
-                             iuxray_orientation_criterion=iuxray_orientation_criterion,
-                             mimiccxr_orientation_criterion=mimiccxr_orientation_criterion)
-    evaluator = Engine(eval_step)
+    evaluator = get_engine(model, tokenizer,
+                           use_tags, use_orientation, use_chexpert,
+                           device, training=False)
     
     # Default image transform
     count_print('Defining image transform ...')
@@ -216,11 +197,13 @@ def _evaluate_model(
     mimiccxr_collate_batch_fn = get_collate_batch_fn(MIMICCXR_DATASET_ID,
                                                     use_tags = use_tags,
                                                     n_tags = n_medical_tags,
-                                                    use_orientation = use_orientation)
+                                                    use_orientation = use_orientation,
+                                                    use_chexpert = use_chexpert)
     iuxray_collate_batch_fn = get_collate_batch_fn(IUXRAY_DATASET_ID,
                                                    use_tags = use_tags,
                                                    n_tags = n_medical_tags,
-                                                   use_orientation = use_orientation)
+                                                   use_orientation = use_orientation,
+                                                   use_chexpert = use_chexpert)
 
     # Create MIMIC-CXR vqa evaluator
     if eval_mimiccxr:
@@ -233,6 +216,8 @@ def _evaluate_model(
             use_tags = use_tags,
             medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
             use_orientation = use_orientation,
+            use_chexpert = use_chexpert,
+            chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
             **mimiccxr_vqa_evaluator_kwargs,
         )
     
@@ -247,6 +232,8 @@ def _evaluate_model(
             use_tags = use_tags,
             medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
             use_orientation = use_orientation,
+            use_chexpert = use_chexpert,
+            chexpert_labels_filename = iuxray_chexpert_labels_filename,
             **iuxray_vqa_trainer_kwargs,
         )
 
@@ -264,6 +251,8 @@ def _evaluate_model(
         attach_medical_tags_f1score(evaluator, device, record_scores=return_results)
     if use_orientation:
         attach_dataset_aware_orientation_accuracy(evaluator, record_scores=return_results)
+    if use_chexpert:
+        attach_chexpert_labels_accuracy(evaluator, device, record_scores=return_results)
 
     if return_results:
         attach_accumulator(evaluator, 'idxs')
@@ -273,6 +262,8 @@ def _evaluate_model(
             attach_accumulator(evaluator, 'pred_tags')
         if use_orientation:
             attach_accumulator(evaluator, 'pred_orientation')
+        if use_chexpert:
+            attach_accumulator(evaluator, 'pred_chexpert')
 
     # Losses
     attach_loss('loss', evaluator, device)
@@ -288,6 +279,8 @@ def _evaluate_model(
         metrics_to_print.append('medtagf1')
     if use_orientation:
         metrics_to_print.append('orienacc')
+    if use_chexpert:
+        metrics_to_print.append('chxlabelacc')
 
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()
@@ -312,6 +305,8 @@ def _evaluate_model(
         metrics_to_aggregate.append('medtagf1')
     if use_orientation:
         metrics_to_aggregate.append('orienacc')
+    if use_chexpert:
+        metrics_to_aggregate.append('chxlabelacc')
 
     if return_results:
         results_dict = dict(tokenizer = tokenizer)

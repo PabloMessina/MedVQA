@@ -7,6 +7,7 @@ from medvqa.metrics.medical.med_completeness import (
 )
 from medvqa.metrics.classification import (
     MultiLabelF1score,
+    MultiLabelAccuracy,
     DatasetAwareOrientationAccuracy,
 )
 
@@ -60,6 +61,11 @@ def attach_medical_tags_f1score(engine, device, record_scores=False):
     medtagf1 = MultiLabelF1score(output_transform = _get_output_transform('pred_tags', 'tags'),
                                 device=device, record_scores=record_scores)
     medtagf1.attach(engine, 'medtagf1')
+
+def attach_chexpert_labels_accuracy(engine, device, record_scores=False):
+    chxlabelacc = MultiLabelAccuracy(output_transform = _get_output_transform('pred_chexpert', 'chexpert'),
+                                device=device, record_scores=record_scores)
+    chxlabelacc.attach(engine, 'chxlabelacc')
 
 def attach_dataset_aware_orientation_accuracy(engine, record_scores=False):
     orienacc = DatasetAwareOrientationAccuracy(record_scores=record_scores)

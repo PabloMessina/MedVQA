@@ -1,4 +1,3 @@
-from matplotlib.pyplot import get
 from medvqa.utils.files import (
     load_json_file,
     save_to_json,

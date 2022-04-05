@@ -41,6 +41,17 @@ class ChexpertLabelerJob:
         self.cmd = (f'docker run -v {TMP_FOLDER}:/data chexpert-labeler:latest '
         f'python label.py --reports_path /data/{input_filename} --output_path /data/{output_filename}')
 
+def merge_raw_labels(labels_list):        
+    merged = np.zeros((len(CHEXPERT_LABELS),), np.int8)
+    merged[0] = 1
+    for labels in labels_list:            
+        labels = np.where(labels == -2, 0, labels)
+        labels = np.where(labels == -1, 1, labels)
+        if labels[0] == 0: # no findings
+            merged[0] = 0
+        for i in range(1, len(CHEXPERT_LABELS)): # abnormalities
+            merged[i] = max(merged[i], labels[i])
+    return merged
 
 def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_processes=1, verbose=True):
 
@@ -174,6 +185,7 @@ class ChexpertLabeler:
         out = np.where(out == -2, fill_empty, out)
         out = np.where(out == -1, fill_uncertain, out)
         return out
+
 
     # def _invoke_chexpert_labeler_process(self, texts, tmp_suffix=''):
 
