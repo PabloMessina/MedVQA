@@ -63,26 +63,26 @@ class AnswerDecoder(nn.Module):
 
         for t in range(max_answer_length):
             y_bar = torch.cat((y,o),1)
-#             assert y_bar.shape == (batch_size, self.embed_size + self.hidden_size)
-#             assert h.shape == (batch_size, self.hidden_size)
-#             assert c.shape == (batch_size, self.hidden_size)
+            # assert y_bar.shape == (batch_size, self.embed_size + self.hidden_size)
+            # assert h.shape == (batch_size, self.hidden_size)
+            # assert c.shape == (batch_size, self.hidden_size)
             h, c = self.lstm_cell(y_bar, (h, c))
             e = (self.W_attn(image_local_features) * h.unsqueeze(1)).sum(-1)
             att = torch.softmax(e,-1)
             a = (image_local_features * att.unsqueeze(2)).sum(1)
-#             assert a.shape == (batch_size, self.image_local_feat_size)
+            # assert a.shape == (batch_size, self.image_local_feat_size)
             u = torch.cat((a,h),1)
-#             assert u.shape == (batch_size, self.hidden_size + self.image_local_feat_size)
+            # assert u.shape == (batch_size, self.hidden_size + self.image_local_feat_size)
             v = self.W_u(u)
             o = self.dropout(torch.tanh(v))
-#             assert o.shape == (batch_size, self.hidden_size)
+            # assert o.shape == (batch_size, self.hidden_size)
             output.append(self.W_vocab(o))
             if mode == 'train':
                 y = answer_embeddings[t] # teacher-forcing
             else:
                 y = self.embedding_table(torch.argmax(output[t], 1)) # greedy search
-#             assert y.shape == (batch_size, self.embed_size)
+            # assert y.shape == (batch_size, self.embed_size)
 
         output = torch.stack(output, 1)
-#         assert output.shape == (batch_size, max_answer_length, self.vocab_size)
+        # assert output.shape == (batch_size, max_answer_length, self.vocab_size)
         return output

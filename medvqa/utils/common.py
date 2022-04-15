@@ -14,7 +14,8 @@ def get_timestamp():
     return datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
 def parsed_args_to_dict(args, verbose=True):
-    args = {k : v for k, v in vars(args).items() if v is not None}
+    # args = {k : v for k, v in vars(args).items() if v is not None}
+    args = {k : v for k, v in vars(args).items()}
     if verbose:
         print('script\'s arguments:')
         for k, v in args.items():

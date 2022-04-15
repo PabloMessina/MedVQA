@@ -50,7 +50,9 @@ def merge_raw_labels(labels_list):
         if labels[0] == 0: # no findings
             merged[0] = 0
         for i in range(1, len(CHEXPERT_LABELS)): # abnormalities
-            merged[i] = max(merged[i], labels[i])
+            if labels[i] == 1:
+                merged[i] = 1
+                merged[0] = 0
     return merged
 
 def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_processes=1, verbose=True):

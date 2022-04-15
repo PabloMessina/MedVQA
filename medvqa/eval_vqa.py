@@ -52,7 +52,7 @@ from medvqa.training.vqa import get_engine
 from medvqa.datasets.dataloading_utils import get_collate_batch_fn
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Evaluator
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
-from medvqa.utils.images import get_image_transform
+from medvqa.datasets.images import get_image_transform
 from medvqa.utils.logging import CountPrinter
 from medvqa.evaluation.vqa import compute_aggregated_metrics
 

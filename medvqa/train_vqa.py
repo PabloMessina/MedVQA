@@ -45,7 +45,7 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vqa import get_engine
 from medvqa.datasets.dataloading_utils import (
-    question_balanced_train_dataloader_generator,
+    balanced_dataloaders_generator,
     multi_cyclic_dataloader_sampler,
     get_collate_batch_fn
 )
@@ -55,7 +55,7 @@ from medvqa.metrics.utils import (
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Trainer
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
-from medvqa.utils.images import get_image_transform
+from medvqa.datasets.images import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
 def parse_args():
@@ -68,7 +68,7 @@ def parse_args():
                         help='Number of batches per epoch')
 
     # optional arguments
-    parser.add_argument('--checkpoint-folder', type=str,
+    parser.add_argument('--checkpoint-folder', type=str, default=None,
                         help='Relative path to folder with checkpoint to resume training from')    
     parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
@@ -101,7 +101,18 @@ def parse_args():
     parser.add_argument('--mimic-iuxray-freqs', nargs=2, type=int, default=[20 * 10, 10],
                         help='Relative number of batches to sample from MIMIC-CXR and IU X-Ray (for rebalancing purposes)')
     parser.add_argument('--device', type=str, default='GPU',
-                        help='Device to use (GPU or CPU)')
+                        help='Device to use (GPU or CPU)')    
+    parser.add_argument('--img-aug-mode', type=str, default=None,
+                        help='Mode of data augmentation used for images')
+
+    # balanced dataset arguments
+    parser.add_argument('--balanced-split', dest='balanced_split', action='store_true')
+    parser.set_defaults(balanced_split=False)
+    parser.add_argument('--n-healthy-per-question', type=int, default=2)
+    parser.add_argument('--n-unhealthy-per-question', type=int, default=3)
+    parser.add_argument('--min-question-count', type=int, default=100)
+    parser.add_argument('--iuxray-balanced-metadata-filename', type=str, default=None)
+    parser.add_argument('--mimiccxr-balanced-metadata-filename', type=str, default=None)
 
     parser.add_argument('--save', dest='save', action='store_true')
     parser.add_argument('--no-save', dest='save', action='store_false')
@@ -109,6 +120,11 @@ def parse_args():
 
     parser.add_argument('--override-lr', dest='override_lr', action='store_true')
     parser.set_defaults(override_lr=False)
+
+    parser.add_argument('--no-mimiccxr', dest='train_mimiccxr', action='store_false')
+    parser.set_defaults(train_mimiccxr=True)
+    parser.add_argument('--no-iuxray', dest='train_iuxray', action='store_false')
+    parser.set_defaults(train_iuxray=True)
 
     # Auxiliary tasks arguments
     
@@ -154,7 +170,12 @@ def train_model(
     checkpoint_folder_path = None,
     save = True,
     override_lr = False,
+    train_iuxray = True,
+    train_mimiccxr = True,    
 ):
+
+    assert train_iuxray or train_mimiccxr
+
     count_print = CountPrinter()
     
     # Pull out some args from kwargs
@@ -166,8 +187,10 @@ def train_model(
     mimiccxr_medical_tags_per_report_filename = auxiliary_tasks_kwargs['mimiccxr_medical_tags_per_report_filename']
     if use_tags:
         assert n_medical_tags is not None
-        assert iuxray_medical_tags_per_report_filename is not None
-        assert mimiccxr_medical_tags_per_report_filename is not None
+        if train_iuxray:
+            assert iuxray_medical_tags_per_report_filename is not None
+        if train_mimiccxr:
+            assert mimiccxr_medical_tags_per_report_filename is not None
     
     # auxiliary task: orientation classification
     use_orientation = auxiliary_tasks_kwargs['use_orientation']
@@ -233,63 +256,82 @@ def train_model(
 
     # Default image transform
     count_print('Defining image transform ...')
-    img_transform = get_image_transform()
+    img_transform = get_image_transform(augmentation_mode=dataloading_kwargs['img_aug_mode'])
 
     # Define collate_batch_fn
-    mimiccxr_collate_batch_fn = get_collate_batch_fn(MIMICCXR_DATASET_ID,
+    if train_mimiccxr:
+        mimiccxr_collate_batch_fn = get_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                                        use_tags = use_tags,
+                                                        n_tags = n_medical_tags,
+                                                        use_orientation = use_orientation,
+                                                        use_chexpert = use_chexpert)
+    if train_iuxray:
+        iuxray_collate_batch_fn = get_collate_batch_fn(IUXRAY_DATASET_ID,
                                                     use_tags = use_tags,
                                                     n_tags = n_medical_tags,
                                                     use_orientation = use_orientation,
                                                     use_chexpert = use_chexpert)
-    iuxray_collate_batch_fn = get_collate_batch_fn(IUXRAY_DATASET_ID,
-                                                   use_tags = use_tags,
-                                                   n_tags = n_medical_tags,
-                                                   use_orientation = use_orientation,
-                                                   use_chexpert = use_chexpert)
 
     # Create MIMIC-CXR vqa trainer
-    count_print('Creating MIMIC-CXR vqa trainer ...')
-    mimiccxr_vqa_trainer = MIMICCXR_VQA_Trainer(
-        transform = img_transform,
-        collate_batch_fn = mimiccxr_collate_batch_fn,
-        tokenizer = tokenizer,
-        mimiccxr_qa_reports = mimiccxr_qa_reports,
-        use_tags = use_tags,
-        medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
-        use_orientation = use_orientation,
-        use_chexpert = use_chexpert,
-        chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
-        **mimiccxr_vqa_trainer_kwargs,
-    )
+    if train_mimiccxr:
+        count_print('Creating MIMIC-CXR vqa trainer ...')
+        mimiccxr_vqa_trainer = MIMICCXR_VQA_Trainer(
+            transform = img_transform,
+            collate_batch_fn = mimiccxr_collate_batch_fn,
+            tokenizer = tokenizer,
+            mimiccxr_qa_reports = mimiccxr_qa_reports,
+            use_tags = use_tags,
+            medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
+            use_orientation = use_orientation,
+            use_chexpert = use_chexpert,
+            chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+            **mimiccxr_vqa_trainer_kwargs,
+        )
     
     # Create IU X-Ray vqa trainer
-    count_print('Creating IU X-Ray vqa trainer ...')
-    iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
-        transform = img_transform,
-        collate_batch_fn = iuxray_collate_batch_fn,
-        tokenizer = tokenizer,        
-        iuxray_qa_reports = iuxray_qa_reports,
-        use_tags = use_tags,
-        medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-        use_orientation = use_orientation,
-        use_chexpert = use_chexpert,
-        chexpert_labels_filename = iuxray_chexpert_labels_filename,
-        **iuxray_vqa_trainer_kwargs,
-    )
+    if train_iuxray:
+        count_print('Creating IU X-Ray vqa trainer ...')
+        iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
+            transform = img_transform,
+            collate_batch_fn = iuxray_collate_batch_fn,
+            tokenizer = tokenizer,        
+            iuxray_qa_reports = iuxray_qa_reports,
+            use_tags = use_tags,
+            medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
+            use_orientation = use_orientation,
+            use_chexpert = use_chexpert,
+            chexpert_labels_filename = iuxray_chexpert_labels_filename,
+            **iuxray_vqa_trainer_kwargs,
+        )
 
     # Create complex dataloaders
     count_print('Creating dataloaders ...')
-    mimiccxr_balanced_dataloader = question_balanced_train_dataloader_generator(mimiccxr_vqa_trainer)
-    iuxray_balanced_dataloader = question_balanced_train_dataloader_generator(iuxray_vqa_trainer)
-    mimic_iuxray_freqs = dataloading_kwargs['mimic_iuxray_freqs']    
-    train_dataloader = multi_cyclic_dataloader_sampler(
-        [mimiccxr_balanced_dataloader, iuxray_balanced_dataloader],
-        mimic_iuxray_freqs,
-        shuffle=True,
-    )
-    val_dataloaders = [mimiccxr_vqa_trainer.val_dataloader, iuxray_vqa_trainer.val_dataloader]
-    val_dataloader_size = sum(len(d) for d in val_dataloaders)
-    val_dataloader = multi_cyclic_dataloader_sampler(val_dataloaders)
+    if train_mimiccxr:
+        mimiccxr_balanced_dataloader = balanced_dataloaders_generator(
+                        mimiccxr_vqa_trainer.train_dataloaders,
+                        mimiccxr_vqa_trainer.train_dataset_weights)
+    if train_iuxray:
+        iuxray_balanced_dataloader = balanced_dataloaders_generator(
+                        iuxray_vqa_trainer.train_dataloaders,
+                        iuxray_vqa_trainer.train_dataset_weights)
+
+    if train_mimiccxr and train_iuxray:
+        mimic_iuxray_freqs = dataloading_kwargs['mimic_iuxray_freqs']
+        train_dataloader = multi_cyclic_dataloader_sampler(
+            [mimiccxr_balanced_dataloader, iuxray_balanced_dataloader],
+            mimic_iuxray_freqs)
+        val_dataloaders = [mimiccxr_vqa_trainer.val_dataloader, iuxray_vqa_trainer.val_dataloader]
+        val_dataloader_size = sum(len(d) for d in val_dataloaders)
+        val_dataloader = multi_cyclic_dataloader_sampler(val_dataloaders)    
+    elif train_mimiccxr:        
+        train_dataloader = mimiccxr_balanced_dataloader
+        val_dataloader = mimiccxr_vqa_trainer.val_dataloader
+        val_dataloader_size = len(val_dataloader)
+    else:
+        assert train_iuxray
+        train_dataloader = iuxray_balanced_dataloader
+        val_dataloader = iuxray_vqa_trainer.val_dataloader
+        val_dataloader_size = len(val_dataloader)
 
     # Attach metrics, losses, timer and events to engines    
     count_print('Attaching metrics, losses, timer and events to engines ...')
@@ -355,7 +397,13 @@ def train_model(
     
     if checkpoint_folder_path is None: # first time
         if save: # only if we want to save checkpoints to disk
-            checkpoint_folder_path = get_checkpoint_folder_path('vqa', 'mimiccxr+iuxray', model.name,
+            if train_iuxray and train_mimiccxr:
+                folder = 'mimiccxr+iuxray'
+            elif train_iuxray:
+                folder = 'iuxray'
+            else:
+                folder = 'mimiccxr'
+            checkpoint_folder_path = get_checkpoint_folder_path('vqa', folder, model.name,
                 f'vocab-minf={vocab_min_freq}',
                 f'emb-size={model_kwargs["embed_size"]}',
                 f'hidden-size={model_kwargs["hidden_size"]}',
@@ -363,7 +411,8 @@ def train_model(
                 f'img-loc-feat-size={model_kwargs["image_local_feat_size"]}',
                 f'drop-prob={model_kwargs["dropout_prob"]}',
                 f'cnn-pretrained={bool(model_kwargs["densenet_pretrained_weights_path"])}',
-                f'mimic-iuxray-freqs={",".join(map(str, mimic_iuxray_freqs))}',
+                f'mimic-iuxray-freqs={",".join(map(str, mimic_iuxray_freqs))}' \
+                    if (train_iuxray and train_mimiccxr) else None,
                 f'use_tags={use_tags}',
                 f'use_orien={use_orientation}',
                 f'use_chx={use_orientation}',
@@ -433,25 +482,34 @@ def train_from_scratch(
     min_train_examples_per_question,
     iuxray_qa_adapted_reports_filename,
     mimiccxr_qa_adapted_reports_filename,
+    balanced_split,
+    n_healthy_per_question,
+    n_unhealthy_per_question,
+    min_question_count,
+    iuxray_balanced_metadata_filename,
+    mimiccxr_balanced_metadata_filename,
     # Dataloading args
     batch_size,
-    mimic_iuxray_freqs = [20 * 10, 10],
+    mimic_iuxray_freqs,
+    img_aug_mode,
     # Traning args
-    epochs = 1,
-    batches_per_epoch = 1000,
+    epochs,
+    batches_per_epoch,
+    train_mimiccxr,
+    train_iuxray,
     # Auxiliary tasks args
-    use_tags = False,
-    n_medical_tags = None,
-    iuxray_medical_tags_per_report_filename = None,
-    mimiccxr_medical_tags_per_report_filename = None,
-    use_orientation = False,
-    use_chexpert = False,
-    iuxray_chexpert_labels_filename = None,
-    mimiccxr_chexpert_labels_filename = None,
+    use_tags,
+    n_medical_tags,
+    iuxray_medical_tags_per_report_filename,
+    mimiccxr_medical_tags_per_report_filename,
+    use_orientation,
+    use_chexpert,
+    iuxray_chexpert_labels_filename,
+    mimiccxr_chexpert_labels_filename,
     # GPU
-    device = 'GPU',
+    device,
     # Other args
-    save = True,
+    save,
     **unused_kwargs,
 ):
     print('----- Training model from scratch ------')
@@ -474,22 +532,36 @@ def train_from_scratch(
         factor = lr_decay,
         patience = lr_decay_patience,
     )
-    split_kwargs = dict(
-        n_val_examples_per_question = n_val_examples_per_question,
-        min_train_examples_per_question = min_train_examples_per_question,
-    )
+    if balanced_split:
+        split_kwargs = dict(
+            n_healthy_per_question = n_healthy_per_question,
+            n_unhealthy_per_question = n_unhealthy_per_question,
+            min_question_count = min_question_count,
+        )
+        assert mimiccxr_balanced_metadata_filename is not None
+        assert iuxray_balanced_metadata_filename is not None
+    else:
+        split_kwargs = dict(
+            n_val_examples_per_question = n_val_examples_per_question,
+            min_train_examples_per_question = min_train_examples_per_question,
+        )
     mimiccxr_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
         qa_adapted_reports_filename = mimiccxr_qa_adapted_reports_filename,
+        balanced_split = balanced_split,
+        balanced_metadata_filename = mimiccxr_balanced_metadata_filename,
     )
     iuxray_vqa_trainer_kwargs = dict(
         batch_size = batch_size,
         split_kwargs = split_kwargs,
         qa_adapted_reports_filename = iuxray_qa_adapted_reports_filename,
+        balanced_split = balanced_split,
+        balanced_metadata_filename = iuxray_balanced_metadata_filename,
     )
     dataloading_kwargs = dict(
         mimic_iuxray_freqs = mimic_iuxray_freqs,
+        img_aug_mode = img_aug_mode,
     )
     auxiliary_tasks_kwargs = dict(
         # medical tags
@@ -516,7 +588,9 @@ def train_from_scratch(
                 epochs,
                 batches_per_epoch,
                 device = device,
-                save = save)
+                save = save,
+                train_mimiccxr = train_mimiccxr,
+                train_iuxray = train_iuxray)
 
 def resume_training(
     checkpoint_folder,
@@ -527,7 +601,9 @@ def resume_training(
     batches_per_epoch = 1000,
     device = 'GPU',
     save = True,
-    override_lr = False,
+    override_lr = False,    
+    train_mimiccxr = True,
+    train_iuxray = True,
     **unused_kwargs,
 ):
     print('----- Resuming training ------')
@@ -565,14 +641,15 @@ def resume_training(
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
                 save = save,
-                override_lr = override_lr)
+                override_lr = override_lr,                
+                train_mimiccxr = train_mimiccxr,
+                train_iuxray = train_iuxray)
 
 if __name__ == '__main__':
 
     args = parse_args()
     args = parsed_args_to_dict(args)
-
-    if args.get('checkpoint_folder', None):
+    if args['checkpoint_folder'] is not None:
         resume_training(**args)
     else:
         train_from_scratch(**args)

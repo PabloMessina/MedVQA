@@ -2,12 +2,10 @@ from medvqa.utils.files import load_pickle, load_json_file, save_to_pickle
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import CACHE_DIR, get_timestamp
-from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.metrics.medical.chexpert import merge_raw_labels
 from tqdm import tqdm
-import numpy as np
 import argparse
 import os
 

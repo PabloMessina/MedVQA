@@ -30,24 +30,23 @@ _MIMICCXR_BROKEN_IMAGES = set([
 def _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
     return _MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
 
-def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer):
-    m = split_kwargs['min_train_examples_per_question']
-    n = split_kwargs['n_val_examples_per_question']
+def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
+                                       balanced_metadata_filename = None):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
-        f'split_params=({m},{n})',
+        f'split_params={tuple(split_kwargs[k] for k in sorted(list(split_kwargs.keys())))}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
     ]
-    return os.path.join('mimiccxr',
-            f'mimiccxr_preprocessed_train_data__({";".join(strings)}).pkl')
+    if balanced_metadata_filename:
+        strings.append(f'balanced_metadata={balanced_metadata_filename}')
+    return os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_train_data__({";".join(strings)}).pkl')
 
 def _get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
     ]
-    return os.path.join('mimiccxr',
-            f'mimiccxr_preprocessed_test_data__({";".join(strings)}).pkl')
+    return os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_test_data__({";".join(strings)}).pkl')
 
 def _get_orientation_id(orientation):
     try:
@@ -157,6 +156,8 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 mimiccxr_qa_reports = None,
                 mimiccxr_metadata = None,
                 mimiccxr_split = None,
+                balanced_split = False,
+                balanced_metadata_filename = None,
                 debug = False):
         
         self.tokenizer = tokenizer
@@ -166,10 +167,11 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
         
         preprocessing_save_path = _get_train_preprocessing_save_path(
-                        qa_adapted_reports_filename, split_kwargs, tokenizer)
+                        qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
 
         rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
         chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
+        balanced_metadata_path = os.path.join(MIMICCXR_CACHE_DIR, balanced_metadata_filename) if balanced_split else None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
@@ -180,6 +182,8 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         chexpert_labels_path = chexpert_labels_path,
                         dataset_name = 'MIMIC-CXR',
                         split_kwargs = split_kwargs,
+                        balanced_split = balanced_split,
+                        balanced_metadata_path = balanced_metadata_path,
                         debug = debug)
 
     def _preprocess_data(self):

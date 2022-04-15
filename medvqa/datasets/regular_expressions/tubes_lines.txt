@@ -1,7 +1,7 @@
 \bcath
-\btube(s)?
+\btube(s)?\b
 \btubing\b
-\btubular\b
+\btubular structure\b
 \bsideport
 \bport\b
 mediport\b

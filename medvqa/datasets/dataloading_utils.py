@@ -2,7 +2,69 @@ import random
 import math
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset
 from sklearn.preprocessing import MultiLabelBinarizer
+
+INFINITE_DATASET_LENGTH = int(1e18)
+
+def _get_balancedly_distributed_class_indices(class_weights):
+    w_sum = sum(class_weights)
+    ws = [w / w_sum for w in class_weights]
+    w_min = min(ws)
+    assert w_min > 0
+    freqs = [int(100 * w/w_min) for w in ws]
+    count = sum(freqs)
+    indices = [None] * count
+    class_ids = list(range(len(class_weights)))
+    class_ids.sort(key = lambda i : freqs[i], reverse=True)
+    available_slots = list(range(count))
+    for i in class_ids:
+        assert len(available_slots) >= freqs[i]
+        step = len(available_slots) / freqs[i]
+        for j in range(freqs[i]):
+            jj = int(j * step)
+            indices[available_slots[jj]] = i
+        available_slots = [s for s in available_slots if indices[s] is None]
+    indices = [i for i in indices if i is not None]
+    return indices
+
+class CompositeInfiniteDataset(Dataset):
+    def __init__(self, datasets, weights):
+        self.datasets = datasets
+        self._init_indices(datasets, weights)
+    
+    def _init_indices(self, datasets, weights):
+        assert len(datasets) == len(weights)
+        
+        indices = _get_balancedly_distributed_class_indices(weights)
+        
+        dataset_counts = [[0] * len(indices) for _ in range(len(datasets))]
+        for i in range(len(datasets)):
+            for j in range(len(indices)):
+                dataset_counts[i][j] = (indices[j] == i) + (dataset_counts[i][j-1] if j > 0 else 0)
+            assert dataset_counts[i][-1] > 0, (i, dataset_counts[i], indices)
+
+        self.indices = indices
+        self.counts = dataset_counts
+    
+    def __len__(self):
+        return INFINITE_DATASET_LENGTH
+    
+    def __getitem__(self, i):
+        indices = self.indices        
+        ii = i % len(indices)
+        idx = indices[ii]
+        assert idx < len(self.datasets)
+        counts = self.counts[idx]
+        j = (i // len(indices)) * counts[-1] + (counts[ii - 1] if ii > 0 else 0)
+        assert j < len(self.datasets[idx])
+        return self.datasets[idx][j]
+
+def log_normalize_weights(ws):
+    w_sum = sum(ws)
+    ws = [w/w_sum for w in ws]
+    ws = [math.log(1 + w * 2e3) for w in ws]
+    return ws
 
 def cyclic_dataloader_generator(dataloader):
     while True:
@@ -13,35 +75,40 @@ def next_k_iterations_gen(cyclic_generator, k):
     for _ in range(k):
         yield next(cyclic_generator)
 
-def question_balanced_train_dataloader_generator(vqa_handler, min_max_ratio=1.8):
+# def question_balanced_train_dataloader_generator(vqa_handler, min_max_ratio=1.8):
         
-    min_count = min(len(d) for d in vqa_handler.train_datasets)
-    max_count = max(len(d) for d in vqa_handler.train_datasets)
-    vqa_handler.freqs = []
-    vqa_handler.dataset_indices = []
-    for i, dataset in enumerate(vqa_handler.train_datasets):
-        freq = (min_max_ratio - 1) * (len(dataset) - min_count) / (max_count - min_count) + 1
-        freq = math.ceil(10 * freq * math.log2(len(dataset) / min_count + 1))
-        vqa_handler.freqs.append(freq)
-        for _ in range(freq):
-            vqa_handler.dataset_indices.append(i)
+#     min_count = min(len(d) for d in vqa_handler.train_datasets)
+#     max_count = max(len(d) for d in vqa_handler.train_datasets)
+#     vqa_handler.freqs = []
+#     vqa_handler.dataset_indices = []
+#     for i, dataset in enumerate(vqa_handler.train_datasets):
+#         freq = (min_max_ratio - 1) * (len(dataset) - min_count) / (max_count - min_count) + 1
+#         freq = math.ceil(10 * freq * math.log2(len(dataset) / min_count + 1))
+#         vqa_handler.freqs.append(freq)
+#         for _ in range(freq):
+#             vqa_handler.dataset_indices.append(i)
     
-    cyclic_dataloaders = [cyclic_dataloader_generator(d) for d in vqa_handler.train_dataloaders]
+#     cyclic_dataloaders = [cyclic_dataloader_generator(d) for d in vqa_handler.train_dataloaders]
     
-    indices = vqa_handler.dataset_indices
-    while True:            
-        random.shuffle(indices)
+#     indices = vqa_handler.dataset_indices
+#     while True:            
+#         random.shuffle(indices)
+#         for i in indices:
+#             yield next(cyclic_dataloaders[i])
+
+def balanced_dataloaders_generator(dataloaders, weights):
+    assert len(dataloaders) == len(weights)
+    indices = _get_balancedly_distributed_class_indices(weights)    
+    cyclic_dataloaders = [cyclic_dataloader_generator(d) for d in dataloaders]
+    while True:
         for i in indices:
             yield next(cyclic_dataloaders[i])
 
-def multi_cyclic_dataloader_sampler(dataloaders, frequencies=None, shuffle=False):
-    if shuffle:
-        indices = []
-        for i, f in enumerate(frequencies):
-            for _ in range(f):
-                indices.append(i)    
+def multi_cyclic_dataloader_sampler(dataloaders, weights=None):
+    if weights is not None:
+        assert len(dataloaders) == len(weights)
+        indices = _get_balancedly_distributed_class_indices(weights)
         while True:
-            random.shuffle(indices)
             for i in indices:
                 yield next(dataloaders[i])
     else:

@@ -38,7 +38,7 @@ class MedicalTagsExtractor:
         for token in wordpunct_tokenize(text.lower()):
             id = self.term2id.get(token, None)
             if id is not None: ids.add(id)
-        return [self.tags[id] for id in ids]
+        return [self.tags[id] for id in ids]    
 
     def extract_tag_ids(self, text):
         ids = set()
@@ -46,3 +46,10 @@ class MedicalTagsExtractor:
             id = self.term2id.get(token, None)
             if id is not None: ids.add(id)
         return [id for id in ids]
+    
+    def extract_tags_sequence(self, text):
+        tags = []
+        for token in wordpunct_tokenize(text.lower()):
+            id = self.term2id.get(token, None)
+            if id is not None: tags.append(self.tags[id])
+        return tags
