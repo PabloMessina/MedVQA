@@ -1,6 +1,8 @@
 import os
 import re
+import glob
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
@@ -30,18 +32,26 @@ _MIMICCXR_BROKEN_IMAGES = set([
 def _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
     return _MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
 
+def get_mimiccxr_image_paths(report):
+    filepath = report['filepath']
+    part_id, subject_id, study_id = map(int, _MIMICCXR_STUDY_REGEX.findall(filepath)[0])        
+    images = glob.glob(_MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
+    return images
+
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
                                        balanced_metadata_filename = None):
+    
+    split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
-        f'split_params={tuple(split_kwargs[k] for k in sorted(list(split_kwargs.keys())))}',
+        f'split_params={split_params_string}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
     ]
     if balanced_metadata_filename:
         strings.append(f'balanced_metadata={balanced_metadata_filename}')
     return os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_train_data__({";".join(strings)}).pkl')
 
-def _get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):
+def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
@@ -142,9 +152,17 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda):
                 self.answers.append(tokenizer.string2ids(answer.lower()))
                 self.orientations.append(orientation_id)
 
+    self.report_ids = np.array(self.report_ids, dtype=int)
+    self.question_ids = np.array(self.question_ids, dtype=int)
+    self.images = np.array(self.images, dtype=str)
+    self.questions = np.array(self.questions, dtype=object)
+    self.answers = np.array(self.answers, dtype=object)
+    self.orientations = np.array(self.orientations, dtype=int)    
+
 class MIMICCXR_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
+                num_workers,
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
@@ -157,6 +175,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 mimiccxr_metadata = None,
                 mimiccxr_split = None,
                 balanced_split = False,
+                balanced_dataloading = False,
                 balanced_metadata_filename = None,
                 debug = False):
         
@@ -175,6 +194,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        num_workers,
                         use_tags = use_tags,
                         rid2tags_path = rid2tags_path,
                         use_orientation = use_orientation,
@@ -183,6 +203,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         dataset_name = 'MIMIC-CXR',
                         split_kwargs = split_kwargs,
                         balanced_split = balanced_split,
+                        balanced_dataloading = balanced_dataloading,
                         balanced_metadata_path = balanced_metadata_path,
                         debug = debug)
 
@@ -193,6 +214,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
                 qa_adapted_reports_filename,
+                num_workers,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
@@ -210,7 +232,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.mimiccxr_split = mimiccxr_split
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
         
-        preprocessing_save_path = _get_test_preprocessing_save_path(
+        preprocessing_save_path = get_test_preprocessing_save_path(
                         qa_adapted_reports_filename, tokenizer)
         
         rid2tags_path = os.path.join(MIMICCXR_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
@@ -218,6 +240,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        num_workers,
                         use_tags = use_tags,
                         rid2tags_path = rid2tags_path,
                         use_orientation = use_orientation,

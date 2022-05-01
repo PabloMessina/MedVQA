@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from medvqa.models.vqa.question_encoder import QuestionEncoder_BiLSTM
-from medvqa.models.vqa.question_decoder import QuestionDecoder
+from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
+from medvqa.models.nlp.question_decoder import QuestionDecoder
 from medvqa.models.vqa.answer_decoder import AnswerDecoder
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
@@ -10,9 +10,10 @@ from medvqa.utils.constants import CHEXPERT_LABELS
 
 class OpenEndedVQA(nn.Module):
 
-    def __init__(self, vocab_size, start_idx, embed_size, hidden_size,
+    def __init__(self, vocab_size, start_idx, embed_size, question_hidden_size, answer_hidden_size,
+                 n_lstm_layers,
                  question_vec_size, image_local_feat_size, dropout_prob, device,
-                 densenet_pretrained_weights_path=None,                 
+                 densenet_pretrained_weights_path=None,
                  n_medical_tags=None,
                  classify_orientation=False,
                  classify_chexpert=False,
@@ -42,12 +43,12 @@ class OpenEndedVQA(nn.Module):
         self.image_encoder = densenet.features
         self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
                                                        embed_size,
-                                                       hidden_size,
+                                                       question_hidden_size,
                                                        question_vec_size,
                                                        device)
         self.question_decoder = QuestionDecoder(self.embedding_table,
                                             embed_size,
-                                            hidden_size,
+                                            question_hidden_size,
                                             question_vec_size,
                                             vocab_size,
                                             start_idx)        
@@ -55,7 +56,8 @@ class OpenEndedVQA(nn.Module):
                                             image_local_feat_size,
                                             question_vec_size,
                                             embed_size,
-                                            hidden_size,
+                                            answer_hidden_size,
+                                            n_lstm_layers,
                                             start_idx,
                                             vocab_size,
                                             dropout_prob)

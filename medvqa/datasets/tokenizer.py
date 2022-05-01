@@ -24,7 +24,7 @@ class Tokenizer:
     END_TOKEN = '</s>'
     ignore_regex = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
     
-    def __init__(self, qa_adapted_filenames, qa_adapted_datasets=None, min_freq=5, overwrite=False):
+    def __init__(self, qa_adapted_filenames, qa_adapted_datasets, min_freq=5, overwrite=False):
 
         assert type(qa_adapted_filenames) is list, type(qa_adapted_filenames)
 
@@ -35,7 +35,7 @@ class Tokenizer:
             self.id2token = load_pickle(vocab_filepath)
 
         if overwrite or self.id2token is None:
-            # process Q&A datasets
+            # process Q&A datasets            
             vocab = dict()
             for sentence in tqdm(get_sentences(qa_adapted_datasets)):
                 for token in wordpunct_tokenize(sentence):
@@ -95,9 +95,15 @@ class Tokenizer:
                 id = id.item()
             if id == self.token2id[self.END_TOKEN]:
                 break
-            if id >= 3:
+            if id >= 3 and (len(clean) == 0 or clean[-1] != id):
                 clean.append(id)
         return clean
+
+    def clean_text(self, text):
+        text = text.lower()
+        ids = self.string2ids(text)
+        ids = self.clean_sentence(ids)
+        return self.ids2string(ids)
     
     def clean_batch(self, batch):
         clean_sentences = [None] * len(batch)

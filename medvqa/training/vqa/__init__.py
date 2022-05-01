@@ -92,7 +92,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
                 batch_loss += orientation_loss            
             if use_chexpert:
-                batch_loss += chexpert_criterion(pred_chexpert_logits, chexpert.float())
+                chexpert_loss = chexpert_criterion(pred_chexpert_logits, chexpert.float())
+                batch_loss += chexpert_loss
 
             # Backward pass + optimizer step if training
             if training:
@@ -106,6 +107,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         output = {
             'idxs': idxs,
             'loss': batch_loss.detach(),
+            'question_loss': question_loss.detach(),
+            'answer_loss': answer_loss.detach(),
             'answers': tokenizer.clean_batch(answers.detach()),
             'questions': tokenizer.clean_batch(questions.detach()),
             'pred_answers': tokenizer.clean_batch(pred_answers.detach()),
@@ -114,13 +117,16 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if use_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
+            output['tags_loss'] = tags_loss.detach()
         if use_orientation:
             output['orientation'] = orientation.detach()
             output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
             output['dataset_id'] = dataset_id
+            output['orientation_loss'] = orientation_loss.detach()
         if use_chexpert:
             output['chexpert'] = chexpert.detach().cpu()
             output['pred_chexpert'] = (pred_chexpert_logits.detach() > 0).cpu()
+            output['chexpert_loss'] = chexpert_loss.detach()
 
         return output
     

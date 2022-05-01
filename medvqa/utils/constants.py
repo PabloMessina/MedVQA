@@ -54,6 +54,11 @@ METRIC2SHORT = {
     'medtagf1': 'mtf1',
     'orienacc': 'oracc',
     'chxlabelacc': 'chxlacc',
+    'chxlabelf1': 'chxlf1',
+    'question_loss': 'q_loss',
+    'answer_loss': 'a_loss',
+    'orientation_loss': 'orien_loss',
+    'chexpert_loss': 'chx_loss',
 }
 
 IUXRAY_DATASET_ID = 0

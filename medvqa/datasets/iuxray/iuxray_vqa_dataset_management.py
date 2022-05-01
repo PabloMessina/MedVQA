@@ -1,5 +1,6 @@
 import os
-from medvqa.utils.files import load_json_file
+import numpy as np
+from medvqa.utils.files import get_cached_json_file
 from medvqa.datasets.vqa import VQA_Trainer
 from medvqa.datasets.iuxray import (
     IUXRAY_DATASET_DIR,
@@ -14,11 +15,21 @@ _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
 def _get_iuxray_image_path(image_name):
     return _IUXRAY_IMAGE_PATH_TEMPLATE.format(image_name)
 
+def get_iuxray_image_paths(report):
+    filename = report['filename']
+    iuxray_metadata = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
+    metadata = iuxray_metadata[filename]
+    images = metadata['images']
+    image_paths = [_get_iuxray_image_path(f'{img["id"]}.png') for img in images]
+    return image_paths
+
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
                                        balanced_metadata_filename=None):    
+    
+    split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
-        f'split_params={tuple(split_kwargs[k] for k in sorted(list(split_kwargs.keys())))}',
+        f'split_params={split_params_string}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
     ]
     if balanced_metadata_filename:
@@ -28,6 +39,7 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
 class IUXRAY_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
+                num_workers,
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
@@ -40,7 +52,9 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 iuxray_image_info = None,
                 iuxray_qa_reports = None,
                 balanced_split = False,
-                balanced_metadata_filename = None):
+                balanced_dataloading = False,
+                balanced_metadata_filename = None,
+                validation_only = False):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
@@ -57,6 +71,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        num_workers,
                         use_tags = use_tags,
                         rid2tags_path = rid2tags_path,
                         use_orientation = use_orientation,
@@ -65,7 +80,9 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         dataset_name = 'IU X-Ray',
                         split_kwargs = split_kwargs,
                         balanced_split = balanced_split,
-                        balanced_metadata_path = balanced_metadata_path)
+                        balanced_dataloading = balanced_dataloading,
+                        balanced_metadata_path = balanced_metadata_path,
+                        validation_only = validation_only)
         
     def _preprocess_data(self):
 
@@ -77,13 +94,13 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         if iuxray_qa_reports is None:
             file_path = os.path.join(IUXRAY_CACHE_DIR, self.qa_adapted_reports_filename)
             print(f'Loading {file_path}')
-            iuxray_qa_reports = load_json_file(file_path)
+            iuxray_qa_reports = get_cached_json_file(file_path)
         if iuxray_metadata is None:
             print(f'Loading {IUXRAY_REPORTS_MIN_JSON_PATH}')
-            iuxray_metadata = load_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
+            iuxray_metadata = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
         if iuxray_image_info is None:
             print(f'Loading {IUXRAY_IMAGE_INFO_JSON_PATH}')
-            iuxray_image_info = load_json_file(IUXRAY_IMAGE_INFO_JSON_PATH)
+            iuxray_image_info = get_cached_json_file(IUXRAY_IMAGE_INFO_JSON_PATH)
         
         self.report_ids = []
         self.question_ids = []        
@@ -131,3 +148,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                     self.questions.append(tokenizer.string2ids(question.lower()))
                     self.answers.append(tokenizer.string2ids(answer.lower()))
                     self.orientations.append(orientation_id)
+
+        self.report_ids = np.array(self.report_ids, dtype=int)
+        self.question_ids = np.array(self.question_ids, dtype=int)
+        self.images = np.array(self.images, dtype=str)
+        self.questions = np.array(self.questions, dtype=object)
+        self.answers = np.array(self.answers, dtype=object)
+        self.orientations = np.array(self.orientations, dtype=int)

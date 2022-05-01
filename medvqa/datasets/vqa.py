@@ -1,5 +1,5 @@
-import os
 import random
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
@@ -7,14 +7,14 @@ from medvqa.utils.files import (
     load_pickle,
     save_to_pickle
 )
-from medvqa.utils.common import CACHE_DIR
 from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
+    BatchedCompositeInfiniteDataset,
     log_normalize_weights,
     INFINITE_DATASET_LENGTH,
 )
 
-def _split_data_train_val(question_ids, answers, n_vals_per_question=10, min_question_count=100):
+def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
     """Splits questions and answers into train and val splits.
 
     Question-answer pairs are sampled for validation in a stratified manner, by sorting answers
@@ -39,9 +39,10 @@ def _split_data_train_val(question_ids, answers, n_vals_per_question=10, min_que
         except KeyError:
             list_ = tmp[qi] = []
         list_.append((len(a), i))
-    train_indices = {k:[] for k in tmp.keys()}
-    val_indices = []
-    for k, list_ in tmp.items():
+    
+    val_rids = set()
+    forbidden_rids = set()
+    for list_ in tmp.values():
         list_.sort()
         if len(list_) >= min_question_count:
             chunk_size = len(list_) // n_vals_per_question
@@ -51,16 +52,25 @@ def _split_data_train_val(question_ids, answers, n_vals_per_question=10, min_que
                 max_i = min(offset + chunk_size, len(list_)) - 1
                 if max_i - min_i + 1 == chunk_size:
                     val_i = random.randint(min_i, max_i)
-                else:
-                    val_i = None
-                for i in range(min_i, max_i+1):
-                    if i == val_i:
-                        val_indices.append(list_[val_i][1])
-                    else:
-                        train_indices[k].append(list_[i][1])
+                    val_rids.add(report_ids[list_[val_i][1]])
                 offset += chunk_size
         else:
-            train_indices[k].extend(e[1] for e in list_)
+            forbidden_rids.update(report_ids[e[1]] for e in list_)
+    
+    # split indices into train and validation
+    train_indices = { qid:[] for qid in tmp.keys() }
+    val_indices = []
+    for qid, list_ in tmp.items():
+        for _, i in list_:
+            if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
+                val_indices.append(i)
+            else:
+                train_indices[qid].append(i)
+
+    # convert to numpy arrays
+    for qid in train_indices.keys():
+        train_indices[qid] = np.array(train_indices[qid], dtype=int)
+    val_indices = np.array(val_indices, dtype=int)
 
     return train_indices, val_indices
 
@@ -133,6 +143,11 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
             else:
                 train_indices[qid].append(i)
     
+    # convert to numpy arrays
+    for qid in train_indices.keys():
+        train_indices[qid] = np.array(train_indices[qid], dtype=int)
+    val_indices = np.array(val_indices, dtype=int)
+
     print(f'balanced splitting: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
           f' len(val_indices) = {len(val_indices)}')
 
@@ -141,6 +156,7 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
 class VQADataset(Dataset):
     
     def __init__(self, report_ids, images, questions, answers, indices, transform, source_dataset_name,
+                suffle_indices = True,
                 # aux task: medical tags
                 use_tags = False, rid2tags = None,
                 # aux task: image orientation
@@ -158,6 +174,9 @@ class VQADataset(Dataset):
         self.transform = transform
         self.source_dataset_name = source_dataset_name
         self.infinite = infinite
+
+        if suffle_indices:
+            np.random.shuffle(self.indices)
         
         # optional auxiliary tasks
         self.use_tags = use_tags
@@ -197,7 +216,8 @@ class VQADataset(Dataset):
 class VQA_Base:
 
     def __init__(self, training, transform, batch_size, collate_batch_fn,
-                preprocessing_save_path,
+                preprocessing_save_path,                
+                num_workers,
                 use_tags = False,
                 rid2tags_path = None,
                 use_orientation = False,
@@ -247,7 +267,9 @@ class VQA_Base:
             if not debug:
                 self._save_data(preprocessing_save_path)
         
-        self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn)        
+        
+        print(f'batch_size = {batch_size}')
+        self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn, num_workers)
         print('done!')
 
     def __len__(self):
@@ -256,7 +278,7 @@ class VQA_Base:
     def _preprocess_data(self):
         raise NotImplementedError('Make sure your specialized class implements this function')
     
-    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
         raise NotImplementedError('Make sure your specialized class implements this function')
 
     def _load_cached_data(self, preprocessing_save_path):
@@ -356,13 +378,14 @@ class BalancedTreeNode:
         else:
             assert len(self.children) == len(self.weights)
             datasets = [child.get_dataset(vqa_trainer) for child in self.children]
-            return CompositeInfiniteDataset(datasets, self.weights)            
+            return CompositeInfiniteDataset(datasets, self.weights)
 
 
 class VQA_Trainer(VQA_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
+                num_workers,
                 use_tags = False,
                 rid2tags_path = None,
                 use_orientation = False,
@@ -371,12 +394,22 @@ class VQA_Trainer(VQA_Base):
                 dataset_name = None,
                 split_kwargs = None,
                 balanced_split = False,
+                balanced_dataloading = False,
                 balanced_metadata_path = None,
+                validation_only = False,
                 debug = False,
         ):
+
+        if balanced_dataloading:
+            assert balanced_split
+            assert balanced_metadata_path is not None
+
+        self.balanced_dataloading = balanced_dataloading
+        self.validation_only = validation_only
     
         super().__init__(True, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
+                num_workers,
                 use_tags = use_tags,
                 rid2tags_path = rid2tags_path,
                 use_orientation = use_orientation,
@@ -388,54 +421,66 @@ class VQA_Trainer(VQA_Base):
                 balanced_metadata_path = balanced_metadata_path,
                 debug = debug)
 
-    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):
-        if self.balanced_split:
-            self._generate_train_datasets__balanced(batch_size)
-        else:
-            self._generate_train_datasets(batch_size)
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
+        if not self.validation_only:
+            if self.balanced_dataloading:
+                self._generate_train_dataset__balanced(batch_size)
+            else:
+                self._generate_train_dataset(batch_size)
         self._generate_val_dataset()
-        self._generate_train_val_dataloaders(batch_size, collate_batch_fn,
-                                             shuffle = not self.balanced_split)
+        self._generate_train_val_dataloaders(batch_size, collate_batch_fn, num_workers)
 
-    def _generate_train_datasets(self, batch_size):
-        self.train_datasets = []
+    def _generate_train_dataset(self, batch_size):
+        question_datasets = []                
         train_question_ids = list(self.train_indices.keys())
         train_question_ids.sort(key=lambda x : len(self.train_indices[x]))
-        acc_indices = []
-        for i, qid in enumerate(train_question_ids):
-            indices = self.train_indices[qid]
-            if len(acc_indices) > 0 or len(indices) < batch_size:
-                assert len(acc_indices) < batch_size
-                acc_indices += indices
-                indices = acc_indices
-            if len(indices) >= batch_size or i+1 == len(train_question_ids):
-                self.train_datasets.append(VQADataset(
-                    self.report_ids, self.images, self.questions, self.answers,
-                    indices, self.transform, self.dataset_name,
-                    # aux task: medical tags
-                    use_tags = self.use_tags,
-                    rid2tags = self.rid2tags if self.use_tags else None,
-                    # aux task: orientation
-                    use_orientation = self.use_orientation,
-                    orientations = self.orientations if self.use_orientation else None,
-                    # aux task: chexpert labels
-                    use_chexpert = self.use_chexpert,
-                    chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
-                ))
-                if len(acc_indices) > 0:
-                    acc_indices = []
-        self.train_dataset_weights = log_normalize_weights([len(d) for d in self.train_datasets])
-        print(f'\tlen(self.train_datasets) = {len(self.train_datasets)}')
+        i = 0
+        n = len(train_question_ids)
+        while i < n:
+            j = i
+            acc_size = len(self.train_indices[train_question_ids[i]])
+            while j+1 < n and acc_size < batch_size:
+                j += 1
+                acc_size += len(self.train_indices[train_question_ids[j]])
+            if i == j:
+                indices = self.train_indices[train_question_ids[i]]
+            else:
+                print(f' *** merging from i={i} to j={j}, acc_size = {acc_size}')
+                indices = []
+                for k in range(i, j+1):
+                    indices.extend(self.train_indices[train_question_ids[k]])
+                indices = np.array(indices, dtype=int)
+            question_datasets.append(VQADataset(
+                self.report_ids, self.images, self.questions, self.answers,
+                indices, self.transform, self.dataset_name,
+                # aux task: medical tags
+                use_tags = self.use_tags,
+                rid2tags = self.rid2tags if self.use_tags else None,
+                # aux task: orientation
+                use_orientation = self.use_orientation,
+                orientations = self.orientations if self.use_orientation else None,
+                # aux task: chexpert labels
+                use_chexpert = self.use_chexpert,
+                chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+                # infinite mode
+                infinite=True,
+            ))
+            i = j+1
+        
+        question_weights = log_normalize_weights([len(d) for d in question_datasets])
+        self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+        print(f'\tlen(question_datasets) = {len(question_datasets)}')
     
-    def _generate_train_datasets__balanced(self, batch_size):
+    def _generate_train_dataset__balanced(self, batch_size):
 
         cached_balanced_train_datasets_path = f'{self.preprocessing_save_path}.balanced_train_data(bs={batch_size}).pkl'
         cached_data = load_pickle(cached_balanced_train_datasets_path)
         if cached_data is not None:
             print(f'Balanced train data loaded from {cached_balanced_train_datasets_path}')
-            self.train_datasets = [node.get_dataset(self) for node in cached_data['train_nodes']]
-            self.train_dataset_weights = cached_data['train_dataset_weights']
-            print(f'\tlen(self.train_datasets) = {len(self.train_datasets)}')
+            question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
+            question_weights = cached_data['question_weights']
+            self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+            print(f'\tlen(question_datasets) = {len(question_datasets)}')
             return
 
         print('Computing balanced datasets from scratch ...')
@@ -519,14 +564,15 @@ class VQA_Trainer(VQA_Base):
             dataset_weights.append(acc_size)
         
         cached_data = {
-            'train_nodes': merged_train_nodes,
-            'train_dataset_weights': log_normalize_weights(dataset_weights),
+            'question_nodes': merged_train_nodes,
+            'question_weights': log_normalize_weights(dataset_weights),
         }
         save_to_pickle(cached_data, cached_balanced_train_datasets_path)
         print(f'Balanced train data saved to {cached_balanced_train_datasets_path}')
-        self.train_datasets = [node.get_dataset(self) for node in cached_data['train_nodes']]
-        self.train_dataset_weights = cached_data['train_dataset_weights']
-        print(f'\tlen(self.train_datasets) = {len(self.train_datasets)}')
+        question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
+        question_weights = cached_data['question_weights']
+        self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+        print(f'\tlen(question_datasets) = {len(question_datasets)}')
 
     def _generate_val_dataset(self):
         # validation dataset
@@ -544,26 +590,33 @@ class VQA_Trainer(VQA_Base):
             chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
         )        
             
-    def _generate_train_val_dataloaders(self, batch_size, collate_batch_fn, shuffle=True):
+    def _generate_train_val_dataloaders(self, batch_size, collate_batch_fn, num_workers):
 
         print('generating training and validation dataloaders ...')
+
+        print('num_workers =', num_workers)
         
-        self.train_dataloaders = []
-        for dataset in self.train_datasets:
-            self.train_dataloaders.append(DataLoader(dataset,
-                                                     batch_size=batch_size,
-                                                     shuffle=shuffle,
-                                                     collate_fn=collate_batch_fn))
+        if not self.validation_only:
+            
+            self.train_dataloader = DataLoader(self.train_dataset,
+                                            batch_size=batch_size,
+                                            shuffle=False,
+                                            collate_fn=collate_batch_fn,
+                                            num_workers=num_workers,
+                                            pin_memory=True)
         
         self.val_dataloader = DataLoader(self.val_dataset,
                                          batch_size=batch_size,
                                          shuffle=False,
-                                         collate_fn=collate_batch_fn)
+                                         collate_fn=collate_batch_fn,
+                                         num_workers=num_workers,
+                                         pin_memory=True)
 
 class VQA_Evaluator(VQA_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
-                preprocessing_save_path,                
+                preprocessing_save_path,
+                num_workers,
                 use_tags = False,
                 rid2tags_path = None,
                 use_orientation = False,
@@ -575,6 +628,7 @@ class VQA_Evaluator(VQA_Base):
     
         super().__init__(False, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
+                num_workers,
                 use_tags = use_tags,
                 rid2tags_path = rid2tags_path,
                 use_orientation = use_orientation,
@@ -583,10 +637,10 @@ class VQA_Evaluator(VQA_Base):
                 dataset_name = dataset_name,
                 debug = debug)
 
-    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn):
+    def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
         self.test_indices = list(range(len(self.report_ids)))
         self._generate_test_dataset()
-        self._generate_test_dataloader(batch_size, collate_batch_fn)
+        self._generate_test_dataloader(batch_size, collate_batch_fn, num_workers)
 
     def _generate_test_dataset(self):
 
@@ -607,11 +661,12 @@ class VQA_Evaluator(VQA_Base):
         )
         
             
-    def _generate_test_dataloader(self, batch_size, collate_batch_fn):
+    def _generate_test_dataloader(self, batch_size, collate_batch_fn, num_workers):
 
         print('generating test dataloader ...')
         
         self.test_dataloader = DataLoader(self.test_dataset,
                                          batch_size=batch_size,
                                          shuffle=False,
+                                         num_workers=num_workers,
                                          collate_fn=collate_batch_fn)

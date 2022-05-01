@@ -3,6 +3,7 @@ from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.files import (
     load_json_file,
+    load_pickle,
     save_to_pickle,
 )
 from medvqa.datasets.preprocessing import get_sentences
@@ -22,6 +23,7 @@ def parse_args():
     parser.add_argument('--mimiccxr-qa-dataset-filename', type=str, required=True)
     parser.add_argument('--chunk-size', type=int, default=5000)
     parser.add_argument('--max-processes', type=int, default=16)
+    parser.add_argument('--chexpert-labels-cache-filename', type=str, default=None)
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -54,19 +56,36 @@ if __name__ == '__main__':
             hash2text[h] = clean_s
 
     text2hash = {t:h for h,t in hash2text.items()}
-    texts = list(text2hash.keys())
-    random.shuffle(texts)
+    
+    hash2label = dict()
 
-    print('len(texts):', len(texts))
-    print('average length:', sum(len(x) for x in texts) / len(texts))
+    if args.chexpert_labels_cache_filename is not None:
+        labels_cache_path = os.path.join(CACHE_DIR, args.chexpert_labels_cache_filename)
+        cached_labels = load_pickle(labels_cache_path)
+        unlabeled_texts = []
+        for text, hash in text2hash.items():
+            try:
+                hash2label[hash] = cached_labels[hash]
+            except KeyError:
+                unlabeled_texts.append(text)
+    else:
+        unlabeled_texts = list(text2hash.keys())
+
 
     timestamp = get_timestamp()
 
-    n = len(texts)
-    n_chunks = n // args.chunk_size + (n % args.chunk_size > 0)
-    labels = invoke_chexpert_labeler_process(texts, f'_{timestamp}',
-                                    n_chunks=n_chunks, max_processes=args.max_processes)
-    hash2label = { text2hash[texts[i]] : labels[i] for i in range(len(texts)) }
+    n = len(unlabeled_texts)
+    print('len(unlabeled_texts):', n)
+    
+    if n > 0:
+        random.shuffle(unlabeled_texts)
+        print('average length:', sum(len(x.split()) for x in unlabeled_texts) / len(unlabeled_texts))
+
+        n_chunks = n // args.chunk_size + (n % args.chunk_size > 0)
+        labels = invoke_chexpert_labeler_process(unlabeled_texts, f'_{timestamp}',
+                                        n_chunks=n_chunks, max_processes=args.max_processes)
+        for i in range(n):
+            hash2label[text2hash[unlabeled_texts[i]]] = labels[i]
     
     output_path = os.path.join(CACHE_DIR, f'precomputed_chexpert_labels_{timestamp}.pkl')
     save_to_pickle(hash2label, output_path)

@@ -1,7 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from medvqa.utils.files import load_pickle, save_to_pickle
+from ignite.metrics import Metric
+from ignite.exceptions import NotComputableError
+from sklearn.metrics import f1_score
+from medvqa.utils.files import get_cached_pickle_file, save_to_pickle
 from medvqa.utils.common import CACHE_DIR, TMP_DIR
 from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.hashing import hash_string
@@ -22,6 +25,48 @@ TMP_FOLDER = os.path.join(TMP_DIR, 'chexpert-labeler')
 #     prev = custom_env.get('PYTHONPATH', '')
 #     custom_env['PYTHONPATH'] = f'{NEGBIO_PATH}:{prev}'
 #     return custom_env
+
+
+class ChexpertLabelsF1score(Metric):
+
+    def __init__(self, output_transform=lambda x: x, device=None, record_scores=False):
+        self._acc_score = 0
+        self._count = 0
+        self.record_scores = record_scores
+        if record_scores:
+            self._scores = []
+        super().__init__(output_transform=output_transform, device=device)
+    
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+        if self.record_scores:
+            self._scores.clear()
+        super().reset()
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        n, m = pred_labels.shape
+        for i in range(n):
+            pred = pred_labels[i]
+            gt = gt_labels[i]
+            if all(pred[j] == gt[j] for j in range(m)):
+                score = 1
+            elif gt[0] == 1:
+                score = 0
+            else:
+                score = f1_score(gt[1:], pred[1:])
+            self._acc_score += score
+            if self.record_scores:
+                self._scores.append(score)
+        self._count += n
+
+    def compute(self):
+        if self._count == 0:
+            raise NotComputableError('Chexpert F1score needs at least one example before it can be computed.')
+        if self.record_scores:
+            return self._scores
+        return self._acc_score / self._count
 
 class ChexpertLabelerJob:
     def __init__(self, texts, input_filename, output_filename):
@@ -59,8 +104,8 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
 
     n = len(texts)
     chunk_size = n // n_chunks + (n % n_chunks > 0)
-    if chunk_size < 80:
-        chunk_size = 80
+    if chunk_size < 30:
+        chunk_size = 30
         n_chunks = n // chunk_size + (n % chunk_size > 0)
         chunk_size = n // n_chunks + (n % n_chunks > 0)
 
@@ -136,7 +181,7 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
 class ChexpertLabeler:
     def __init__(self, verbose=True):        
         self.cache_path = os.path.join(CACHE_DIR, 'chexpert_labeler_cache.pkl')
-        self.cache = load_pickle(self.cache_path)
+        self.cache = get_cached_pickle_file(self.cache_path)
         self.verbose = verbose
         if self.cache is None:
             self.cache = dict()
@@ -168,12 +213,12 @@ class ChexpertLabeler:
 
         if len(unlabeled_texts) > 0:
             labels = invoke_chexpert_labeler_process(unlabeled_texts, tmp_suffix,
-                                                     n_chunks=8, max_processes=8,
+                                                     n_chunks=10, max_processes=10,
                                                      verbose=self.verbose)
             for hash, label in zip(unlabeled_hashes, labels):
                 self.cache[hash] = label
             
-            if update_cache_on_disk:
+            if update_cache_on_disk and len(unlabeled_texts) > 10:
                 save_to_pickle(self.cache, self.cache_path)
                 if self.verbose:
                     print(f'Cache successfully updated and saved to {self.cache_path}')

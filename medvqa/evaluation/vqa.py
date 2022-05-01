@@ -12,8 +12,11 @@ from medvqa.utils.constants import (
     NLP_METRICS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import load_json_file
-from medvqa.utils.metrics import average_ignoring_nones     
+from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.metrics import (
+    average_ignoring_nones,
+    chexpert_label_array_to_string,
+)
 
 def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
     
@@ -108,10 +111,7 @@ def extend_columns(columns, metric_name):
         columns.append('chx_s_0')
         columns.append('chx_s_1')
     else:
-        try:
-            columns.append(METRIC2SHORT[metric_name])
-        except KeyError:
-            columns.append(metric_name)
+        columns.append(METRIC2SHORT.get(metric_name, metric_name))
 
 def update_row_ranker(row_ranker, metric_name, metrics_to_rank = None):
     if metric_name == 'chexpert_prf1s':
@@ -176,12 +176,9 @@ def get_per_question_metrics_dataframe(aggregated_metrics, metrics_to_ignore=Non
             extend_row(data[i], q2metrics[q], mn)
     data.sort(key=row_ranker, reverse=True)
     return pd.DataFrame(data=data, columns=columns)
-
-def _chexpert_label_array_to_string(label_array):
-    return ', '.join(CHEXPERT_LABELS[i] for i, label in enumerate(label_array) if label == 1)
-
    
 class VQAExamplePlotter:
+
     def __init__(self, dataset_name, results,
                 medical_tags_extractor=None,
                 orientation_names=None,
@@ -225,7 +222,7 @@ class VQAExamplePlotter:
             self.pred_chexpert_labels = metrics_dict['pred_chexpert']
 
         if qa_adapted_reports_file_path is not None:
-            self.reports = load_json_file(qa_adapted_reports_file_path)
+            self.reports = get_cached_json_file(qa_adapted_reports_file_path)
         else:
             self.reports is None
 
@@ -276,15 +273,15 @@ class VQAExamplePlotter:
             print('pred tags:', pred_tags)
             print('--')
         if self.use_chexpert:
-            chexpert_labels = _chexpert_label_array_to_string(self.dataset.chexpert_labels[self.dataset.report_ids[self.idxs[idx]]])
-            pred_chexpert_labels = _chexpert_label_array_to_string(self.pred_chexpert_labels[idx])
+            chexpert_labels = chexpert_label_array_to_string(self.dataset.chexpert_labels[self.dataset.report_ids[self.idxs[idx]]])
+            pred_chexpert_labels = chexpert_label_array_to_string(self.pred_chexpert_labels[idx])
             print('chexpert_labels:', chexpert_labels)
             print('pred_chexpert_labels:', pred_chexpert_labels)
             print('--')
         print('chexpert_labels_gt:', self.metrics_dict['chexpert_labels_gt'][idx])
         print('chexpert_labels_gen:', self.metrics_dict['chexpert_labels_gen'][idx])
-        print('chexpert_labels_gt (verbose):', _chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gt'][idx]))
-        print('chexpert_labels_gen (verbose):', _chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gen'][idx]))
+        print('chexpert_labels_gt (verbose):', chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gt'][idx]))
+        print('chexpert_labels_gen (verbose):', chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gen'][idx]))
         print('--')
         for m in metrics_to_inspect:
             print(f'{m}:', self.metrics_dict[m][idx])

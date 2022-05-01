@@ -21,7 +21,7 @@ class MultiLabelAccuracy(Metric):
 
     def update(self, output):
         pred_tags, gt_tags = output
-        n = pred_tags.size(0)
+        n = pred_tags.shape[0]
         for i in range(n):
             pred = pred_tags[i]
             gt = gt_tags[i]            

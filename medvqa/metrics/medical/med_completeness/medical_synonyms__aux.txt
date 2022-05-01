@@ -68,7 +68,7 @@ bleed bleeding
 blunt blunted blunting blunts
 blurred blurring
 bodies body
-bone bones bony osseous osseus
+bone bones bony osseous osseus skeletal skeleton
 border bordering borderline borders
 brachiocephalic brachycephalic
 branch branches branching
@@ -451,7 +451,6 @@ sidehole sideholes
 sideport sideports
 sinus sinuses
 size sized sizes
-skeletal skeleton
 small smaller
 smooth smoothly
 space spaces

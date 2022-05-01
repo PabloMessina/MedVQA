@@ -7,6 +7,25 @@ from medvqa.utils.common import (
     get_timestamp,
 )
 
+_json_cache = dict()
+_pickle_cache = dict()
+
+def get_cached_json_file(path):
+    try:
+        file = _json_cache[path]
+    except KeyError:
+        file = _json_cache[path] = load_json_file(path)
+    return file
+
+def get_cached_pickle_file(path):
+    try:
+        file = _pickle_cache[path]        
+    except KeyError:
+        file = None
+    if file is None:
+        file = _pickle_cache[path] = load_pickle(path)
+    return file
+
 def load_json_file(path):
     with open(path, 'r') as f:
         return json.load(f)
@@ -47,7 +66,7 @@ def save_to_json(obj, path):
 def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
     timestamp = get_timestamp()
     folder_name = f'{timestamp}_{dataset_name}_{model_name}'
-    if args: folder_name = f'{folder_name}_{"_".join(args)}'
+    if args: folder_name = f'{folder_name}_{"_".join(arg for arg in args if arg is not None)}'
     full_path = os.path.join(WORKSPACE_DIR, 'models', task, folder_name)
     os.makedirs(full_path, exist_ok=True)
     return full_path

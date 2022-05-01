@@ -196,12 +196,15 @@ class QuestionAnswerExtractor:
         sentences = tmp
         assert len(sentences) == idx
         
-        # generate QA pairs        
+        # generate QA pairs
+        question_ids = []
         for i in valid_indices:
             s = sentences[i]
             match = False
             for q in self.get_matched_questions(s):
                 q_idx = self.question2index[q]
+                if q_idx not in question_ids:
+                    question_ids.append(q_idx)
                 try:                        
                     answers = output['qa'][str(q_idx)]
                 except KeyError:
@@ -212,6 +215,7 @@ class QuestionAnswerExtractor:
                 output['matched'].append(i)
             else:
                 output['unmatched'].append(i)
+        output['question_ids'] = question_ids
         return output
     
     def get_unmatched_sentences(self, text):
