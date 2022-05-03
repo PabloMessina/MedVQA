@@ -225,6 +225,7 @@ class VQA_Base:
                 chexpert_labels_path = None,
                 dataset_name = None,
                 split_kwargs = None,
+                load_split_from_path = None,
                 balanced_split = False,
                 balanced_metadata_path = None,
                 debug = False,
@@ -252,6 +253,8 @@ class VQA_Base:
         
         if not debug:            
             first_time = not self._load_cached_data(preprocessing_save_path)
+            if not first_time and load_split_from_path is not None:
+                self._load_split_from_path(load_split_from_path)
 
         if debug or first_time:
             
@@ -259,7 +262,9 @@ class VQA_Base:
             self._preprocess_data()
 
             if training:
-                if balanced_split:
+                if load_split_from_path is not None:
+                    self._load_split_from_path(load_split_from_path)
+                elif balanced_split:
                     self._split_data_train_val__balanced(**split_kwargs)
                 else:
                     self._split_data_train_val(**split_kwargs)
@@ -281,8 +286,14 @@ class VQA_Base:
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
         raise NotImplementedError('Make sure your specialized class implements this function')
 
+    def _load_split_from_path(self, preprocessing_save_path):
+        data = load_pickle(preprocessing_save_path)
+        self.train_indices = data['train_indices']
+        self.val_indices = data['val_indices']
+        print(f'Train-val split indices successfully loaded from {preprocessing_save_path}')
+    
     def _load_cached_data(self, preprocessing_save_path):
-        print (f'Checking if data is already cached in path {preprocessing_save_path} ...')
+        print(f'Checking if data is already cached in path {preprocessing_save_path} ...')
         data = load_pickle(preprocessing_save_path)
         if data is None:
             print('\tNo, it isn\'t :(')
@@ -299,7 +310,7 @@ class VQA_Base:
             self.val_indices = data['val_indices']
         if self.use_orientation:
             self.orientations = data['orientations']
-        print ('\tYes, it is, data successfully loaded :)')
+        print('\tYes, it is, data successfully loaded :)')
         return True
     
     def _save_data(self, preprocessing_save_path):
@@ -393,6 +404,7 @@ class VQA_Trainer(VQA_Base):
                 chexpert_labels_path = None,
                 dataset_name = None,
                 split_kwargs = None,
+                load_split_from_path = None,
                 balanced_split = False,
                 balanced_dataloading = False,
                 balanced_metadata_path = None,
@@ -417,6 +429,7 @@ class VQA_Trainer(VQA_Base):
                 chexpert_labels_path = chexpert_labels_path,
                 dataset_name = dataset_name,
                 split_kwargs = split_kwargs,
+                load_split_from_path = load_split_from_path,
                 balanced_split = balanced_split,
                 balanced_metadata_path = balanced_metadata_path,
                 debug = debug)

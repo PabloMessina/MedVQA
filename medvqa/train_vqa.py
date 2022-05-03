@@ -111,6 +111,10 @@ def parse_args():
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
                         help='Mode of data augmentation used for images')
+    
+    parser.add_argument('--medical-tokenization', dest='medical_tokenization', action='store_true')
+    parser.set_defaults(medical_tokenization=True)
+    parser.add_argument('--medical-terms-frequency-filename', type=str, default=None)
 
     # balanced dataset arguments
     parser.add_argument('--balanced-split', dest='balanced_split', action='store_true')
@@ -232,10 +236,13 @@ def train_model(
     # Init tokenizer
     count_print('Initializing tokenizer ...')
     vocab_min_freq = tokenizer_kwargs['vocab_min_freq']
-    tokenizer = Tokenizer(qa_adapted_filenames=[iuxray_qa_adapted_reports_filename,
-                                                mimiccxr_qa_adapted_reports_filename],
-                          qa_adapted_datasets=[iuxray_qa_reports, mimiccxr_qa_reports],
-                          min_freq=vocab_min_freq)
+    medical_tokenization = tokenizer_kwargs['medical_tokenization']
+    medical_terms_frequency_filename = tokenizer_kwargs['medical_terms_frequency_filename']
+    assert medical_tokenization == (medical_terms_frequency_filename is not None)
+    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path,
+                                                    mimiccxr_qa_adapted_reports_path],                          
+                          min_freq=vocab_min_freq,
+                          medical_terms_frequency_filename=medical_terms_frequency_filename)
     
     # Create model
     count_print('Creating instance of OpenEndedVQA model ...')    
@@ -435,6 +442,7 @@ def train_model(
                 f'cnn-pretr={int(bool(model_kwargs["densenet_pretrained_weights_path"]))}',
                 f'mim-iux-freqs={",".join(map(str, mimic_iuxray_freqs))}' \
                     if (train_iuxray and train_mimiccxr) else None,
+                f'medtok={int(medical_tokenization)}',
                 f'tags={int(use_tags)}',
                 f'orien={int(use_orientation)}',
                 f'chx={int(use_orientation)}',
@@ -507,6 +515,8 @@ def train_model(
 def train_from_scratch(
     # Tokenizer's args
     vocab_min_freq,
+    medical_tokenization,
+    medical_terms_frequency_filename,
     # Model's args
     embed_size,
     question_hidden_size,
@@ -561,7 +571,9 @@ def train_from_scratch(
     print('----- Training model from scratch ------')
 
     tokenizer_kwargs = dict(
-        vocab_min_freq = vocab_min_freq
+        vocab_min_freq = vocab_min_freq,
+        medical_tokenization = medical_tokenization,
+        medical_terms_frequency_filename = medical_terms_frequency_filename,
     )
     model_kwargs = dict(
         embed_size = embed_size,

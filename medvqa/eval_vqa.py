@@ -186,10 +186,13 @@ def _evaluate_model(
     # Init tokenizer
     count_print('Initializing tokenizer ...')
     vocab_min_freq = tokenizer_kwargs['vocab_min_freq']
-    tokenizer = Tokenizer(qa_adapted_filenames=[iuxray_qa_adapted_reports_filename,
-                                                mimiccxr_qa_adapted_reports_filename],
-                          qa_adapted_datasets=[iuxray_qa_reports, mimiccxr_qa_reports],
-                          min_freq=vocab_min_freq)
+    medical_tokenization = tokenizer_kwargs['medical_tokenization']
+    medical_terms_frequency_filename = tokenizer_kwargs['medical_terms_frequency_filename']
+    assert medical_tokenization == (medical_terms_frequency_filename is not None)
+    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path,
+                                                    mimiccxr_qa_adapted_reports_path],
+                          min_freq=vocab_min_freq,
+                          medical_terms_frequency_filename=medical_terms_frequency_filename)
     
     # Create model
     count_print('Creating instance of OpenEndedVQA model ...')    
@@ -256,6 +259,7 @@ def _evaluate_model(
             use_chexpert = use_chexpert,
             chexpert_labels_filename = iuxray_chexpert_labels_filename,
             validation_only = True,
+            ignore_medical_tokenization = tokenizer.medical_tokenization,
             **iuxray_vqa_trainer_kwargs,
         )
 
@@ -345,16 +349,16 @@ def _evaluate_model(
         if return_results:
             results_dict['iuxray_metrics'] = deepcopy(evaluator.state.metrics)            
             results_dict['iuxray_dataset'] = iuxray_vqa_trainer.val_dataset
-            # _append_chexpert_labels(
-            #     results_dict['iuxray_metrics'],
-            #     results_dict['iuxray_metrics']['pred_answers'],
-            #     results_dict['iuxray_dataset'],
-            #     results_dict['iuxray_metrics']['idxs'],
-            #     tokenizer,
-            # )
-            # results_dict['iuxray_agg_metrics'] = _compute_and_save_aggregated_metrics(
-            #                                         results_dict, 'iuxray', tokenizer,
-            #                                         metrics_to_aggregate, results_folder_path)
+            _append_chexpert_labels(
+                results_dict['iuxray_metrics'],
+                results_dict['iuxray_metrics']['pred_answers'],
+                results_dict['iuxray_dataset'],
+                results_dict['iuxray_metrics']['idxs'],
+                tokenizer,
+            )
+            results_dict['iuxray_agg_metrics'] = _compute_and_save_aggregated_metrics(
+                                                    results_dict, 'iuxray', tokenizer,
+                                                    metrics_to_aggregate, results_folder_path)
             results_dict['iuxray_reports'] = recover_reports(
                 results_dict['iuxray_metrics'],
                 results_dict['iuxray_dataset'],
@@ -372,16 +376,16 @@ def _evaluate_model(
         if return_results:
             results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
             results_dict['mimiccxr_dataset'] = mimiccxr_vqa_evaluator.test_dataset
-            # _append_chexpert_labels(
-            #     results_dict['mimiccxr_metrics'],
-            #     results_dict['mimiccxr_metrics']['pred_answers'],
-            #     results_dict['mimiccxr_dataset'],
-            #     results_dict['mimiccxr_metrics']['idxs'],
-            #     tokenizer,
-            # )
-            # results_dict['mimiccxr_agg_metrics'] = _compute_and_save_aggregated_metrics(
-            #                                         results_dict, 'mimiccxr', tokenizer,
-            #                                         metrics_to_aggregate, results_folder_path)
+            _append_chexpert_labels(
+                results_dict['mimiccxr_metrics'],
+                results_dict['mimiccxr_metrics']['pred_answers'],
+                results_dict['mimiccxr_dataset'],
+                results_dict['mimiccxr_metrics']['idxs'],
+                tokenizer,
+            )
+            results_dict['mimiccxr_agg_metrics'] = _compute_and_save_aggregated_metrics(
+                                                    results_dict, 'mimiccxr', tokenizer,
+                                                    metrics_to_aggregate, results_folder_path)
             results_dict['mimiccxr_reports'] = recover_reports(
                 results_dict['mimiccxr_metrics'],
                 results_dict['mimiccxr_dataset'],

@@ -7,6 +7,8 @@ from medvqa.utils.common import (
     get_timestamp,
 )
 
+MAX_FILENAME_LENGTH = os.statvfs('/').f_namemax
+
 _json_cache = dict()
 _pickle_cache = dict()
 

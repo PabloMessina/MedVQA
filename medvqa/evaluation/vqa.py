@@ -216,15 +216,15 @@ class VQAExamplePlotter:
         else:
             self.orientations = None
 
+        self.use_chexpert = use_chexpert
         if use_chexpert:
             assert 'pred_chexpert' in metrics_dict
-            self.use_chexpert = use_chexpert
-            self.pred_chexpert_labels = metrics_dict['pred_chexpert']
+            self.pred_chexpert_labels = metrics_dict['pred_chexpert']        
 
         if qa_adapted_reports_file_path is not None:
             self.reports = get_cached_json_file(qa_adapted_reports_file_path)
         else:
-            self.reports is None
+            self.reports = None
 
 
     def inspect_example(self, metrics_to_inspect, metrics_to_rank=None, idx=None, question=None, mode='random'):
@@ -260,7 +260,7 @@ class VQAExamplePlotter:
         print('answer:', self.answers[idx])
         print('pred_answer:', self.pred_answers[idx])
         print('--')
-        if self.orientation_names:
+        if self.orientations:
             orien = self.orientation_names[self.orientations[idx]]
             pred_orien = self.orientation_names[self.pred_orientations[idx]]
             print('orientation:', orien)

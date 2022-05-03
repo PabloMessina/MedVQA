@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from medvqa.utils.files import get_cached_json_file
 from medvqa.datasets.vqa import VQA_Trainer
 from medvqa.datasets.iuxray import (
     IUXRAY_DATASET_DIR,
@@ -9,6 +8,8 @@ from medvqa.datasets.iuxray import (
     IUXRAY_IMAGE_INFO_JSON_PATH,
     IUXRAY_IMAGE_ORIENTATIONS,
 )
+from medvqa.utils.files import get_cached_json_file, MAX_FILENAME_LENGTH
+from medvqa.utils.hashing import hash_string
 
 _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
 
@@ -24,17 +25,26 @@ def get_iuxray_image_paths(report):
     return image_paths
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
-                                       balanced_metadata_filename=None):    
+                                       balanced_metadata_filename=None,
+                                       ignore_medical_tokenization=False):    
     
     split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
+    tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
+    if tokenizer.medical_tokenization and not ignore_medical_tokenization:
+        tokenizer_string += f',{tokenizer.medical_terms_frequency_filename}'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'split_params={split_params_string}',
-        f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
+        f'tokenizer={tokenizer_string}',
     ]
     if balanced_metadata_filename:
         strings.append(f'balanced_metadata={balanced_metadata_filename}')
-    return os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__({";".join(strings)}).pkl')
+    merged_string = ";".join(strings)
+    final_path = os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__({merged_string}).pkl')
+    if len(final_path) > MAX_FILENAME_LENGTH:
+        h = hash_string(merged_string)
+        final_path = os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__(hash={h[0]},{h[1]}).pkl')
+    return final_path
 
 class IUXRAY_VQA_Trainer(VQA_Trainer):
 
@@ -54,16 +64,26 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 balanced_split = False,
                 balanced_dataloading = False,
                 balanced_metadata_filename = None,
-                validation_only = False):
+                validation_only = False,
+                ignore_medical_tokenization = False):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
         self.iuxray_image_info = iuxray_image_info
         self.iuxray_qa_reports = iuxray_qa_reports
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
-        
-        preprocessing_save_path = _get_train_preprocessing_save_path(
-                        qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+
+        if ignore_medical_tokenization:        
+            preprocessing_save_path = _get_train_preprocessing_save_path(
+                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                            ignore_medical_tokenization=True)
+            load_split_from_path = _get_train_preprocessing_save_path(
+                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+        else:
+            preprocessing_save_path = _get_train_preprocessing_save_path(
+                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                            ignore_medical_tokenization=True)
+            load_split_from_path = None
 
         rid2tags_path = os.path.join(IUXRAY_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
         chexpert_labels_path = os.path.join(IUXRAY_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
@@ -79,6 +99,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         chexpert_labels_path = chexpert_labels_path,
                         dataset_name = 'IU X-Ray',
                         split_kwargs = split_kwargs,
+                        load_split_from_path = load_split_from_path,
                         balanced_split = balanced_split,
                         balanced_dataloading = balanced_dataloading,
                         balanced_metadata_path = balanced_metadata_path,
@@ -90,6 +111,11 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         iuxray_metadata = self.iuxray_metadata
         iuxray_image_info = self.iuxray_image_info
         iuxray_qa_reports = self.iuxray_qa_reports
+
+        if tokenizer.medical_tokenization:
+            answer_string2ids_func = tokenizer.strig2medical_tag_ids
+        else:
+            answer_string2ids_func = tokenizer.string2ids
 
         if iuxray_qa_reports is None:
             file_path = os.path.join(IUXRAY_CACHE_DIR, self.qa_adapted_reports_filename)
@@ -146,7 +172,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                     self.question_ids.append(q_idx)
                     self.images.append(image_path)
                     self.questions.append(tokenizer.string2ids(question.lower()))
-                    self.answers.append(tokenizer.string2ids(answer.lower()))
+                    self.answers.append(answer_string2ids_func(answer.lower()))
                     self.orientations.append(orientation_id)
 
         self.report_ids = np.array(self.report_ids, dtype=int)

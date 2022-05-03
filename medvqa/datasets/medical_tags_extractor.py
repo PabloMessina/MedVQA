@@ -4,6 +4,8 @@ from medvqa.utils.files import read_lines_from_txt, load_pickle
 from nltk.tokenize import wordpunct_tokenize
 import os
 
+_VALID_PUNCTUATIONS = '.,:'
+
 class MedicalTagsExtractor:
 
     def __init__(self, medical_terms_frequency_filename):
@@ -52,4 +54,14 @@ class MedicalTagsExtractor:
         for token in wordpunct_tokenize(text.lower()):
             id = self.term2id.get(token, None)
             if id is not None: tags.append(self.tags[id])
+        return tags
+    
+    def extract_tags_sequence_with_punctuation(self, text):
+        tags = []
+        for token in wordpunct_tokenize(text.lower()):
+            if token in _VALID_PUNCTUATIONS:
+                tags.append(token)
+            else: 
+                id = self.term2id.get(token, None)
+                if id is not None: tags.append(self.tags[id])
         return tags

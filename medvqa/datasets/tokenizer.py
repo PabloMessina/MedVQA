@@ -1,6 +1,8 @@
 from nltk.tokenize import wordpunct_tokenize
 from tqdm import tqdm
+from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor
 from medvqa.utils.files import (
+    get_cached_json_file,
     load_pickle,
     save_to_pickle,
     load_json_file,
@@ -13,22 +15,33 @@ from medvqa.utils.hashing import hash_string
 import os
 import re
 
+_IGNORE_REGEX = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
+
 def _get_vocab_filepath(qa_adapted_filenames, min_freq):
     filename = f'vocab__min_freq={min_freq}__from({";".join(qa_adapted_filenames)}).pkl'
-    return os.path.join(CACHE_DIR, filename)    
+    return os.path.join(CACHE_DIR, filename)
 
 class Tokenizer:
     
     PAD_TOKEN = '<pad>'
     START_TOKEN = '<s>'
-    END_TOKEN = '</s>'
-    ignore_regex = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
+    END_TOKEN = '</s>'    
     
-    def __init__(self, qa_adapted_filenames, qa_adapted_datasets, min_freq=5, overwrite=False):
+    def __init__(self, qa_adapted_dataset_paths, min_freq=5, overwrite=False,
+                medical_terms_frequency_filename = None):
 
-        assert type(qa_adapted_filenames) is list, type(qa_adapted_filenames)
+        assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
+
+        qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
 
         vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq)
+        
+        if medical_terms_frequency_filename is not None:
+            self.med_tags_extractor = MedicalTagsExtractor(medical_terms_frequency_filename)
+            self.medical_terms_frequency_filename = medical_terms_frequency_filename
+            self.medical_tokenization = True
+        else:
+            self.medical_tokenization = False
 
         if not overwrite:
             print(f'Loading {vocab_filepath} ...')
@@ -37,9 +50,10 @@ class Tokenizer:
         if overwrite or self.id2token is None:
             # process Q&A datasets            
             vocab = dict()
+            qa_adapted_datasets = [get_cached_json_file(path) for path in qa_adapted_dataset_paths]
             for sentence in tqdm(get_sentences(qa_adapted_datasets)):
                 for token in wordpunct_tokenize(sentence):
-                    if self.ignore_regex.search(token):
+                    if _IGNORE_REGEX.search(token):
                         continue
                     vocab[token] = vocab.get(token, 0) + 1
             # filter by frequency
@@ -82,6 +96,14 @@ class Tokenizer:
                 ids.append(self.token2id[token])
             except KeyError:
                 pass
+        ids.append(self.token2id[self.END_TOKEN])
+        return ids
+    
+    def strig2medical_tag_ids(self, s):
+        tags = self.med_tags_extractor.extract_tags_sequence_with_punctuation(s)
+        ids = [self.token2id[self.START_TOKEN]]
+        for tag in tags:
+            ids.append(self.token2id[tag])
         ids.append(self.token2id[self.END_TOKEN])
         return ids
 
