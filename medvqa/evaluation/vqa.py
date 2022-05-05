@@ -71,6 +71,26 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
                     for i in range(len(CHEXPERT_LABELS))
                 ])
         
+        elif name == 'bleu':
+            # overall
+            bleus = metrics_dict[name]
+            for k in range(0, 4):
+                bleu_k = f'bleu-{k+1}'
+                output['overall'][bleu_k] = bleus[0][k]
+            # per question
+            for i, q in enumerate(unique_questions):
+                tmp = output['per_question'][q]
+                for k in range(0, 4):
+                    bleu_k = f'bleu-{k+1}'
+                    tmp[bleu_k] = average_ignoring_nones(bleus[1][k][j] for j in idxs_per_q[i])
+        
+        elif name == 'ciderD':
+            # overall
+            output['overall'][name] = metrics_dict[name][0]
+            # per question
+            for i, q in enumerate(unique_questions):
+                tmp = output['per_question'][q]
+                tmp[name] = average_ignoring_nones(metrics_dict[name][1][j] for j in idxs_per_q[i])
         else:
             # overall
             output['overall'][name] =  average_ignoring_nones(metrics_dict[name])

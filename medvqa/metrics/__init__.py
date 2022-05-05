@@ -1,6 +1,4 @@
-from medvqa.metrics.nlp.bleu import Bleu
-from medvqa.metrics.nlp.rouge import RougeL
-from medvqa.metrics.nlp.cider import CiderD
+from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
     WeightedMedicalCompleteness,
@@ -20,26 +18,40 @@ def _get_output_transform(pred_key, gt_key):
         return output[pred_key], output[gt_key]
     return output_transform
 
-def attach_bleu_question(engine, device, record_scores=False):
-    blue = Bleu(output_transform = _get_output_transform('pred_questions', 'questions'),
+# def attach_bleu_question(engine, device, record_scores=False):
+#     blue = Bleu(output_transform = _get_output_transform('pred_questions', 'questions'),
+#                 device = device, record_scores=record_scores)
+#     blue.attach(engine, 'bleu_question')
+
+def attach_exactmatch_question(engine, device, record_scores=False):
+    em = ExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
                 device = device, record_scores=record_scores)
-    blue.attach(engine, 'bleu_question')
+    em.attach(engine, 'exactmatch_question')
+
 
 def attach_bleu(engine, device, record_scores=False, ks=None):
-    if ks is None:
-        blue = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
-                    device = device, record_scores=record_scores)
-        blue.attach(engine, 'bleu')
-    else:
-        for k in ks:
-            blue = Bleu(k = k, output_transform = _get_output_transform('pred_answers', 'answers'),
-                    device = device, record_scores=record_scores)
-            blue.attach(engine, f'bleu-{k}')
+    # if ks is None:
+    #     blue = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
+    #                 device = device, record_scores=record_scores)
+    #     blue.attach(engine, 'bleu')
+    # else:
+    #     for k in ks:
+    #         blue = Bleu(k = k, output_transform = _get_output_transform('pred_answers', 'answers'),
+    #                 device = device, record_scores=record_scores)
+    #         blue.attach(engine, f'bleu-{k}')    
+    blue = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
+                device = device, record_scores=record_scores)
+    blue.attach(engine, 'bleu')
 
 def attach_rougel(engine, device, record_scores=False):
     rougel = RougeL(output_transform = _get_output_transform('pred_answers', 'answers'),
                     device = device, record_scores=record_scores)
     rougel.attach(engine, 'rougeL')
+
+def attach_meteor(engine, device, record_scores=False):
+    meteor = Meteor(output_transform = _get_output_transform('pred_answers', 'answers'),
+                    device = device, record_scores=record_scores)
+    meteor.attach(engine, 'meteor')
 
 def attach_ciderd(engine, device, record_scores=False):
     ciderd = CiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
@@ -72,7 +84,6 @@ def attach_chexpert_labels_f1score(engine, device, record_scores=False):
     chxlabelacc = ChexpertLabelsF1score(output_transform = _get_output_transform('pred_chexpert', 'chexpert'),
                                 device=device, record_scores=record_scores)
     chxlabelacc.attach(engine, 'chxlabelf1')
-
 
 def attach_dataset_aware_orientation_accuracy(engine, record_scores=False):
     orienacc = DatasetAwareOrientationAccuracy(record_scores=record_scores)

@@ -3,12 +3,12 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import random
 from sklearn.metrics import (
+    accuracy_score,
     precision_score,
     recall_score,
     f1_score,
 )
-from medvqa.metrics.nlp import Bleu, RougeL, CiderD
-from medvqa.metrics import MultiLabelAccuracy
+from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
     MedicalCompleteness,
@@ -23,8 +23,7 @@ from medvqa.utils.constants import (
 from medvqa.utils.files import get_cached_json_file
 from medvqa.utils.metrics import chexpert_label_array_to_string
 
-_REPORT_LEVEL_METRIC_NAMES = ['bleu', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4', 'ciderD',
-    'rougeL', 'medcomp', 'wmedcomp', 'chexpert_labels']
+_REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
 
 def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset):
     idxs = metrics_dict['idxs']
@@ -86,18 +85,20 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, qa_adapted_
     if metric_name in metric_names:
         metric = Bleu(device='cpu', record_scores=True)
         metric.update((gen_texts, gt_texts))
-        metrics[metric_name] = metric.compute()
-    
-    for k in range(1, 5):
-        metric_name = f'bleu-{k}'
-        if metric_name in metric_names:
-            metric = Bleu(k=k, device='cpu', record_scores=True)
-            metric.update((gen_texts, gt_texts))
-            metrics[metric_name] = metric.compute()
+        scores = metric.compute()    
+        for k in range(0, 4):
+            blue_k = f'bleu-{k+1}'
+            metrics[blue_k] = (scores[0][k], scores[1][k])
     
     metric_name = 'rougeL'
     if metric_name in metric_names:
         metric = RougeL(device='cpu', record_scores=True)
+        metric.update((gen_texts, gt_texts))
+        metrics[metric_name] = metric.compute()
+
+    metric_name = 'meteor'
+    if metric_name in metric_names:
+        metric = Meteor(device='cpu', record_scores=True)
         metric.update((gen_texts, gt_texts))
         metrics[metric_name] = metric.compute()
     
@@ -142,34 +143,64 @@ def get_report_level_metrics_dataframe(metrics_dict, metric_names=_REPORT_LEVEL_
             data[0].append(chxlabf1.compute())
             columns.append('chxlabf1(hard)')
 
-            chxlabacc = MultiLabelAccuracy(device='cpu')
-            chxlabacc.update((gen_labels, gt_labels))
-            data[0].append(chxlabacc.compute())
-            columns.append(METRIC2SHORT['chxlabelacc'])
+            # chxlabacc = MultiLabelAccuracy(device='cpu')
+            # chxlabacc.update((gen_labels, gt_labels))
+            # data[0].append(chxlabacc.compute())
+            # columns.append(METRIC2SHORT['chxlabelacc'])
 
-            ps = []
-            rs = []
-            f1s = []
+            ps, rs, f1s, accs = [], [], [], []
             for i in range(len(CHEXPERT_LABELS)):
-                p = precision_score(gt_labels.T[i], gen_labels.T[i])
-                r = recall_score(gt_labels.T[i], gen_labels.T[i])
-                f1 = f1_score(gt_labels.T[i], gen_labels.T[i])
-                ps.append(p)
-                rs.append(r)
-                f1s.append(f1)            
-            macro_avg_p = sum(ps[1:]) / (len(CHEXPERT_LABELS)-1)
-            macro_avg_r = sum(rs[1:]) / (len(CHEXPERT_LABELS)-1)
-            macro_avg_f1 = sum(f1s[1:]) / (len(CHEXPERT_LABELS)-1)
+                ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
+                rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
+                f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
+                accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
+            macro_avg_p = sum(ps) / len(CHEXPERT_LABELS)
+            macro_avg_r = sum(rs) / len(CHEXPERT_LABELS)
+            macro_avg_f1 = sum(f1s) / len(CHEXPERT_LABELS)
+            gt_flat = gt_labels.reshape(-1)
+            gen_flat = gen_labels.reshape(-1)
+            micro_avg_p = precision_score(gt_flat, gen_flat)
+            micro_avg_r = recall_score(gt_flat, gen_flat)
+            micro_avg_f1 = f1_score(gt_flat, gen_flat)
+            accuracy = accuracy_score(gt_flat, gen_flat)
+
+            data[0].append(micro_avg_p)
+            columns.append('p(micro)')
+            data[0].append(micro_avg_r)
+            columns.append('r(micro)')
+            data[0].append(micro_avg_f1)
+            columns.append('f1(micro)')
+
             data[0].append(macro_avg_p)
             columns.append('p(macro)')
             data[0].append(macro_avg_r)
             columns.append('r(macro)')
             data[0].append(macro_avg_f1)
             columns.append('f1(macro)')
+
+            data[0].append(accuracy)
+            columns.append('acc')
+
+            for i, label in enumerate(CHEXPERT_LABELS):
+                data[0].append(ps[i])
+                columns.append(f'p({CHEXPERT_LABEL2SHORT[label]})')
+            for i, label in enumerate(CHEXPERT_LABELS):
+                data[0].append(rs[i])
+                columns.append(f'r({CHEXPERT_LABEL2SHORT[label]})')
             for i, label in enumerate(CHEXPERT_LABELS):
                 data[0].append(f1s[i])
                 columns.append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
             
+        elif mn == 'bleu':            
+            for k in range(4):
+                bleu_k = f'bleu-{k+1}'
+                bleu_score = metrics_dict[bleu_k]                
+                data[0].append(bleu_score[0])
+                columns.append(METRIC2SHORT.get(bleu_k, bleu_k))
+        elif mn == 'ciderD':
+            scores = metrics_dict[mn]
+            data[0].append(scores[0])
+            columns.append(METRIC2SHORT.get(mn, mn))
         else:
             scores = metrics_dict[mn]
             score = sum(scores) / len(scores)
@@ -202,7 +233,9 @@ class ReportGenExamplePlotter:
         self.metric_names = sorted(list(self.metric_names))
 
     def _get_metric(self, name, idx):
-        return self.report_metrics[name][idx]
+        m = self.report_metrics[name]
+        if type(m) is tuple: m = m[1]
+        return m[idx]        
 
     def inspect_example(self, metrics_to_rank=None, idx=None, mode='random'):
 
@@ -249,7 +282,7 @@ class ReportGenExamplePlotter:
             print('chexpert_labels_gen (verbose):', chexpert_label_array_to_string(self.report_metrics['chexpert_labels_gen'][idx]))
         
         for m in self.metric_names:
-            print(f'{m}:', self.report_metrics[m][idx])
+            print(f'{m}:', self._get_metric(m, idx))
 
         print('\n--')
         print('\nimages:')

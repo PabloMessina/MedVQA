@@ -40,14 +40,16 @@ NLP_METRICS = [
 
 METRIC2SHORT = {
     'chexpert_accuracy': 'chx_acc',
-    'chexpert_prf1s': 'chx_prf1s',   
+    'chexpert_prf1s': 'chx_prf1s',
     'bleu_question': 'bq',
+    'exactmatch_question': 'emq',
     'bleu': 'b',
     'bleu-1': 'b1',
     'bleu-2': 'b2',
     'bleu-3': 'b3',
     'bleu-4': 'b4',
     'rougeL': 'rg-L',
+    'meteor': 'met',
     'ciderD': 'cD',
     'medcomp': 'mdcmp',
     'wmedcomp': 'wmdcmp',

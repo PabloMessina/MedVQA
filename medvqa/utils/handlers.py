@@ -34,17 +34,37 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
     def handler(engine):
         metrics = engine.state.metrics        
         scores = []
+        metric_names = []
         for m in metrics_to_print:
             score = metrics.get(m)
-            if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
-                try:
-                    score = average_ignoring_nones(score)
-                except TypeError:
-                    print(f'm = {m}, score = {score}, type(score) = {type(score)}')
-                    raise
-            scores.append(score)
+            if m == 'bleu':
+                assert len(score) == 4 or (len(score) == 2 and len(score[0]) == 4)
+                if len(score) == 2:
+                    score = score[0]
+                for k in range(0, 4):
+                    score_k = score[k]
+                    name_k = f'bleu-{k+1}'
+                    scores.append(score_k)
+                    metric_names.append(name_k)
+            elif m == 'ciderD':
+                if type(score) is tuple:
+                    assert len(score) == 2
+                    score = score[0]
+                scores.append(score)
+                metric_names.append(m)
+            else:
+                if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
+                    try:
+                        score = average_ignoring_nones(score)
+                    except TypeError:
+                        print(f'm = {m}, score = {score}, type(score) = {type(score)}')
+                        raise
+                scores.append(score)
+                metric_names.append(m)
         
-        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metrics_to_print, scores))
+        # print(metric_names, scores)
+
+        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metric_names, scores))
         duration = timer._elapsed()
         print(f'{metrics_str}, {duration:.2f} secs')
 

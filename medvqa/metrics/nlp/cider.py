@@ -23,5 +23,5 @@ class CiderD(Metric):
     def compute(self):
         mean_score, scores = self.scorer.compute_score()
         if self.record_scores:
-            return scores
+            return mean_score, scores
         return mean_score

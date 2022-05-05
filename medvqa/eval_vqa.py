@@ -14,10 +14,11 @@ from medvqa.utils.constants import (
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.metrics import (
-    attach_bleu_question,
+    attach_exactmatch_question,
     attach_bleu,
     attach_chexpert_labels_f1score,
     attach_rougel,
+    attach_meteor,
     attach_ciderd,
     attach_medical_completeness,
     attach_weighted_medical_completeness,
@@ -62,9 +63,10 @@ from medvqa.evaluation.report_generation import (
 )
 
 _METRIC_NAMES = [
-    'bleu_question',
-    'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
+    'exactmatch_question',
+    'bleu',
     'rougeL',
+    'meteor',
     'ciderD',
     'chexpert_accuracy',
     'chexpert_prf1s',
@@ -267,9 +269,10 @@ def _evaluate_model(
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
     # Metrics
-    attach_bleu_question(evaluator, device, record_scores=return_results)
-    attach_bleu(evaluator, device, record_scores=return_results, ks=[1,2,3,4])
+    attach_exactmatch_question(evaluator, device, record_scores=return_results)
+    attach_bleu(evaluator, device, record_scores=return_results)
     attach_rougel(evaluator, device, record_scores=return_results)
+    attach_meteor(evaluator, device, record_scores=return_results)
     attach_ciderd(evaluator, device, record_scores=return_results)
     attach_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
     attach_weighted_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
@@ -300,8 +303,8 @@ def _evaluate_model(
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss', 'bleu_question', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
-                      'rougeL', 'ciderD', 'medcomp', 'wmedcomp']
+    metrics_to_print=['loss', 'exactmatch_question', 'bleu', 'rougeL', 'meteor', 'ciderD',
+                     'medcomp', 'wmedcomp']
     if use_tags:
         metrics_to_print.append('medtagf1')
     if use_orientation:
