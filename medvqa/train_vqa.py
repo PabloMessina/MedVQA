@@ -15,7 +15,7 @@ from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
-    attach_bleu_question,
+    attach_exactmatch_question,
     attach_ciderd,
     attach_weighted_medical_completeness,
     attach_medical_tags_f1score,
@@ -111,9 +111,13 @@ def parse_args():
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
                         help='Mode of data augmentation used for images')
+
+    parser.add_argument('--use-amp', dest='use_amp', action='store_true')
+    parser.set_defaults(use_amp=False)
     
     parser.add_argument('--medical-tokenization', dest='medical_tokenization', action='store_true')
-    parser.set_defaults(medical_tokenization=True)
+    parser.set_defaults(medical_tokenization=False)
+
     parser.add_argument('--medical-terms-frequency-filename', type=str, default=None)
 
     # balanced dataset arguments
@@ -160,7 +164,7 @@ def parse_args():
     return parser.parse_args()
 
 _METRIC_WEIGHTS = {
-    'bleu_question': 1,
+    'exactmatch_question': 1,
     'ciderD': 0.1,
     'wmedcomp': 1,
     'medtagf1': 1,
@@ -177,6 +181,7 @@ def train_model(
     mimiccxr_vqa_trainer_kwargs,
     iuxray_vqa_trainer_kwargs,
     dataloading_kwargs,
+    training_kwargs,
     auxiliary_tasks_kwargs,
     epochs,
     batch_size,
@@ -186,15 +191,14 @@ def train_model(
     checkpoint_folder_path = None,
     save = True,
     override_lr = False,
-    train_iuxray = True,
-    train_mimiccxr = True,    
 ):
-
-    assert train_iuxray or train_mimiccxr
-
     count_print = CountPrinter()
     
     # Pull out some args from kwargs
+    train_iuxray = training_kwargs['train_iuxray']
+    train_mimiccxr = training_kwargs['train_mimiccxr']
+    use_amp = training_kwargs['use_amp']
+    assert train_iuxray or train_mimiccxr
 
     # auxiliary task: medical tags prediction
     use_tags = auxiliary_tasks_kwargs['use_tags']
@@ -268,7 +272,7 @@ def train_model(
     count_print('Creating trainer and validator engines ...')    
     trainer = get_engine(model, tokenizer,
                          use_tags, use_orientation, use_chexpert,
-                         device, training=True, optimizer=optimizer)
+                         device, use_amp=use_amp, training=True, optimizer=optimizer)
     validator = get_engine(model, tokenizer,
                          use_tags, use_orientation, use_chexpert,
                          device, training=False)
@@ -359,8 +363,8 @@ def train_model(
     # Attach metrics, losses, timer and events to engines    
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
-    attach_bleu_question(trainer, device)
-    attach_bleu_question(validator, device)
+    attach_exactmatch_question(trainer, device)
+    attach_exactmatch_question(validator, device)
     
     attach_ciderd(trainer, device)
     attach_ciderd(validator, device)
@@ -403,7 +407,7 @@ def train_model(
     timer.attach(validator, start=Events.EPOCH_STARTED)
     
     # Learning rate scheduler
-    metrics_to_merge = ['bleu_question', 'ciderD', 'wmedcomp']
+    metrics_to_merge = ['exactmatch_question', 'ciderD', 'wmedcomp']
     if use_tags:
         metrics_to_merge.append('medtagf1')
     if use_orientation:
@@ -446,6 +450,7 @@ def train_model(
                 f'tags={int(use_tags)}',
                 f'orien={int(use_orientation)}',
                 f'chx={int(use_orientation)}',
+                'use_amp' if use_amp else None,
             )
             print('checkpoint_folder_path =', checkpoint_folder_path)
             save_metadata(checkpoint_folder_path,
@@ -456,6 +461,7 @@ def train_model(
                         mimiccxr_vqa_trainer_kwargs = mimiccxr_vqa_trainer_kwargs,
                         iuxray_vqa_trainer_kwargs = iuxray_vqa_trainer_kwargs,
                         dataloading_kwargs = dataloading_kwargs,
+                        training_kwargs = training_kwargs,
                         auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
     else: # resuming
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
@@ -472,7 +478,7 @@ def train_model(
                                                     score_fn=score_fn)
 
     # Logging
-    metrics_to_print=['loss', 'question_loss', 'answer_loss', 'bleu_question', 'ciderD', 'wmedcomp']    
+    metrics_to_print=['loss', 'question_loss', 'answer_loss', 'exactmatch_question', 'ciderD', 'wmedcomp']    
     if use_tags:
         metrics_to_print.append('tags_loss')
         metrics_to_print.append('medtagf1')        
@@ -548,11 +554,13 @@ def train_from_scratch(
     mimic_iuxray_freqs,
     img_aug_mode,
     balanced_dataloading,
-    # Traning args
-    epochs,
-    batches_per_epoch,
+    # Fixed traning args
     train_mimiccxr,
     train_iuxray,
+    use_amp,
+    # Variable traning args
+    epochs,
+    batches_per_epoch,
     # Auxiliary tasks args
     use_tags,
     n_medical_tags,
@@ -625,6 +633,11 @@ def train_from_scratch(
         mimic_iuxray_freqs = mimic_iuxray_freqs,
         img_aug_mode = img_aug_mode,
     )
+    training_kwargs = dict(
+        use_amp = use_amp,
+        train_mimiccxr = train_mimiccxr,
+        train_iuxray = train_iuxray,
+    )
     auxiliary_tasks_kwargs = dict(
         # medical tags
         use_tags = use_tags,
@@ -646,15 +659,14 @@ def train_from_scratch(
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
+                training_kwargs,
                 auxiliary_tasks_kwargs,
                 epochs,
                 batch_size,
                 batches_per_epoch,
                 num_workers,
                 device = device,
-                save = save,
-                train_mimiccxr = train_mimiccxr,
-                train_iuxray = train_iuxray)
+                save = save)
 
 def resume_training(
     checkpoint_folder,
@@ -667,9 +679,7 @@ def resume_training(
     batches_per_epoch = 1000,
     device = 'GPU',
     save = True,
-    override_lr = False,    
-    train_mimiccxr = True,
-    train_iuxray = True,
+    override_lr = False,
     **unused_kwargs,
 ):
     print('----- Resuming training ------')
@@ -683,6 +693,7 @@ def resume_training(
     mimiccxr_vqa_trainer_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+    training_kwargs = metadata['training_kwargs']
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
 
     if override_lr:
@@ -701,6 +712,7 @@ def resume_training(
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 dataloading_kwargs,
+                training_kwargs,
                 auxiliary_tasks_kwargs,
                 epochs,
                 batch_size,
@@ -709,9 +721,7 @@ def resume_training(
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
                 save = save,
-                override_lr = override_lr,                
-                train_mimiccxr = train_mimiccxr,
-                train_iuxray = train_iuxray)
+                override_lr = override_lr)
 
 if __name__ == '__main__':
 

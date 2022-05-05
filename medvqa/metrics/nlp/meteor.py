@@ -14,7 +14,7 @@ class Meteor(Metric):
         super().__init__(output_transform=output_transform, device=device)
     
     def reset(self):
-        self._score = 0
+        self._acc_score = 0
         self._count = 0
         if self.record_scores:
             self._scores.clear()

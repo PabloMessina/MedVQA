@@ -1,9 +1,13 @@
 import torch
 import torch.nn as nn
+from torch.cuda.amp.grad_scaler import GradScaler
+from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
 from medvqa.utils.constants import MIMICCXR_DATASET_ID
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
+            # automatic mixed precision
+            use_amp=False,
             # tags aux task
             use_tags=False,
             tags_criterion=None,
@@ -15,6 +19,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             use_chexpert=False,
             chexpert_criterion=None,
     ):
+
+    scaler = GradScaler(enabled=use_amp)
     
     def step_fn(unused_engine, batch):
 
@@ -32,10 +38,6 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             orientation = batch['orientation'].to(device)
         if use_chexpert:
             chexpert = batch['chexpert'].to(device)
-
-        # Zero grad if training
-        if training:
-            optimizer.zero_grad()
         
         with torch.set_grad_enabled(training):
 
@@ -62,43 +64,49 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     model_kwargs['iuxray_foward'] = True
 
             # Forward pass
-            model_output = model(**model_kwargs)
+            with autocast(enabled=use_amp): # automatic mixed precision
 
-            pred_answer_logits = model_output['pred_answers']
-            pred_question_logits = model_output['pred_questions']
-            
-            if use_tags:
-                pred_tags_logits = model_output['pred_tags']            
-            if use_orientation:
-                if dataset_id == MIMICCXR_DATASET_ID:
-                    pred_orientation_logits = model_output['mimiccxr_pred_orientation']
-                else:
-                    pred_orientation_logits = model_output['iuxray_pred_orientation']
-            if use_chexpert:
-                pred_chexpert_logits = model_output['pred_chexpert']
+                model_output = model(**model_kwargs)
 
-            # Compute losses
-            answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-            question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
-            batch_loss = answer_loss + question_loss
-            
-            if use_tags:
-                tags_loss = tags_criterion(pred_tags_logits, tags.float())
-                batch_loss += tags_loss
-            if use_orientation:
-                if dataset_id == MIMICCXR_DATASET_ID:
-                    orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
-                else:
-                    orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
-                batch_loss += orientation_loss            
-            if use_chexpert:
-                chexpert_loss = chexpert_criterion(pred_chexpert_logits, chexpert.float())
-                batch_loss += chexpert_loss
+                pred_answer_logits = model_output['pred_answers']
+                pred_question_logits = model_output['pred_questions']
+                
+                if use_tags:
+                    pred_tags_logits = model_output['pred_tags']            
+                if use_orientation:
+                    if dataset_id == MIMICCXR_DATASET_ID:
+                        pred_orientation_logits = model_output['mimiccxr_pred_orientation']
+                    else:
+                        pred_orientation_logits = model_output['iuxray_pred_orientation']
+                if use_chexpert:
+                    pred_chexpert_logits = model_output['pred_chexpert']
+
+                # Compute losses
+                answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
+                batch_loss = answer_loss + question_loss
+                
+                if use_tags:
+                    tags_loss = tags_criterion(pred_tags_logits, tags.float())
+                    batch_loss += tags_loss
+                if use_orientation:
+                    if dataset_id == MIMICCXR_DATASET_ID:
+                        orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
+                    else:
+                        orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
+                    batch_loss += orientation_loss            
+                if use_chexpert:
+                    chexpert_loss = chexpert_criterion(pred_chexpert_logits, chexpert.float())
+                    batch_loss += chexpert_loss
 
             # Backward pass + optimizer step if training
             if training:
-                batch_loss.backward()
-                optimizer.step()
+                scaler.scale(batch_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                # batch_loss.backward()
+                # optimizer.step()
+                optimizer.zero_grad()
 
         # Compute predicted Q & A
         pred_questions = pred_question_logits.argmax(-1)
@@ -133,7 +141,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     return step_fn
 
 def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
-               device, training=False, optimizer=None):
+               device, use_amp=False, training=False, optimizer=None):
     # Criterion
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
     
@@ -156,7 +164,7 @@ def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
 
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                          training=training, device=device,
+                          training=training, device=device, use_amp=use_amp,
                           # tags auxiliary task
                           use_tags=use_tags,
                           tags_criterion=tags_criterion,
