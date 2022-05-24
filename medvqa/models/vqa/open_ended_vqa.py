@@ -15,8 +15,11 @@ class OpenEndedVQA(nn.Module):
                  question_vec_size, image_local_feat_size, dropout_prob, device,
                  densenet_pretrained_weights_path=None,
                  n_medical_tags=None,
+                 n_questions=None,
                  classify_orientation=False,
                  classify_chexpert=False,
+                 classify_questions=False,
+                 **unused_kwargs,
                  ):
         super().__init__()
         self.name = 'oevqa(densenet121+bilstm+lstm)'
@@ -86,6 +89,13 @@ class OpenEndedVQA(nn.Module):
         else:
             self.chx_aux_task = False
 
+        # 4) questions classification
+        if classify_questions:
+            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions)
+            self.q_aux_task = True
+        else:
+            self.q_aux_task = False
+
     def forward(
         self,
         images,
@@ -138,5 +148,8 @@ class OpenEndedVQA(nn.Module):
         
         if self.chx_aux_task:
             output['pred_chexpert'] = self.W_chx(global_feat)
+
+        if self.q_aux_task:
+            output['pred_qlabels'] = self.W_q(global_feat)
 
         return output

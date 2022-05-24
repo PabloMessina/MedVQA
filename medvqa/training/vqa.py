@@ -6,6 +6,8 @@ from ignite.engine import Engine
 from medvqa.utils.constants import MIMICCXR_DATASET_ID
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
+            include_answer=True,
+            max_answer_length=None,
             # automatic mixed precision
             use_amp=False,
             # tags aux task
@@ -18,9 +20,15 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             # chexpert aux task
             use_chexpert=False,
             chexpert_criterion=None,
+            # question auxiliary task
+            classify_questions=False,
+            question_criterion=None,
     ):
 
     scaler = GradScaler(enabled=use_amp)
+
+    if not include_answer:
+        assert max_answer_length is not None
     
     def step_fn(unused_engine, batch):
 
@@ -29,15 +37,18 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         images = batch['i'].to(device)
         questions = batch['q'].to(device)
         question_lengths = batch['ql']
-        answers = batch['a'].to(device)        
+        if include_answer:
+            answers = batch['a'].to(device)
         
         if use_tags:
-            tags = batch['tags'].to(device)        
+            tags = batch['tags'].to(device)
         if use_orientation:
             dataset_id = batch['dataset_id']
             orientation = batch['orientation'].to(device)
         if use_chexpert:
             chexpert = batch['chexpert'].to(device)
+        if classify_questions:
+            question_labels = batch['qlabels'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -54,7 +65,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 model_kwargs['answers'] = answers
                 model_kwargs['mode'] = 'train'
             else:
-                model_kwargs['max_answer_length'] = answers.size(1)
+                if include_answer:
+                    model_kwargs['max_answer_length'] = answers.size(1)
+                else:                    
+                    model_kwargs['max_answer_length'] = max_answer_length
                 model_kwargs['mode'] = 'eval'
 
             if use_orientation:
@@ -80,11 +94,15 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         pred_orientation_logits = model_output['iuxray_pred_orientation']
                 if use_chexpert:
                     pred_chexpert_logits = model_output['pred_chexpert']
+                if classify_questions:
+                    pred_qlabels_logits = model_output['pred_qlabels']
 
                 # Compute losses
-                answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
                 question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
-                batch_loss = answer_loss + question_loss
+                batch_loss = question_loss
+                if include_answer:
+                    answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                    batch_loss += answer_loss
                 
                 if use_tags:
                     tags_loss = tags_criterion(pred_tags_logits, tags.float())
@@ -98,6 +116,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if use_chexpert:
                     chexpert_loss = chexpert_criterion(pred_chexpert_logits, chexpert.float())
                     batch_loss += chexpert_loss
+                if classify_questions:
+                    qlabels_loss = question_criterion(pred_qlabels_logits, question_labels.float())
+                    batch_loss += qlabels_loss
 
             # Backward pass + optimizer step if training
             if training:
@@ -116,12 +137,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             'idxs': idxs,
             'loss': batch_loss.detach(),
             'question_loss': question_loss.detach(),
-            'answer_loss': answer_loss.detach(),
-            'answers': tokenizer.clean_batch(answers.detach()),
             'questions': tokenizer.clean_batch(questions.detach()),
             'pred_answers': tokenizer.clean_batch(pred_answers.detach()),
             'pred_questions': tokenizer.clean_batch(pred_questions.detach()),
         }
+        if include_answer:
+            output['answer_loss'] = answer_loss.detach()
+            output['answers'] = tokenizer.clean_batch(answers.detach())
         if use_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
@@ -135,36 +157,49 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['chexpert'] = chexpert.detach().cpu()
             output['pred_chexpert'] = (pred_chexpert_logits.detach() > 0).cpu()
             output['chexpert_loss'] = chexpert_loss.detach()
+        if classify_questions:
+            output['qlabels'] = question_labels.detach().cpu()
+            output['pred_qlabels'] = (pred_qlabels_logits.detach() > 0).cpu()
+            output['qlabels_loss'] = qlabels_loss.detach()
 
         return output
     
     return step_fn
 
-def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
-               device, use_amp=False, training=False, optimizer=None):
+def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert, classify_questions,
+               device, include_answer=True, max_answer_length = None,
+               use_amp=False, training=False, optimizer=None):
     # Criterion
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
     
-    if use_tags: # auxiliary task
+    # Auxiliary tasks
+    if use_tags:
         tags_criterion = nn.BCEWithLogitsLoss()
     else:
         tags_criterion = None
     
-    if use_orientation: # auxiliary task
+    if use_orientation:
         iuxray_orientation_criterion = nn.CrossEntropyLoss()
         mimiccxr_orientation_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore unknown
     else:
         iuxray_orientation_criterion = None
         mimiccxr_orientation_criterion = None
 
-    if use_chexpert: # auxiliary task
+    if use_chexpert:
         chexpert_criterion = nn.BCEWithLogitsLoss()
     else:
         chexpert_criterion = None
+    
+    if classify_questions:
+        question_criterion = nn.BCEWithLogitsLoss()
+    else:
+        question_criterion = None
 
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                          training=training, device=device, use_amp=use_amp,
+                          include_answer=include_answer, max_answer_length=max_answer_length,
+                          training=training,
+                          device=device, use_amp=use_amp,
                           # tags auxiliary task
                           use_tags=use_tags,
                           tags_criterion=tags_criterion,
@@ -174,6 +209,10 @@ def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
                           mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
                           # chexpert auxiliary task
                           use_chexpert=use_chexpert,
-                          chexpert_criterion=chexpert_criterion)
+                          chexpert_criterion=chexpert_criterion,
+                          # question auxiliary task
+                          classify_questions=classify_questions,
+                          question_criterion=question_criterion,
+                          )
     engine = Engine(step_fn)
     return engine

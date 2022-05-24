@@ -21,6 +21,7 @@ from medvqa.metrics import (
     attach_medical_tags_f1score,
     attach_chexpert_labels_accuracy,
     attach_chexpert_labels_f1score,
+    attach_question_labels_f1score,
     attach_dataset_aware_orientation_accuracy,
     attach_loss
 )
@@ -56,7 +57,7 @@ from medvqa.metrics.utils import (
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Trainer
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
-from medvqa.datasets.images import get_image_transform
+from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
 def parse_args():
@@ -120,6 +121,10 @@ def parse_args():
 
     parser.add_argument('--medical-terms-frequency-filename', type=str, default=None)
 
+    parser.add_argument('--allowed-questions', type=str, default=None)
+
+    parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
+
     # balanced dataset arguments
     parser.add_argument('--balanced-split', dest='balanced_split', action='store_true')
     parser.set_defaults(balanced_split=False)
@@ -160,6 +165,12 @@ def parse_args():
     parser.set_defaults(use_chexpert=False)
     parser.add_argument('--iuxray-chexpert-labels-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-chexpert-labels-filename', type=str, default=None)
+    # question classification
+    parser.add_argument('--classify-questions', dest='classify_questions', action='store_true')
+    parser.set_defaults(classify_questions=False)
+    parser.add_argument('--n-questions', type=int, default=None)
+    parser.add_argument('--iuxray-question-labels-filename', type=str, default=None)
+    parser.add_argument('--mimiccxr-question-labels-filename', type=str, default=None)
     
     return parser.parse_args()
 
@@ -171,6 +182,7 @@ _METRIC_WEIGHTS = {
     'orienacc': 1,
     'chxlabelacc': 1,
     'chxlabelf1': 1,
+    'qlabelsf1': 1,
 }
 
 def train_model(
@@ -188,6 +200,7 @@ def train_model(
     batches_per_epoch,
     num_workers,
     device = 'GPU',
+    allowed_questions = None,
     checkpoint_folder_path = None,
     save = True,
     override_lr = False,
@@ -207,10 +220,8 @@ def train_model(
     mimiccxr_medical_tags_per_report_filename = auxiliary_tasks_kwargs['mimiccxr_medical_tags_per_report_filename']
     if use_tags:
         assert n_medical_tags is not None
-        if train_iuxray:
-            assert iuxray_medical_tags_per_report_filename is not None
-        if train_mimiccxr:
-            assert mimiccxr_medical_tags_per_report_filename is not None
+        if train_iuxray: assert iuxray_medical_tags_per_report_filename is not None
+        if train_mimiccxr: assert mimiccxr_medical_tags_per_report_filename is not None
     
     # auxiliary task: orientation classification
     use_orientation = auxiliary_tasks_kwargs['use_orientation']
@@ -219,6 +230,16 @@ def train_model(
     use_chexpert = auxiliary_tasks_kwargs['use_chexpert']
     iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
     mimiccxr_chexpert_labels_filename = auxiliary_tasks_kwargs['mimiccxr_chexpert_labels_filename']
+
+    # auxiliary task: questions classification
+    classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
+    n_questions = auxiliary_tasks_kwargs.get('n_questions', None)
+    iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
+    mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
+    if classify_questions:
+        assert n_questions is not None
+        if train_iuxray: assert iuxray_question_labels_filename is not None
+        if train_mimiccxr: assert mimiccxr_question_labels_filename is not None
     
     # QA dataset filenames
     iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
@@ -254,8 +275,10 @@ def train_model(
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
                          device=device,
                          n_medical_tags=n_medical_tags,
+                         n_questions=n_questions,
                          classify_orientation=use_orientation,
                          classify_chexpert=use_chexpert,
+                         classify_questions=classify_questions,
                          **model_kwargs)
     model = model.to(device)
 
@@ -271,10 +294,10 @@ def train_model(
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')    
     trainer = get_engine(model, tokenizer,
-                         use_tags, use_orientation, use_chexpert,
+                         use_tags, use_orientation, use_chexpert, classify_questions,
                          device, use_amp=use_amp, training=True, optimizer=optimizer)
     validator = get_engine(model, tokenizer,
-                         use_tags, use_orientation, use_chexpert,
+                         use_tags, use_orientation, use_chexpert, classify_questions,
                          device, training=False)
 
     # Default image transform
@@ -287,13 +310,15 @@ def train_model(
                                                         use_tags = use_tags,
                                                         n_tags = n_medical_tags,
                                                         use_orientation = use_orientation,
-                                                        use_chexpert = use_chexpert)
+                                                        use_chexpert = use_chexpert,
+                                                        classify_questions = classify_questions)
     if train_iuxray:
         iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
                                                     use_tags = use_tags,
                                                     n_tags = n_medical_tags,
                                                     use_orientation = use_orientation,
-                                                    use_chexpert = use_chexpert)
+                                                    use_chexpert = use_chexpert,
+                                                    classify_questions = classify_questions)
 
     # Create MIMIC-CXR vqa trainer
     if train_mimiccxr:
@@ -310,6 +335,9 @@ def train_model(
             use_orientation = use_orientation,
             use_chexpert = use_chexpert,
             chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+            classify_questions = classify_questions,
+            question_labels_filename = mimiccxr_question_labels_filename,
+            allowed_questions=allowed_questions,
             **mimiccxr_vqa_trainer_kwargs,
         )
     
@@ -328,6 +356,9 @@ def train_model(
             use_orientation = use_orientation,
             use_chexpert = use_chexpert,
             chexpert_labels_filename = iuxray_chexpert_labels_filename,
+            classify_questions = classify_questions,
+            question_labels_filename = iuxray_question_labels_filename,
+            allowed_questions=allowed_questions,
             **iuxray_vqa_trainer_kwargs,
         )
 
@@ -400,7 +431,13 @@ def train_model(
         attach_chexpert_labels_f1score(validator, device)
         attach_loss('chexpert_loss', trainer, device)
         attach_loss('chexpert_loss', validator, device)
-    
+
+    if classify_questions:
+        attach_question_labels_f1score(trainer, device)
+        attach_question_labels_f1score(validator, device)
+        attach_loss('qlabels_loss', trainer, device)
+        attach_loss('qlabels_loss', validator, device)
+
     # Timer
     timer = Timer()
     timer.attach(trainer, start=Events.EPOCH_STARTED)
@@ -413,8 +450,9 @@ def train_model(
     if use_orientation:
         metrics_to_merge.append('orienacc')
     if use_chexpert:
-        # metrics_to_merge.append('chxlabelacc')
         metrics_to_merge.append('chxlabelf1')
+    if classify_questions:
+        metrics_to_merge.append('qlabelsf1')
     
     merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.5, 0.5)
 
@@ -422,6 +460,8 @@ def train_model(
 
     # Checkpoint saving    
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
+
+    pretrained_checkpoint_folder_path = model_kwargs.get('pretrained_checkpoint_folder_path', None)
     
     if checkpoint_folder_path is None: # first time
         if save: # only if we want to save checkpoints to disk
@@ -431,7 +471,7 @@ def train_model(
                 folder = 'iuxray'
             else:
                 folder = 'mimiccxr'
-            model_string = ','.join(map(str, [
+            model_args = [
                 model_kwargs["embed_size"],
                 model_kwargs["question_hidden_size"],
                 model_kwargs["answer_hidden_size"],
@@ -439,7 +479,10 @@ def train_model(
                 model_kwargs["question_vec_size"],
                 model_kwargs["image_local_feat_size"],
                 model_kwargs["dropout_prob"],
-            ]))
+            ]
+            if pretrained_checkpoint_folder_path is not None:
+                model_args.append('pretrained')
+            model_string = ','.join(map(str, model_args))
             checkpoint_folder_path = get_checkpoint_folder_path('vqa', folder, model.name,
                 f'voc-minf={vocab_min_freq}',
                 f'model-args=({model_string})',
@@ -450,6 +493,7 @@ def train_model(
                 f'tags={int(use_tags)}',
                 f'orien={int(use_orientation)}',
                 f'chx={int(use_orientation)}',
+                f'ql={int(classify_questions)}',
                 'use_amp' if use_amp else None,
             )
             print('checkpoint_folder_path =', checkpoint_folder_path)
@@ -463,10 +507,18 @@ def train_model(
                         dataloading_kwargs = dataloading_kwargs,
                         training_kwargs = training_kwargs,
                         auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
+
+        if pretrained_checkpoint_folder_path is not None:
+            pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
+            count_print(f'Loading pretrained weights from {pretrained_checkpoint_path} ...')
+            checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
+            model_wrapper.model.load_state_dict(checkpoint['model'], strict=False)
+            print('Checkpoint successfully loaded!')
+    
     else: # resuming
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
         count_print('Loading model from checkpoint ...')
-        print('checkpoint_path = ', checkpoint_path)
+        print('checkpoint_path =', checkpoint_path)
         model_wrapper.load_checkpoint(checkpoint_path, device, model_only=override_lr)
     
     score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
@@ -489,6 +541,9 @@ def train_model(
         metrics_to_print.append('chexpert_loss')
         metrics_to_print.append('chxlabelf1')
         metrics_to_print.append('chxlabelacc')
+    if classify_questions:
+        metrics_to_print.append('qlabels_loss')
+        metrics_to_print.append('qlabelsf1')
 
     log_metrics_handler = get_log_metrics_handlers(timer,
                                                    metrics_to_print=metrics_to_print,
@@ -532,6 +587,7 @@ def train_from_scratch(
     image_local_feat_size,
     dropout_prob,
     densenet_pretrained_weights_path,
+    pretrained_checkpoint_folder_path,
     # Optimizer's args
     lr,
     # lr_scheduler's args
@@ -548,6 +604,7 @@ def train_from_scratch(
     min_question_count,
     iuxray_balanced_metadata_filename,
     mimiccxr_balanced_metadata_filename,
+    allowed_questions,
     # Dataloading args
     batch_size,
     num_workers,
@@ -570,6 +627,10 @@ def train_from_scratch(
     use_chexpert,
     iuxray_chexpert_labels_filename,
     mimiccxr_chexpert_labels_filename,
+    classify_questions,
+    n_questions,
+    iuxray_question_labels_filename,
+    mimiccxr_question_labels_filename,
     # GPU
     device,
     # Other args
@@ -592,6 +653,8 @@ def train_from_scratch(
         image_local_feat_size = image_local_feat_size,
         dropout_prob = dropout_prob,
         densenet_pretrained_weights_path = densenet_pretrained_weights_path,
+        pretrained_checkpoint_folder_path = os.path.join(WORKSPACE_DIR, pretrained_checkpoint_folder_path) \
+            if pretrained_checkpoint_folder_path is not None else None,
     )
     optimizer_kwargs = dict(
         lr = lr,
@@ -650,6 +713,11 @@ def train_from_scratch(
         use_chexpert = use_chexpert,
         iuxray_chexpert_labels_filename = iuxray_chexpert_labels_filename,
         mimiccxr_chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+        # question labels
+        classify_questions = classify_questions,
+        n_questions = n_questions,
+        iuxray_question_labels_filename = iuxray_question_labels_filename,
+        mimiccxr_question_labels_filename = mimiccxr_question_labels_filename,
     )
 
     train_model(tokenizer_kwargs,
@@ -665,6 +733,7 @@ def train_from_scratch(
                 batch_size,
                 batches_per_epoch,
                 num_workers,
+                allowed_questions = allowed_questions,
                 device = device,
                 save = save)
 
@@ -677,6 +746,7 @@ def resume_training(
     num_workers,
     epochs = 1,
     batches_per_epoch = 1000,
+    allowed_questions = None,
     device = 'GPU',
     save = True,
     override_lr = False,
@@ -718,6 +788,7 @@ def resume_training(
                 batch_size,
                 batches_per_epoch,
                 num_workers,
+                allowed_questions = allowed_questions,
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
                 save = save,

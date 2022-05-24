@@ -85,6 +85,11 @@ def attach_chexpert_labels_f1score(engine, device, record_scores=False):
                                 device=device, record_scores=record_scores)
     chxlabelacc.attach(engine, 'chxlabelf1')
 
+def attach_question_labels_f1score(engine, device, record_scores=False):
+    qlabelsf1 = MultiLabelF1score(output_transform = _get_output_transform('pred_qlabels', 'qlabels'),
+                                device=device, record_scores=record_scores)
+    qlabelsf1.attach(engine, 'qlabelsf1')
+
 def attach_dataset_aware_orientation_accuracy(engine, record_scores=False):
     orienacc = DatasetAwareOrientationAccuracy(record_scores=record_scores)
     orienacc.attach(engine, 'orienacc')

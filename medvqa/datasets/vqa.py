@@ -1,3 +1,4 @@
+import os
 import random
 import numpy as np
 from PIL import Image
@@ -5,12 +6,15 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.utils.files import (
     load_pickle,
-    save_to_pickle
+    get_cached_json_file,
+    save_to_pickle,
 )
+from medvqa.utils.files import MAX_FILENAME_LENGTH
+from medvqa.utils.hashing import hash_string
 from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
     BatchedCompositeInfiniteDataset,
-    log_normalize_weights,
+    get_imbalance_reduced_weights,
     INFINITE_DATASET_LENGTH,
 )
 
@@ -156,6 +160,7 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
 class VQADataset(Dataset):
     
     def __init__(self, report_ids, images, questions, answers, indices, transform, source_dataset_name,
+                include_answer = False,
                 suffle_indices = True,
                 # aux task: medical tags
                 use_tags = False, rid2tags = None,
@@ -163,6 +168,8 @@ class VQADataset(Dataset):
                 use_orientation = False, orientations = None,
                 # aux task: chexpert labels
                 use_chexpert = False, chexpert_labels = None,
+                # aux task: question labels
+                classify_questions = False, question_labels = None,
                 # infinite mode
                 infinite = False,
         ):
@@ -174,6 +181,7 @@ class VQADataset(Dataset):
         self.transform = transform
         self.source_dataset_name = source_dataset_name
         self.infinite = infinite
+        self.include_answer = include_answer
 
         if suffle_indices:
             np.random.shuffle(self.indices)
@@ -185,6 +193,8 @@ class VQADataset(Dataset):
         self.orientations = orientations
         self.use_chexpert = use_chexpert
         self.chexpert_labels = chexpert_labels
+        self.classify_questions = classify_questions
+        self.question_labels = question_labels
 
         if infinite:
             self._length = INFINITE_DATASET_LENGTH
@@ -203,14 +213,18 @@ class VQADataset(Dataset):
             idx=idx,
             i=self.transform(Image.open(self.images[idx]).convert('RGB')),
             q=self.questions[idx],
-            a=self.answers[idx],
         )
+        if self.include_answer:
+            output['a'] = self.answers[idx]
+        rid = self.report_ids[idx]
         if self.use_tags:
-            output['tags'] = self.rid2tags[self.report_ids[idx]]
+            output['tags'] = self.rid2tags[rid]
         if self.use_orientation:
             output['orientation'] = self.orientations[idx]
         if self.use_chexpert:
-            output['chexpert'] = self.chexpert_labels[self.report_ids[idx]]
+            output['chexpert'] = self.chexpert_labels[rid]
+        if self.classify_questions:
+            output['qlabels'] = self.question_labels[rid]
         return output
 
 class VQA_Base:
@@ -222,12 +236,15 @@ class VQA_Base:
                 rid2tags_path = None,
                 use_orientation = False,
                 use_chexpert = False,
+                classify_questions = False,
                 chexpert_labels_path = None,
+                question_labels_path = None,
                 dataset_name = None,
                 split_kwargs = None,
                 load_split_from_path = None,
                 balanced_split = False,
                 balanced_metadata_path = None,
+                use_report_eval_mode = False,
                 debug = False,
         ):
         
@@ -237,7 +254,10 @@ class VQA_Base:
         self.use_tags = use_tags
         self.use_orientation = use_orientation
         self.use_chexpert = use_chexpert
+        self.classify_questions = classify_questions
         self.balanced_split = balanced_split
+        self.dataset_name = dataset_name
+        self.use_report_eval_mode = use_report_eval_mode
         
         if use_tags:
             assert rid2tags_path is not None
@@ -247,31 +267,38 @@ class VQA_Base:
             assert chexpert_labels_path is not None
             self.chexpert_labels = load_pickle(chexpert_labels_path)
         
+        if classify_questions:
+            assert question_labels_path is not None
+            self.question_labels = load_pickle(question_labels_path)
+        
         if balanced_split:
             assert balanced_metadata_path is not None
             self.balanced_metadata = load_pickle(balanced_metadata_path)
-        
-        if not debug:            
-            first_time = not self._load_cached_data(preprocessing_save_path)
-            if not first_time and load_split_from_path is not None:
-                self._load_split_from_path(load_split_from_path)
 
-        if debug or first_time:
-            
-            self.dataset_name = dataset_name
-            self._preprocess_data()
-
-            if training:
-                if load_split_from_path is not None:
-                    self._load_split_from_path(load_split_from_path)
-                elif balanced_split:
-                    self._split_data_train_val__balanced(**split_kwargs)
-                else:
-                    self._split_data_train_val(**split_kwargs)
-            
-            if not debug:
+        if use_report_eval_mode:
+            assert load_split_from_path is not None
+            self._load_split_from_path(load_split_from_path)
+            if (not self._load_cached_data(preprocessing_save_path)):
+                self._preprocess_data()
                 self._save_data(preprocessing_save_path)
-        
+            self.val_indices = np.array(list(range(len(self.report_ids))), dtype=int)
+        else:        
+            if not debug:            
+                first_time = not self._load_cached_data(preprocessing_save_path)
+                if not first_time and load_split_from_path is not None:
+                    self._load_split_from_path(load_split_from_path)
+
+            if debug or first_time:                
+                self._preprocess_data()
+                if training:
+                    if load_split_from_path is not None:
+                        self._load_split_from_path(load_split_from_path)
+                    elif balanced_split:
+                        self._split_data_train_val__balanced(**split_kwargs)
+                    else:
+                        self._split_data_train_val(**split_kwargs)                
+                if not debug:
+                    self._save_data(preprocessing_save_path)        
         
         print(f'batch_size = {batch_size}')
         self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn, num_workers)
@@ -288,8 +315,13 @@ class VQA_Base:
 
     def _load_split_from_path(self, preprocessing_save_path):
         data = load_pickle(preprocessing_save_path)
-        self.train_indices = data['train_indices']
-        self.val_indices = data['val_indices']
+        if self.use_report_eval_mode:
+            report_ids = data['report_ids']
+            self.train_report_ids = list(set(report_ids[i] for i in data['train_indices']))
+            self.val_report_ids = list(set(report_ids[i] for i in data['val_indices']))
+        else:
+            self.train_indices = data['train_indices']
+            self.val_indices = data['val_indices']
         print(f'Train-val split indices successfully loaded from {preprocessing_save_path}')
     
     def _load_cached_data(self, preprocessing_save_path):
@@ -364,6 +396,10 @@ class VQA_Base:
 class BalancedTreeNode:
     
     def __init__(self, indices=None, children=None, weights=None):
+        # print(f'BalancedTreeNode()')
+        # if indices is not None: print(f'\tlen(indices)={len(indices)}')
+        # if children is not None: print(f'\tlen(children)={len(children)}')
+        # if weights is not None: print(f'\tlen(weights)={len(weights)}')
         self.indices = indices
         self.weights = weights
         self.children = children
@@ -383,6 +419,9 @@ class BalancedTreeNode:
                 # aux task: chexpert labels
                 use_chexpert = vqa_trainer.use_chexpert,
                 chexpert_labels = vqa_trainer.chexpert_labels if vqa_trainer.use_chexpert else None,
+                # aux task: question labels
+                classify_questions = vqa_trainer.classify_questions,
+                question_labels = vqa_trainer.question_labels if vqa_trainer.classify_questions else None,
                 # infinite mode
                 infinite=True,
             )
@@ -392,25 +431,51 @@ class BalancedTreeNode:
             return CompositeInfiniteDataset(datasets, self.weights)
 
 
+def _get_cached_balanced_train_datasets_path(preprocessing_save_path, batch_size, allowed_question_ids=None):    
+    if allowed_question_ids is not None:
+        aqi_string = '(' + ','.join(map(str, allowed_question_ids)) + ')'
+        filepath = f'{preprocessing_save_path}.balanced_train_data(bs={batch_size},aqi={aqi_string}).pkl'
+    else:
+        filepath = f'{preprocessing_save_path}.balanced_train_data(bs={batch_size}).pkl'
+
+    if len(filepath) > MAX_FILENAME_LENGTH:
+        h = hash_string(filepath)
+        filepath = os.path.join(os.path.dirname(preprocessing_save_path), f'balanced_train_data(hash={h[0]},{h[1]}).pkl')
+    return filepath
+
 class VQA_Trainer(VQA_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
+                cache_dir,
                 num_workers,
                 use_tags = False,
-                rid2tags_path = None,
+                rid2tags_filename = None,
                 use_orientation = False,
                 use_chexpert = False,
-                chexpert_labels_path = None,
+                chexpert_labels_filename = None,
+                classify_questions = False,
+                question_labels_filename = None,
                 dataset_name = None,
                 split_kwargs = None,
                 load_split_from_path = None,
                 balanced_split = False,
                 balanced_dataloading = False,
-                balanced_metadata_path = None,
+                balanced_metadata_filename = None,
+                imbalance_reduction_coef = 1,
                 validation_only = False,
+                include_answer = True,
+                use_report_eval_mode = False,
+                allowed_questions = None,
+                qa_adapted_reports_filename = None,
+                one_question_per_batch = False,
                 debug = False,
         ):
+
+        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if use_tags else None
+        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if use_chexpert else None
+        balanced_metadata_path = os.path.join(cache_dir, balanced_metadata_filename) if balanced_split else None
+        question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
 
         if balanced_dataloading:
             assert balanced_split
@@ -418,6 +483,21 @@ class VQA_Trainer(VQA_Base):
 
         self.balanced_dataloading = balanced_dataloading
         self.validation_only = validation_only
+        self.cache_dir = cache_dir
+        self.imbalance_reduction_coef = imbalance_reduction_coef
+        self.one_question_per_batch = one_question_per_batch
+        self.include_answer = include_answer
+        
+        if allowed_questions is not None:
+            assert qa_adapted_reports_filename is not None
+            allowed_questions = [q.strip() for q in allowed_questions.split('?')]
+            allowed_questions = [q + '?' for q in allowed_questions if len(q) > 0]
+            qa_adapted_reports_path = os.path.join(cache_dir, qa_adapted_reports_filename)
+            qa_adapted_reports = get_cached_json_file(qa_adapted_reports_path)
+            assert all(q in qa_adapted_reports['questions'] for q in allowed_questions)
+            self.allowed_question_ids = [qa_adapted_reports['questions'].index(q) for q in allowed_questions]
+        else:
+            self.allowed_question_ids = None
     
         super().__init__(True, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
@@ -426,12 +506,15 @@ class VQA_Trainer(VQA_Base):
                 rid2tags_path = rid2tags_path,
                 use_orientation = use_orientation,
                 use_chexpert = use_chexpert,
+                classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
+                question_labels_path = question_labels_path,
                 dataset_name = dataset_name,
                 split_kwargs = split_kwargs,
                 load_split_from_path = load_split_from_path,
                 balanced_split = balanced_split,
                 balanced_metadata_path = balanced_metadata_path,
+                use_report_eval_mode = use_report_eval_mode,
                 debug = debug)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
@@ -443,9 +526,18 @@ class VQA_Trainer(VQA_Base):
         self._generate_val_dataset()
         self._generate_train_val_dataloaders(batch_size, collate_batch_fn, num_workers)
 
+    def _get_composite_dataset(self, datasets, weights, batch_size):
+        if self.one_question_per_batch:
+            return BatchedCompositeInfiniteDataset(datasets, weights, batch_size)
+        return CompositeInfiniteDataset(datasets, weights)
+
     def _generate_train_dataset(self, batch_size):
-        question_datasets = []                
-        train_question_ids = list(self.train_indices.keys())
+
+        question_datasets = []
+        if self.allowed_question_ids is not None:
+            train_question_ids = self.allowed_question_ids
+        else:
+            train_question_ids = list(self.train_indices.keys())
         train_question_ids.sort(key=lambda x : len(self.train_indices[x]))
         i = 0
         n = len(train_question_ids)
@@ -475,24 +567,28 @@ class VQA_Trainer(VQA_Base):
                 # aux task: chexpert labels
                 use_chexpert = self.use_chexpert,
                 chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+                # aux task: question labels
+                classify_questions = self.classify_questions,
+                question_labels = self.question_labels if self.classify_questions else None,
                 # infinite mode
                 infinite=True,
             ))
             i = j+1
         
-        question_weights = log_normalize_weights([len(d) for d in question_datasets])
-        self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+        question_weights = get_imbalance_reduced_weights([len(d) for d in question_datasets], self.imbalance_reduction_coef)
+        self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')
     
     def _generate_train_dataset__balanced(self, batch_size):
 
-        cached_balanced_train_datasets_path = f'{self.preprocessing_save_path}.balanced_train_data(bs={batch_size}).pkl'
+        cached_balanced_train_datasets_path = _get_cached_balanced_train_datasets_path(
+            self.preprocessing_save_path, batch_size, self.allowed_question_ids)
         cached_data = load_pickle(cached_balanced_train_datasets_path)
         if cached_data is not None:
             print(f'Balanced train data loaded from {cached_balanced_train_datasets_path}')
             question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
             question_weights = cached_data['question_weights']
-            self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+            self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
             print(f'\tlen(question_datasets) = {len(question_datasets)}')
             return
 
@@ -504,7 +600,10 @@ class VQA_Trainer(VQA_Base):
         question_ids = self.question_ids
 
         train_nodes = []
-        train_question_ids = list(self.train_indices.keys())
+        if self.allowed_question_ids is not None:
+            train_question_ids = self.allowed_question_ids
+        else:
+            train_question_ids = list(self.train_indices.keys())
         train_question_ids.sort(key=lambda x : len(self.train_indices[x]))
         
         for qid in tqdm(train_question_ids):
@@ -541,7 +640,7 @@ class VQA_Trainer(VQA_Base):
                     weights.append(len(sub_indices))
 
                 if len(nodes) > 1:
-                    weights = log_normalize_weights(weights)
+                    weights = get_imbalance_reduced_weights(weights, self.imbalance_reduction_coef)
                     nodes_by_health.append(BalancedTreeNode(children=nodes, weights=weights))
                 else:
                     assert len(nodes) == 1
@@ -549,7 +648,7 @@ class VQA_Trainer(VQA_Base):
                 weights_by_health.append(len(indices))
             
             if len(nodes_by_health) > 1:
-                weights_by_health = log_normalize_weights(weights_by_health)
+                weights_by_health = get_imbalance_reduced_weights(weights_by_health, self.imbalance_reduction_coef)
                 train_nodes.append(BalancedTreeNode(children=nodes_by_health, weights=weights_by_health))
             else:
                 assert len(nodes_by_health) == 1
@@ -570,7 +669,7 @@ class VQA_Trainer(VQA_Base):
             else:
                 sub_nodes = [train_nodes[k] for k in range(i, j+1)]
                 weights = [len(self.train_indices[train_question_ids[k]]) for k in range(i, j+1)]
-                weights = log_normalize_weights(weights)
+                weights = get_imbalance_reduced_weights(weights, self.imbalance_reduction_coef)
                 merged_train_nodes.append(BalancedTreeNode(children=sub_nodes, weights=weights))
                 print(f' *** merging from i={i} to j={j}, acc_size = {acc_size}')
             i = j + 1
@@ -578,20 +677,26 @@ class VQA_Trainer(VQA_Base):
         
         cached_data = {
             'question_nodes': merged_train_nodes,
-            'question_weights': log_normalize_weights(dataset_weights),
+            'question_weights': get_imbalance_reduced_weights(dataset_weights, self.imbalance_reduction_coef),
         }
         save_to_pickle(cached_data, cached_balanced_train_datasets_path)
         print(f'Balanced train data saved to {cached_balanced_train_datasets_path}')
         question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
         question_weights = cached_data['question_weights']
-        self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
+        self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')
 
     def _generate_val_dataset(self):
-        # validation dataset
+        if self.allowed_question_ids is not None:
+            val_indices = np.array([i for i in self.val_indices if self.question_ids[i] in self.allowed_question_ids], dtype=int)
+        else:
+            val_indices = self.val_indices
+        print('len(self.val_indices) =', len(self.val_indices))
+        print('len(val_indices) =', len(val_indices))
         self.val_dataset = VQADataset(
-            self.report_ids, self.images, self.questions, self.answers, self.val_indices,
+            self.report_ids, self.images, self.questions, self.answers, val_indices,
             self.transform, self.dataset_name,
+            include_answer = self.include_answer,
             # aux task: medical tags
             use_tags = self.use_tags,
             rid2tags = self.rid2tags if self.use_tags else None,
@@ -601,6 +706,9 @@ class VQA_Trainer(VQA_Base):
             # aux task: chexpert labels
             use_chexpert = self.use_chexpert,
             chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+            # aux task: question labels
+            classify_questions = self.classify_questions,
+            question_labels = self.question_labels if self.classify_questions else None,
         )        
             
     def _generate_train_val_dataloaders(self, batch_size, collate_batch_fn, num_workers):
@@ -629,15 +737,25 @@ class VQA_Evaluator(VQA_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
+                cache_dir,
                 num_workers,
+                include_answer = True,
                 use_tags = False,
-                rid2tags_path = None,
+                rid2tags_filename = None,
                 use_orientation = False,
                 use_chexpert = False,
-                chexpert_labels_path = None,
+                chexpert_labels_filename = None,
+                classify_questions = False,
+                question_labels_filename = None,
                 dataset_name = None,
                 debug = False,
         ):
+
+        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if use_tags else None
+        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if use_chexpert else None        
+        question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
+
+        self.include_answer = include_answer
     
         super().__init__(False, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
@@ -646,7 +764,9 @@ class VQA_Evaluator(VQA_Base):
                 rid2tags_path = rid2tags_path,
                 use_orientation = use_orientation,
                 use_chexpert = use_chexpert,
+                classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
+                question_labels_path = question_labels_path,
                 dataset_name = dataset_name,
                 debug = debug)
 
@@ -662,6 +782,7 @@ class VQA_Evaluator(VQA_Base):
         self.test_dataset = VQADataset(
             self.report_ids, self.images, self.questions, self.answers, self.test_indices,
             self.transform, self.dataset_name,
+            include_answer = self.include_answer,
             # aux task: medical tags prediction
             use_tags = self.use_tags,
             rid2tags = self.rid2tags if self.use_tags else None,
@@ -671,6 +792,9 @@ class VQA_Evaluator(VQA_Base):
             # aux task: chexpert labels
             use_chexpert = self.use_chexpert,
             chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+            # aux task: question labels
+            classify_questions = self.classify_questions,
+            question_labels = self.question_labels if self.classify_questions else None,
         )
         
             

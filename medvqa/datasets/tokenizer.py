@@ -99,13 +99,18 @@ class Tokenizer:
         ids.append(self.token2id[self.END_TOKEN])
         return ids
     
-    def strig2medical_tag_ids(self, s):
+    def string2medical_tag_ids(self, s):
         tags = self.med_tags_extractor.extract_tags_sequence_with_punctuation(s)
         ids = [self.token2id[self.START_TOKEN]]
         for tag in tags:
             ids.append(self.token2id[tag])
         ids.append(self.token2id[self.END_TOKEN])
         return ids
+    
+    def tokenize(self, s):
+        if self.medical_tokenization:
+            return self.string2medical_tag_ids(s)
+        return self.string2ids(s)
 
     def ids2string(self, ids):
         return ' '.join(self.id2token[i] for i in ids)

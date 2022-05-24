@@ -1,3 +1,5 @@
+from enum import Enum
+
 CHEXPERT_LABELS = [
     'No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly',
     'Lung Lesion', 'Lung Opacity', 'Edema', 'Consolidation',
@@ -57,11 +59,19 @@ METRIC2SHORT = {
     'orienacc': 'oracc',
     'chxlabelacc': 'chxlacc',
     'chxlabelf1': 'chxlf1',
+    'qlabelsf1': 'qlf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
+    'qlabels_loss': 'ql_loss',
 }
 
 IUXRAY_DATASET_ID = 0
 MIMICCXR_DATASET_ID = 1
+
+class ReportEvalMode(Enum):
+    GROUND_TRUTH = 'ground-truth'
+    MOST_POPULAR = 'most-popular'
+    QUESTION_CLASSIFICATION = 'question-classification'
+    NEAREST_NEIGHBOR = 'nearest-neighbor'

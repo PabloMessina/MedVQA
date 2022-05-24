@@ -16,6 +16,7 @@ from medvqa.utils.files import get_cached_json_file
 from medvqa.utils.metrics import (
     average_ignoring_nones,
     chexpert_label_array_to_string,
+    question_label_array_to_string,
 )
 
 def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
@@ -203,6 +204,7 @@ class VQAExamplePlotter:
                 medical_tags_extractor=None,
                 orientation_names=None,
                 use_chexpert=False,
+                use_qlabels=False,
                 qa_adapted_reports_file_path=None,
         ):
         dataset = results[f'{dataset_name}_dataset']
@@ -239,7 +241,12 @@ class VQAExamplePlotter:
         self.use_chexpert = use_chexpert
         if use_chexpert:
             assert 'pred_chexpert' in metrics_dict
-            self.pred_chexpert_labels = metrics_dict['pred_chexpert']        
+            self.pred_chexpert_labels = metrics_dict['pred_chexpert']
+
+        self.use_qlabels = use_qlabels
+        if use_qlabels:
+            assert qa_adapted_reports_file_path is not None
+            self.pred_qlabels = metrics_dict['pred_qlabels']
 
         if qa_adapted_reports_file_path is not None:
             self.reports = get_cached_json_file(qa_adapted_reports_file_path)
@@ -298,13 +305,28 @@ class VQAExamplePlotter:
             print('chexpert_labels:', chexpert_labels)
             print('pred_chexpert_labels:', pred_chexpert_labels)
             print('--')
+        if self.use_qlabels:
+            question_labels = question_label_array_to_string(self.reports['questions'],
+                                 self.dataset.question_labels[self.dataset.report_ids[self.idxs[idx]]])
+            pred_question_labels = question_label_array_to_string(self.reports['questions'], self.pred_qlabels[idx])
+            print('question_labels:', question_labels)
+            print('pred_question_labels:', pred_question_labels)
+            print('--')
+
         print('chexpert_labels_gt:', self.metrics_dict['chexpert_labels_gt'][idx])
         print('chexpert_labels_gen:', self.metrics_dict['chexpert_labels_gen'][idx])
         print('chexpert_labels_gt (verbose):', chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gt'][idx]))
         print('chexpert_labels_gen (verbose):', chexpert_label_array_to_string(self.metrics_dict['chexpert_labels_gen'][idx]))
         print('--')
         for m in metrics_to_inspect:
-            print(f'{m}:', self.metrics_dict[m][idx])
+            metric = self.metrics_dict[m]
+            if m == 'bleu':
+                for k in range(4):
+                    print(f'{m}-{k+1}:', metric[1][k][idx])
+            elif m == 'ciderD':
+                print(f'{m}:', metric[1][idx])
+            else:
+                print(f'{m}:', metric[idx])
         print('image:', self.images[idx])
         img = Image.open(self.images[idx])
         return img

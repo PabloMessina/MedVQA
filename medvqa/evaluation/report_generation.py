@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -45,20 +46,20 @@ def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset):
         gt_report = tokenizer.clean_text(gt_report)
         gt_reports.append({'rid': rid, 'text': gt_report})
 
-        gen_report = {}
+        gen_report = {'q':[], 'a': []}
         for i in indices:
             q = tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
-            gen_report[q] = a
-        gen_reports.append(gen_report)        
+            gen_report['q'].append(q)
+            gen_report['a'].append(a)
+        gen_reports.append(gen_report)
 
     return {
         'gt_reports': gt_reports,
         'gen_reports': gen_reports,
     }
 
-def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, qa_adapted_dataset,
-        metric_names = _REPORT_LEVEL_METRIC_NAMES):
+def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_names = _REPORT_LEVEL_METRIC_NAMES):
 
     n = len(gt_reports)
     gt_texts = []
@@ -67,16 +68,11 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, qa_adapted_
     for i in range(n):        
         # gt text
         gt_report = gt_reports[i]
-        rid = gt_report['rid']
         gt_text = gt_report['text']
         gt_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gt_text)))
         # gen text
         gen_report = gen_reports[i]
-        gen_answers = []
-        for qid in qa_adapted_dataset['reports'][rid]['question_ids']:
-            q = tokenizer.clean_text(qa_adapted_dataset['questions'][qid])
-            gen_answers.append(gen_report[q])        
-        gen_text = ' . '.join(gen_answers)
+        gen_text = ' . '.join(gen_report['a'])
         gen_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
 
     metrics = {}
@@ -130,82 +126,92 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, qa_adapted_
     
     return metrics
 
-def get_report_level_metrics_dataframe(metrics_dict, metric_names=_REPORT_LEVEL_METRIC_NAMES):
-    columns = []
-    data = [[]]
-    for mn in metric_names:
-        if mn == 'chexpert_labels':
-            gt_labels = metrics_dict['chexpert_labels_gt']
-            gen_labels = metrics_dict['chexpert_labels_gen']
-            
-            chxlabf1 = ChexpertLabelsF1score(device='cpu')
-            chxlabf1.update((gen_labels, gt_labels))
-            data[0].append(chxlabf1.compute())
-            columns.append('chxlabf1(hard)')
+def get_report_level_metrics_dataframe(metrics, method_names, metric_names=_REPORT_LEVEL_METRIC_NAMES):
+    assert type(metrics) is list or type(metrics) is dict
+    assert type(method_names) is list or method_names is str
+    if type(metrics) is dict:
+        metrics  = [metrics]
+        method_names = [method_names]
+    columns = ['method_name']
+    data = [[] for _ in range(len(metrics))]
+    for row_i, (metrics_dict, method_name) in tqdm(enumerate(zip(metrics, method_names))):
+        data[row_i].append(method_name)
+        for mn in metric_names:
+            if mn == 'chexpert_labels':
+                gt_labels = metrics_dict['chexpert_labels_gt']
+                gen_labels = metrics_dict['chexpert_labels_gen']
+                
+                chxlabf1 = ChexpertLabelsF1score(device='cpu')
+                chxlabf1.update((gen_labels, gt_labels))
+                data[row_i].append(chxlabf1.compute())
+                if row_i == 0: columns.append('chxlabf1(hard)')
 
-            # chxlabacc = MultiLabelAccuracy(device='cpu')
-            # chxlabacc.update((gen_labels, gt_labels))
-            # data[0].append(chxlabacc.compute())
-            # columns.append(METRIC2SHORT['chxlabelacc'])
+                # chxlabacc = MultiLabelAccuracy(device='cpu')
+                # chxlabacc.update((gen_labels, gt_labels))
+                # data[row_i].append(chxlabacc.compute())
+                # if row_i == 0: columns.append(METRIC2SHORT['chxlabelacc'])
 
-            ps, rs, f1s, accs = [], [], [], []
-            for i in range(len(CHEXPERT_LABELS)):
-                ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
-                rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
-                f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
-                accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
-            macro_avg_p = sum(ps) / len(CHEXPERT_LABELS)
-            macro_avg_r = sum(rs) / len(CHEXPERT_LABELS)
-            macro_avg_f1 = sum(f1s) / len(CHEXPERT_LABELS)
-            gt_flat = gt_labels.reshape(-1)
-            gen_flat = gen_labels.reshape(-1)
-            micro_avg_p = precision_score(gt_flat, gen_flat)
-            micro_avg_r = recall_score(gt_flat, gen_flat)
-            micro_avg_f1 = f1_score(gt_flat, gen_flat)
-            accuracy = accuracy_score(gt_flat, gen_flat)
+                ps, rs, f1s, accs = [], [], [], []
+                for i in range(len(CHEXPERT_LABELS)):
+                    ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
+                    rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
+                    f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
+                    accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
+                macro_avg_p = sum(ps) / len(CHEXPERT_LABELS)
+                macro_avg_r = sum(rs) / len(CHEXPERT_LABELS)
+                macro_avg_f1 = sum(f1s) / len(CHEXPERT_LABELS)
+                gt_flat = gt_labels.reshape(-1)
+                gen_flat = gen_labels.reshape(-1)
+                micro_avg_p = precision_score(gt_flat, gen_flat)
+                micro_avg_r = recall_score(gt_flat, gen_flat)
+                micro_avg_f1 = f1_score(gt_flat, gen_flat)
+                accuracy = accuracy_score(gt_flat, gen_flat)
 
-            data[0].append(micro_avg_p)
-            columns.append('p(micro)')
-            data[0].append(micro_avg_r)
-            columns.append('r(micro)')
-            data[0].append(micro_avg_f1)
-            columns.append('f1(micro)')
+                data[row_i].append(micro_avg_p)
+                if row_i == 0: columns.append('p(micro)')
+                data[row_i].append(micro_avg_r)
+                if row_i == 0: columns.append('r(micro)')
+                data[row_i].append(micro_avg_f1)
+                if row_i == 0: columns.append('f1(micro)')
 
-            data[0].append(macro_avg_p)
-            columns.append('p(macro)')
-            data[0].append(macro_avg_r)
-            columns.append('r(macro)')
-            data[0].append(macro_avg_f1)
-            columns.append('f1(macro)')
+                data[row_i].append(macro_avg_p)
+                if row_i == 0: columns.append('p(macro)')
+                data[row_i].append(macro_avg_r)
+                if row_i == 0: columns.append('r(macro)')
+                data[row_i].append(macro_avg_f1)
+                if row_i == 0: columns.append('f1(macro)')
 
-            data[0].append(accuracy)
-            columns.append('acc')
+                data[row_i].append(accuracy)
+                if row_i == 0: columns.append('acc')
 
-            for i, label in enumerate(CHEXPERT_LABELS):
-                data[0].append(ps[i])
-                columns.append(f'p({CHEXPERT_LABEL2SHORT[label]})')
-            for i, label in enumerate(CHEXPERT_LABELS):
-                data[0].append(rs[i])
-                columns.append(f'r({CHEXPERT_LABEL2SHORT[label]})')
-            for i, label in enumerate(CHEXPERT_LABELS):
-                data[0].append(f1s[i])
-                columns.append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
-            
-        elif mn == 'bleu':            
-            for k in range(4):
-                bleu_k = f'bleu-{k+1}'
-                bleu_score = metrics_dict[bleu_k]                
-                data[0].append(bleu_score[0])
-                columns.append(METRIC2SHORT.get(bleu_k, bleu_k))
-        elif mn == 'ciderD':
-            scores = metrics_dict[mn]
-            data[0].append(scores[0])
-            columns.append(METRIC2SHORT.get(mn, mn))
-        else:
-            scores = metrics_dict[mn]
-            score = sum(scores) / len(scores)
-            data[0].append(score)
-            columns.append(METRIC2SHORT.get(mn, mn))
+                for i, label in enumerate(CHEXPERT_LABELS):
+                    data[row_i].append(ps[i])
+                    if row_i == 0: columns.append(f'p({CHEXPERT_LABEL2SHORT[label]})')
+                for i, label in enumerate(CHEXPERT_LABELS):
+                    data[row_i].append(rs[i])
+                    if row_i == 0: columns.append(f'r({CHEXPERT_LABEL2SHORT[label]})')
+                for i, label in enumerate(CHEXPERT_LABELS):
+                    data[row_i].append(f1s[i])
+                    if row_i == 0: columns.append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
+                
+            elif mn == 'bleu':            
+                for k in range(4):
+                    bleu_k = f'bleu-{k+1}'
+                    bleu_score = metrics_dict[bleu_k]                
+                    data[row_i].append(bleu_score[0])
+                    if row_i == 0: columns.append(METRIC2SHORT.get(bleu_k, bleu_k))
+            elif mn == 'ciderD':
+                scores = metrics_dict[mn]
+                data[row_i].append(scores[0])
+                if row_i == 0: columns.append(METRIC2SHORT.get(mn, mn))
+            else:
+                try:
+                    scores = metrics_dict[mn]
+                    score = sum(scores) / len(scores)
+                    data[row_i].append(score)
+                except KeyError:
+                    data[row_i].append(None)
+                if row_i == 0: columns.append(METRIC2SHORT.get(mn, mn))
     
     return pd.DataFrame(data=data, columns=columns)
 

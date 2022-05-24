@@ -1,1 +1,3 @@
 from .open_ended_vqa import OpenEndedVQA
+from .visual_modules import ImageQuestionClassifier
+from .visual_modules import ImageFeatureExtractor

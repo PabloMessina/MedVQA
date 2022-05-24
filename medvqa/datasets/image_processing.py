@@ -1,0 +1,177 @@
+import torch
+import torchvision.transforms as T
+from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+from tqdm import tqdm
+import random
+import numpy as np
+import os
+
+from medvqa.models.vqa import (
+    ImageQuestionClassifier,
+    ImageFeatureExtractor,
+)
+from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
+from medvqa.utils.hashing import hash_string
+from medvqa.datasets.augmentation import ImageAugmentationTransforms
+
+_AUGMENTATION_MODES = [
+    'random-color',
+    'random-spatial',
+]
+
+def get_image_transform(
+    image_size = (256, 256),
+    mean = (0.485, 0.456, 0.406),
+    std = (0.229, 0.224, 0.225),
+    augmentation_mode = None,
+):
+
+    tf_resize = T.Resize(image_size)
+    tf_totensor = T.ToTensor()
+    tf_normalize = T.Normalize(mean, std)
+    default_transform = T.Compose([tf_resize, tf_totensor, tf_normalize])
+
+    if augmentation_mode is None:
+        print('Returning default transform')
+        return default_transform
+    
+    assert augmentation_mode in _AUGMENTATION_MODES
+
+    image_aug_transforms = ImageAugmentationTransforms(image_size)
+
+    if augmentation_mode == 'random-color':
+        aug_transforms = image_aug_transforms.get_color_transforms()
+    else:
+        aug_transforms = image_aug_transforms.get_spatial_transforms()
+
+    final_transforms = [
+        T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
+        for tf_aug in aug_transforms
+    ]
+    final_transforms.append(default_transform)
+
+    def transform_fn(img):
+        return random.choice(final_transforms)(img)
+
+    print(f'Returning augmented transforms with mode {augmentation_mode}')
+    return transform_fn
+
+inv_normalize = T.Normalize(
+    mean=[-0.485/0.229, -0.456/0.224, -0.406/0.255],
+    std=[1/0.229, 1/0.224, 1/0.255]
+)
+
+class ImageDataset(Dataset):    
+    def __init__(self, images, transform):
+        self.images = images
+        self.transform = transform    
+    def __len__(self):
+        return len(self.images)
+    def __getitem__(self, i):
+        return {'i': self.transform(Image.open(self.images[i]).convert('RGB')) }
+
+def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size, top_k):
+
+    print(f'** Ranking the top {top_k} questions per image according to image classifier:')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    classifier = ImageQuestionClassifier(image_local_feat_size, n_questions)
+    classifier = classifier.to(device)
+    classifier.load_state_dict(pretrained_weights, strict=False)
+    dataset = ImageDataset(image_paths, transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, pin_memory=True)
+    print('len(dataset) =',len(dataset))
+    print('len(dataloader) =',len(dataloader))
+    print('batch_size =',batch_size)
+    questions = [None] * len(image_paths)
+    question_ids = list(range(n_questions))
+    assert top_k <= n_questions
+    i = 0
+    with torch.set_grad_enabled(False):
+        classifier.train(False)        
+        for batch in tqdm(dataloader):
+            images = batch['i'].to(device)
+            logits = classifier(images)
+            logits = logits.detach()
+            assert logits.size(1) == n_questions
+            for j in range(logits.size(0)):
+                question_ids.sort(key=lambda k:logits[j][k], reverse=True)
+                questions[i + j] = question_ids[:top_k]
+            i += logits.size(0)
+
+    del classifier
+    del dataset
+    del dataloader
+    del logits
+    torch.cuda.empty_cache()
+
+    return questions
+
+def get_nearest_neighbors(target_images, reference_images, transform, pretrained_weights, batch_size,
+                          cache_dir, pretrained_checkpoint_path, suffix=None):
+
+    strings = [f'pretrained_checkpoint_path={pretrained_checkpoint_path}']
+    if suffix is not None: strings.append(suffix)
+    file_path = os.path.join(cache_dir, f'nearest_neighbors({";".join(strings)})')    
+    if len(file_path) > MAX_FILENAME_LENGTH:
+        h = hash_string(file_path)
+        file_path = os.path.join(cache_dir, f'nearest_neighbors(hash={h[0]},{h[1]}).pkl')
+    nearest_neighbors = load_pickle(file_path)
+    if nearest_neighbors is not None:
+        print('nearest_neighbors loaded from', file_path)
+        return nearest_neighbors    
+
+    print(f'** Finding the nearest neighbors for {len(target_images)} images from among {len(reference_images)} images:')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = ImageFeatureExtractor()
+    model = model.to(device)
+    model.load_state_dict(pretrained_weights, strict=False)
+    dataset = ImageDataset(target_images + reference_images, transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, pin_memory=True)
+    print('len(dataset) =',len(dataset))
+    print('len(dataloader) =',len(dataloader))
+    print('batch_size =', batch_size)    
+    
+    n_targ = len(target_images)
+    n_ref = len(reference_images)
+    n = len(dataset)
+    assert n == n_targ + n_ref
+    offset = 0
+    feat = None
+    
+    print('\textracting features ...')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        for batch in tqdm(dataloader):
+            images = batch['i'].to(device)
+            batch_feat = model(images)
+            batch_feat = batch_feat.detach()
+            if feat is None:
+                feat_size = batch_feat.size(1)
+                feat = np.empty((n, feat_size), dtype=float)
+                print('feat.shape =', feat.shape)
+            actual_batch_size = batch_feat.size(0)
+            feat[offset : offset + actual_batch_size] = batch_feat.cpu()
+            offset += actual_batch_size
+    
+    print('\tfinding nearest neighbors (euclidean distance) ...')
+    nearest_neighbors = [None] * n_targ
+    target_feat = feat[:n_targ]
+    ref_feat = feat[n_targ:]
+    # TODO: parallelize this
+    for i in tqdm(range(n_targ)):
+        dist = (ref_feat - target_feat[i])**2
+        dist = dist.sum(axis=1)
+        assert dist.shape == (n_ref,)
+        _, j = min((d,j) for j,d in enumerate(dist))
+        nearest_neighbors[i] = j
+    
+    del model
+    del dataset
+    del dataloader
+    del batch_feat
+    torch.cuda.empty_cache()
+
+    save_to_pickle(nearest_neighbors, file_path)
+    print('nearest_neighbors saved to', file_path)
+    return nearest_neighbors

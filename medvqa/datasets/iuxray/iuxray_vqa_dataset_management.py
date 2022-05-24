@@ -8,8 +8,15 @@ from medvqa.datasets.iuxray import (
     IUXRAY_IMAGE_INFO_JSON_PATH,
     IUXRAY_IMAGE_ORIENTATIONS,
 )
-from medvqa.utils.files import get_cached_json_file, MAX_FILENAME_LENGTH
+from medvqa.utils.files import (
+    load_pickle,
+    save_to_pickle,
+    get_cached_json_file,
+    MAX_FILENAME_LENGTH,
+)
 from medvqa.utils.hashing import hash_string
+from medvqa.utils.constants import ReportEvalMode
+
 
 _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
 
@@ -46,6 +53,49 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
         final_path = os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__(hash={h[0]},{h[1]}).pkl')
     return final_path
 
+def _get_report_eval_mode_preprocessing_save_path(qa_adapted_reports_filename, load_split_from_path,
+                                                  tokenizer, report_eval_mode):    
+    tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
+    strings = [
+        f'dataset={qa_adapted_reports_filename}',
+        f'load_split_from_path={load_split_from_path}',
+        f'tokenizer={tokenizer_string}',
+        f'report_eval_mode={report_eval_mode}'
+    ]
+    merged_string = ";".join(strings)
+    final_path = os.path.join(IUXRAY_CACHE_DIR, f'report_eval_mode_preprocessed_data__({merged_string}).pkl')
+    if len(final_path) > MAX_FILENAME_LENGTH:
+        h = hash_string(merged_string)
+        final_path = os.path.join(IUXRAY_CACHE_DIR, f'report_eval_mode_preprocessed_data__(hash={h[0]},{h[1]}).pkl')
+    return final_path
+
+def _precompute_questions_per_report(load_split_from_path, report_eval_mode, iuxray_qa_reports, report_ids):
+
+    file_path = os.path.join(IUXRAY_CACHE_DIR,
+        f'questions_per_report(load_split_from_path={load_split_from_path};report_eval_mode={report_eval_mode}).pkl')
+    if len(file_path) > MAX_FILENAME_LENGTH:
+        h = hash_string(file_path)
+        file_path = os.path.join(IUXRAY_CACHE_DIR, f'questions_per_report(hash={h[0]},{h[1]}).pkl')
+
+    data = load_pickle(file_path)
+    if data is not None:
+        print('questions per report data loaded from', file_path)
+        return data
+
+    data = {}
+
+    if report_eval_mode == ReportEvalMode.GROUND_TRUTH.value:
+        for ri in report_ids:
+            report = iuxray_qa_reports['reports'][ri]
+            data[ri] = report['question_ids']
+    else:
+        assert False, f'Unknown report_eval_mode = {report_eval_mode}'
+    
+    save_to_pickle(data, file_path)
+    print('questions per report data saved to', file_path)
+    
+    return data
+
 class IUXRAY_VQA_Trainer(VQA_Trainer):
 
     def __init__(self, transform, batch_size, collate_batch_fn,
@@ -58,52 +108,71 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 use_orientation = False,
                 use_chexpert = False,
                 chexpert_labels_filename = None,
+                classify_questions = False,
+                question_labels_filename = None,
                 iuxray_metadata = None,
                 iuxray_image_info = None,
                 iuxray_qa_reports = None,
                 balanced_split = False,
                 balanced_dataloading = False,
                 balanced_metadata_filename = None,
+                imbalance_reduction_coef = 1,
                 validation_only = False,
-                ignore_medical_tokenization = False):
+                report_eval_mode = None,
+                ignore_medical_tokenization = False,
+                allowed_questions = None):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
         self.iuxray_image_info = iuxray_image_info
         self.iuxray_qa_reports = iuxray_qa_reports
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
+        self.ignore_medical_tokenization = ignore_medical_tokenization
+        self.report_eval_mode = report_eval_mode
 
-        if ignore_medical_tokenization:        
-            preprocessing_save_path = _get_train_preprocessing_save_path(
-                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
-                            ignore_medical_tokenization=True)
+        if report_eval_mode is not None:
+            assert validation_only            
             load_split_from_path = _get_train_preprocessing_save_path(
                             qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+            preprocessing_save_path = _get_report_eval_mode_preprocessing_save_path(
+                            qa_adapted_reports_filename, load_split_from_path, tokenizer, report_eval_mode)
+            self.load_split_from_path = load_split_from_path
         else:
-            preprocessing_save_path = _get_train_preprocessing_save_path(
-                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
-                            ignore_medical_tokenization=True)
-            load_split_from_path = None
-
-        rid2tags_path = os.path.join(IUXRAY_CACHE_DIR, medical_tags_per_report_filename) if use_tags else None
-        chexpert_labels_path = os.path.join(IUXRAY_CACHE_DIR, chexpert_labels_filename) if use_chexpert else None
-        balanced_metadata_path = os.path.join(IUXRAY_CACHE_DIR, balanced_metadata_filename) if balanced_split else None
+            if ignore_medical_tokenization:        
+                preprocessing_save_path = _get_train_preprocessing_save_path(
+                                qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                                ignore_medical_tokenization=True)
+                load_split_from_path = _get_train_preprocessing_save_path(
+                                qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+            else:
+                preprocessing_save_path = _get_train_preprocessing_save_path(
+                                qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                                ignore_medical_tokenization=True)
+                load_split_from_path = None
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
+                        IUXRAY_CACHE_DIR,
                         num_workers,
                         use_tags = use_tags,
-                        rid2tags_path = rid2tags_path,
+                        rid2tags_filename = medical_tags_per_report_filename,
                         use_orientation = use_orientation,
                         use_chexpert = use_chexpert,
-                        chexpert_labels_path = chexpert_labels_path,
+                        chexpert_labels_filename = chexpert_labels_filename,
+                        classify_questions = classify_questions,
+                        question_labels_filename = question_labels_filename,
                         dataset_name = 'IU X-Ray',
                         split_kwargs = split_kwargs,
                         load_split_from_path = load_split_from_path,
                         balanced_split = balanced_split,
                         balanced_dataloading = balanced_dataloading,
-                        balanced_metadata_path = balanced_metadata_path,
-                        validation_only = validation_only)
+                        balanced_metadata_filename = balanced_metadata_filename,
+                        imbalance_reduction_coef = imbalance_reduction_coef,
+                        validation_only = validation_only,
+                        include_answer = report_eval_mode == None,
+                        use_report_eval_mode = report_eval_mode != None,
+                        allowed_questions = allowed_questions,
+                        qa_adapted_reports_filename = qa_adapted_reports_filename)
         
     def _preprocess_data(self):
 
@@ -112,7 +181,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         iuxray_image_info = self.iuxray_image_info
         iuxray_qa_reports = self.iuxray_qa_reports
 
-        if tokenizer.medical_tokenization:
+        if tokenizer.medical_tokenization and not self.ignore_medical_tokenization:
             answer_string2ids_func = tokenizer.strig2medical_tag_ids
         else:
             answer_string2ids_func = tokenizer.string2ids
@@ -133,18 +202,26 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         self.images = []
         self.questions = []
         self.answers = []
-        self.orientations = []                     
+        self.orientations = []
         
-        print('loading IU X-ray vqa dataset ...')
+        if self.report_eval_mode is not None:
+            questions_per_report = _precompute_questions_per_report(self.load_split_from_path, self.report_eval_mode,
+                                                                    iuxray_qa_reports, self.val_report_ids)
+        else:
+            questions_per_report = None
+
+        print('Preprocessing IU X-ray vqa dataset ...')
 
         question_list = iuxray_qa_reports['questions']
         
         invalid_images = set()
         invalid_images.update(iuxray_image_info['marks']['wrong'])
         invalid_images.update(iuxray_image_info['marks']['broken'])
-        
-        for ri, report in enumerate(iuxray_qa_reports['reports']):
-            
+
+        reports_ids = questions_per_report.keys() if questions_per_report is not None else range(len(iuxray_qa_reports))
+
+        for ri in reports_ids:
+            report = iuxray_qa_reports['reports'][ri]
             metadata = iuxray_metadata[report['filename']]
             images = metadata['images']
             sentences = report['sentences']
@@ -164,16 +241,26 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
 
             if image_path:
                 orientation_id = IUXRAY_IMAGE_ORIENTATIONS.index(iuxray_image_info['classification'][image_name])
-                for q_idx, a_idxs in report['qa'].items():
-                    q_idx = int(q_idx)
-                    question = question_list[q_idx]
-                    answer = '. '.join(sentences[i] for i in a_idxs)
-                    self.report_ids.append(ri)
-                    self.question_ids.append(q_idx)
-                    self.images.append(image_path)
-                    self.questions.append(tokenizer.string2ids(question.lower()))
-                    self.answers.append(answer_string2ids_func(answer.lower()))
-                    self.orientations.append(orientation_id)
+                if questions_per_report is None:
+                    for qid, a_ids in report['qa'].items():
+                        qid = int(qid)
+                        question = question_list[qid]
+                        answer = '. '.join(sentences[i] for i in a_ids)
+                        self.report_ids.append(ri)
+                        self.question_ids.append(qid)
+                        self.images.append(image_path)
+                        self.questions.append(tokenizer.string2ids(question.lower()))
+                        self.answers.append(answer_string2ids_func(answer.lower()))
+                        self.orientations.append(orientation_id)
+                else:
+                    question_ids = questions_per_report[ri]
+                    for qid in question_ids:
+                        question = question_list[qid]
+                        self.report_ids.append(ri)
+                        self.question_ids.append(qid)
+                        self.images.append(image_path)
+                        self.questions.append(tokenizer.string2ids(question.lower()))
+                        self.orientations.append(orientation_id)
 
         self.report_ids = np.array(self.report_ids, dtype=int)
         self.question_ids = np.array(self.question_ids, dtype=int)
