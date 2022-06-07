@@ -160,7 +160,7 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
 class VQADataset(Dataset):
     
     def __init__(self, report_ids, images, questions, answers, indices, transform, source_dataset_name,
-                include_answer = False,
+                include_answer = True,
                 suffle_indices = True,
                 # aux task: medical tags
                 use_tags = False, rid2tags = None,
@@ -407,8 +407,9 @@ class BalancedTreeNode:
     def get_dataset(self, vqa_trainer):
         if self.children is None: # this is a leaf node
             assert len(self.indices) > 0
+            questions = vqa_trainer.questions if vqa_trainer.verbose_question else vqa_trainer.question_ids
             return VQADataset(
-                vqa_trainer.report_ids, vqa_trainer.images, vqa_trainer.questions, vqa_trainer.answers,
+                vqa_trainer.report_ids, vqa_trainer.images, questions, vqa_trainer.answers,
                 self.indices, vqa_trainer.transform, vqa_trainer.dataset_name,
                 # aux task: medical tags
                 use_tags = vqa_trainer.use_tags,
@@ -449,6 +450,7 @@ class VQA_Trainer(VQA_Base):
                 preprocessing_save_path,
                 cache_dir,
                 num_workers,
+                verbose_question = True,
                 use_tags = False,
                 rid2tags_filename = None,
                 use_orientation = False,
@@ -481,6 +483,7 @@ class VQA_Trainer(VQA_Base):
             assert balanced_split
             assert balanced_metadata_path is not None
 
+        self.verbose_question = verbose_question
         self.balanced_dataloading = balanced_dataloading
         self.validation_only = validation_only
         self.cache_dir = cache_dir
@@ -528,6 +531,7 @@ class VQA_Trainer(VQA_Base):
 
     def _get_composite_dataset(self, datasets, weights, batch_size):
         if self.one_question_per_batch:
+            print('(***) Note: using BatchedCompositeInfiniteDataset (one question per batch)')
             return BatchedCompositeInfiniteDataset(datasets, weights, batch_size)
         return CompositeInfiniteDataset(datasets, weights)
 
@@ -555,8 +559,10 @@ class VQA_Trainer(VQA_Base):
                 for k in range(i, j+1):
                     indices.extend(self.train_indices[train_question_ids[k]])
                 indices = np.array(indices, dtype=int)
+            
+            questions = self.questions if self.verbose_question else self.question_ids
             question_datasets.append(VQADataset(
-                self.report_ids, self.images, self.questions, self.answers,
+                self.report_ids, self.images, questions, self.answers,
                 indices, self.transform, self.dataset_name,
                 # aux task: medical tags
                 use_tags = self.use_tags,
@@ -693,8 +699,9 @@ class VQA_Trainer(VQA_Base):
             val_indices = self.val_indices
         print('len(self.val_indices) =', len(self.val_indices))
         print('len(val_indices) =', len(val_indices))
+        questions = self.questions if self.verbose_question else self.question_ids
         self.val_dataset = VQADataset(
-            self.report_ids, self.images, self.questions, self.answers, val_indices,
+            self.report_ids, self.images, questions, self.answers, val_indices,
             self.transform, self.dataset_name,
             include_answer = self.include_answer,
             # aux task: medical tags
@@ -739,6 +746,7 @@ class VQA_Evaluator(VQA_Base):
                 preprocessing_save_path,
                 cache_dir,
                 num_workers,
+                verbose_question = True,
                 include_answer = True,
                 use_tags = False,
                 rid2tags_filename = None,
@@ -755,6 +763,7 @@ class VQA_Evaluator(VQA_Base):
         chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if use_chexpert else None        
         question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
 
+        self.verbose_question = verbose_question
         self.include_answer = include_answer
     
         super().__init__(False, transform, batch_size, collate_batch_fn,
@@ -779,8 +788,9 @@ class VQA_Evaluator(VQA_Base):
 
         print('generating test dataset ...')
         
+        questions = self.questions if self.verbose_question else self.question_ids
         self.test_dataset = VQADataset(
-            self.report_ids, self.images, self.questions, self.answers, self.test_indices,
+            self.report_ids, self.images, questions, self.answers, self.test_indices,
             self.transform, self.dataset_name,
             include_answer = self.include_answer,
             # aux task: medical tags prediction
@@ -806,4 +816,5 @@ class VQA_Evaluator(VQA_Base):
                                          batch_size=batch_size,
                                          shuffle=False,
                                          num_workers=num_workers,
-                                         collate_fn=collate_batch_fn)
+                                         collate_fn=collate_batch_fn,
+                                         pin_memory=True)

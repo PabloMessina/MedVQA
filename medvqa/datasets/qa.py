@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 from medvqa.utils.files import load_pickle
 from medvqa.datasets.dataloading_utils import (
     BatchedCompositeInfiniteDataset,
-    log_normalize_weights,
+    get_imbalance_reduced_weights,
     INFINITE_DATASET_LENGTH,
 )
 
@@ -50,7 +50,7 @@ class QA_Base:
         assert preprocessed_data_path is not None        
         self.preprocessed_data_path = preprocessed_data_path
         self.training = training
-        self._load_cached_data(preprocessed_data_path)        
+        self._load_cached_data(preprocessed_data_path)
         print(f'batch_size = {batch_size}')
         self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn, num_workers)
 
@@ -77,8 +77,10 @@ class QA_Base:
 class QA_Trainer(QA_Base):
     
     def __init__(self, batch_size, collate_batch_fn, preprocessed_data_path, num_workers,
-                 validation_only=False):
+                imbalance_reduction_coef = 1,
+                validation_only=False):
 
+        self.imbalance_reduction_coef = imbalance_reduction_coef
         self.validation_only = validation_only
 
         super().__init__(True, batch_size, collate_batch_fn, preprocessed_data_path, num_workers)
@@ -115,7 +117,7 @@ class QA_Trainer(QA_Base):
             ))
             i = j+1
         
-        question_weights = log_normalize_weights([len(d) for d in question_datasets])
+        question_weights = get_imbalance_reduced_weights([len(d) for d in question_datasets], self.imbalance_reduction_coef)
         self.train_dataset = BatchedCompositeInfiniteDataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')
 

@@ -103,6 +103,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
+                verbose_question = True,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
@@ -120,7 +121,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 validation_only = False,
                 report_eval_mode = None,
                 ignore_medical_tokenization = False,
-                allowed_questions = None):
+                allowed_questions = None,
+                one_question_per_batch = False):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
@@ -154,6 +156,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         preprocessing_save_path,
                         IUXRAY_CACHE_DIR,
                         num_workers,
+                        verbose_question = verbose_question,
                         use_tags = use_tags,
                         rid2tags_filename = medical_tags_per_report_filename,
                         use_orientation = use_orientation,
@@ -172,7 +175,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         include_answer = report_eval_mode == None,
                         use_report_eval_mode = report_eval_mode != None,
                         allowed_questions = allowed_questions,
-                        qa_adapted_reports_filename = qa_adapted_reports_filename)
+                        qa_adapted_reports_filename = qa_adapted_reports_filename,
+                        one_question_per_batch = one_question_per_batch)
         
     def _preprocess_data(self):
 

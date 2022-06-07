@@ -40,6 +40,40 @@ NLP_METRICS = [
     'ciderD',
 ]
 
+class MetricNames:
+    CHEXPERT_ACCURACY = 'chexpert_accuracy'
+    CHEXPERT_PRF1S = 'chexpert_prf1s'
+    BLEU_QUESTION = 'bleu_question'
+    EXACTMATCH_QUESTION = 'exactmatch_question'
+    BLEU = 'bleu'
+    BLEU_1 = 'bleu-1'
+    BLEU_2 = 'bleu-2'
+    BLEU_3 = 'bleu-3'
+    BLEU_4 = 'bleu-4'
+    ROUGE_L = 'rougeL'
+    METEOR = 'meteor'
+    CIDER_D = 'ciderD'
+    MEDCOMP = 'medcomp'
+    WMEDCOMP = 'wmedcomp'
+    MEDTAGF1 = 'medtagf1'
+    ORIENACC = 'orienacc'
+    CHXLABELACC = 'chxlabelacc'
+    CHXLABELF1 = 'chxlabelf1'
+    CHXLABELMACROAVGF1 = 'chxlabelmacroavgf1'
+    CHXLABELMICROAVGF1 = 'chxlabelmicroavgf1'
+    CHXLABEL_ROCAUC = 'chxlabel_rocauc'
+    CHXLABEL_PRF1 = 'chxlabel_prf1'
+    QLABELSF1 = 'qlabelsf1'
+    QLABELS_PRF1 = 'qlabels_prf1'
+    QLABELS_MACROAVGF1 = 'qlabels_macroavgf1'
+    QLABELS_MICROAVGF1 = 'qlabels_microavgf1'
+    QUESTION_LOSS = 'question_loss'
+    ANSWER_LOSS = 'answer_loss'
+    ORIENTATION_LOSS = 'orientation_loss'
+    CHEXPERT_LOSS = 'chexpert_loss'
+    QLABELS_LOSS = 'qlabels_loss'
+    MEDTAGS_LOSS = 'medtags_loss'
+
 METRIC2SHORT = {
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',
@@ -59,7 +93,14 @@ METRIC2SHORT = {
     'orienacc': 'oracc',
     'chxlabelacc': 'chxlacc',
     'chxlabelf1': 'chxlf1',
+    'chxlabelmacroavgf1': 'chxlmacf1',
+    'chxlabelmicroavgf1': 'chxlmicf1',
+    'chxlabel_rocauc': 'chxlrocauc',
+    'chxlabel_prf1': 'chxlprf1',
     'qlabelsf1': 'qlf1',
+    'qlabels_prf1': 'qlprf1',
+    'qlabels_macroavgf1': 'qlmacf1',
+    'qlabels_microavgf1': 'qlmicf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'orientation_loss': 'orien_loss',

@@ -8,17 +8,25 @@ from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.utils.constants import CHEXPERT_LABELS
 
+class QuestionEncoding:
+    BILSTM = 'bilstm'
+    ONE_HOT = 'one-hot'
+
 class OpenEndedVQA(nn.Module):
 
-    def __init__(self, vocab_size, start_idx, embed_size, question_hidden_size, answer_hidden_size,
+    def __init__(self, vocab_size, start_idx, embed_size, answer_hidden_size,
                  n_lstm_layers,
-                 question_vec_size, image_local_feat_size, dropout_prob, device,
+                 question_vec_size, image_local_feat_size, dropout_prob, device,                 
+                 question_encoding = QuestionEncoding.BILSTM,
+                 question_hidden_size = None,
                  densenet_pretrained_weights_path=None,
                  n_medical_tags=None,
                  n_questions=None,
                  classify_orientation=False,
                  classify_chexpert=False,
                  classify_questions=False,
+                 eos_idx=None,
+                 padding_idx=None,
                  **unused_kwargs,
                  ):
         super().__init__()
@@ -27,34 +35,46 @@ class OpenEndedVQA(nn.Module):
             num_embeddings=vocab_size,
             embedding_dim=embed_size,
             padding_idx=0,
-        )        
-        # Load pre-trained weights
+        )
+        
+        # Load pre-trained CNN weights
         if densenet_pretrained_weights_path:
             densenet = models.densenet121(pretrained=False)
-            pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
-            # begin HACK
-            del pretrained_weights["prediction.weight"]
-            del pretrained_weights["prediction.bias"]            
-            densenet.classifier = None
-            # end HACK
-            densenet.load_state_dict(pretrained_weights)
+            pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')            
+            densenet.load_state_dict(pretrained_weights, strict=False)
             print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
         else:
             densenet = models.densenet121(pretrained=True)
             print('Using densenet121 with ImageNet pretrained weights')        
         # self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
         self.image_encoder = densenet.features
-        self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
-                                                       embed_size,
-                                                       question_hidden_size,
-                                                       question_vec_size,
-                                                       device)
-        self.question_decoder = QuestionDecoder(self.embedding_table,
+
+        self.question_encoding = question_encoding
+        
+        # Question encoding
+        if question_encoding == QuestionEncoding.BILSTM:
+            assert question_hidden_size is not None
+            self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
+                                                        embed_size,
+                                                        question_hidden_size,
+                                                        question_vec_size,
+                                                        device)
+            self.question_decoder = QuestionDecoder(self.embedding_table,
                                             embed_size,
                                             question_hidden_size,
                                             question_vec_size,
                                             vocab_size,
-                                            start_idx)        
+                                            start_idx)
+        elif question_encoding == QuestionEncoding.ONE_HOT:
+            assert n_questions is not None
+            self.question_encoder = nn.Embedding(
+                num_embeddings=n_questions,
+                embedding_dim=question_vec_size,
+            )
+        else:
+            assert False, f'Unknown question encoding strategy {question_encoding}'
+          
+        # Answer decoding
         self.answer_decoder = AnswerDecoder(self.embedding_table,
                                             image_local_feat_size,
                                             question_vec_size,
@@ -63,7 +83,9 @@ class OpenEndedVQA(nn.Module):
                                             n_lstm_layers,
                                             start_idx,
                                             vocab_size,
-                                            dropout_prob)
+                                            dropout_prob,
+                                            eos_idx=eos_idx,
+                                            padding_idx=padding_idx)
         
         # Optional auxiliary tasks        
         
@@ -100,10 +122,12 @@ class OpenEndedVQA(nn.Module):
         self,
         images,
         questions,
-        question_lengths,
+        device,
+        question_lengths=None,
         answers=None,
         max_answer_length=None,
         mode='train',
+        beam_search_k=None,
         iuxray_foward=False,
         mimiccxr_foward=False,
     ):
@@ -119,21 +143,25 @@ class OpenEndedVQA(nn.Module):
         global_feat = torch.cat((global_avg_pool, global_max_pool), 1)
 
         # process questions
-        question_vectors = self.question_encoder(questions, question_lengths)
-        
-        # recover questions from vectors
-        pred_questions = self.question_decoder(question_vectors, questions, question_lengths)
+        if self.question_encoding == QuestionEncoding.BILSTM:
+            question_vectors = self.question_encoder(questions, question_lengths)
+        else: # one-hot
+            question_vectors = self.question_encoder(questions)
 
         # predict answers
         if mode == 'train':
-            pred_answers = self.answer_decoder(local_feat, global_feat, question_vectors, answers=answers, mode=mode)
+            pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
+        elif beam_search_k:
+            pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
         else:
-            pred_answers = self.answer_decoder(local_feat, global_feat, question_vectors, max_answer_length=max_answer_length, mode=mode)
+            pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)
 
-        output = {
-            'pred_answers': pred_answers,
-            'pred_questions': pred_questions,
-        }
+        output = { 'pred_answers': pred_answers }
+
+        # recover questions from vectors
+        if self.question_encoding == QuestionEncoding.BILSTM:
+            pred_questions = self.question_decoder(question_vectors, questions, question_lengths)
+            output['pred_questions'] = pred_questions
 
         # auxiliary tasks (optional)
         

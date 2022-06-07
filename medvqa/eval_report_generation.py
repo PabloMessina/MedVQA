@@ -8,6 +8,7 @@ import torch
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 
+from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.utils.constants import (
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
@@ -138,6 +139,8 @@ def _evaluate_model(
        assert n_questions_per_report is not None
 
     # Pull out some args from kwargs
+    question_encoding = model_kwargs.get('question_encoding', QuestionEncoding.BILSTM)
+    verbose_question = question_encoding != QuestionEncoding.ONE_HOT
 
     # auxiliary task: medical tags prediction
     use_tags = auxiliary_tasks_kwargs['use_tags']
@@ -206,6 +209,7 @@ def _evaluate_model(
 
     # Define collate_batch_fn    
     mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                                        verbose_question = verbose_question,
                                                         include_answer=False,
                                                         use_tags = use_tags,
                                                         n_tags = n_medical_tags,
@@ -213,6 +217,7 @@ def _evaluate_model(
                                                         use_chexpert = use_chexpert,
                                                         classify_questions = classify_questions)    
     iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
+                                                   verbose_question = verbose_question,
                                                    include_answer=False,
                                                    use_tags = use_tags,
                                                    n_tags = n_medical_tags,
@@ -247,6 +252,7 @@ def _evaluate_model(
             pretrained_weights = checkpoint['model'],
             pretrained_checkpoint_path = checkpoint_path,
             n_questions_per_report = n_questions_per_report,
+            verbose_question = verbose_question,
             **mimiccxr_vqa_evaluator_kwargs,
         )
     
@@ -269,6 +275,7 @@ def _evaluate_model(
             validation_only = True,
             report_eval_mode = eval_mode,
             ignore_medical_tokenization = tokenizer.medical_tokenization,
+            verbose_question = verbose_question,
             **iuxray_vqa_trainer_kwargs,
         )
 
@@ -288,8 +295,8 @@ def _evaluate_model(
 
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
-    evaluator = get_engine(model, tokenizer,
-                           use_tags, use_orientation, use_chexpert, classify_questions,
+    evaluator = get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
+                           classify_questions, question_encoding,
                            device, use_amp=use_amp, training=False, include_answer=False,
                            max_answer_length=max_answer_length)
 
@@ -297,7 +304,8 @@ def _evaluate_model(
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
     # Metrics
-    attach_exactmatch_question(evaluator, device, record_scores=True)    
+    if verbose_question:
+        attach_exactmatch_question(evaluator, device, record_scores=True)
     if use_tags:
         attach_medical_tags_f1score(evaluator, device, record_scores=True)
     if use_orientation:
@@ -311,7 +319,8 @@ def _evaluate_model(
     # Accumulators
     attach_accumulator(evaluator, 'idxs')
     attach_accumulator(evaluator, 'pred_answers')
-    attach_accumulator(evaluator, 'pred_questions')
+    if verbose_question:
+        attach_accumulator(evaluator, 'pred_questions')
     if use_tags:
         attach_accumulator(evaluator, 'pred_tags')
     if use_orientation:
@@ -329,7 +338,9 @@ def _evaluate_model(
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss', 'exactmatch_question']
+    metrics_to_print=['loss']
+    if verbose_question:
+        metrics_to_print.append('exactmatch_question')
     if use_tags:
         metrics_to_print.append('medtagf1')
     if use_orientation:
@@ -366,6 +377,7 @@ def _evaluate_model(
             results_dict['iuxray_metrics'],
             results_dict['iuxray_dataset'],
             tokenizer, iuxray_qa_reports,
+            verbose_question=verbose_question,
         )
         results_dict['iuxray_report_metrics'] = _compute_and_save_report_level_metrics(
             results_dict, 'iuxray', tokenizer, results_folder_path, parenthesis_text=eval_mode_text)
@@ -383,6 +395,7 @@ def _evaluate_model(
             results_dict['mimiccxr_metrics'],
             results_dict['mimiccxr_dataset'],
             tokenizer, mimiccxr_qa_reports,
+            verbose_question=verbose_question,
         )
         results_dict['mimiccxr_report_metrics'] = _compute_and_save_report_level_metrics(
             results_dict, 'mimiccxr', tokenizer, results_folder_path, parenthesis_text=eval_mode_text)

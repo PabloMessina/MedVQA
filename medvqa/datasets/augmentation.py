@@ -71,5 +71,5 @@ class ImageAugmentationTransforms:
         return self._spatial_transforms
     
     def get_color_transforms(self):
-        return self._spatial_transforms
+        return self._color_transforms
         

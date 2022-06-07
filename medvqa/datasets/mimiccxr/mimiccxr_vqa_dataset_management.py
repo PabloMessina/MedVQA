@@ -375,6 +375,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
+                verbose_question = True,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
@@ -390,6 +391,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 balanced_metadata_filename = None,
                 imbalance_reduction_coef = 1,
                 allowed_questions = None,
+                one_question_per_batch = False,
                 debug = False):
         
         self.tokenizer = tokenizer
@@ -399,12 +401,14 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
         
         preprocessing_save_path = _get_train_preprocessing_save_path(
-                        qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+                        qa_adapted_reports_filename, split_kwargs, tokenizer,
+                         balanced_metadata_filename)
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         MIMICCXR_CACHE_DIR,
                         num_workers,
+                        verbose_question = verbose_question,
                         use_tags = use_tags,
                         rid2tags_filename = medical_tags_per_report_filename,
                         use_orientation = use_orientation,
@@ -420,6 +424,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         imbalance_reduction_coef = imbalance_reduction_coef,
                         allowed_questions = allowed_questions,
                         qa_adapted_reports_filename = qa_adapted_reports_filename,
+                        one_question_per_batch = one_question_per_batch,
                         debug = debug)
 
     def _preprocess_data(self):
@@ -430,6 +435,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
     def __init__(self, transform, batch_size, collate_batch_fn,
                 qa_adapted_reports_filename,
                 num_workers,
+                verbose_question = True,
                 use_tags = False,
                 medical_tags_per_report_filename = None,
                 use_orientation = False,
@@ -446,7 +452,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 pretrained_checkpoint_path = None,
                 pretrained_weights = None,
                 n_questions = None,
-                n_questions_per_report = None,
+                n_questions_per_report = None,                
                 **unused_kwargs):
 
         print('report_eval_mode =', report_eval_mode)
@@ -478,6 +484,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         preprocessing_save_path,
                         MIMICCXR_CACHE_DIR,
                         num_workers,
+                        verbose_question = verbose_question,
                         include_answer = report_eval_mode == None,
                         use_tags = use_tags,
                         rid2tags_filename = medical_tags_per_report_filename,

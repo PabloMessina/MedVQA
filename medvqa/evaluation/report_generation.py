@@ -26,7 +26,7 @@ from medvqa.utils.metrics import chexpert_label_array_to_string
 
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
 
-def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset):
+def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbose_question=True):
     idxs = metrics_dict['idxs']
     report_ids = [dataset.report_ids[i] for i in idxs]
     rid2indices = dict()
@@ -48,7 +48,10 @@ def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset):
 
         gen_report = {'q':[], 'a': []}
         for i in indices:
-            q = tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
+            if verbose_question:
+                q = tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
+            else:
+                q = qa_adapted_dataset['questions'][dataset.questions[idxs[i]]]
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
             gen_report['q'].append(q)
             gen_report['a'].append(a)

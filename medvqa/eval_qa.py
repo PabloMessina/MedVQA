@@ -11,7 +11,7 @@ from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.datasets.dataloading_utils import qa_collate_batch_fn
 from medvqa.metrics import (
-    attach_bleu_question,
+    attach_exactmatch_question,
     attach_bleu,
     attach_rougel,
     attach_ciderd,
@@ -54,7 +54,7 @@ from medvqa.evaluation.report_generation import (
 from medvqa.datasets.mimiccxr import mimiccxr_vqa_dataset_management
 
 _METRIC_NAMES = [
-    'bleu_question',
+    'exactmatch_question',
     'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
     'rougeL',
     'ciderD',
@@ -208,7 +208,7 @@ def _evaluate_model(
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
     # Metrics
-    attach_bleu_question(evaluator, device, record_scores=return_results)
+    attach_exactmatch_question(evaluator, device, record_scores=return_results)
     attach_bleu(evaluator, device, record_scores=return_results, ks=[1,2,3,4])
     attach_rougel(evaluator, device, record_scores=return_results)
     attach_ciderd(evaluator, device, record_scores=return_results)
@@ -228,7 +228,7 @@ def _evaluate_model(
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss', 'bleu_question', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
+    metrics_to_print=['loss', 'exactmatch_question', 'bleu-1', 'bleu-2', 'bleu-3', 'bleu-4',
                       'rougeL', 'ciderD', 'medcomp', 'wmedcomp']
 
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)

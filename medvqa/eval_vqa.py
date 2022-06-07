@@ -6,7 +6,9 @@ import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
+from medvqa.models.vqa.answer_decoder import AnswerDecoding
 
+from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.utils.constants import (
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
@@ -26,7 +28,6 @@ from medvqa.metrics import (
     attach_medical_tags_f1score,
     attach_chexpert_labels_accuracy,
     attach_dataset_aware_orientation_accuracy,
-    attach_loss
 )
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.models.checkpoint import (
@@ -64,7 +65,6 @@ from medvqa.evaluation.report_generation import (
 )
 
 _METRIC_NAMES = [
-    'exactmatch_question',
     'bleu',
     'rougeL',
     'meteor',
@@ -82,7 +82,9 @@ def parse_args():
     parser.add_argument('--checkpoint-folder', type=str,
                         help='Relative path to folder with checkpoint to evaluate')
 
-    # optional arguments    
+    # optional arguments
+    parser.add_argument('--answer-decoding', type=str, default='greedy-search')
+    parser.add_argument('--beam-search-k', type=int, default=None)
     parser.add_argument('--batch-size', type=int, default=140,
                         help='Batch size')
     parser.add_argument('--device', type=str, default='GPU',
@@ -140,6 +142,8 @@ def _evaluate_model(
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
     auxiliary_tasks_kwargs,
+    answer_decoding,
+    beam_search_k = None,
     num_workers = 0,
     device = 'GPU',
     checkpoint_folder_path = None,
@@ -152,6 +156,8 @@ def _evaluate_model(
     assert eval_iuxray or eval_mimiccxr
 
     # Pull out some args from kwargs
+    question_encoding = model_kwargs.get('question_encoding', QuestionEncoding.BILSTM)
+    verbose_question = question_encoding != QuestionEncoding.ONE_HOT
 
     # auxiliary task: medical tags prediction
     use_tags = auxiliary_tasks_kwargs['use_tags']
@@ -187,6 +193,9 @@ def _evaluate_model(
     assert iuxray_qa_adapted_reports_filename is not None
     assert mimiccxr_qa_adapted_reports_filename is not None
     
+    if answer_decoding == AnswerDecoding.BEAM_SEARCH:
+        assert beam_search_k is not None
+
     count_print = CountPrinter()
 
     # device
@@ -221,14 +230,16 @@ def _evaluate_model(
                          classify_orientation=use_orientation,
                          classify_chexpert=use_chexpert,
                          classify_questions=classify_questions,
+                         padding_idx=tokenizer.token2id[tokenizer.PAD_TOKEN],
+                         eos_idx=tokenizer.token2id[tokenizer.END_TOKEN],
                          **model_kwargs)
     model = model.to(device)
 
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
-    evaluator = get_engine(model, tokenizer,
-                           use_tags, use_orientation, use_chexpert, classify_questions,
-                           device, use_amp=use_amp, training=False)
+    evaluator = get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
+                           classify_questions, question_encoding, answer_decoding,
+                           device, beam_search_k=beam_search_k, use_amp=use_amp, training=False)
     
     # Default image transform
     count_print('Defining image transform ...')
@@ -236,12 +247,14 @@ def _evaluate_model(
 
     # Define collate_batch_fn    
     mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                                    verbose_question = verbose_question,
                                                     use_tags = use_tags,
                                                     n_tags = n_medical_tags,
                                                     use_orientation = use_orientation,
                                                     use_chexpert = use_chexpert,
                                                     classify_questions = classify_questions)
     iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
+                                                   verbose_question = verbose_question,
                                                    use_tags = use_tags,
                                                    n_tags = n_medical_tags,
                                                    use_orientation = use_orientation,
@@ -264,6 +277,7 @@ def _evaluate_model(
             chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
             classify_questions = classify_questions,
             question_labels_filename = mimiccxr_question_labels_filename,
+            verbose_question = verbose_question,
             **mimiccxr_vqa_evaluator_kwargs,
         )
     
@@ -285,20 +299,22 @@ def _evaluate_model(
             question_labels_filename = mimiccxr_question_labels_filename,
             validation_only = True,
             ignore_medical_tokenization = tokenizer.medical_tokenization,
+            verbose_question = verbose_question,
             **iuxray_vqa_trainer_kwargs,
         )
 
-    # Attach metrics, losses, timer and events to engines    
-    count_print('Attaching metrics, losses, timer and events to engines ...')
+    # Attach metrics, timer and events to engines    
+    count_print('Attaching metrics, timer and events to engines ...')
 
     # Metrics
-    attach_exactmatch_question(evaluator, device, record_scores=return_results)
     attach_bleu(evaluator, device, record_scores=return_results)
     attach_rougel(evaluator, device, record_scores=return_results)
     attach_meteor(evaluator, device, record_scores=return_results)
     attach_ciderd(evaluator, device, record_scores=return_results)
     attach_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
     attach_weighted_medical_completeness(evaluator, device, tokenizer, record_scores=return_results)
+    if verbose_question:
+        attach_exactmatch_question(evaluator, device, record_scores=return_results)
     if use_tags:
         attach_medical_tags_f1score(evaluator, device, record_scores=return_results)
     if use_orientation:
@@ -312,7 +328,8 @@ def _evaluate_model(
     if return_results:
         attach_accumulator(evaluator, 'idxs')
         attach_accumulator(evaluator, 'pred_answers')
-        attach_accumulator(evaluator, 'pred_questions')
+        if verbose_question:
+            attach_accumulator(evaluator, 'pred_questions')
         if use_tags:
             attach_accumulator(evaluator, 'pred_tags')
         if use_orientation:
@@ -321,17 +338,15 @@ def _evaluate_model(
             attach_accumulator(evaluator, 'pred_chexpert')
         if classify_questions:
             attach_accumulator(evaluator, 'pred_qlabels')
-
-    # Losses
-    attach_loss('loss', evaluator, device)
     
     # Timer
     timer = Timer()
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss', 'exactmatch_question', 'bleu', 'rougeL', 'meteor', 'ciderD',
-                     'medcomp', 'wmedcomp']
+    metrics_to_print=['bleu', 'rougeL', 'meteor', 'ciderD', 'medcomp', 'wmedcomp']
+    if verbose_question:
+        metrics_to_print.append('exactmatch_question')
     if use_tags:
         metrics_to_print.append('medtagf1')
     if use_orientation:
@@ -361,6 +376,8 @@ def _evaluate_model(
     # Run evaluation
 
     metrics_to_aggregate = _METRIC_NAMES[:]
+    if verbose_question:
+        metrics_to_aggregate.append('exactmatch_question')
     if use_tags:
         metrics_to_aggregate.append('medtagf1')
     if use_orientation:
@@ -433,6 +450,8 @@ def _evaluate_model(
 
 def evaluate_model(
     checkpoint_folder,
+    answer_decoding,
+    beam_search_k=None,
     batch_size = 100,
     num_workers = 0,
     device = 'GPU',
@@ -460,6 +479,8 @@ def evaluate_model(
                 iuxray_vqa_trainer_kwargs,
                 auxiliary_tasks_kwargs = auxiliary_tasks_kwargs,
                 device = device,
+                answer_decoding = answer_decoding,
+                beam_search_k = beam_search_k,
                 num_workers = num_workers,
                 checkpoint_folder_path = checkpoint_folder,
                 return_results = return_results,

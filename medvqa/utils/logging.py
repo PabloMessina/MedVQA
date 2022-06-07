@@ -21,4 +21,4 @@ class MetricsLogger:
     
     def log_metrics(self, scores):
         with open(self.metrics_logs_path, 'a+') as f:
-            f.write(','.join(f'{s:.5f}' for s in scores) + '\n')
+            f.write(','.join(f'{s:.5f}' if s is not None else '' for s in scores) + '\n')

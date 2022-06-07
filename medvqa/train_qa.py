@@ -11,7 +11,7 @@ from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
-    attach_bleu_question,
+    attach_exactmatch_question,
     attach_ciderd,
     attach_loss,
     attach_weighted_medical_completeness
@@ -110,7 +110,7 @@ def parse_args():
     return parser.parse_args()
 
 _METRIC_WEIGHTS = {
-    'bleu_question': 1,
+    'exactmatch_question': 1,
     'ciderD': 0.1,
     'wmedcomp': 1,
 }
@@ -237,8 +237,8 @@ def train_model(
     # Attach metrics, losses, timer and events to engines    
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
-    attach_bleu_question(trainer, device)
-    attach_bleu_question(validator, device)
+    attach_exactmatch_question(trainer, device)
+    attach_exactmatch_question(validator, device)
     
     attach_ciderd(trainer, device)
     attach_ciderd(validator, device)

@@ -1,3 +1,4 @@
+from tabnanny import verbose
 import numpy as np
 import math
 import torch
@@ -158,23 +159,32 @@ def multi_cyclic_dataloaders_generator(dataloaders):
 #     batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
 #     return batch_dict
 
-def get_vqa_collate_batch_fn(dataset_id, include_answer=True, use_tags=False, n_tags=None,
+def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, include_answer=True, use_tags=False, n_tags=None,
                          use_orientation=False, use_chexpert=False, classify_questions=False):
 
     if use_tags:
         mlb = MultiLabelBinarizer(list(range(n_tags)))
 
     def collate_batch_fn(batch):
-        indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
+        if verbose_question:
+            indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
+        else:
+            indexes = list(range(len(batch)))
+        
         batch_dict = dict()
         batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
         batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
-        batch_dict['q'] = nn.utils.rnn.pad_sequence(
-            sequences = [torch.tensor(batch[i]['q']) for i in indexes],
-            batch_first=True,
-            padding_value=0,
-        )
-        batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
+        
+        if verbose_question:
+            batch_dict['q'] = nn.utils.rnn.pad_sequence(
+                sequences = [torch.tensor(batch[i]['q']) for i in indexes],
+                batch_first=True,
+                padding_value=0,
+            )
+            batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
+        else:
+            batch_dict['q'] = torch.tensor([batch[i]['q'] for i in indexes])
+        
         if include_answer:
             batch_dict['a'] = nn.utils.rnn.pad_sequence(
                 sequences = [torch.tensor(batch[i]['a']) for i in indexes],
@@ -212,3 +222,32 @@ def qa_collate_batch_fn(batch):
         padding_value=0,
     )            
     return batch_dict
+
+def get_vision_collate_batch_fn(dataset_id,
+                             classify_tags=False, n_tags=None,
+                             classify_orientation=False,
+                             classify_chexpert=False,
+                             classify_questions=False):
+
+    if classify_tags:
+        mlb = MultiLabelBinarizer(list(range(n_tags)))
+
+    def collate_batch_fn(batch):
+        indexes = list(range(len(batch)))        
+        batch_dict = dict()
+        batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
+        batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+        # Auxiliary tasks
+        if classify_tags:
+            batch_dict['tags'] = torch.tensor(mlb.fit_transform([batch[i]['tags'] for i in indexes]))
+        if classify_orientation:
+            batch_dict['orientation'] = torch.tensor([batch[i]['orientation'] for i in indexes])
+            batch_dict['dataset_id'] = dataset_id        
+        if classify_chexpert:
+            batch_dict['chexpert'] = torch.tensor([batch[i]['chexpert'] for i in indexes])
+        if classify_questions:
+            batch_dict['qlabels'] = torch.tensor([batch[i]['qlabels'] for i in indexes])
+            
+        return batch_dict
+
+    return collate_batch_fn

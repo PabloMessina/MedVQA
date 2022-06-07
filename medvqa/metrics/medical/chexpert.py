@@ -1,6 +1,5 @@
-from dotenv import load_dotenv
-load_dotenv()
-
+# from dotenv import load_dotenv
+# load_dotenv()
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from sklearn.metrics import f1_score
@@ -15,8 +14,8 @@ import csv
 import numpy as np
 import time
 
-CHEXPERT_FOLDER = os.environ['CHEXPERT_FOLDER']
-CHEXPERT_PYTHON = os.environ['CHEXPERT_PYTHON']
+# CHEXPERT_FOLDER = os.environ['CHEXPERT_FOLDER']
+# CHEXPERT_PYTHON = os.environ['CHEXPERT_PYTHON']
 # NEGBIO_PATH = os.environ['NEGBIO_PATH']
 TMP_FOLDER = os.path.join(TMP_DIR, 'chexpert-labeler')
 
@@ -25,7 +24,6 @@ TMP_FOLDER = os.path.join(TMP_DIR, 'chexpert-labeler')
 #     prev = custom_env.get('PYTHONPATH', '')
 #     custom_env['PYTHONPATH'] = f'{NEGBIO_PATH}:{prev}'
 #     return custom_env
-
 
 class ChexpertLabelsF1score(Metric):
 

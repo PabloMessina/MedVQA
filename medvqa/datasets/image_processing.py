@@ -1,3 +1,4 @@
+from cv2 import dft
 import torch
 import torchvision.transforms as T
 from torch.utils.data import Dataset, DataLoader
@@ -7,7 +8,7 @@ import random
 import numpy as np
 import os
 
-from medvqa.models.vqa import (
+from medvqa.models.vision import (
     ImageQuestionClassifier,
     ImageFeatureExtractor,
 )
@@ -18,6 +19,7 @@ from medvqa.datasets.augmentation import ImageAugmentationTransforms
 _AUGMENTATION_MODES = [
     'random-color',
     'random-spatial',
+    'random-color-and-or-spatial',
 ]
 
 def get_image_transform(
@@ -25,6 +27,7 @@ def get_image_transform(
     mean = (0.485, 0.456, 0.406),
     std = (0.229, 0.224, 0.225),
     augmentation_mode = None,
+    default_prob=0.3,
 ):
 
     tf_resize = T.Resize(image_size)
@@ -36,22 +39,38 @@ def get_image_transform(
         print('Returning default transform')
         return default_transform
     
-    assert augmentation_mode in _AUGMENTATION_MODES
+    assert augmentation_mode in _AUGMENTATION_MODES, f'Unknown augmentation mode {augmentation_mode}'
 
     image_aug_transforms = ImageAugmentationTransforms(image_size)
 
     if augmentation_mode == 'random-color':
         aug_transforms = image_aug_transforms.get_color_transforms()
-    else:
+        final_transforms = [
+            T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
+            for tf_aug in aug_transforms
+        ]
+    elif augmentation_mode == 'random-color':
         aug_transforms = image_aug_transforms.get_spatial_transforms()
+        final_transforms = [
+            T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
+            for tf_aug in aug_transforms
+        ]
+    elif augmentation_mode == 'random-color-and-or-spatial':
+        spatial_transforms = image_aug_transforms.get_spatial_transforms()
+        color_transforms = image_aug_transforms.get_color_transforms()
+        final_transforms = []
+        for stf in spatial_transforms:
+            for ctf in color_transforms:
+                final_transforms.append(T.Compose([tf_resize, stf, ctf, tf_totensor, tf_normalize]))
+    else:
+        assert False
 
-    final_transforms = [
-        T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
-        for tf_aug in aug_transforms
-    ]
-    final_transforms.append(default_transform)
+    print('len(final_transforms) =', len(final_transforms))
+    print('default_prob =', default_prob)
 
     def transform_fn(img):
+        if random.random() < default_prob:
+            return default_transform(img)
         return random.choice(final_transforms)(img)
 
     print(f'Returning augmented transforms with mode {augmentation_mode}')

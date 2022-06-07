@@ -3,7 +3,7 @@ from ignite.engine import Events
 from torch import Tensor
 import operator
 
-from medvqa.utils.constants import METRIC2SHORT
+from medvqa.utils.constants import METRIC2SHORT, MetricNames
 from medvqa.utils.metrics import average_ignoring_nones
 from medvqa.utils.logging import MetricsLogger
 
@@ -36,8 +36,11 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
         scores = []
         metric_names = []
         for m in metrics_to_print:
-            score = metrics.get(m)
-            if m == 'bleu':
+            score = metrics.get(m, None)
+            if score is None:
+                scores.append(None)
+                continue
+            if m == MetricNames.BLEU:
                 assert len(score) == 4 or (len(score) == 2 and len(score[0]) == 4)
                 if len(score) == 2:
                     score = score[0]
@@ -46,12 +49,22 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
                     name_k = f'bleu-{k+1}'
                     scores.append(score_k)
                     metric_names.append(name_k)
-            elif m == 'ciderD':
+            elif m == MetricNames.CIDER_D:
                 if type(score) is tuple:
                     assert len(score) == 2
                     score = score[0]
                 scores.append(score)
                 metric_names.append(m)
+            elif m == MetricNames.CHXLABEL_PRF1:
+                scores.append(score['f1_macro_avg'])
+                metric_names.append(MetricNames.CHXLABELMACROAVGF1)
+                scores.append(score['f1_micro_avg'])
+                metric_names.append(MetricNames.CHXLABELMICROAVGF1)
+            elif m == MetricNames.QLABELS_PRF1:
+                scores.append(score['f1_macro_avg'])
+                metric_names.append(MetricNames.QLABELS_MACROAVGF1)
+                scores.append(score['f1_micro_avg'])
+                metric_names.append(MetricNames.QLABELS_MICROAVGF1)
             else:
                 if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
                     try:
@@ -64,7 +77,9 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
         
         # print(metric_names, scores)
 
-        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metric_names, scores))
+        nonnull_scores = [s for s in scores if s is not None]
+        assert len(metric_names) == len(nonnull_scores)
+        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metric_names, nonnull_scores))
         duration = timer._elapsed()
         print(f'{metrics_str}, {duration:.2f} secs')
 

@@ -3,27 +3,20 @@ import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
-from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
-from medvqa.models.vqa.answer_decoder import AnswerDecoding
 from medvqa.utils.constants import MIMICCXR_DATASET_ID
 
-def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
-            question_encoding = QuestionEncoding.BILSTM,
-            answer_decoding = AnswerDecoding.TEACHER_FORCING,
-            beam_search_k = None,
-            include_answer=True,
-            max_answer_length=None,
+def get_step_fn(model, optimizer, training, device,
             # automatic mixed precision
             use_amp=False,
             # tags aux task
-            use_tags=False,
+            classify_tags=False,
             tags_criterion=None,
             # orientation aux task
-            use_orientation=False,
+            classify_orientation=False,
             iuxray_orientation_criterion=None,
             mimiccxr_orientation_criterion=None,
             # chexpert aux task
-            use_chexpert=False,
+            classify_chexpert=False,
             chexpert_criterion=None,
             # question auxiliary task
             classify_questions=False,
@@ -31,35 +24,19 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     ):
 
     scaler = GradScaler(enabled=use_amp)
-    verbose_question = question_encoding != QuestionEncoding.ONE_HOT   
-
-    assert training == (answer_decoding == AnswerDecoding.TEACHER_FORCING)
-
-    use_beam_search = answer_decoding == AnswerDecoding.BEAM_SEARCH
-    
-    if use_beam_search:
-        assert beam_search_k is not None
-
-    if not include_answer:
-        assert max_answer_length is not None
     
     def step_fn(unused_engine, batch):
 
         # Extract elements from batch
         idxs = batch['idx']
         images = batch['i'].to(device)
-        questions = batch['q'].to(device)
-        if verbose_question:
-            question_lengths = batch['ql']
-        if include_answer:
-            answers = batch['a'].to(device)
         
-        if use_tags:
+        if classify_tags:
             tags = batch['tags'].to(device)
-        if use_orientation:
+        if classify_orientation:
             dataset_id = batch['dataset_id']
             orientation = batch['orientation'].to(device)
-        if use_chexpert:
+        if classify_chexpert:
             chexpert = batch['chexpert'].to(device)
         if classify_questions:
             question_labels = batch['qlabels'].to(device)
@@ -71,25 +48,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             # Prepare args for model forward
             model_kwargs = {
                 'images': images,
-                'questions': questions,
-                'device': device,
             }
-            if verbose_question:
-                model_kwargs['question_lengths'] = question_lengths
-
-            if training:
-                model_kwargs['mode'] = 'train'
-                model_kwargs['answers'] = answers
-            else:
-                model_kwargs['mode'] = 'eval'
-                if use_beam_search:
-                    model_kwargs['beam_search_k'] = beam_search_k
-                if include_answer:
-                    model_kwargs['max_answer_length'] = answers.size(1)
-                else:                    
-                    model_kwargs['max_answer_length'] = max_answer_length
-
-            if use_orientation:
+            if classify_orientation:
                 if dataset_id == MIMICCXR_DATASET_ID:
                     model_kwargs['mimiccxr_foward'] = True
                 else:
@@ -100,45 +60,32 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
                 model_output = model(**model_kwargs)
 
-                if training:
-                    pred_answer_logits = model_output['pred_answers']
-                else:
-                    pred_answers = model_output['pred_answers']
-                
-                if verbose_question:
-                    pred_question_logits = model_output['pred_questions']
-                
-                if use_tags:
+                if classify_tags:
                     pred_tags_logits = model_output['pred_tags']            
-                if use_orientation:
+                if classify_orientation:
                     if dataset_id == MIMICCXR_DATASET_ID:
                         pred_orientation_logits = model_output['mimiccxr_pred_orientation']
                     else:
                         pred_orientation_logits = model_output['iuxray_pred_orientation']
-                if use_chexpert:
+                if classify_chexpert:
                     pred_chexpert_logits = model_output['pred_chexpert']
+                    pred_chexpert_probs = model_output['pred_chexpert_probs']
                 if classify_questions:
                     pred_qlabels_logits = model_output['pred_qlabels']
 
                 if training:                    
                     # Compute losses
                     losses = []
-                    if verbose_question:
-                        question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
-                        losses.append(question_loss)
-                    if include_answer:
-                        answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                        losses.append(answer_loss)                    
-                    if use_tags:
+                    if classify_tags:
                         tags_loss = tags_criterion(pred_tags_logits, tags.float())
                         losses.append(tags_loss)
-                    if use_orientation:
+                    if classify_orientation:
                         if dataset_id == MIMICCXR_DATASET_ID:
                             orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
                         else:
                             orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
                         losses.append(orientation_loss)
-                    if use_chexpert:
+                    if classify_chexpert:
                         chexpert_loss = chexpert_criterion(pred_chexpert_logits, chexpert.float())
                         losses.append(chexpert_loss)
                     if classify_questions:
@@ -158,44 +105,27 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     # batch_loss.backward()
                     # optimizer.step()
                     optimizer.zero_grad()
-
-        # Compute predicted Q & A
-        if training:
-            pred_answers = pred_answer_logits.argmax(-1)
-        if verbose_question:
-            pred_questions = pred_question_logits.argmax(-1)
         
         output = {
             'idxs': idxs,
-            'pred_answers': tokenizer.clean_batch(pred_answers.detach()),
         }            
         if training and batch_loss is not None:
-            output['loss'] = batch_loss.detach()
-        if verbose_question:
-            output['questions'] = tokenizer.clean_batch(questions.detach())
-            output['pred_questions'] = tokenizer.clean_batch(pred_questions.detach())
-            if training:
-                output['question_loss'] = question_loss.detach()
-        else:
-            output['questions'] = questions.detach()
-        if include_answer:
-            output['answers'] = tokenizer.clean_batch(answers.detach())
-            if training:
-                output['answer_loss'] = answer_loss.detach()
-        if use_tags:
+            output['loss'] = batch_loss.detach()        
+        if classify_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
             if training:
                 output['tags_loss'] = tags_loss.detach()
-        if use_orientation:
+        if classify_orientation:
             output['orientation'] = orientation.detach()
             output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
             output['dataset_id'] = dataset_id
             if training:
                 output['orientation_loss'] = orientation_loss.detach()
-        if use_chexpert:
+        if classify_chexpert:
             output['chexpert'] = chexpert.detach().cpu()
             output['pred_chexpert'] = (pred_chexpert_logits.detach() > 0).cpu()
+            output['pred_chexpert_probs'] = pred_chexpert_probs.detach().cpu()
             if training:
                 output['chexpert_loss'] = chexpert_loss.detach()
         if classify_questions:
@@ -208,26 +138,23 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     
     return step_fn
 
-def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert, classify_questions,
-               question_encoding, answer_decoding, device, beam_search_k=None, include_answer=True, max_answer_length = None,
-               use_amp=False, training=False, optimizer=None):
-    # Criterion
-    nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
+def get_engine(model, classify_tags, classify_orientation, classify_chexpert, classify_questions,
+               device, use_amp=False, training=False, optimizer=None):    
     
     # Auxiliary tasks
-    if use_tags:
+    if classify_tags:
         tags_criterion = nn.BCEWithLogitsLoss()
     else:
         tags_criterion = None
     
-    if use_orientation:
+    if classify_orientation:
         iuxray_orientation_criterion = nn.CrossEntropyLoss()
         mimiccxr_orientation_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore unknown
     else:
         iuxray_orientation_criterion = None
         mimiccxr_orientation_criterion = None
 
-    if use_chexpert:
+    if classify_chexpert:
         chexpert_criterion = nn.BCEWithLogitsLoss()
     else:
         chexpert_criterion = None
@@ -238,22 +165,18 @@ def get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert, classi
         question_criterion = None
 
     # Create engine
-    step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                          include_answer=include_answer, max_answer_length=max_answer_length,
+    step_fn = get_step_fn(model, optimizer,
                           training=training,
                           device=device, use_amp=use_amp,
-                          question_encoding=question_encoding,
-                          answer_decoding=answer_decoding,
-                          beam_search_k=beam_search_k,
                           # tags auxiliary task
-                          use_tags=use_tags,
+                          classify_tags=classify_tags,
                           tags_criterion=tags_criterion,
                           # orientation auxiliary task
-                          use_orientation=use_orientation,
+                          classify_orientation=classify_orientation,
                           iuxray_orientation_criterion=iuxray_orientation_criterion,
                           mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
                           # chexpert auxiliary task
-                          use_chexpert=use_chexpert,
+                          classify_chexpert=classify_chexpert,
                           chexpert_criterion=chexpert_criterion,
                           # question auxiliary task
                           classify_questions=classify_questions,

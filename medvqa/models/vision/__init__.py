@@ -1,0 +1,3 @@
+from .visual_modules import ImageFeatureExtractor
+from .visual_modules import ImageQuestionClassifier
+from .visual_modules import DensenetVisualModule
