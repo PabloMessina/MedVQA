@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import pandas as pd
 
 from nltk.tokenize import sent_tokenize
 from nltk.corpus import stopwords
@@ -53,6 +54,9 @@ class QuestionAnswerExtractor:
         # load unknown tokens patterns
         self.unknown_regex = self._load_regex_from_files(['unknown_token_patterns.txt'])
 
+        # load replacements
+        self._load_replacements()
+
         # load medical terms
         self.medterms_regex = self._load_medical_terms_regex()
     
@@ -70,6 +74,21 @@ class QuestionAnswerExtractor:
         medical_terms = read_lines_from_txt(MEDICAL_TERMS_PATH)
         pattern = f"\\b({'|'.join(medical_terms)})\\b"
         return re.compile(pattern, re.IGNORECASE)
+
+
+    def _load_replacements(self):
+        df = pd.read_csv(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'replacements.csv'), header=None)
+        self.replacements = []
+        for source, target in zip(df[0], df[1]):
+            self.replacements.append((
+                re.compile(source.strip()),
+                target.strip()
+            ))
+
+    def _apply_replacements(self, sentence):
+        for r in self.replacements:
+            sentence = r[1].join(r[0].split(sentence))
+        return sentence
     
     def get_matched_questions(self, sentence):
         for rule in self.question_rules:
@@ -80,6 +99,7 @@ class QuestionAnswerExtractor:
         last_sep = None
         i = 0
         n = len(sentence)
+        sentence = self._apply_replacements(sentence)
         clean_sentence = ''
         prepend_to_next_chunk = None
         for match in _SEP_REGEX.finditer(sentence):
@@ -130,7 +150,7 @@ class QuestionAnswerExtractor:
         if not self.medterms_regex.search(sentence): return False
         # unknown token test
         unknown_len = sum(len(x.group()) for x in self.unknown_regex.finditer(sentence))
-        if unknown_len * 10 >= len(sentence): return False
+        if unknown_len > 0.4 * len(sentence): return False
         # we are good to go
         return True
 

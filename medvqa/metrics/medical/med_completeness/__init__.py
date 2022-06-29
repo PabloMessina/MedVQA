@@ -1,5 +1,6 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
+from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 from medvqa.utils.common import SOURCE_DIR, CACHE_DIR
 from medvqa.utils.files import load_pickle
 import os
@@ -10,17 +11,7 @@ MEDICAL_SYNONYMS_PATH = os.path.join(SOURCE_DIR, 'medvqa', 'metrics', 'medical',
                                  'med_completeness', 'medical_synonyms.txt')
 MEDICAL_TERMS_WEIGHTS_PATH = os.path.join(CACHE_DIR, 'medical_terms_weights.pkl')
 
-class MedicalCompleteness(Metric):
-
-    def __init__(self, tokenizer, output_transform=lambda x: x, device=None, record_scores=False):
-        self._acc_score = 0
-        self._count = 0
-        self.record_scores = record_scores
-        self._load_medical_terms(tokenizer)
-        self._load_medical_synonyms(tokenizer)
-        if record_scores:
-            self._scores = []
-        super().__init__(output_transform=output_transform, device=device)
+class MedicalCompletenessBase:
 
     def _load_medical_terms(self, tokenizer):
         with open(MEDICAL_TERMS_PATH) as f:
@@ -38,22 +29,6 @@ class MedicalCompleteness(Metric):
                 for i in range(1, len(row)):
                     self.id2synonym[synonym_ids[i]] = synonym_ids[0]
     
-    def reset(self):
-        self._acc_score = 0
-        self._count = 0
-        if self.record_scores:
-            self._scores.clear()
-        super().reset()
-
-    def update(self, output):
-        pred_sentences, gt_sentences = output
-        for pred_s, gt_s in zip(pred_sentences, gt_sentences):
-            score = self.score(gt_s, pred_s)
-            self._acc_score += score
-            if self.record_scores:
-                self._scores.append(score)
-        self._count += len(pred_sentences)
-
     def score(self, gt_s, gen_s):
 
         # ground truth sequence
@@ -147,6 +122,34 @@ class MedicalCompleteness(Metric):
             score += 2 * prec * rec / (prec + rec) if prec > 0 or rec > 0 else 0
         return score / L if L > 0 else 0
 
+class MedicalCompleteness(MedicalCompletenessBase, Metric):
+
+    def __init__(self, tokenizer, output_transform=lambda x: x, device=None, record_scores=False):
+        self._acc_score = 0
+        self._count = 0
+        self.record_scores = record_scores
+        self._load_medical_terms(tokenizer)
+        self._load_medical_synonyms(tokenizer)
+        if record_scores:
+            self._scores = []
+        super().__init__(output_transform=output_transform, device=device)
+
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+        if self.record_scores:
+            self._scores.clear()
+        super().reset()
+
+    def update(self, output):
+        pred_sentences, gt_sentences = output
+        for pred_s, gt_s in zip(pred_sentences, gt_sentences):
+            score = self.score(gt_s, pred_s)
+            self._acc_score += score
+            if self.record_scores:
+                self._scores.append(score)
+        self._count += len(pred_sentences)
+
     def compute(self):
         if self._count == 0:
             raise NotComputableError('Medical Completness needs at least one example before it can be computed.')
@@ -154,11 +157,8 @@ class MedicalCompleteness(Metric):
             return self._scores
         return self._acc_score / self._count
 
-class WeightedMedicalCompleteness(MedicalCompleteness):
 
-    def __init__(self, tokenizer, output_transform=lambda x: x, device=None, record_scores=False):        
-        super().__init__(tokenizer, output_transform, device, record_scores)
-        self._load_weights(tokenizer)
+class WeightedMedicalCompletenessBase(MedicalCompletenessBase):
     
     def _load_weights(self, tokenizer):
         terms2weight = load_pickle(MEDICAL_TERMS_WEIGHTS_PATH)
@@ -216,6 +216,70 @@ class WeightedMedicalCompleteness(MedicalCompleteness):
             rec = inter_weights[i] / gt_tot_weights[i] if gt_tot_weights[i] > 0 else 0
             score += 2 * prec * rec / (prec + rec) if prec > 0 or rec > 0 else 0
         return score / L if L > 0 else 0
+
+class WeightedMedicalCompleteness(WeightedMedicalCompletenessBase, Metric):
+
+    def __init__(self, tokenizer, output_transform=lambda x: x, device=None, record_scores=False):
+        self._acc_score = 0
+        self._count = 0
+        self.record_scores = record_scores
+        self._load_medical_terms(tokenizer)
+        self._load_medical_synonyms(tokenizer)
+        self._load_weights(tokenizer)
+        if record_scores:
+            self._scores = []
+        super().__init__(output_transform=output_transform, device=device)
+    
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+        if self.record_scores:
+            self._scores.clear()
+        super().reset()
+
+    def update(self, output):
+        pred_sentences, gt_sentences = output
+        for pred_s, gt_s in zip(pred_sentences, gt_sentences):
+            score = self.score(gt_s, pred_s)
+            self._acc_score += score
+            if self.record_scores:
+                self._scores.append(score)
+        self._count += len(pred_sentences)
+
+    def compute(self):
+        if self._count == 0:
+            raise NotComputableError('Weighted Med. Comp. needs at least one example before it can be computed.')
+        if self.record_scores:
+            return self._scores
+        return self._acc_score / self._count
+
+class DatasetAwareWeightedMedicalCompleteness(WeightedMedicalCompletenessBase, DatasetAwareMetric):
+
+    def __init__(self, tokenizer, output_transform, allowed_dataset_ids, record_scores=False):
+        self._acc_score = 0
+        self._count = 0
+        self.record_scores = record_scores
+        self._load_medical_terms(tokenizer)
+        self._load_medical_synonyms(tokenizer)
+        self._load_weights(tokenizer)
+        if record_scores:
+            self._scores = []
+        super().__init__(output_transform, allowed_dataset_ids)
+    
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+        if self.record_scores:
+            self._scores.clear()
+
+    def update(self, output):
+        pred_sentences, gt_sentences = output
+        for pred_s, gt_s in zip(pred_sentences, gt_sentences):
+            score = self.score(gt_s, pred_s)
+            self._acc_score += score
+            if self.record_scores:
+                self._scores.append(score)
+        self._count += len(pred_sentences)
 
     def compute(self):
         if self._count == 0:

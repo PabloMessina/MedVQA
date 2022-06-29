@@ -4,7 +4,7 @@ from medvqa.utils.files import (
 )
 from medvqa.datasets.qa_pairs_extractor import QuestionAnswerExtractor
 from medvqa.datasets.iuxray import (
-    IUXRAY_REPORTS_JSON_PATH,
+    IUXRAY_REPORTS_MIN_JSON_PATH,
     IUXRAY_CACHE_DIR,
 )
 from medvqa.utils.common import get_timestamp
@@ -15,8 +15,8 @@ if __name__ == '__main__':
 
     qa_extractor = QuestionAnswerExtractor()
     
-    print(f'Loading original reports from {IUXRAY_REPORTS_JSON_PATH}')
-    original_reports = load_json_file(IUXRAY_REPORTS_JSON_PATH)
+    print(f'Loading original reports from {IUXRAY_REPORTS_MIN_JSON_PATH}')
+    original_reports = load_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
 
     print('Processing each report ...')    
     qa_adapted_reports = []

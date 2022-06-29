@@ -11,6 +11,7 @@ from medvqa.utils.constants import (
     CHEXPERT_METRICS,
     NLP_METRICS,
     METRIC2SHORT,
+    MetricNames,
 )
 from medvqa.utils.files import get_cached_json_file
 from medvqa.utils.metrics import (
@@ -19,10 +20,14 @@ from medvqa.utils.metrics import (
     question_label_array_to_string,
 )
 
-def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
-    
+def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names,
+        one_hot_questions=False, qa_reports=None):
     idxs = metrics_dict['idxs']
-    questions = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[i])) for i in idxs]
+    if one_hot_questions:
+        tmp = [tokenizer.clean_text(q) for q in qa_reports['questions']]
+        questions = [tmp[dataset.questions[i]] for i in idxs]
+    else:
+        questions = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[i])) for i in idxs]
     unique_questions = list(set(questions))
     q2i = { q:i for i,q in enumerate(unique_questions) }
     idxs_per_q = [[] for _ in range(len(unique_questions))]
@@ -36,7 +41,7 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
 
     for name in metric_names:
 
-        if name == 'chexpert_accuracy':
+        if name == MetricNames.CHEXPERT_ACCURACY:
             gt_labels = metrics_dict['chexpert_labels_gt']
             gen_labels = metrics_dict['chexpert_labels_gen']            
             # overall
@@ -54,7 +59,7 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
                     for i in range(len(CHEXPERT_LABELS))
                 ])
 
-        elif name == 'chexpert_prf1s':
+        elif name == MetricNames.CHEXPERT_PRF1S:
             gt_labels = metrics_dict['chexpert_labels_gt']
             gen_labels = metrics_dict['chexpert_labels_gen']
             # overall
@@ -72,7 +77,7 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
                     for i in range(len(CHEXPERT_LABELS))
                 ])
         
-        elif name == 'bleu':
+        elif name == MetricNames.BLEU:
             # overall
             bleus = metrics_dict[name]
             for k in range(0, 4):
@@ -85,16 +90,24 @@ def compute_aggregated_metrics(metrics_dict, dataset, tokenizer, metric_names):
                     bleu_k = f'bleu-{k+1}'
                     tmp[bleu_k] = average_ignoring_nones(bleus[1][k][j] for j in idxs_per_q[i])
         
-        elif name == 'ciderD':
+        elif name == MetricNames.CIDER_D:
             # overall
             output['overall'][name] = metrics_dict[name][0]
             # per question
             for i, q in enumerate(unique_questions):
                 tmp = output['per_question'][q]
                 tmp[name] = average_ignoring_nones(metrics_dict[name][1][j] for j in idxs_per_q[i])
+        
+        elif name == MetricNames.CHXLABEL_ROCAUC:
+            output['overall'][MetricNames.CHXLABEL_ROCAUC_MICRO] = metrics_dict[name]['micro_avg']
+            output['overall'][MetricNames.CHXLABEL_ROCAUC_MACRO] = metrics_dict[name]['macro_avg']
+        
+        elif type(metrics_dict[name]) is float:
+            output['overall'][name] = metrics_dict[name]
+        
         else:
             # overall
-            output['overall'][name] =  average_ignoring_nones(metrics_dict[name])
+            output['overall'][name] = average_ignoring_nones(metrics_dict[name])
             # per question
             for i, q in enumerate(unique_questions):
                 tmp = output['per_question'][q]

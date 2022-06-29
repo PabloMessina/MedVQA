@@ -71,7 +71,7 @@ class ChexpertLabelerJob:
         
         self.texts = texts
         
-        # Define input & output paths chexpert labeler
+        # Define input & output paths for chexpert labeler
         self.input_path = os.path.join(TMP_FOLDER, input_filename)
         self.output_path = os.path.join(TMP_FOLDER, output_filename)
 
@@ -95,7 +95,6 @@ def merge_raw_labels(labels_list):
         for i in range(1, len(CHEXPERT_LABELS)): # abnormalities
             if labels[i] == 1:
                 merged[i] = 1
-                merged[0] = 0
     return merged
 
 def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_processes=1, verbose=True):

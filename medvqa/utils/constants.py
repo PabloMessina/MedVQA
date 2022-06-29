@@ -1,10 +1,20 @@
 from enum import Enum
 
 CHEXPERT_LABELS = [
-    'No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly',
-    'Lung Lesion', 'Lung Opacity', 'Edema', 'Consolidation',
-    'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion',
-    'Pleural Other', 'Fracture', 'Support Devices',
+    'No Finding',
+    'Enlarged Cardiomediastinum',
+    'Cardiomegaly',    
+    'Lung Lesion',
+    'Lung Opacity',
+    'Edema',
+    'Consolidation',    
+    'Pneumonia',
+    'Atelectasis',
+    'Pneumothorax',
+    'Pleural Effusion',
+    'Pleural Other',
+    'Fracture',
+    'Support Devices',
 ]
 
 CHEXPERT_LABEL2SHORT = {
@@ -23,6 +33,10 @@ CHEXPERT_LABEL2SHORT = {
     'Lung Lesion': 'LL',
     'Fracture': 'F',
 }
+
+CHEXPERT_GENDERS = ['Female', 'Male']
+
+CHEXPERT_ORIENTATIONS = ['FrontalAP', 'Lateral', 'FrontalPA']
 
 CHEXPERT_METRICS = [
     'chexpert_accuracy',
@@ -62,6 +76,8 @@ class MetricNames:
     CHXLABELMACROAVGF1 = 'chxlabelmacroavgf1'
     CHXLABELMICROAVGF1 = 'chxlabelmicroavgf1'
     CHXLABEL_ROCAUC = 'chxlabel_rocauc'
+    CHXLABEL_ROCAUC_MICRO = 'chxlabel_rocauc_micro'
+    CHXLABEL_ROCAUC_MACRO = 'chxlabel_rocauc_macro'
     CHXLABEL_PRF1 = 'chxlabel_prf1'
     QLABELSF1 = 'qlabelsf1'
     QLABELS_PRF1 = 'qlabels_prf1'
@@ -73,6 +89,8 @@ class MetricNames:
     CHEXPERT_LOSS = 'chexpert_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
+    GENDER_LOSS = 'gender_loss'
+    GENDER_ACC = 'gender_acc'
 
 METRIC2SHORT = {
     'chexpert_accuracy': 'chx_acc',
@@ -96,6 +114,8 @@ METRIC2SHORT = {
     'chxlabelmacroavgf1': 'chxlmacf1',
     'chxlabelmicroavgf1': 'chxlmicf1',
     'chxlabel_rocauc': 'chxlrocauc',
+    'chxlabel_rocauc_micro': 'chxlrocaucmic',
+    'chxlabel_rocauc_macro': 'chxlrocaucmac',
     'chxlabel_prf1': 'chxlprf1',
     'qlabelsf1': 'qlf1',
     'qlabels_prf1': 'qlprf1',
@@ -106,10 +126,13 @@ METRIC2SHORT = {
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
     'qlabels_loss': 'ql_loss',
+    'gender_loss': 'gloss',
+    'gender_acc': 'gacc',
 }
 
 IUXRAY_DATASET_ID = 0
 MIMICCXR_DATASET_ID = 1
+CHEXPERT_DATASET_ID = 2
 
 class ReportEvalMode(Enum):
     GROUND_TRUTH = 'ground-truth'

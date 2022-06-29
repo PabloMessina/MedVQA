@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-from medvqa.datasets.iuxray import IUXRAY_REPORTS_JSON_PATH
+from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
 from medvqa.utils.files import (
     load_json_file,
     make_dirs_in_filepath,
@@ -12,8 +12,8 @@ from medvqa.utils.common import CACHE_DIR
 if __name__ == '__main__':
 
     # Load json with reports
-    print(f'Loading file {IUXRAY_REPORTS_JSON_PATH} ...')
-    reports = load_json_file(IUXRAY_REPORTS_JSON_PATH)
+    print(f'Loading file {IUXRAY_REPORTS_MIN_JSON_PATH} ...')
+    reports = load_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
 
     # Extracting and merge findings and impressions
     print('Extracing and merging findings and impressions ...')

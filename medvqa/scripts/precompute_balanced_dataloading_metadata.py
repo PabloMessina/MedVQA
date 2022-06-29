@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     med_tags_extractor = MedicalTagsExtractor(args.medical_terms_frequency_filename)
 
-    tokenizer = Tokenizer(qa_adapted_filenames=[args.iuxray_qa_dataset_filename, args.mimiccxr_qa_dataset_filename])
+    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path, mimiccxr_qa_adapted_reports_path])
 
     print('Precomputing metadata ...')
 

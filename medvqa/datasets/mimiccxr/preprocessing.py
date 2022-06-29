@@ -7,15 +7,16 @@ _re_header = re.compile(r'[A-Z]+( +[A-Z]+)*?:')
 
 def extract_findings_and_impression(report_path, debug=False):
     with open(report_path) as f:
-        text = f.read()
+        text = f.read()    
     if debug:
         print(text)
     text = text.replace('_', '')
-    spans = [i.span() for i in _re_header.finditer(text)]
+    spans = [i.span() for i in _re_header.finditer(text)]    
     report = ''
     for i, span in enumerate(spans):
-        match = text[span[0]:span[1]]
-        if (len(match) > 20 or match == 'FINDINGS:' or match == 'IMPRESSION:' or match == 'CONCLUSION:'):
+        match = text[span[0]:span[1]]        
+        if ((len(match) > 20 and not match == 'REASON FOR EXAMINATION:') or match == 'FINDINGS:' or
+                match == 'IMPRESSION:' or match == 'CONCLUSION:'):
             if i+1 == len(spans):
                 x = text[span[1]:]
             else:
@@ -29,7 +30,9 @@ def extract_findings_and_impression(report_path, debug=False):
         for part in re.split('\s*\n\s*\n\s*', text):
             part = ' '.join(part.split())
             if len(part) > 150:
-                report = part
+                if report:
+                    report += ' ' if report[-1] == '.' else '. '
+                report += part
     return report
 
 def report_paths_generator():

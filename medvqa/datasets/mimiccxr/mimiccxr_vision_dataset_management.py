@@ -46,6 +46,7 @@ class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
+                **unused_kwargs,
         ):
         preprocessed_data_path = os.path.join(MIMICCXR_CACHE_DIR, preprocessed_data_filename)
         super().__init__(transform, batch_size, collate_batch_fn,

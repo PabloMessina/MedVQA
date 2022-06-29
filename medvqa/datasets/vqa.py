@@ -5,6 +5,7 @@ from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.utils.files import (
+    get_cached_pickle_file,
     load_pickle,
     get_cached_json_file,
     save_to_pickle,
@@ -17,6 +18,7 @@ from medvqa.datasets.dataloading_utils import (
     get_imbalance_reduced_weights,
     INFINITE_DATASET_LENGTH,
 )
+from medvqa.utils.constants import CHEXPERT_LABELS
 
 def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
     """Splits questions and answers into train and val splits.
@@ -93,13 +95,15 @@ def _get_diverse_samples(k, indices, class_getter, max_tries=200):
     return samples
 
 def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
-        n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50):    
+        n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50,
+        chexpert_labels=None, n_positive_per_chexpert_label=7):
 
     assert n_healthy_per_question < min_question_count
     assert n_unhealthy_per_question < min_question_count
 
     health_metadata = balanced_metadata['healthy']
     tags_based_class_metadata = balanced_metadata['tags_based_class']
+    
     # split indices by question
     n = len(report_ids)
     qid2indices = dict()
@@ -110,6 +114,7 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
         except KeyError:
             tmp = qid2indices[qid] = []
         tmp.append(i)
+    
     # choose report ids for validation
     val_rids = set()
     forbidden_rids = set()
@@ -137,6 +142,26 @@ def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
         else:
             forbidden_rids.update(report_ids[i] for i in unh_indices)
     
+    # bin report ids by chexpert label
+    if chexpert_labels is not None:
+        print('_split_data_train_val__balanced(): sampling from chexpert labels')
+        binned_report_ids = [[] for _ in range(len(CHEXPERT_LABELS))]
+        for rid in report_ids:
+            if rid in forbidden_rids: continue
+            labels = chexpert_labels[rid]
+            for i, label in enumerate(labels):
+                if label == 1:
+                    binned_report_ids[i].append(rid)
+        # add examples from each label to validation set
+        for bin in binned_report_ids:
+            bin = list(set(bin))
+            if len(bin) > 0:
+                print('len(bin)=', len(bin), ', label=', chexpert_labels[bin[0]])
+            else:
+                print('len(bin)=', len(bin))
+            if len(bin) > n_positive_per_chexpert_label:
+                val_rids.update(random.sample(bin, n_positive_per_chexpert_label))
+    
     # split indices into train and validation
     train_indices = { qid:[] for qid in qid2indices.keys() }
     val_indices = []
@@ -163,11 +188,11 @@ class VQADataset(Dataset):
                 include_answer = True,
                 suffle_indices = True,
                 # aux task: medical tags
-                use_tags = False, rid2tags = None,
+                classify_tags = False, rid2tags = None,
                 # aux task: image orientation
-                use_orientation = False, orientations = None,
+                classify_orientation = False, orientations = None,
                 # aux task: chexpert labels
-                use_chexpert = False, chexpert_labels = None,
+                classify_chexpert = False, chexpert_labels = None,
                 # aux task: question labels
                 classify_questions = False, question_labels = None,
                 # infinite mode
@@ -187,11 +212,11 @@ class VQADataset(Dataset):
             np.random.shuffle(self.indices)
         
         # optional auxiliary tasks
-        self.use_tags = use_tags
+        self.classify_tags = classify_tags
         self.rid2tags = rid2tags
-        self.use_orientation = use_orientation
+        self.classify_orientation = classify_orientation
         self.orientations = orientations
-        self.use_chexpert = use_chexpert
+        self.classify_chexpert = classify_chexpert
         self.chexpert_labels = chexpert_labels
         self.classify_questions = classify_questions
         self.question_labels = question_labels
@@ -217,11 +242,11 @@ class VQADataset(Dataset):
         if self.include_answer:
             output['a'] = self.answers[idx]
         rid = self.report_ids[idx]
-        if self.use_tags:
+        if self.classify_tags:
             output['tags'] = self.rid2tags[rid]
-        if self.use_orientation:
+        if self.classify_orientation:
             output['orientation'] = self.orientations[idx]
-        if self.use_chexpert:
+        if self.classify_chexpert:
             output['chexpert'] = self.chexpert_labels[rid]
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
@@ -232,10 +257,10 @@ class VQA_Base:
     def __init__(self, training, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,                
                 num_workers,
-                use_tags = False,
+                classify_tags = False,
                 rid2tags_path = None,
-                use_orientation = False,
-                use_chexpert = False,
+                classify_orientation = False,
+                classify_chexpert = False,
                 classify_questions = False,
                 chexpert_labels_path = None,
                 question_labels_path = None,
@@ -251,21 +276,21 @@ class VQA_Base:
         self.preprocessing_save_path = preprocessing_save_path
         self.training = training
         self.transform = transform
-        self.use_tags = use_tags
-        self.use_orientation = use_orientation
-        self.use_chexpert = use_chexpert
+        self.classify_tags = classify_tags
+        self.classify_orientation = classify_orientation
+        self.classify_chexpert = classify_chexpert
         self.classify_questions = classify_questions
         self.balanced_split = balanced_split
         self.dataset_name = dataset_name
         self.use_report_eval_mode = use_report_eval_mode
         
-        if use_tags:
+        if classify_tags:
             assert rid2tags_path is not None
             self.rid2tags = load_pickle(rid2tags_path)
 
-        if use_chexpert:
+        if classify_chexpert:
             assert chexpert_labels_path is not None
-            self.chexpert_labels = load_pickle(chexpert_labels_path)
+            self.chexpert_labels = get_cached_pickle_file(chexpert_labels_path)
         
         if classify_questions:
             assert question_labels_path is not None
@@ -274,6 +299,8 @@ class VQA_Base:
         if balanced_split:
             assert balanced_metadata_path is not None
             self.balanced_metadata = load_pickle(balanced_metadata_path)
+            self.chexpert_labels = get_cached_pickle_file(chexpert_labels_path) \
+                if chexpert_labels_path is not None else None
 
         if use_report_eval_mode:
             assert load_split_from_path is not None
@@ -283,7 +310,7 @@ class VQA_Base:
                 self._save_data(preprocessing_save_path)
             self.val_indices = np.array(list(range(len(self.report_ids))), dtype=int)
         else:        
-            if not debug:            
+            if not debug:
                 first_time = not self._load_cached_data(preprocessing_save_path)
                 if not first_time and load_split_from_path is not None:
                     self._load_split_from_path(load_split_from_path)
@@ -340,7 +367,7 @@ class VQA_Base:
         if self.training:
             self.train_indices = data['train_indices']
             self.val_indices = data['val_indices']
-        if self.use_orientation:
+        if self.classify_orientation:
             self.orientations = data['orientations']
         print('\tYes, it is, data successfully loaded :)')
         return True
@@ -358,7 +385,7 @@ class VQA_Base:
         if self.training:
             data['train_indices'] = self.train_indices
             data['val_indices'] = self.val_indices
-        if self.use_orientation:
+        if self.classify_orientation:
             data['orientations'] = self.orientations
         save_to_pickle(data, preprocessing_save_path)
         print('\tdone!')
@@ -380,7 +407,8 @@ class VQA_Base:
     def _split_data_train_val__balanced(self,
                                         n_healthy_per_question=2,
                                         n_unhealthy_per_question=3,
-                                        min_question_count=100):
+                                        min_question_count=100,
+                                        n_positive_per_chexpert_label=7):
 
         print('Splitting data into training and validation in balanced mode ...')
 
@@ -389,7 +417,9 @@ class VQA_Base:
                                                                      self.balanced_metadata,
                                                                      n_healthy_per_question,
                                                                      n_unhealthy_per_question,
-                                                                     min_question_count)
+                                                                     min_question_count,
+                                                                     self.chexpert_labels,
+                                                                     n_positive_per_chexpert_label)
         self.train_indices = train_indices
         self.val_indices = val_indices
 
@@ -412,14 +442,14 @@ class BalancedTreeNode:
                 vqa_trainer.report_ids, vqa_trainer.images, questions, vqa_trainer.answers,
                 self.indices, vqa_trainer.transform, vqa_trainer.dataset_name,
                 # aux task: medical tags
-                use_tags = vqa_trainer.use_tags,
-                rid2tags = vqa_trainer.rid2tags if vqa_trainer.use_tags else None,
+                classify_tags = vqa_trainer.classify_tags,
+                rid2tags = vqa_trainer.rid2tags if vqa_trainer.classify_tags else None,
                 # aux task: orientation
-                use_orientation = vqa_trainer.use_orientation,
-                orientations = vqa_trainer.orientations if vqa_trainer.use_orientation else None,
+                classify_orientation = vqa_trainer.classify_orientation,
+                orientations = vqa_trainer.orientations if vqa_trainer.classify_orientation else None,
                 # aux task: chexpert labels
-                use_chexpert = vqa_trainer.use_chexpert,
-                chexpert_labels = vqa_trainer.chexpert_labels if vqa_trainer.use_chexpert else None,
+                classify_chexpert = vqa_trainer.classify_chexpert,
+                chexpert_labels = vqa_trainer.chexpert_labels if vqa_trainer.classify_chexpert else None,
                 # aux task: question labels
                 classify_questions = vqa_trainer.classify_questions,
                 question_labels = vqa_trainer.question_labels if vqa_trainer.classify_questions else None,
@@ -451,10 +481,10 @@ class VQA_Trainer(VQA_Base):
                 cache_dir,
                 num_workers,
                 verbose_question = True,
-                use_tags = False,
+                classify_tags = False,
                 rid2tags_filename = None,
-                use_orientation = False,
-                use_chexpert = False,
+                classify_orientation = False,
+                classify_chexpert = False,
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
@@ -474,9 +504,10 @@ class VQA_Trainer(VQA_Base):
                 debug = False,
         ):
 
-        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if use_tags else None
-        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if use_chexpert else None
-        balanced_metadata_path = os.path.join(cache_dir, balanced_metadata_filename) if balanced_split else None
+        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if classify_tags else None
+        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) \
+            if chexpert_labels_filename is not None else None
+        balanced_metadata_path = os.path.join(cache_dir, balanced_metadata_filename) if balanced_split else None        
         question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
 
         if balanced_dataloading:
@@ -505,10 +536,10 @@ class VQA_Trainer(VQA_Base):
         super().__init__(True, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 num_workers,
-                use_tags = use_tags,
+                classify_tags = classify_tags,
                 rid2tags_path = rid2tags_path,
-                use_orientation = use_orientation,
-                use_chexpert = use_chexpert,
+                classify_orientation = classify_orientation,
+                classify_chexpert = classify_chexpert,
                 classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
                 question_labels_path = question_labels_path,
@@ -565,14 +596,14 @@ class VQA_Trainer(VQA_Base):
                 self.report_ids, self.images, questions, self.answers,
                 indices, self.transform, self.dataset_name,
                 # aux task: medical tags
-                use_tags = self.use_tags,
-                rid2tags = self.rid2tags if self.use_tags else None,
+                classify_tags = self.classify_tags,
+                rid2tags = self.rid2tags if self.classify_tags else None,
                 # aux task: orientation
-                use_orientation = self.use_orientation,
-                orientations = self.orientations if self.use_orientation else None,
+                classify_orientation = self.classify_orientation,
+                orientations = self.orientations if self.classify_orientation else None,
                 # aux task: chexpert labels
-                use_chexpert = self.use_chexpert,
-                chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+                classify_chexpert = self.classify_chexpert,
+                chexpert_labels = self.chexpert_labels if self.classify_chexpert else None,
                 # aux task: question labels
                 classify_questions = self.classify_questions,
                 question_labels = self.question_labels if self.classify_questions else None,
@@ -705,14 +736,14 @@ class VQA_Trainer(VQA_Base):
             self.transform, self.dataset_name,
             include_answer = self.include_answer,
             # aux task: medical tags
-            use_tags = self.use_tags,
-            rid2tags = self.rid2tags if self.use_tags else None,
+            classify_tags = self.classify_tags,
+            rid2tags = self.rid2tags if self.classify_tags else None,
             # aux task: orientation
-            use_orientation = self.use_orientation,
-            orientations = self.orientations if self.use_orientation else None,
+            classify_orientation = self.classify_orientation,
+            orientations = self.orientations if self.classify_orientation else None,
             # aux task: chexpert labels
-            use_chexpert = self.use_chexpert,
-            chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+            classify_chexpert = self.classify_chexpert,
+            chexpert_labels = self.chexpert_labels if self.classify_chexpert else None,
             # aux task: question labels
             classify_questions = self.classify_questions,
             question_labels = self.question_labels if self.classify_questions else None,
@@ -748,10 +779,10 @@ class VQA_Evaluator(VQA_Base):
                 num_workers,
                 verbose_question = True,
                 include_answer = True,
-                use_tags = False,
+                classify_tags = False,
                 rid2tags_filename = None,
-                use_orientation = False,
-                use_chexpert = False,
+                classify_orientation = False,
+                classify_chexpert = False,
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
@@ -759,8 +790,8 @@ class VQA_Evaluator(VQA_Base):
                 debug = False,
         ):
 
-        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if use_tags else None
-        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if use_chexpert else None        
+        rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if classify_tags else None
+        chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if classify_chexpert else None        
         question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
 
         self.verbose_question = verbose_question
@@ -769,10 +800,10 @@ class VQA_Evaluator(VQA_Base):
         super().__init__(False, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 num_workers,
-                use_tags = use_tags,
+                classify_tags = classify_tags,
                 rid2tags_path = rid2tags_path,
-                use_orientation = use_orientation,
-                use_chexpert = use_chexpert,
+                classify_orientation = classify_orientation,
+                classify_chexpert = classify_chexpert,
                 classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
                 question_labels_path = question_labels_path,
@@ -794,14 +825,14 @@ class VQA_Evaluator(VQA_Base):
             self.transform, self.dataset_name,
             include_answer = self.include_answer,
             # aux task: medical tags prediction
-            use_tags = self.use_tags,
-            rid2tags = self.rid2tags if self.use_tags else None,
+            classify_tags = self.classify_tags,
+            rid2tags = self.rid2tags if self.classify_tags else None,
             # aux task: orientation
-            use_orientation = self.use_orientation,
-            orientations = self.orientations if self.use_orientation else None,
+            classify_orientation = self.classify_orientation,
+            orientations = self.orientations if self.classify_orientation else None,
             # aux task: chexpert labels
-            use_chexpert = self.use_chexpert,
-            chexpert_labels = self.chexpert_labels if self.use_chexpert else None,
+            classify_chexpert = self.classify_chexpert,
+            chexpert_labels = self.chexpert_labels if self.classify_chexpert else None,
             # aux task: question labels
             classify_questions = self.classify_questions,
             question_labels = self.question_labels if self.classify_questions else None,

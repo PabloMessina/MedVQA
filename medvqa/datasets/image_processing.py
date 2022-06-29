@@ -19,7 +19,7 @@ from medvqa.datasets.augmentation import ImageAugmentationTransforms
 _AUGMENTATION_MODES = [
     'random-color',
     'random-spatial',
-    'random-color-and-or-spatial',
+    'random-color-and-spatial',
 ]
 
 def get_image_transform(
@@ -49,13 +49,13 @@ def get_image_transform(
             T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
-    elif augmentation_mode == 'random-color':
+    elif augmentation_mode == 'random-spatial':
         aug_transforms = image_aug_transforms.get_spatial_transforms()
         final_transforms = [
             T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
-    elif augmentation_mode == 'random-color-and-or-spatial':
+    elif augmentation_mode == 'random-color-and-spatial':
         spatial_transforms = image_aug_transforms.get_spatial_transforms()
         color_transforms = image_aug_transforms.get_color_transforms()
         final_transforms = []

@@ -12,18 +12,20 @@ from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.utils.constants import (
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
+    MetricNames,
     ReportEvalMode,
 )
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.metrics import (
+    attach_chexpert_labels_macroavgf1,
+    attach_chexpert_labels_microavgf1,
+    attach_chexpert_labels_roc_auc,
     attach_exactmatch_question,
-    attach_chexpert_labels_f1score,
     attach_question_labels_f1score,
     attach_medical_tags_f1score,
     attach_chexpert_labels_accuracy,
     attach_dataset_aware_orientation_accuracy,
-    attach_loss
 )
 from medvqa.models.checkpoint import (
     get_checkpoint_filepath,
@@ -73,6 +75,7 @@ def parse_args():
                         help='Device to use (GPU or CPU)')
     parser.add_argument('--num-workers', type=int, default=0,
                         help='Number of workers for parallel dataloading')
+    parser.add_argument('--answer-decoding', type=str, default='greedy-search')
 
     parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
     parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
@@ -122,6 +125,7 @@ def _evaluate_model(
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
     auxiliary_tasks_kwargs,
+    answer_decoding,
     eval_mode,
     n_questions_per_report = None,
     num_workers = 0,
@@ -143,20 +147,20 @@ def _evaluate_model(
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT
 
     # auxiliary task: medical tags prediction
-    use_tags = auxiliary_tasks_kwargs['use_tags']
+    classify_tags = auxiliary_tasks_kwargs['classify_tags']
     n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
     iuxray_medical_tags_per_report_filename = auxiliary_tasks_kwargs['iuxray_medical_tags_per_report_filename']
     mimiccxr_medical_tags_per_report_filename = auxiliary_tasks_kwargs['mimiccxr_medical_tags_per_report_filename']
-    if use_tags:
+    if classify_tags:
         assert n_medical_tags is not None
         assert iuxray_medical_tags_per_report_filename is not None
         assert mimiccxr_medical_tags_per_report_filename is not None
     
     # auxiliary task: orientation classification
-    use_orientation = auxiliary_tasks_kwargs['use_orientation']
+    classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
 
     # auxiliary task: chexpert labels
-    use_chexpert = auxiliary_tasks_kwargs['use_chexpert']
+    classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
     iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
     mimiccxr_chexpert_labels_filename = auxiliary_tasks_kwargs['mimiccxr_chexpert_labels_filename']
 
@@ -169,6 +173,7 @@ def _evaluate_model(
         assert n_questions is not None
         if eval_iuxray: assert iuxray_question_labels_filename is not None
         if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
+    
     # QA dataset filenames
     iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
     mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_evaluator_kwargs['qa_adapted_reports_filename']
@@ -211,18 +216,18 @@ def _evaluate_model(
     mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
                                                         verbose_question = verbose_question,
                                                         include_answer=False,
-                                                        use_tags = use_tags,
+                                                        classify_tags = classify_tags,
                                                         n_tags = n_medical_tags,
-                                                        use_orientation = use_orientation,
-                                                        use_chexpert = use_chexpert,
+                                                        classify_orientation = classify_orientation,
+                                                        classify_chexpert = classify_chexpert,
                                                         classify_questions = classify_questions)    
     iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
                                                    verbose_question = verbose_question,
                                                    include_answer=False,
-                                                   use_tags = use_tags,
+                                                   classify_tags = classify_tags,
                                                    n_tags = n_medical_tags,
-                                                   use_orientation = use_orientation,
-                                                   use_chexpert = use_chexpert,
+                                                   classify_orientation = classify_orientation,
+                                                   classify_chexpert = classify_chexpert,
                                                    classify_questions = classify_questions)
 
     # Load saved checkpoint    
@@ -239,10 +244,10 @@ def _evaluate_model(
             collate_batch_fn = mimiccxr_collate_batch_fn,
             num_workers = num_workers,
             tokenizer = tokenizer,
-            use_tags = use_tags,
+            classify_tags = classify_tags,
             medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
-            use_orientation = use_orientation,
-            use_chexpert = use_chexpert,
+            classify_orientation = classify_orientation,
+            classify_chexpert = classify_chexpert,
             chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
             classify_questions = classify_questions,
             question_labels_filename = mimiccxr_question_labels_filename,
@@ -265,10 +270,10 @@ def _evaluate_model(
             num_workers = num_workers,
             tokenizer = tokenizer,        
             iuxray_qa_reports = iuxray_qa_reports,
-            use_tags = use_tags,
+            classify_tags = classify_tags,
             medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-            use_orientation = use_orientation,
-            use_chexpert = use_chexpert,
+            classify_orientation = classify_orientation,
+            classify_chexpert = classify_chexpert,
             chexpert_labels_filename = iuxray_chexpert_labels_filename,
             classify_questions = classify_questions,
             question_labels_filename = mimiccxr_question_labels_filename,
@@ -286,8 +291,8 @@ def _evaluate_model(
                          device=device, 
                          n_medical_tags=n_medical_tags,
                          n_questions=n_questions,
-                         classify_orientation=use_orientation,
-                         classify_chexpert=use_chexpert,
+                         classify_orientation=classify_orientation,
+                         classify_chexpert=classify_chexpert,
                          classify_questions=classify_questions,
                          **model_kwargs)
     model = model.to(device)
@@ -295,8 +300,8 @@ def _evaluate_model(
 
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
-    evaluator = get_engine(model, tokenizer, use_tags, use_orientation, use_chexpert,
-                           classify_questions, question_encoding,
+    evaluator = get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert,
+                           classify_questions, question_encoding, answer_decoding,
                            device, use_amp=use_amp, training=False, include_answer=False,
                            max_answer_length=max_answer_length)
 
@@ -306,13 +311,15 @@ def _evaluate_model(
     # Metrics
     if verbose_question:
         attach_exactmatch_question(evaluator, device, record_scores=True)
-    if use_tags:
+    if classify_tags:
         attach_medical_tags_f1score(evaluator, device, record_scores=True)
-    if use_orientation:
+    if classify_orientation:
         attach_dataset_aware_orientation_accuracy(evaluator, record_scores=True)
-    if use_chexpert:
-        attach_chexpert_labels_f1score(evaluator, device, record_scores=True)
-        attach_chexpert_labels_accuracy(evaluator, device, record_scores=True)
+    if classify_chexpert:
+        attach_chexpert_labels_accuracy(evaluator, device)
+        attach_chexpert_labels_macroavgf1(evaluator, device)
+        attach_chexpert_labels_microavgf1(evaluator, device)
+        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
     if classify_questions:
         attach_question_labels_f1score(evaluator, device, record_scores=True)
 
@@ -321,35 +328,34 @@ def _evaluate_model(
     attach_accumulator(evaluator, 'pred_answers')
     if verbose_question:
         attach_accumulator(evaluator, 'pred_questions')
-    if use_tags:
+    if classify_tags:
         attach_accumulator(evaluator, 'pred_tags')
-    if use_orientation:
+    if classify_orientation:
         attach_accumulator(evaluator, 'pred_orientation')
-    if use_chexpert:
+    if classify_chexpert:
         attach_accumulator(evaluator, 'pred_chexpert')
     if classify_questions:
         attach_accumulator(evaluator, 'pred_qlabels')
-
-    # Losses
-    attach_loss('loss', evaluator, device)
     
     # Timer
     timer = Timer()
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     
     # Logging
-    metrics_to_print=['loss']
+    metrics_to_print = []
     if verbose_question:
-        metrics_to_print.append('exactmatch_question')
-    if use_tags:
-        metrics_to_print.append('medtagf1')
-    if use_orientation:
-        metrics_to_print.append('orienacc')
-    if use_chexpert:
-        metrics_to_print.append('chxlabelf1')
-        metrics_to_print.append('chxlabelacc')
+        metrics_to_print.append(MetricNames.EXACTMATCH_QUESTION)
+    if classify_tags:
+        metrics_to_print.append(MetricNames.MEDTAGF1)
+    if classify_orientation:
+        metrics_to_print.append(MetricNames.ORIENACC)
+    if classify_chexpert:
+        metrics_to_print.append(MetricNames.CHXLABELMICROAVGF1)
+        metrics_to_print.append(MetricNames.CHXLABELMACROAVGF1)
+        metrics_to_print.append(MetricNames.CHXLABELACC)
+        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:
-        metrics_to_print.append('qlabelsf1')
+        metrics_to_print.append(MetricNames.QLABELSF1)
 
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()    
@@ -407,6 +413,7 @@ def _evaluate_model(
 def evaluate_model(
     checkpoint_folder,
     eval_mode,
+    answer_decoding,
     n_questions_per_report = None,
     batch_size = 100,
     num_workers = 0,
@@ -434,6 +441,7 @@ def evaluate_model(
                 mimiccxr_vqa_evaluator_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 auxiliary_tasks_kwargs,
+                answer_decoding,
                 eval_mode,
                 n_questions_per_report = n_questions_per_report,
                 device = device,

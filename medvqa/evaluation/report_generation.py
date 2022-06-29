@@ -16,6 +16,8 @@ from medvqa.metrics.medical import (
     WeightedMedicalCompleteness,
 )
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
+from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
+from medvqa.models.report_generation.templates.models import SimpleTemplateRGModel
 from medvqa.utils.constants import (
     CHEXPERT_LABEL2SHORT,
     CHEXPERT_LABELS,
@@ -55,6 +57,36 @@ def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbos
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
             gen_report['q'].append(q)
             gen_report['a'].append(a)
+        gen_reports.append(gen_report)
+
+    return {
+        'gt_reports': gt_reports,
+        'gen_reports': gen_reports,
+    }
+
+def recover_reports__template_based(metrics_dict, dataset, qa_adapted_dataset, chexpert_order):
+    idxs = metrics_dict['idxs']
+    report_ids = [dataset.report_ids[i] for i in idxs]
+    pred_chexpert_labels = metrics_dict['pred_chexpert']
+    
+    n = len(report_ids)
+    assert len(pred_chexpert_labels) == n
+
+    template_rg_model = SimpleTemplateRGModel(CHEXPERT_LABELS, TEMPLATES_CHEXPERT_v1, chexpert_order)
+    template_based_reports = template_rg_model(pred_chexpert_labels)
+    
+    gen_reports = []
+    gt_reports = []
+    for i in range(n):
+        rid = report_ids[i]        
+        report = qa_adapted_dataset['reports'][rid]
+        gt_report = '.\n '.join(report['sentences'][i].lower() for i in report['matched'])        
+        gt_reports.append({'rid': rid, 'text': gt_report})
+
+        gen_report = {'q':[], 'a': []}
+        for j in range(len(chexpert_order)):
+            gen_report['q'].append(chexpert_order[j])
+            gen_report['a'].append(template_based_reports[i][j])
         gen_reports.append(gen_report)
 
     return {
@@ -131,7 +163,7 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_name
 
 def get_report_level_metrics_dataframe(metrics, method_names, metric_names=_REPORT_LEVEL_METRIC_NAMES):
     assert type(metrics) is list or type(metrics) is dict
-    assert type(method_names) is list or method_names is str
+    assert type(method_names) is list or type(method_names) is str
     if type(metrics) is dict:
         metrics  = [metrics]
         method_names = [method_names]
@@ -248,17 +280,19 @@ class ReportGenExamplePlotter:
 
     def inspect_example(self, metrics_to_rank=None, idx=None, mode='random'):
 
-        if idx is None:
-            
-            if mode == 'random':
-                idx = random.choice(range(self.n))
+        if idx is None: idx = 0
+        if mode == 'random':
+            idx = random.choice(range(self.n))                
+        elif mode == 'default':
+            assert idx is not None
+        else:            
+            if metrics_to_rank is None:
+                metrics_to_rank = self.metric_names
+            if mode == 'best':
+                indices = sorted(list(range(self.n)), key=lambda i : sum(self._get_metric(name,i) for name in metrics_to_rank), reverse=True)
             else:
-                if metrics_to_rank is None:
-                    metrics_to_rank = self.metric_names
-                if mode == 'best':
-                    _, idx = max((sum(self._get_metric(name,i) for name in metrics_to_rank), i) for i in range(self.n))
-                else:
-                    _, idx = min((sum(self._get_metric(name,i) for name in metrics_to_rank), i) for i in range(self.n))       
+                indices = sorted(list(range(self.n)), key=lambda i : sum(self._get_metric(name,i) for name in metrics_to_rank))
+            idx = indices[idx]                
         
         print('idx:', idx)        
         print('\n--')
@@ -269,19 +303,14 @@ class ReportGenExamplePlotter:
         
         print('\n--')
         print('gen_report:\n')
-        gen_report = self.reports['gen_reports'][idx]
-        gen_answers = []
-        questions = []
-        for qid in self.qa_adapted_dataset['reports'][rid]['question_ids']:
-            q = self.tokenizer.clean_text(self.qa_adapted_dataset['questions'][qid])
-            questions.append(q)
-            gen_answers.append(gen_report[q])
+        gen_report = self.reports['gen_reports'][idx]        
+        gen_answers = gen_report['a']
         gen_text = ' . '.join(gen_answers)
         print(gen_text)
 
         print('\n--')
         print('answered questions:\n')
-        for q in questions: print(q)
+        for q in gen_report['q']: print(q)
 
         if 'chexpert_labels_gt' in self.report_metrics:
             print('\n--')

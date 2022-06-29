@@ -1,5 +1,6 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
+from ignite.engine import Events
 from sklearn.metrics import f1_score
 
 class MultiLabelF1score(Metric):
@@ -42,6 +43,65 @@ class MultiLabelF1score(Metric):
             return self._scores
         return self._acc_score / self._count
 
+class DatasetAwareMultilabelF1score:
+
+    def __init__(self, output_transform, allowed_dataset_ids, record_scores=False):
+        self.allowed_dataset_ids = allowed_dataset_ids
+        self.output_transform = output_transform
+        self._acc_score = 0
+        self._count = 0
+        self.record_scores = record_scores
+        if record_scores:
+            self._scores = []
+    
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+        if self.record_scores:
+            self._scores.clear()
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        n = pred_labels.size(0)
+        for i in range(n):
+            pred = pred_labels[i]
+            gt = gt_labels[i]            
+            score = f1_score(gt, pred)
+            self._acc_score += score
+            # if (i == 0):
+            #     print('pred =', pred)
+            #     print('gt =', gt)
+            #     print('score =', score)
+            #     print('self._acc_score =', self._acc_score)
+            if self.record_scores:
+                self._scores.append(score)
+        self._count += n
+    
+    def attach(self, engine, metric_alias):
+        
+        def epoch_started_handler(unused_engine):
+            self.reset()
+
+        def iteration_completed_handler(engine):
+            output = engine.state.output
+            dataset_id = output['dataset_id'] # make sure your step_fn returns this
+            if dataset_id in self.allowed_dataset_ids:
+                self.update(self.output_transform(output))
+
+        def epoch_completed_handler(engine):
+            engine.state.metrics[metric_alias] = self.compute()
+
+        engine.add_event_handler(Events.EPOCH_STARTED, epoch_started_handler)
+        engine.add_event_handler(Events.ITERATION_COMPLETED, iteration_completed_handler)
+        engine.add_event_handler(Events.EPOCH_COMPLETED, epoch_completed_handler)
+
+    def compute(self):
+        if self._count == 0:
+            raise NotComputableError('DatasetAwareMultilabelF1score needs at least one example before it can be computed.')
+        if self.record_scores:
+            return self._scores
+        return self._acc_score / self._count
+
 class MultiLabelMicroAvgF1(Metric):
 
     def __init__(self, output_transform=lambda x: x, device=None):
@@ -73,9 +133,9 @@ class MultiLabelMicroAvgF1(Metric):
                     else: self._tn += 1
 
     def compute(self):
-        prec = self._tp / (self._tp + self._fp)
-        rec = self._tp / (self._tp + self._fn)
-        return (2 * prec * rec) / (prec + rec)
+        prec = self._tp / max(self._tp + self._fp, 1)
+        rec = self._tp / max(self._tp + self._fn, 1)
+        return (2 * prec * rec) / max(prec + rec, 1)
 
 class MultiLabelMacroAvgF1(Metric):
 

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
-from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 
 class ImageQuestionClassifier(nn.Module):
 
@@ -57,12 +57,13 @@ class DensenetVisualModule(nn.Module):
                 classify_questions=False,
                 n_medical_tags=None,
                 n_questions=None,
+                use_chexpert_forward=False,
                 **unused_kwargs,
         ):
         super().__init__()
         self.name = 'densenet121'
         if pretrained:
-            if densenet_pretrained_weights_path is not None:
+            if densenet_pretrained_weights_path:
                 densenet = models.densenet121(pretrained=False)
                 pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
                 densenet.load_state_dict(pretrained_weights, strict=False)
@@ -106,7 +107,11 @@ class DensenetVisualModule(nn.Module):
         else:
             self.q_aux_task = False
 
-    def forward(self, images, iuxray_foward=False, mimiccxr_foward=False):
+        if use_chexpert_forward:
+            self.W_gender_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_GENDERS))
+            self.W_ori_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_ORIENTATIONS))
+
+    def forward(self, images, iuxray_foward=False, mimiccxr_foward=False, chexpert_forward=False):
         
         # local features
         batch_size = images.size(0)
@@ -121,18 +126,24 @@ class DensenetVisualModule(nn.Module):
 
         output = { 'global_feat': global_feat }
 
-        # auxiliary tasks (optional)        
-        if self.tags_aux_task:
-            output['pred_tags'] = self.W_tags(global_feat)        
-        if self.orien_aux_task:            
-            if iuxray_foward:
-                output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
-            if mimiccxr_foward:
-                output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)        
-        if self.chx_aux_task:
+        if chexpert_forward:
             output['pred_chexpert'] = self.W_chx(global_feat)
             output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-        if self.q_aux_task:
-            output['pred_qlabels'] = self.W_q(global_feat)
+            output['pred_orientation'] = self.W_ori_chexpert(global_feat)
+            output['pred_gender'] = self.W_gender_chexpert(global_feat)
+        else:
+            # auxiliary tasks (optional)        
+            if self.tags_aux_task:
+                output['pred_tags'] = self.W_tags(global_feat)        
+            if self.orien_aux_task:            
+                if iuxray_foward:
+                    output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
+                if mimiccxr_foward:
+                    output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)        
+            if self.chx_aux_task:
+                output['pred_chexpert'] = self.W_chx(global_feat)
+                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+            if self.q_aux_task:
+                output['pred_qlabels'] = self.W_q(global_feat)
         
         return output

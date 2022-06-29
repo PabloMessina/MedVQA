@@ -29,7 +29,7 @@ if __name__ == '__main__':
     chexpert_labels_cache_path = os.path.join(CACHE_DIR, args.chexpert_labels_cache_filename)
     chexpert_labels_cache = load_pickle(chexpert_labels_cache_path)
 
-    tokenizer = Tokenizer(qa_adapted_filenames=[args.iuxray_qa_dataset_filename, args.mimiccxr_qa_dataset_filename])
+    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path, mimiccxr_qa_adapted_reports_path])
 
     for qa_adapted_reports, cache_dir in zip(
                         [iuxray_qa_adapted_reports, mimiccxr_qa_adapted_reports],

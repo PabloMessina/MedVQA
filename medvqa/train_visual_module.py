@@ -8,6 +8,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 
 from medvqa.utils.constants import (
+    CHEXPERT_DATASET_ID,
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
     MetricNames,
@@ -21,6 +22,9 @@ from medvqa.metrics import (
     attach_chexpert_labels_roc_auc,
     attach_dataset_aware_orientation_accuracy,
     attach_question_labels_f1score,
+    attach_dataset_aware_question_labels_f1score,
+    attach_dataset_aware_gender_accuracy,
+    attach_dataset_aware_loss,
     attach_loss,
 )
 from medvqa.models.checkpoint import (
@@ -43,7 +47,7 @@ from medvqa.training.vision import get_engine
 from medvqa.datasets.dataloading_utils import (
     balanced_dataloaders_generator,
     multi_cyclic_dataloaders_generator,
-    get_vision_collate_batch_fn
+    get_vision_collate_batch_fn,
 )
 from medvqa.metrics.utils import (
     get_merge_metrics_fn,
@@ -51,10 +55,11 @@ from medvqa.metrics.utils import (
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_VisualModuleTrainer
+from medvqa.datasets.chexpert.chexpert_vision_dataset_management import Chexpert_VisualModuleTrainer
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     
     # required arguments
@@ -87,12 +92,17 @@ def parse_args():
                         help='Batch size')
     parser.add_argument('--num-workers', type=int, default=0,
                         help='Number of workers for parallel dataloading')
-    parser.add_argument('--mimic-iuxray-freqs', nargs=2, type=int, default=[20 * 10, 10],
-                        help='Relative number of batches to sample from MIMIC-CXR and IU X-Ray (for rebalancing purposes)')
     parser.add_argument('--device', type=str, default='GPU',
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
                         help='Mode of data augmentation used for images')
+    
+    parser.add_argument('--mimiccxr-weight', type=float, default=1.0,
+                        help='Relative number of batches to sample from MIMIC-CXR dataset (for rebalancing purposes)')
+    parser.add_argument('--chexpert-weight', type=float, default=0.8,
+                        help='Relative number of batches to sample from CheXpert dataset (for rebalancing purposes)')
+    parser.add_argument('--iuxray-weight', type=float, default=0.08,
+                        help='Relative number of batches to sample from IU X-ray dataset (for rebalancing purposes)')
 
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
@@ -113,6 +123,10 @@ def parse_args():
     parser.set_defaults(train_mimiccxr=True)
     parser.add_argument('--no-iuxray', dest='train_iuxray', action='store_false')
     parser.set_defaults(train_iuxray=True)
+    parser.add_argument('--no-chexpert', dest='train_chexpert', action='store_false')
+    parser.set_defaults(train_chexpert=True)
+
+    parser.add_argument('--binary-loss-name', type=str, default='bce')
 
     # Auxiliary tasks arguments
     
@@ -138,16 +152,22 @@ def parse_args():
     parser.add_argument('--iuxray-question-labels-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-question-labels-filename', type=str, default=None)
     
-    return parser.parse_args()
+    return parser.parse_args(args=args)
 
 _METRIC_WEIGHTS = {
     MetricNames.MEDTAGF1: 1,
     MetricNames.ORIENACC: 1,
-    MetricNames.CHXLABELMICROAVGF1: 0.5,
-    MetricNames.CHXLABELMACROAVGF1: 0.5,
+    MetricNames.CHXLABELMICROAVGF1: 1,
+    MetricNames.CHXLABELMACROAVGF1: 1,
     MetricNames.CHXLABEL_ROCAUC: 1,
     MetricNames.QLABELSF1: 1,
+    MetricNames.GENDER_ACC: 1,
 }
+
+def _metric_getter(metrics_dict, key):
+    if key == MetricNames.CHXLABEL_ROCAUC:
+        return 0.5 * (metrics_dict[key]['micro_avg'] + metrics_dict[key]['macro_avg'])
+    return metrics_dict[key]
 
 def train_model(
     model_kwargs,
@@ -167,12 +187,14 @@ def train_model(
     checkpoint_folder_path = None,
     save = True,
     override_lr = False,
+    debug = False,
 ):
     count_print = CountPrinter()
     
     # Pull out some args from kwargs
     train_iuxray = training_kwargs['train_iuxray']
     train_mimiccxr = training_kwargs['train_mimiccxr']
+    train_chexpert = training_kwargs['train_chexpert']
     use_amp = training_kwargs['use_amp']
     assert train_iuxray or train_mimiccxr
 
@@ -204,6 +226,11 @@ def train_model(
         if train_iuxray: assert iuxray_question_labels_filename is not None
         if train_mimiccxr: assert mimiccxr_question_labels_filename is not None
 
+    if train_chexpert:
+        assert classify_chexpert
+        assert classify_orientation
+        assert classify_questions
+
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
     count_print('device =', device)
@@ -224,7 +251,10 @@ def train_model(
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')
     trainer = get_engine(model, classify_tags, classify_orientation, classify_chexpert,
-                         classify_questions, device, use_amp=use_amp, training=True, optimizer=optimizer)
+                         classify_questions, device,
+                         binary_loss_name=training_kwargs['binary_loss_name'],
+                         use_amp=use_amp, training=True,
+                         train_with_chexpert_dataset=train_chexpert, optimizer=optimizer)
     validator = get_engine(model, classify_tags, classify_orientation, classify_chexpert,
                          classify_questions, device, training=False)
 
@@ -247,6 +277,9 @@ def train_model(
                                                     classify_orientation = classify_orientation,
                                                     classify_chexpert = classify_chexpert,
                                                     classify_questions = classify_questions)
+
+    if train_chexpert:
+        chexpert_collate_batch_fn = get_vision_collate_batch_fn(CHEXPERT_DATASET_ID)
 
     # Create MIMIC-CXR visual module trainer
     if train_mimiccxr:
@@ -286,25 +319,57 @@ def train_model(
             **iuxray_vision_trainer_kwargs,
         )
 
+    if train_chexpert:
+        count_print('Creating CheXpert visual module trainer ...')
+        chexpert_vision_trainer = Chexpert_VisualModuleTrainer(
+            transform=img_transform,
+            batch_size=batch_size,
+            collate_batch_fn=chexpert_collate_batch_fn,
+            num_workers=num_workers,
+        )
+
+    if debug: # if debugging
+        output = {}
+        if train_chexpert: output['chexpert_vision_trainer'] = chexpert_vision_trainer
+        if train_mimiccxr: output['mimiccxr_vision_trainer'] = mimiccxr_vision_trainer
+        if train_iuxray: output['iuxray_vision_trainer'] = iuxray_vision_trainer
+        return output
+
     # Create complex dataloaders
     count_print('Creating dataloaders ...')
     if train_mimiccxr and train_iuxray:
-        mimic_iuxray_freqs = dataloading_kwargs['mimic_iuxray_freqs']
-        train_dataloader = balanced_dataloaders_generator(
-            [mimiccxr_vision_trainer.train_dataloader, iuxray_vision_trainer.train_dataloader],
-            mimic_iuxray_freqs)
+        mimiccxr_weight = dataloading_kwargs['mimiccxr_weight']
+        iuxray_weight = dataloading_kwargs['iuxray_weight']        
+        _train_weights = [mimiccxr_weight, iuxray_weight]
+        _train_dataloaders = [
+            mimiccxr_vision_trainer.train_dataloader,
+            iuxray_vision_trainer.train_dataloader
+        ]
+        if train_chexpert:
+            _train_weights.append(dataloading_kwargs['chexpert_weight'])
+            _train_dataloaders.append(chexpert_vision_trainer.dataloader)
+        train_dataloader = balanced_dataloaders_generator(_train_dataloaders, _train_weights)
+        
         val_dataloaders = [mimiccxr_vision_trainer.val_dataloader, iuxray_vision_trainer.val_dataloader]
         val_dataloader_size = sum(len(d) for d in val_dataloaders)
         val_dataloader = multi_cyclic_dataloaders_generator(val_dataloaders)
-    elif train_mimiccxr:
-        train_dataloader = mimiccxr_vision_trainer.train_dataloader
-        val_dataloader = mimiccxr_vision_trainer.val_dataloader
-        val_dataloader_size = len(val_dataloader)
     else:
-        assert train_iuxray
-        train_dataloader = iuxray_vision_trainer.train_dataloader
-        val_dataloader = iuxray_vision_trainer.val_dataloader
-        val_dataloader_size = len(val_dataloader)
+        if train_mimiccxr:
+            train_dataloader = mimiccxr_vision_trainer.train_dataloader
+            train_weight = dataloading_kwargs['mimiccxr_weight']
+            val_dataloader = mimiccxr_vision_trainer.val_dataloader
+            val_dataloader_size = len(val_dataloader)
+        else:
+            assert train_iuxray
+            train_dataloader = iuxray_vision_trainer.train_dataloader
+            train_weight = dataloading_kwargs['iuxray_weight']
+            val_dataloader = iuxray_vision_trainer.val_dataloader
+            val_dataloader_size = len(val_dataloader)
+        
+        if train_chexpert:
+            _train_dataloaders = [train_dataloader, chexpert_vision_trainer.dataloader]
+            _train_weights = [train_weight, dataloading_kwargs['chexpert_weight']]
+            train_dataloader = balanced_dataloaders_generator(_train_dataloaders, _train_weights)
 
     # Attach metrics, losses, timer and events to engines
     count_print('Attaching metrics, losses, timer and events to engines ...')    
@@ -337,9 +402,13 @@ def train_model(
         attach_loss(MetricNames.CHEXPERT_LOSS, trainer, device)
 
     if classify_questions:
-        attach_question_labels_f1score(trainer, device)
+        attach_dataset_aware_question_labels_f1score(trainer, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
+        attach_dataset_aware_loss(trainer, MetricNames.QLABELS_LOSS, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
         attach_question_labels_f1score(validator, device)
-        attach_loss(MetricNames.QLABELS_LOSS, trainer, device)
+
+    if train_chexpert:
+        attach_dataset_aware_gender_accuracy(trainer, [CHEXPERT_DATASET_ID])
+        attach_dataset_aware_loss(trainer, MetricNames.GENDER_LOSS, [CHEXPERT_DATASET_ID])
 
     # Timer
     timer = Timer()
@@ -358,8 +427,10 @@ def train_model(
         metrics_to_merge.append(MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:
         metrics_to_merge.append(MetricNames.QLABELSF1)
+    if train_chexpert:
+        metrics_to_merge.append(MetricNames.GENDER_ACC)
     
-    merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.5, 0.5)
+    merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.4, 0.6, _metric_getter)
 
     lr_sch_handler = get_lr_sch_handler(trainer, validator, lr_scheduler, merge_metrics_fn)
 
@@ -370,12 +441,18 @@ def train_model(
     
     if checkpoint_folder_path is None: # first time
         if save: # only if we want to save checkpoints to disk
-            if train_iuxray and train_mimiccxr:
-                folder = 'mimiccxr+iuxray'
-            elif train_iuxray:
-                folder = 'iuxray'
-            else:
-                folder = 'mimiccxr'
+            _dataset_names = []
+            _dataset_weights = []
+            if train_mimiccxr:
+                _dataset_names.append('mimiccxr')
+                _dataset_weights.append(dataloading_kwargs['mimiccxr_weight'])
+            if train_iuxray:
+                _dataset_names.append('iuxray')
+                _dataset_weights.append(dataloading_kwargs['iuxray_weight'])
+            if train_chexpert:
+                _dataset_names.append('chexpert')
+                _dataset_weights.append(dataloading_kwargs['chexpert_weight'])
+            folder = '+'.join(_dataset_names)            
             model_args = [
                 'densenet-121',
                 model_kwargs["image_local_feat_size"],
@@ -386,8 +463,8 @@ def train_model(
             checkpoint_folder_path = get_checkpoint_folder_path('visual_module', folder, model.name,                
                 f'model-args=({model_string})',
                 f'cnn-pretr={int(bool(model_kwargs["densenet_pretrained_weights_path"]))}',
-                f'mim-iux-freqs={",".join(map(str, mimic_iuxray_freqs))}' \
-                    if (train_iuxray and train_mimiccxr) else None,
+                f'dataset_weights={",".join(map(str, _dataset_weights))}' \
+                    if len(_dataset_weights) > 1 else None,
                 f'img-aug={dataloading_kwargs["img_aug_mode"]}' \
                     if dataloading_kwargs["img_aug_mode"] is not None else None,
                 f'tags={int(classify_tags)}',
@@ -445,6 +522,9 @@ def train_model(
     if classify_questions:
         metrics_to_print.append(MetricNames.QLABELS_LOSS)
         metrics_to_print.append(MetricNames.QLABELSF1)
+    if train_chexpert:
+        metrics_to_print.append(MetricNames.GENDER_LOSS)
+        metrics_to_print.append(MetricNames.GENDER_ACC)
 
     log_metrics_handler = get_log_metrics_handlers(timer,
                                                    metrics_to_print=metrics_to_print,
@@ -491,11 +571,15 @@ def train_from_scratch(
     # Dataloading args
     batch_size,
     num_workers,
-    mimic_iuxray_freqs,
+    mimiccxr_weight,
+    iuxray_weight,
+    chexpert_weight,
     img_aug_mode,
     # Fixed traning args
     train_mimiccxr,
     train_iuxray,
+    train_chexpert,
+    binary_loss_name,
     use_amp,
     # Variable traning args
     epochs,
@@ -518,6 +602,7 @@ def train_from_scratch(
     device,
     # Other args
     save,
+    debug = False,
     **unused_kwargs,
 ):
     print('----- Training model from scratch ------')
@@ -534,6 +619,7 @@ def train_from_scratch(
         classify_questions = classify_questions,
         n_medical_tags = n_medical_tags,
         n_questions = n_questions,
+        use_chexpert_forward = train_chexpert,
     )
     optimizer_kwargs = dict(
         lr = lr,
@@ -549,13 +635,17 @@ def train_from_scratch(
         preprocessed_data_filename = iuxray_preprocessed_data_filename,
     )
     dataloading_kwargs = dict(
-        mimic_iuxray_freqs = mimic_iuxray_freqs,
         img_aug_mode = img_aug_mode,
+        mimiccxr_weight = mimiccxr_weight,
+        iuxray_weight = iuxray_weight,
+        chexpert_weight = chexpert_weight,
     )
     training_kwargs = dict(
         use_amp = use_amp,
         train_mimiccxr = train_mimiccxr,
         train_iuxray = train_iuxray,
+        train_chexpert = train_chexpert,
+        binary_loss_name = binary_loss_name,
     )
     auxiliary_tasks_kwargs = dict(
         # medical tags
@@ -576,7 +666,7 @@ def train_from_scratch(
         mimiccxr_question_labels_filename = mimiccxr_question_labels_filename,
     )
 
-    train_model(model_kwargs,
+    return train_model(model_kwargs,
                 optimizer_kwargs,
                 lr_scheduler_kwargs,
                 mimiccxr_vision_trainer_kwargs,
@@ -590,7 +680,8 @@ def train_from_scratch(
                 one_question_per_batch,
                 num_workers,
                 device = device,
-                save = save)
+                save = save,
+                debug = debug)
 
 def resume_training(
     checkpoint_folder,
@@ -605,6 +696,7 @@ def resume_training(
     device = 'GPU',
     save = True,
     override_lr = False,    
+    debug = False,
     **unused_kwargs,
 ):
     print('----- Resuming training ------')
@@ -629,7 +721,7 @@ def resume_training(
             patience = lr_decay_patience,
         )
 
-    train_model(model_kwargs,
+    return train_model(model_kwargs,
                 optimizer_kwargs,
                 lr_scheduler_kwargs,
                 mimiccxr_vision_trainer_kwargs,
@@ -645,10 +737,18 @@ def resume_training(
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
                 save = save,
-                override_lr = override_lr)
+                override_lr = override_lr,
+                debug = debug)
+
+def debug_main(args):
+    args = parse_args(args)
+    args = parsed_args_to_dict(args)
+    if args['checkpoint_folder'] is not None:
+        return resume_training(**args, debug=True)
+    else:
+        return train_from_scratch(**args, debug=True)
 
 if __name__ == '__main__':
-
     args = parse_args()
     args = parsed_args_to_dict(args)
     if args['checkpoint_folder'] is not None:

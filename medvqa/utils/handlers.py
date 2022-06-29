@@ -29,7 +29,7 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
 
     if log_to_disk:
         assert checkpoint_folder is not None
-        metrics_logger = MetricsLogger(checkpoint_folder, metrics_to_print)
+        metrics_logger = MetricsLogger(checkpoint_folder)
 
     def handler(engine):
         metrics = engine.state.metrics        
@@ -65,6 +65,11 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
                 metric_names.append(MetricNames.QLABELS_MACROAVGF1)
                 scores.append(score['f1_micro_avg'])
                 metric_names.append(MetricNames.QLABELS_MICROAVGF1)
+            elif m == MetricNames.CHXLABEL_ROCAUC:
+                scores.append(score['micro_avg'])
+                metric_names.append(MetricNames.CHXLABEL_ROCAUC_MICRO)
+                scores.append(score['macro_avg'])
+                metric_names.append(MetricNames.CHXLABEL_ROCAUC_MACRO)
             else:
                 if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
                     try:
@@ -84,7 +89,7 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
         print(f'{metrics_str}, {duration:.2f} secs')
 
         if log_to_disk:
-            metrics_logger.log_metrics(scores)
+            metrics_logger.log_metrics(metric_names, scores)
     
     return handler
 

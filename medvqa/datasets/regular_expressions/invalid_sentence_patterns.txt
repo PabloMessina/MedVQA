@@ -1,4 +1,3 @@
-\b(prior|next|preceding|recent|earl).*\b(stud(y|ies)|exam|film|cta\b|ct\b|mri\b|x\-ray)
 \b(day|week|month|year)s? \b(ago|earlier)\b
 \bmonths\b
 \b(two|three|four|five|six|seven|eight|[2-8])\b.*\b(views|images|films|days|weeks|months|years)
@@ -15,12 +14,9 @@
 \b(consider).*\b(treatment|followup|repeat|dedicated|imag|evaluat|HRCT|exam)
 \bnurse\b
 ^\d+\.?$
-\bhistory
-(upright|frontal|lateral|supine|portable|single).*\b(view|radiograph)s?.*\b(provided|attempted)
 \bfollow(-| )?up
 (radiograph|\bimage).*\b(repeat)
 \brepeat.*\b(view|image|radiograph)
-\b(prior|previous).*\b(film\b|CT\b|CTA\b|x-?ray|x ray|study|studies|exam|scan|day)
 \bdictation
 \be-?mail
 \bplease\b
@@ -35,20 +31,15 @@ best correlate
 \bdr\.
 \bby dr\b
 \binvok
-\bwould (have|need) to\b
-\b(could|may|might|would).*\bbe\b.*(helpful|reliable|of use|revealing|confirm)
-\b(may|might|could) (help|be related.*findings|be informative)
 \b(additional|further|more\b|subsequent|better).*\b(imaging|evaluat|exam|assess|investigat|characterization|radiograph|detail)
 clinically (warranted|indicated)
 (warranted|indicated) clinically
-\b(CTA?|MRI|ultrasound)\b
 \bbetter (position|assess)
 necessary for evaluation
 (was|were|ha(s|ve) been) (discussed|reported|reviewed)
 \bphone\b
 \btelephone\b
 \bpaged (at|to|for)\b
-(should|may|might|could) be .*(withdrawn|requested|considered|performed|able|correlated|inserted|evaluated)
 \breport\b
 \brecords
 \bfor detail.*\bsee
@@ -59,9 +50,6 @@ similar to.*\bfilm from
 \bhelp\b.*\bevaluat
 \?$
 \bfor( direct)? comparison\b
-\byesterday
-preceding day
-dating back to
 ^\.$
 technologist
 on the outside study
@@ -71,8 +59,6 @@ acqui(sition|red)
 \bstarted to
 above information
 \bphysician
-\d* hours?\b
-during the.*\bday
 \bmid( )?day\b
 over this period
 \bchange.*\bover.*\btime
@@ -95,7 +81,6 @@ over this period
 \bnot tailored
 \bteam\b
 \bhospital
-\btechnique
 \balcohol
 \bbenefi(t|c)
 consultation

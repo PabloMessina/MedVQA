@@ -33,6 +33,7 @@ def get_iuxray_image_paths(report):
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
                                        balanced_metadata_filename=None,
+                                       chexpert_labels_filename=None,
                                        ignore_medical_tokenization=False):    
     
     split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
@@ -46,6 +47,8 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
     ]
     if balanced_metadata_filename:
         strings.append(f'balanced_metadata={balanced_metadata_filename}')
+    if chexpert_labels_filename:
+        strings.append(f'chexpert_labels={chexpert_labels_filename}')
     merged_string = ";".join(strings)
     final_path = os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__({merged_string}).pkl')
     if len(final_path) > MAX_FILENAME_LENGTH:
@@ -104,10 +107,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 split_kwargs,
                 tokenizer,
                 verbose_question = True,
-                use_tags = False,
+                classify_tags = False,
                 medical_tags_per_report_filename = None,
-                use_orientation = False,
-                use_chexpert = False,
+                classify_orientation = False,
+                classify_chexpert = False,
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
@@ -135,7 +138,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         if report_eval_mode is not None:
             assert validation_only            
             load_split_from_path = _get_train_preprocessing_save_path(
-                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+                            qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                            chexpert_labels_filename if balanced_split else None)
             preprocessing_save_path = _get_report_eval_mode_preprocessing_save_path(
                             qa_adapted_reports_filename, load_split_from_path, tokenizer, report_eval_mode)
             self.load_split_from_path = load_split_from_path
@@ -143,13 +147,15 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
             if ignore_medical_tokenization:        
                 preprocessing_save_path = _get_train_preprocessing_save_path(
                                 qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                                chexpert_labels_filename if balanced_split else None,
                                 ignore_medical_tokenization=True)
                 load_split_from_path = _get_train_preprocessing_save_path(
-                                qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename)
+                                qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
+                                chexpert_labels_filename if balanced_split else None)
             else:
                 preprocessing_save_path = _get_train_preprocessing_save_path(
                                 qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
-                                ignore_medical_tokenization=True)
+                                chexpert_labels_filename if balanced_split else None)
                 load_split_from_path = None
 
         super().__init__(transform, batch_size, collate_batch_fn,
@@ -157,10 +163,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         IUXRAY_CACHE_DIR,
                         num_workers,
                         verbose_question = verbose_question,
-                        use_tags = use_tags,
+                        classify_tags = classify_tags,
                         rid2tags_filename = medical_tags_per_report_filename,
-                        use_orientation = use_orientation,
-                        use_chexpert = use_chexpert,
+                        classify_orientation = classify_orientation,
+                        classify_chexpert = classify_chexpert,
                         chexpert_labels_filename = chexpert_labels_filename,
                         classify_questions = classify_questions,
                         question_labels_filename = question_labels_filename,
@@ -186,7 +192,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         iuxray_qa_reports = self.iuxray_qa_reports
 
         if tokenizer.medical_tokenization and not self.ignore_medical_tokenization:
-            answer_string2ids_func = tokenizer.strig2medical_tag_ids
+            answer_string2ids_func = tokenizer.string2medical_tag_ids
         else:
             answer_string2ids_func = tokenizer.string2ids
 
@@ -222,7 +228,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
         invalid_images.update(iuxray_image_info['marks']['wrong'])
         invalid_images.update(iuxray_image_info['marks']['broken'])
 
-        reports_ids = questions_per_report.keys() if questions_per_report is not None else range(len(iuxray_qa_reports))
+        reports_ids = questions_per_report.keys() if questions_per_report is not None else range(len(iuxray_qa_reports['reports']))
 
         for ri in reports_ids:
             report = iuxray_qa_reports['reports'][ri]
@@ -242,6 +248,8 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                     if image_name not in invalid_images and iuxray_image_info['classification'][image_name] == 'frontal':
                         image_path = _get_iuxray_image_path(image_name)
                         break
+
+            # print(f'ri={ri}, images={images}, image_path={image_path}')
 
             if image_path:
                 orientation_id = IUXRAY_IMAGE_ORIENTATIONS.index(iuxray_image_info['classification'][image_name])
@@ -265,7 +273,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         self.images.append(image_path)
                         self.questions.append(tokenizer.string2ids(question.lower()))
                         self.orientations.append(orientation_id)
-
+        
         self.report_ids = np.array(self.report_ids, dtype=int)
         self.question_ids = np.array(self.question_ids, dtype=int)
         self.images = np.array(self.images, dtype=str)

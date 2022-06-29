@@ -2,6 +2,7 @@ from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
     WeightedMedicalCompleteness,
+    DatasetAwareWeightedMedicalCompleteness,
     ChexpertLabelsF1score,
 )
 from medvqa.metrics.classification import (
@@ -10,12 +11,17 @@ from medvqa.metrics.classification import (
     MultiLabelMicroAvgF1,
     MultiLabelAccuracy,
     MultiLabelPRF1,
+    DatasetAwareMultilabelF1score,
+    DatasetAwareSinglelabelAccuracy,
     DatasetAwareOrientationAccuracy,
     roc_auc_fn,
 )
+from medvqa.losses import DatasetAwareLoss
 
 from ignite.metrics import RunningAverage, EpochMetric
 import operator
+from medvqa.metrics.nlp.cider import DatasetAwareCiderD
+from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 
 from medvqa.utils.constants import MetricNames
 
@@ -32,6 +38,12 @@ def _get_output_transform(pred_key, gt_key):
 def attach_exactmatch_question(engine, device, record_scores=False):
     em = ExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
                 device = device, record_scores=record_scores)
+    em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
+
+def attach_dataset_aware_exactmatch_question(engine, allowed_dataset_ids, record_scores=False):
+    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
+                allowed_dataset_ids=allowed_dataset_ids,
+                record_scores=record_scores)
     em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
 
 
@@ -61,7 +73,13 @@ def attach_meteor(engine, device, record_scores=False):
 
 def attach_ciderd(engine, device, record_scores=False):
     met = CiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
-                    device=device, record_scores=record_scores)
+                device=device, record_scores=record_scores)
+    met.attach(engine, MetricNames.CIDER_D)
+
+def attach_dataset_aware_ciderd(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareCiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
+                allowed_dataset_ids=allowed_dataset_ids,
+                record_scores=record_scores)
     met.attach(engine, MetricNames.CIDER_D)
 
 def attach_medical_completeness(engine, device, tokenizer, record_scores=False):
@@ -74,6 +92,13 @@ def attach_weighted_medical_completeness(engine, device, tokenizer, record_score
     met = WeightedMedicalCompleteness(tokenizer,
                 output_transform = _get_output_transform('pred_answers', 'answers'),
                 device = device, record_scores=record_scores)
+    met.attach(engine, MetricNames.WMEDCOMP)
+
+def attach_dataset_aware_weighted_medical_completeness(engine, tokenizer, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareWeightedMedicalCompleteness(tokenizer,
+                output_transform = _get_output_transform('pred_answers', 'answers'),
+                allowed_dataset_ids = allowed_dataset_ids,
+                record_scores=record_scores)
     met.attach(engine, MetricNames.WMEDCOMP)
 
 def attach_medical_tags_f1score(engine, device, record_scores=False):
@@ -112,6 +137,18 @@ def attach_question_labels_f1score(engine, device, record_scores=False):
                                 device=device, record_scores=record_scores)
     met.attach(engine, MetricNames.QLABELSF1)
 
+def attach_dataset_aware_question_labels_f1score(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareMultilabelF1score(output_transform = _get_output_transform('pred_qlabels', 'qlabels'),
+                                allowed_dataset_ids=allowed_dataset_ids,
+                                record_scores=record_scores)
+    met.attach(engine, MetricNames.QLABELSF1)
+
+def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
+                                allowed_dataset_ids=allowed_dataset_ids,
+                                record_scores=record_scores)
+    met.attach(engine, MetricNames.GENDER_ACC)
+
 def attach_question_labels_prf1(engine, device):
     met = MultiLabelPRF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'), device=device)
     met.attach(engine, MetricNames.QLABELS_PRF1)
@@ -119,6 +156,13 @@ def attach_question_labels_prf1(engine, device):
 def attach_dataset_aware_orientation_accuracy(engine, record_scores=False):
     met = DatasetAwareOrientationAccuracy(record_scores=record_scores)
     met.attach(engine, MetricNames.ORIENACC)
+
+def attach_dataset_aware_loss(engine, loss_name, allowed_dataset_ids):
+    met = DatasetAwareLoss(
+        output_transform=operator.itemgetter(loss_name),
+        allowed_dataset_ids=allowed_dataset_ids
+    )
+    met.attach(engine, loss_name)
 
 def attach_loss(loss_name, engine, device):
     met = RunningAverage(

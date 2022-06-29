@@ -1,3 +1,4 @@
 from .med_completeness import MedicalCompleteness
 from .med_completeness import WeightedMedicalCompleteness
+from .med_completeness import DatasetAwareWeightedMedicalCompleteness
 from .chexpert import ChexpertLabelsF1score   

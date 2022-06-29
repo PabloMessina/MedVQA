@@ -37,8 +37,7 @@ if __name__ == '__main__':
 
     hash2text = dict()
 
-    tokenizer = Tokenizer(qa_adapted_filenames=[args.iuxray_qa_dataset_filename, args.mimiccxr_qa_dataset_filename],
-                         qa_adapted_datasets=[iuxray_qa_adapted_reports, mimiccxr_qa_adapted_reports])
+    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path, mimiccxr_qa_adapted_reports_path])
 
     print('Collecting unique sentences ...')
 
@@ -46,10 +45,10 @@ if __name__ == '__main__':
         [iuxray_qa_adapted_reports, mimiccxr_qa_adapted_reports],
         include_unmatched=False)):
 
-        clean_s =  tokenizer.ids2string(tokenizer.clean_sentence(tokenizer.string2ids(s)))
-
+        clean_s =  tokenizer.clean_text(s)
         h = hash_string(clean_s)
         prev_s = hash2text.get(h, None)
+        
         if prev_s is not None:
             assert prev_s == clean_s, (h, prev_s, clean_s)
         else:
@@ -82,6 +81,8 @@ if __name__ == '__main__':
         print('average length:', sum(len(x.split()) for x in unlabeled_texts) / len(unlabeled_texts))
 
         n_chunks = n // args.chunk_size + (n % args.chunk_size > 0)
+        if n_chunks < args.max_processes:
+            n_chunks = args.max_processes
         labels = invoke_chexpert_labeler_process(unlabeled_texts, f'_{timestamp}',
                                         n_chunks=n_chunks, max_processes=args.max_processes)
         for i in range(n):
