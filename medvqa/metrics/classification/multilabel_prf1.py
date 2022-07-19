@@ -3,6 +3,8 @@ from ignite.exceptions import NotComputableError
 from ignite.engine import Events
 from sklearn.metrics import f1_score
 
+from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
+
 class MultiLabelF1score(Metric):
 
     def __init__(self, output_transform=lambda x: x, device=None, record_scores=False):
@@ -152,6 +154,85 @@ class MultiLabelMacroAvgF1(Metric):
         self._fp.clear()
         self._fn.clear()
         super().reset()
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        n, m = pred_labels.shape
+        if len(self._tp) == 0:
+            self._tp = [0] * m
+            self._tn = [0] * m
+            self._fp = [0] * m
+            self._fn = [0] * m
+        for i in range(n):
+            for j in range(m):
+                pred = pred_labels[i][j]
+                gt = gt_labels[i][j]
+                if pred:
+                    if gt: self._tp[j] += 1
+                    else: self._fp[j] += 1
+                else:
+                    if gt: self._fn[j] += 1
+                    else: self._tn[j] += 1
+
+    def compute(self):
+        m = len(self._tp)
+        mean_f1 = 0
+        for j in range(m):            
+            prec = self._tp[j] / max(self._tp[j] + self._fp[j], 1)
+            rec = self._tp[j] / max(self._tp[j] + self._fn[j], 1)            
+            f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
+            mean_f1 += f1
+        mean_f1 /= m
+        return mean_f1
+
+class DatasetAwareMultiLabelMicroAvgF1(DatasetAwareMetric):
+
+    def __init__(self, output_transform, allowed_dataset_ids):
+        self._tp = 0
+        self._tn = 0
+        self._fp = 0
+        self._fn = 0
+        super().__init__(output_transform, allowed_dataset_ids)
+    
+    def reset(self):
+        self._tp = 0
+        self._tn = 0
+        self._fp = 0
+        self._fn = 0
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        n, m = pred_labels.shape
+        for i in range(n):
+            for j in range(m):
+                pred = pred_labels[i][j]
+                gt = gt_labels[i][j]
+                if pred:
+                    if gt: self._tp += 1
+                    else: self._fp += 1
+                else:
+                    if gt: self._fn += 1
+                    else: self._tn += 1
+
+    def compute(self):
+        prec = self._tp / max(self._tp + self._fp, 1)
+        rec = self._tp / max(self._tp + self._fn, 1)
+        return (2 * prec * rec) / max(prec + rec, 1)
+
+class DatasetAwareMultiLabelMacroAvgF1(DatasetAwareMetric):
+
+    def __init__(self, output_transform, allowed_dataset_ids):
+        self._tp = []
+        self._tn = []
+        self._fp = []
+        self._fn = []
+        super().__init__(output_transform, allowed_dataset_ids)
+    
+    def reset(self):
+        self._tp.clear()
+        self._tn.clear()
+        self._fp.clear()
+        self._fn.clear()
 
     def update(self, output):
         pred_labels, gt_labels = output

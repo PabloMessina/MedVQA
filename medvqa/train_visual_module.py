@@ -6,6 +6,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
+from medvqa.training.utils import append_metric_name
 
 from medvqa.utils.constants import (
     CHEXPERT_DATASET_ID,
@@ -15,14 +16,14 @@ from medvqa.utils.constants import (
 )
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
+    attach_dataset_aware_question_labels_macroavgf1,
+    attach_dataset_aware_question_labels_microavgf1,
     attach_medical_tags_f1score,
     attach_chexpert_labels_accuracy,
     attach_chexpert_labels_macroavgf1,
     attach_chexpert_labels_microavgf1,
     attach_chexpert_labels_roc_auc,
     attach_dataset_aware_orientation_accuracy,
-    attach_question_labels_f1score,
-    attach_dataset_aware_question_labels_f1score,
     attach_dataset_aware_gender_accuracy,
     attach_dataset_aware_loss,
     attach_loss,
@@ -55,7 +56,7 @@ from medvqa.metrics.utils import (
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_VisualModuleTrainer
-from medvqa.datasets.chexpert.chexpert_vision_dataset_management import Chexpert_VisualModuleTrainer
+from medvqa.datasets.chexpert.chexpert_dataset_management import Chexpert_VisualModuleTrainer
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
@@ -79,6 +80,9 @@ def parse_args(args=None):
     
     parser.add_argument('--imagenet-pretrained', dest='imagenet_pretrained', action='store_true')
     parser.set_defaults(imagenet_pretrained=False)
+    
+    parser.add_argument('--freeze-cnn', dest='freeze_cnn', action='store_true')
+    parser.set_defaults(freeze_cnn=False)
 
     parser.add_argument('--densenet-pretrained-weights-path', type=str, default=None,
                         help='Path to densenet 121 pretrained weights')
@@ -104,6 +108,9 @@ def parse_args(args=None):
     parser.add_argument('--iuxray-weight', type=float, default=0.08,
                         help='Relative number of batches to sample from IU X-ray dataset (for rebalancing purposes)')
 
+    parser.add_argument('--question-balanced', dest='question_balanced', action='store_true')
+    parser.set_defaults(question_balanced=False)
+    
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
 
@@ -157,10 +164,11 @@ def parse_args(args=None):
 _METRIC_WEIGHTS = {
     MetricNames.MEDTAGF1: 1,
     MetricNames.ORIENACC: 1,
-    MetricNames.CHXLABELMICROAVGF1: 1,
-    MetricNames.CHXLABELMACROAVGF1: 1,
+    MetricNames.CHXLABELMICROAVGF1: 0.5,
+    MetricNames.CHXLABELMACROAVGF1: 0.5,
     MetricNames.CHXLABEL_ROCAUC: 1,
-    MetricNames.QLABELSF1: 1,
+    MetricNames.QLABELS_MICROAVGF1: 1,
+    MetricNames.QLABELS_MACROAVGF1: 1,
     MetricNames.GENDER_ACC: 1,
 }
 
@@ -213,8 +221,6 @@ def train_model(
 
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
-    iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
-    mimiccxr_chexpert_labels_filename = auxiliary_tasks_kwargs['mimiccxr_chexpert_labels_filename']
 
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
@@ -289,13 +295,6 @@ def train_model(
             batch_size = batch_size,
             collate_batch_fn = mimiccxr_collate_batch_fn,
             num_workers = num_workers,
-            classify_tags = classify_tags,
-            rid2tags_filename = mimiccxr_rid2tags_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = mimiccxr_question_labels_filename,
             one_question_per_batch = one_question_per_batch,
             **mimiccxr_vision_trainer_kwargs,
         )
@@ -308,13 +307,6 @@ def train_model(
             batch_size = batch_size,
             collate_batch_fn = iuxray_collate_batch_fn,
             num_workers = num_workers,
-            classify_tags = classify_tags,
-            rid2tags_filename = iuxray_rid2tags_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = iuxray_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = iuxray_question_labels_filename,
             one_question_per_batch = one_question_per_batch,
             **iuxray_vision_trainer_kwargs,
         )
@@ -402,9 +394,11 @@ def train_model(
         attach_loss(MetricNames.CHEXPERT_LOSS, trainer, device)
 
     if classify_questions:
-        attach_dataset_aware_question_labels_f1score(trainer, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
+        attach_dataset_aware_question_labels_macroavgf1(trainer, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
+        attach_dataset_aware_question_labels_microavgf1(trainer, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
+        attach_dataset_aware_question_labels_macroavgf1(validator, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
+        attach_dataset_aware_question_labels_microavgf1(validator, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
         attach_dataset_aware_loss(trainer, MetricNames.QLABELS_LOSS, [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID])
-        attach_question_labels_f1score(validator, device)
 
     if train_chexpert:
         attach_dataset_aware_gender_accuracy(trainer, [CHEXPERT_DATASET_ID])
@@ -416,21 +410,23 @@ def train_model(
     timer.attach(validator, start=Events.EPOCH_STARTED)
     
     # Learning rate scheduler
-    metrics_to_merge = []
+    train_metrics_to_merge = []
+    val_metrics_to_merge = []
     if classify_tags:
-        metrics_to_merge.append(MetricNames.MEDTAGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.MEDTAGF1)
     if classify_orientation:
-        metrics_to_merge.append(MetricNames.ORIENACC)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.ORIENACC)
     if classify_chexpert:
-        metrics_to_merge.append(MetricNames.CHXLABELMICROAVGF1)
-        metrics_to_merge.append(MetricNames.CHXLABELMACROAVGF1)
-        metrics_to_merge.append(MetricNames.CHXLABEL_ROCAUC)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.CHXLABELMICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.CHXLABELMACROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:
-        metrics_to_merge.append(MetricNames.QLABELSF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.QLABELS_MICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.QLABELS_MACROAVGF1)
     if train_chexpert:
-        metrics_to_merge.append(MetricNames.GENDER_ACC)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.GENDER_ACC, val=False)
     
-    merge_metrics_fn = get_merge_metrics_fn(metrics_to_merge, _METRIC_WEIGHTS, 0.4, 0.6, _metric_getter)
+    merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.3, 0.7, _metric_getter)
 
     lr_sch_handler = get_lr_sch_handler(trainer, validator, lr_scheduler, merge_metrics_fn)
 
@@ -502,7 +498,7 @@ def train_model(
     if save: # only if we want to save checkpoints to disk
         checkpoint_handler = get_checkpoint_handler(model_wrapper, checkpoint_folder_path, trainer,
                                                     epoch_offset=model_wrapper.get_epoch(),
-                                                    score_name=get_hybrid_score_name(metrics_to_merge),
+                                                    score_name=get_hybrid_score_name(set(train_metrics_to_merge + val_metrics_to_merge)),
                                                     score_fn=score_fn)
 
     # Logging
@@ -521,7 +517,8 @@ def train_model(
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:
         metrics_to_print.append(MetricNames.QLABELS_LOSS)
-        metrics_to_print.append(MetricNames.QLABELSF1)
+        metrics_to_print.append(MetricNames.QLABELS_MACROAVGF1)
+        metrics_to_print.append(MetricNames.QLABELS_MICROAVGF1)
     if train_chexpert:
         metrics_to_print.append(MetricNames.GENDER_LOSS)
         metrics_to_print.append(MetricNames.GENDER_ACC)
@@ -556,6 +553,7 @@ def train_model(
 
 def train_from_scratch(
     # Model's args
+    freeze_cnn,
     image_local_feat_size,
     densenet_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
@@ -574,6 +572,7 @@ def train_from_scratch(
     mimiccxr_weight,
     iuxray_weight,
     chexpert_weight,
+    question_balanced,
     img_aug_mode,
     # Fixed traning args
     train_mimiccxr,
@@ -620,6 +619,7 @@ def train_from_scratch(
         n_medical_tags = n_medical_tags,
         n_questions = n_questions,
         use_chexpert_forward = train_chexpert,
+        freeze_cnn = freeze_cnn,
     )
     optimizer_kwargs = dict(
         lr = lr,
@@ -629,10 +629,26 @@ def train_from_scratch(
         patience = lr_decay_patience,
     )    
     mimiccxr_vision_trainer_kwargs = dict(
+        classify_tags = classify_tags,
+        rid2tags_filename = mimiccxr_rid2tags_filename,
+        classify_orientation = classify_orientation,
+        classify_chexpert = classify_chexpert,
+        chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+        classify_questions = classify_questions,
+        question_labels_filename = mimiccxr_question_labels_filename,        
         preprocessed_data_filename = mimiccxr_preprocessed_data_filename,
+        question_balanced = question_balanced,
     )
     iuxray_vision_trainer_kwargs = dict(
+        classify_tags = classify_tags,
+        rid2tags_filename = iuxray_rid2tags_filename,
+        classify_orientation = classify_orientation,
+        classify_chexpert = classify_chexpert,
+        chexpert_labels_filename = iuxray_chexpert_labels_filename,
+        classify_questions = classify_questions,
+        question_labels_filename = iuxray_question_labels_filename,        
         preprocessed_data_filename = iuxray_preprocessed_data_filename,
+        question_balanced = question_balanced,
     )
     dataloading_kwargs = dict(
         img_aug_mode = img_aug_mode,

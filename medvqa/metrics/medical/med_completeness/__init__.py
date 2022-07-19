@@ -55,6 +55,7 @@ class MedicalCompletenessBase:
                     break        
 
         # final score
+        if len(gt_s) == 0: return len(gen_s) == 0 # corner case
         score = 0
         for i in range(L):
             gt_size = len(gt_s) - i
@@ -112,6 +113,7 @@ class MedicalCompletenessBase:
         print('inter_size =', inter_size)
 
         # final score
+        if len(gt_s) == 0: return len(gen_s) == 0 # corner case
         score = 0
         for i in range(L):
             gt_size = len(gt_s) - i
@@ -210,6 +212,7 @@ class WeightedMedicalCompletenessBase(MedicalCompletenessBase):
         # print(gt_tot_weights)
         # print(gen_tot_weights)
         # print(inter_weights)
+        if len(gt_s) == 0: return len(gen_s) == 0 # corner case
         score = 0
         for i in range(L):
             prec = inter_weights[i] / gen_tot_weights[i] if gen_tot_weights[i] > 0 else 0

@@ -106,6 +106,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
+                collate_batch_fn_chexpert_mode = None,
                 verbose_question = True,
                 classify_tags = False,
                 medical_tags_per_report_filename = None,
@@ -125,7 +126,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 report_eval_mode = None,
                 ignore_medical_tokenization = False,
                 allowed_questions = None,
-                one_question_per_batch = False):
+                one_question_per_batch = False,
+                include_chexpert_mode = False,
+                use_chexpert_mode_only = False,
+                chexpert_one_hot_offset = None):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
@@ -162,6 +166,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         preprocessing_save_path,
                         IUXRAY_CACHE_DIR,
                         num_workers,
+                        collate_batch_fn_chexpert_mode = collate_batch_fn_chexpert_mode,
                         verbose_question = verbose_question,
                         classify_tags = classify_tags,
                         rid2tags_filename = medical_tags_per_report_filename,
@@ -182,7 +187,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         use_report_eval_mode = report_eval_mode != None,
                         allowed_questions = allowed_questions,
                         qa_adapted_reports_filename = qa_adapted_reports_filename,
-                        one_question_per_batch = one_question_per_batch)
+                        one_question_per_batch = one_question_per_batch,
+                        include_chexpert_mode = include_chexpert_mode,
+                        use_chexpert_mode_only = use_chexpert_mode_only,
+                        chexpert_one_hot_offset = chexpert_one_hot_offset)
         
     def _preprocess_data(self):
 

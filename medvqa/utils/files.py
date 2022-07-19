@@ -6,6 +6,7 @@ from medvqa.utils.common import (
     WORKSPACE_DIR,
     get_timestamp,
 )
+from medvqa.utils.hashing import hash_string
 
 MAX_FILENAME_LENGTH = os.statvfs('/').f_namemax
 
@@ -77,3 +78,11 @@ def get_results_folder_path(checkpoint_folder_path):
     results_folder_path = checkpoint_folder_path.replace(f'{os.path.sep}models{os.path.sep}',
                                                          f'{os.path.sep}results{os.path.sep}')
     return results_folder_path
+
+def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings, ext='pkl'):
+    assert len(strings) > 0
+    file_path = os.path.join(folder_path, f'{prefix}({";".join(strings)}).{ext}')
+    if len(file_path) > MAX_FILENAME_LENGTH:
+        h = hash_string(file_path)
+        file_path = os.path.join(folder_path, f'{prefix}(hash={h[0]},{h[1]}).{ext}')
+    return file_path

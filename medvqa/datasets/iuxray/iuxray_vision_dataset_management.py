@@ -17,6 +17,7 @@ class IUXRAY_VisualModuleTrainer(VM_Trainer):
                 imbalance_reduction_coef = 1,
                 validation_only = False,
                 one_question_per_batch = False,
+                question_balanced = False,
                 **unused_kwargs,
         ):
         preprocessed_data_path = os.path.join(IUXRAY_CACHE_DIR, preprocessed_data_filename)
@@ -33,4 +34,5 @@ class IUXRAY_VisualModuleTrainer(VM_Trainer):
                         question_labels_filename = question_labels_filename,
                         imbalance_reduction_coef = imbalance_reduction_coef,
                         validation_only = validation_only,
-                        one_question_per_batch = one_question_per_batch)
+                        one_question_per_batch = one_question_per_batch,
+                        question_balanced = question_balanced)

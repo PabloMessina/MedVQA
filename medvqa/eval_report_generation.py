@@ -10,6 +10,7 @@ from ignite.handlers.timing import Timer
 
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.utils.constants import (
+    CHEXPERT_DATASET_ID,
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
     MetricNames,
@@ -67,8 +68,9 @@ def parse_args():
                         help='Relative path to folder with checkpoint to evaluate')
     parser.add_argument('--eval-mode', type=str, required=True)
 
-    # optional arguments    
+    # optional arguments
     parser.add_argument('--n-questions-per-report', type=int, default=None)
+    parser.add_argument('--qclass-threshold', type=float, default=0)
     parser.add_argument('--batch-size', type=int, default=140,
                         help='Batch size')
     parser.add_argument('--device', type=str, default='GPU',
@@ -76,6 +78,9 @@ def parse_args():
     parser.add_argument('--num-workers', type=int, default=0,
                         help='Number of workers for parallel dataloading')
     parser.add_argument('--answer-decoding', type=str, default='greedy-search')
+
+    parser.add_argument('--eval-checkpoint-folder', type=str, default=None,
+                        help='Optional checkpoint folder to load weights from for evaluation')
 
     parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
     parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
@@ -102,12 +107,23 @@ def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer
     print (f'Report-level metrics successfully saved to {save_path}')
     return metrics
 
-def _get_eval_mode_text(eval_mode, n_questions_per_report):
+def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, checkpoint_path):
     strings = [f'eval_mode={eval_mode}']
-    if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION.value or\
-       eval_mode == ReportEvalMode.MOST_POPULAR.value:
+    if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+       eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
+       eval_mode == ReportEvalMode.MOST_POPULAR:
        assert n_questions_per_report is not None
-       strings.append(f'n_questions_per_report={n_questions_per_report}')
+       strings.append(f'n_q_per_report={n_questions_per_report}')
+    if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or \
+       eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+       assert qclass_threshold is not None
+       strings.append(f'qclass_threshold={qclass_threshold}')
+    if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or \
+       eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or \
+       eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
+       assert checkpoint_path is not None       
+       timestamp = os.path.basename(os.path.abspath(os.path.join(checkpoint_path, os.pardir)))[:15]
+       strings.append(f'chkpt={timestamp}')
     return ';'.join(strings)
 
 def _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer):
@@ -119,18 +135,28 @@ def _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer):
     sqrt = np.std(lengths)
     return int(mean + 3 * sqrt)
 
+def _get_one_hot_question_offset(offsets_dict, dataset_id, eval_mode):
+    if offsets_dict is None:
+        return None
+    if eval_mode == ReportEvalMode.CHEXPERT_LABELS:
+        return offsets_dict[str(CHEXPERT_DATASET_ID)]
+    return offsets_dict[str(dataset_id)]
+
 def _evaluate_model(
     tokenizer_kwargs,
     model_kwargs,
+    dataloading_kwargs,
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
     auxiliary_tasks_kwargs,
     answer_decoding,
     eval_mode,
     n_questions_per_report = None,
+    qclass_threshold = None,
     num_workers = 0,
     device = 'GPU',
     checkpoint_folder_path = None,
+    eval_checkpoint_folder_path = None,
     return_results = False,
     use_amp = False,
     eval_iuxray = True,
@@ -138,8 +164,8 @@ def _evaluate_model(
 ):
     assert eval_iuxray or eval_mimiccxr
     assert eval_mode is not None
-    if eval_mode == ReportEvalMode.MOST_POPULAR.value or\
-       eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION.value:
+    if eval_mode == ReportEvalMode.MOST_POPULAR or\
+       eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION:
        assert n_questions_per_report is not None
 
     # Pull out some args from kwargs
@@ -166,13 +192,16 @@ def _evaluate_model(
 
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
-    n_questions = auxiliary_tasks_kwargs.get('n_questions', None)
+    n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
     iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
     mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
     if classify_questions:
-        assert n_questions is not None
+        assert n_questions_aux_task is not None
         if eval_iuxray: assert iuxray_question_labels_filename is not None
         if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
+    
+    if question_encoding == QuestionEncoding.ONE_HOT:
+        assert model_kwargs['n_questions'] is not None
     
     # QA dataset filenames
     iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
@@ -212,29 +241,52 @@ def _evaluate_model(
     count_print('Defining image transform ...')
     img_transform = get_image_transform()
 
-    # Define collate_batch_fn    
-    mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
-                                                        verbose_question = verbose_question,
-                                                        include_answer=False,
-                                                        classify_tags = classify_tags,
-                                                        n_tags = n_medical_tags,
-                                                        classify_orientation = classify_orientation,
-                                                        classify_chexpert = classify_chexpert,
-                                                        classify_questions = classify_questions)    
-    iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
-                                                   verbose_question = verbose_question,
-                                                   include_answer=False,
-                                                   classify_tags = classify_tags,
-                                                   n_tags = n_medical_tags,
-                                                   classify_orientation = classify_orientation,
-                                                   classify_chexpert = classify_chexpert,
-                                                   classify_questions = classify_questions)
+    # Define collate_batch_fn
+    count_print('Defining collate_batch_fn ...')
+    
+    one_hot_question_offsets = dataloading_kwargs.get('one_hot_question_offsets', None)
+    if not verbose_question: assert one_hot_question_offsets is not None
+    
+    if eval_mimiccxr:
+        mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                                            verbose_question = verbose_question,
+                                                            one_hot_question_offset = _get_one_hot_question_offset(
+                                                                one_hot_question_offsets, MIMICCXR_DATASET_ID, eval_mode),
+                                                            include_answer=False,
+                                                            classify_tags = classify_tags,
+                                                            n_tags = n_medical_tags,
+                                                            classify_orientation = classify_orientation,
+                                                            classify_chexpert = classify_chexpert,
+                                                            classify_questions = classify_questions)    
+    
+    if eval_iuxray:
+        iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
+                                                    verbose_question = verbose_question,
+                                                    one_hot_question_offset = _get_one_hot_question_offset(
+                                                                one_hot_question_offsets, IUXRAY_DATASET_ID, eval_mode),
+                                                    include_answer=False,
+                                                    classify_tags = classify_tags,
+                                                    n_tags = n_medical_tags,
+                                                    classify_orientation = classify_orientation,
+                                                    classify_chexpert = classify_chexpert,
+                                                    classify_questions = classify_questions)
 
     # Load saved checkpoint    
     checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
     count_print('Loading model from checkpoint ...')
     print('checkpoint_path = ', checkpoint_path)
-    checkpoint = torch.load(checkpoint_path)    
+    checkpoint = torch.load(checkpoint_path)
+
+    # Load optional checkpoint
+    if eval_checkpoint_folder_path is not None:
+        eval_checkpoint_path = get_checkpoint_filepath(eval_checkpoint_folder_path)        
+        eval_checkpoint = torch.load(eval_checkpoint_path)
+        pretrained_weights = eval_checkpoint['model']
+        pretrained_checkpoint_path = eval_checkpoint_path
+    else:
+        pretrained_weights = checkpoint['model'] # default -> same model
+        pretrained_checkpoint_path = checkpoint_path
+    print('pretrained_checkpoint_path =', pretrained_checkpoint_path)
     
     # Create MIMIC-CXR vqa evaluator
     if eval_mimiccxr:
@@ -253,10 +305,11 @@ def _evaluate_model(
             question_labels_filename = mimiccxr_question_labels_filename,
             report_eval_mode = eval_mode,
             image_local_feat_size = model_kwargs['image_local_feat_size'],
-            n_questions = n_questions,
-            pretrained_weights = checkpoint['model'],
-            pretrained_checkpoint_path = checkpoint_path,
+            n_questions_aux_task = model_kwargs['n_questions_aux_task'],
+            pretrained_weights = pretrained_weights,
+            pretrained_checkpoint_path = pretrained_checkpoint_path,
             n_questions_per_report = n_questions_per_report,
+            qclass_threshold = qclass_threshold,
             verbose_question = verbose_question,
             **mimiccxr_vqa_evaluator_kwargs,
         )
@@ -288,13 +341,7 @@ def _evaluate_model(
     count_print('Creating instance of OpenEndedVQA model ...')
     model = OpenEndedVQA(vocab_size=tokenizer.vocab_size,
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
-                         device=device, 
-                         n_medical_tags=n_medical_tags,
-                         n_questions=n_questions,
-                         classify_orientation=classify_orientation,
-                         classify_chexpert=classify_chexpert,
-                         classify_questions=classify_questions,
-                         **model_kwargs)
+                         device=device, **model_kwargs)
     model = model.to(device)
     model.load_state_dict(checkpoint['model'])
 
@@ -368,7 +415,7 @@ def _evaluate_model(
     # Run evaluation
     results_dict = dict(tokenizer = tokenizer)
     results_folder_path = get_results_folder_path(checkpoint_folder_path)    
-    eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report)
+    eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, pretrained_checkpoint_path)
 
     if eval_iuxray:
         print('\n========================')
@@ -415,6 +462,8 @@ def evaluate_model(
     eval_mode,
     answer_decoding,
     n_questions_per_report = None,
+    qclass_threshold = None,
+    eval_checkpoint_folder = None,
     batch_size = 100,
     num_workers = 0,
     device = 'GPU',
@@ -425,10 +474,13 @@ def evaluate_model(
 ):
     print('----- Evaluating model ------')
 
-    checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)    
+    checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
+    if eval_checkpoint_folder is not None:
+        eval_checkpoint_folder =os.path.join(WORKSPACE_DIR, eval_checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)
     tokenizer_kwargs = metadata['tokenizer_kwargs']
     model_kwargs = metadata['model_kwargs']
+    dataloading_kwargs = metadata['dataloading_kwargs']
     mimiccxr_vqa_evaluator_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
@@ -438,15 +490,18 @@ def evaluate_model(
     return _evaluate_model(
                 tokenizer_kwargs,
                 model_kwargs,
+                dataloading_kwargs,
                 mimiccxr_vqa_evaluator_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 auxiliary_tasks_kwargs,
                 answer_decoding,
                 eval_mode,
                 n_questions_per_report = n_questions_per_report,
+                qclass_threshold = qclass_threshold,
                 device = device,
                 num_workers = num_workers,
                 checkpoint_folder_path = checkpoint_folder,
+                eval_checkpoint_folder_path = eval_checkpoint_folder,
                 return_results = return_results,
                 use_amp = use_amp,
                 eval_iuxray = eval_iuxray,

@@ -131,6 +131,7 @@ def _evaluate_model(
     model_kwargs,
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
+    dataloading_kwargs,
     auxiliary_tasks_kwargs,
     answer_decoding,
     beam_search_k = None,
@@ -169,11 +170,11 @@ def _evaluate_model(
 
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
-    n_questions = auxiliary_tasks_kwargs.get('n_questions', None)
+    n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
     iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
     mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
     if classify_questions:
-        assert n_questions is not None
+        assert n_questions_aux_task is not None
         if eval_iuxray: assert iuxray_question_labels_filename is not None
         if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
     
@@ -214,15 +215,9 @@ def _evaluate_model(
     count_print('Creating instance of OpenEndedVQA model ...')    
     model = OpenEndedVQA(vocab_size=tokenizer.vocab_size,
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
-                         device=device, 
-                         n_medical_tags=n_medical_tags,
-                         n_questions=n_questions,
-                         classify_orientation=classify_orientation,
-                         classify_chexpert=classify_chexpert,
-                         classify_questions=classify_questions,
                          padding_idx=tokenizer.token2id[tokenizer.PAD_TOKEN],
                          eos_idx=tokenizer.token2id[tokenizer.END_TOKEN],
-                         **model_kwargs)
+                         device=device, **model_kwargs)
     model = model.to(device)
 
     # Create evaluator engine
@@ -236,8 +231,12 @@ def _evaluate_model(
     img_transform = get_image_transform()
 
     # Define collate_batch_fn    
+    one_hot_question_offsets = dataloading_kwargs.get('one_hot_question_offsets', None)
+    if not verbose_question: assert one_hot_question_offsets is not None
+
     mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID,
                                                     verbose_question = verbose_question,
+                                                    one_hot_question_offset = one_hot_question_offsets[str(MIMICCXR_DATASET_ID)],
                                                     classify_tags = classify_tags,
                                                     n_tags = n_medical_tags,
                                                     classify_orientation = classify_orientation,
@@ -245,6 +244,7 @@ def _evaluate_model(
                                                     classify_questions = classify_questions)
     iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
                                                    verbose_question = verbose_question,
+                                                   one_hot_question_offset = one_hot_question_offsets[str(IUXRAY_DATASET_ID)],
                                                    classify_tags = classify_tags,
                                                    n_tags = n_medical_tags,
                                                    classify_orientation = classify_orientation,
@@ -456,6 +456,7 @@ def evaluate_model(
     mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs['batch_size'] = batch_size
+    dataloading_kwargs = metadata['dataloading_kwargs']
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
 
     return _evaluate_model(
@@ -463,6 +464,7 @@ def evaluate_model(
                 model_kwargs,
                 mimiccxr_vqa_evaluator_kwargs,
                 iuxray_vqa_trainer_kwargs,
+                dataloading_kwargs,
                 auxiliary_tasks_kwargs = auxiliary_tasks_kwargs,
                 device = device,
                 answer_decoding = answer_decoding,

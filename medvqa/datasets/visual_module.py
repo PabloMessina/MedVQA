@@ -2,6 +2,7 @@ import os
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
+from medvqa.datasets.utils import deduplicate_indices
 from medvqa.utils.files import load_pickle
 from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
@@ -13,7 +14,7 @@ from medvqa.datasets.dataloading_utils import (
 class VisualModuleDataset(Dataset):
     
     def __init__(self, report_ids, images, indices, transform, source_dataset_name,
-                suffle_indices = True,
+                shuffle_indices = True,
                 # aux task: medical tags
                 classify_tags = False, rid2tags = None,
                 # aux task: image orientation
@@ -32,7 +33,7 @@ class VisualModuleDataset(Dataset):
         self.source_dataset_name = source_dataset_name
         self.infinite = infinite
 
-        if suffle_indices:
+        if shuffle_indices:
             np.random.shuffle(self.indices)
         
         # optional auxiliary tasks
@@ -116,15 +117,6 @@ class VM_Base:
     
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
         raise NotImplementedError('Make sure your specialized class implements this function')
-        
-    def _deduplicate_indices(self, indices, report_ids):
-        seen = set()
-        indices_ = []
-        for i in indices:
-            if report_ids[i] not in seen:
-                seen.add(report_ids[i])
-                indices_.append(i)
-        return indices_
     
     def _load_cached_data(self, preprocessed_data_path):
         print (f'Loading data from path {preprocessed_data_path} ...')
@@ -135,7 +127,7 @@ class VM_Base:
         self.question_ids = data['question_ids']
         if self.training:
             self.train_indices = data['train_indices']
-            self.val_indices = self._deduplicate_indices(data['val_indices'], self.report_ids)
+            self.val_indices = deduplicate_indices(data['val_indices'], self.report_ids)
         if self.classify_orientation:
             self.orientations = data['orientations']
         print('\tDone!')
@@ -156,6 +148,7 @@ class VM_Trainer(VM_Base):
                 imbalance_reduction_coef = 1,
                 validation_only = False,
                 one_question_per_batch = False,
+                question_balanced = False,
         ):
 
         rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if classify_tags else None
@@ -166,6 +159,7 @@ class VM_Trainer(VM_Base):
         self.cache_dir = cache_dir
         self.imbalance_reduction_coef = imbalance_reduction_coef
         self.one_question_per_batch = one_question_per_batch
+        self.question_balanced = question_balanced
     
         super().__init__(True, transform, batch_size, collate_batch_fn,
                 preprocessed_data_path,
@@ -179,10 +173,14 @@ class VM_Trainer(VM_Base):
                 question_labels_path = question_labels_path)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
+        print('generating training and validation datasets and dataloaders ...')
+        print('num_workers =', num_workers)
         if not self.validation_only:
-            self._generate_train_dataset(batch_size)
-        self._generate_val_dataset()
-        self._generate_train_val_dataloaders(batch_size, collate_batch_fn, num_workers)
+            if self.question_balanced:
+                self._generate_train_dataset_and_dataloader__question_balanced(batch_size, collate_batch_fn, num_workers)
+            else:
+                self._generate_train_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
+        self._generate_val_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
 
     def _get_composite_dataset(self, datasets, weights, batch_size):
         if self.one_question_per_batch:
@@ -190,7 +188,7 @@ class VM_Trainer(VM_Base):
             return BatchedCompositeInfiniteDataset(datasets, weights, batch_size)
         return CompositeInfiniteDataset(datasets, weights)
 
-    def _generate_train_dataset(self, batch_size):
+    def _generate_train_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
         print('len(self.train_indices) =', len(self.train_indices))
         question_datasets = []
         train_question_ids = list(self.train_indices.keys())
@@ -212,35 +210,24 @@ class VM_Trainer(VM_Base):
                     indices.extend(self.train_indices[train_question_ids[k]])
                 indices = np.array(indices, dtype=int)            
             
-            question_datasets.append(VisualModuleDataset(
-                self.report_ids, self.images, 
-                indices, self.transform, self.dataset_name,
-                # aux task: medical tags
-                classify_tags = self.classify_tags,
-                rid2tags = self.rid2tags if self.classify_tags else None,
-                # aux task: orientation
-                classify_orientation = self.classify_orientation,
-                orientations = self.orientations if self.classify_orientation else None,
-                # aux task: chexpert labels
-                classify_chexpert = self.classify_chexpert,
-                chexpert_labels = self.chexpert_labels if self.classify_chexpert else None,
-                # aux task: question labels
-                classify_questions = self.classify_questions,
-                question_labels = self.question_labels if self.classify_questions else None,
-                # infinite mode
-                infinite=True,
-            ))
+            question_datasets.append(self._get_visual_module_dataset(indices))
             i = j+1
         
         question_weights = get_imbalance_reduced_weights([len(d) for d in question_datasets], self.imbalance_reduction_coef)
         self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')
 
-    def _generate_val_dataset(self):
-        print('len(self.val_indices) =', len(self.val_indices))
-        self.val_dataset = VisualModuleDataset(
-            self.report_ids, self.images, self.val_indices,
-            self.transform, self.dataset_name,
+        self.train_dataloader = DataLoader(self.train_dataset,
+                                            batch_size=batch_size,
+                                            shuffle=False,
+                                            collate_fn=collate_batch_fn,
+                                            num_workers=num_workers,
+                                            pin_memory=True)
+
+    def _get_visual_module_dataset(self, indices, infinite=True, shuffle=True):
+        return VisualModuleDataset(
+            self.report_ids, self.images, 
+            indices, self.transform, self.dataset_name,
             # aux task: medical tags
             classify_tags = self.classify_tags,
             rid2tags = self.rid2tags if self.classify_tags else None,
@@ -253,23 +240,14 @@ class VM_Trainer(VM_Base):
             # aux task: question labels
             classify_questions = self.classify_questions,
             question_labels = self.question_labels if self.classify_questions else None,
-        )        
-            
-    def _generate_train_val_dataloaders(self, batch_size, collate_batch_fn, num_workers):
+            # infinite mode
+            infinite=infinite,
+            shuffle_indices=shuffle,
+        )
 
-        print('generating training and validation dataloaders ...')
-
-        print('num_workers =', num_workers)
-        
-        if not self.validation_only:
-            
-            self.train_dataloader = DataLoader(self.train_dataset,
-                                            batch_size=batch_size,
-                                            shuffle=False,
-                                            collate_fn=collate_batch_fn,
-                                            num_workers=num_workers,
-                                            pin_memory=True)
-        
+    def _generate_val_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
+        print('len(self.val_indices) =', len(self.val_indices))
+        self.val_dataset = self._get_visual_module_dataset(self.val_indices, infinite=False, shuffle=False)
         self.val_dataloader = DataLoader(self.val_dataset,
                                          batch_size=batch_size,
                                          shuffle=False,
@@ -277,6 +255,52 @@ class VM_Trainer(VM_Base):
                                          num_workers=num_workers,
                                          pin_memory=True)
 
+    def _generate_train_dataset_and_dataloader__question_balanced(self, batch_size, collate_batch_fn, num_workers):
+        def _indices_generator():
+            for indices in self.train_indices.values():
+                for i in indices:
+                    yield i
+        indices = deduplicate_indices(_indices_generator(), self.report_ids)
+        n_questions = self.question_labels.shape[1]
+        print(f'len(indices) = {len(indices)}, n_questions = {n_questions}')
+
+        question_datasets = []
+        for i in range(n_questions):
+            pos_indices = []
+            neg_indices = []
+            for j in indices:
+                if self.question_labels[self.report_ids[j]][i] == 1:
+                    pos_indices.append(j)
+                else:
+                    neg_indices.append(j)
+            
+            if i % 6 == 0:
+                print(f'qlabel = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+            
+            if len(pos_indices) >= 5 and len(neg_indices) >= 5:            
+                # positive
+                pos_indices = np.array(pos_indices, dtype=int)
+                pos_dataset = self._get_visual_module_dataset(pos_indices)
+
+                # negative
+                neg_indices = np.array(neg_indices, dtype=int)
+                neg_dataset = self._get_visual_module_dataset(neg_indices)
+
+                # merged
+                comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
+                question_datasets.append(comp_dataset)
+        
+        # final dataset
+        self.train_dataset = CompositeInfiniteDataset(question_datasets, [1] * len(question_datasets))
+
+        # dataloader
+        self.train_dataloader = DataLoader(self.train_dataset,
+                                        batch_size=batch_size,
+                                        shuffle=False,
+                                        num_workers=num_workers,
+                                        collate_fn=collate_batch_fn,
+                                        pin_memory=True)            
+    
 class VM_Evaluator(VM_Base):
     
     def __init__(self, transform, batch_size, collate_batch_fn,
@@ -309,7 +333,7 @@ class VM_Evaluator(VM_Base):
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
         self.test_indices = list(range(len(self.report_ids)))
-        self.test_indices = self._deduplicate_indices(self.test_indices, self.report_ids)
+        self.test_indices = deduplicate_indices(self.test_indices, self.report_ids)
         self._generate_test_dataset()
         self._generate_test_dataloader(batch_size, collate_batch_fn, num_workers)
 

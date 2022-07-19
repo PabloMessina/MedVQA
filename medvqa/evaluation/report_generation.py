@@ -1,4 +1,4 @@
-from tqdm import tqdm
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -23,9 +23,11 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
 from medvqa.utils.metrics import chexpert_label_array_to_string
+from medvqa.utils.common import CACHE_DIR
 
+_REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
 
 def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbose_question=True):
@@ -53,7 +55,13 @@ def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbos
             if verbose_question:
                 q = tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
             else:
-                q = qa_adapted_dataset['questions'][dataset.questions[idxs[i]]]
+                # HACK: fix this in the future
+                q_id = dataset.questions[idxs[i]]
+                if q_id < len(qa_adapted_dataset['questions']):
+                    q = qa_adapted_dataset['questions'][q_id]
+                else:
+                    q_id -= len(qa_adapted_dataset['questions'])
+                    q = CHEXPERT_LABELS[q_id]
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
             gen_report['q'].append(q)
             gen_report['a'].append(a)
@@ -107,7 +115,7 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_name
         gt_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gt_text)))
         # gen text
         gen_report = gen_reports[i]
-        gen_text = ' . '.join(gen_report['a'])
+        gen_text = ' . '.join(x for x in gen_report['a'] if len(x) > 0)
         gen_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
 
     metrics = {}
@@ -152,34 +160,65 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_name
         metrics[metric_name] = metric.compute()
 
     metric_name = 'chexpert_labels'
-    if metric_name in metric_names:        
+    if metric_name in metric_names:
         gt_texts = [tokenizer.ids2string(x) for x in gt_texts]
         gen_texts = [tokenizer.ids2string(x) for x in gen_texts]
         labeler = ChexpertLabeler()
         metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts, tmp_suffix='_gt', update_cache_on_disk=True)
-        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix='_gen', update_cache_on_disk=True)
+        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix='_gen', update_cache_on_disk=False)
     
     return metrics
 
-def get_report_level_metrics_dataframe(metrics, method_names, metric_names=_REPORT_LEVEL_METRIC_NAMES):
-    assert type(metrics) is list or type(metrics) is dict
-    assert type(method_names) is list or type(method_names) is str
-    if type(metrics) is dict:
-        metrics  = [metrics]
-        method_names = [method_names]
-    columns = ['method_name']
-    data = [[] for _ in range(len(metrics))]
-    for row_i, (metrics_dict, method_name) in tqdm(enumerate(zip(metrics, method_names))):
-        data[row_i].append(method_name)
+def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL_METRIC_NAMES):
+    # Sanity checks
+    assert type(metrics_paths) is list or type(metrics_paths) is str
+    if type(metrics_paths) is str:
+        metrics_paths  = [metrics_paths]
+
+    # Load metrics cache
+    metrics_cache = load_pickle(_REPORT_LEVEL_METRICS_CACHE_PATH)
+    needs_update = False
+    if metrics_cache is None:
+        metrics_cache = {}
+        needs_update = True
+
+    # Build dataframe
+    columns = ['metrics_path']
+    data = [[] for _ in range(len(metrics_paths))]
+    for row_i, metrics_path in enumerate(metrics_paths):
+        data[row_i].append(metrics_path)
+
+        # Retrieve cached results (if any)
+        cache_key = (metrics_path, os.path.getmtime(metrics_path))
+        try:
+            cached_results = metrics_cache[cache_key]
+        except KeyError:            
+            cached_results = metrics_cache[cache_key] = {}
+            print("   ** Not cached key:", cache_key)
+            needs_update = True
+        
+        metrics_dict = None
+
         for mn in metric_names:
+            try:
+                cached_metric = cached_results[mn]
+                data[row_i].extend(cached_metric['values'])
+                if row_i == 0: columns.extend(cached_metric['names'])
+                continue
+            except KeyError:
+                cached_metric = cached_results[mn] = {'values':[], 'names':[]}
+                if metrics_dict is None:
+                    metrics_dict = load_pickle(metrics_path)
+                needs_update = True
+
             if mn == 'chexpert_labels':
                 gt_labels = metrics_dict['chexpert_labels_gt']
                 gen_labels = metrics_dict['chexpert_labels_gen']
                 
                 chxlabf1 = ChexpertLabelsF1score(device='cpu')
                 chxlabf1.update((gen_labels, gt_labels))
-                data[row_i].append(chxlabf1.compute())
-                if row_i == 0: columns.append('chxlabf1(hard)')
+                cached_metric['values'].append(chxlabf1.compute())
+                cached_metric['names'].append('chxlabf1(hard)')
 
                 # chxlabacc = MultiLabelAccuracy(device='cpu')
                 # chxlabacc.update((gen_labels, gt_labels))
@@ -202,52 +241,60 @@ def get_report_level_metrics_dataframe(metrics, method_names, metric_names=_REPO
                 micro_avg_f1 = f1_score(gt_flat, gen_flat)
                 accuracy = accuracy_score(gt_flat, gen_flat)
 
-                data[row_i].append(micro_avg_p)
-                if row_i == 0: columns.append('p(micro)')
-                data[row_i].append(micro_avg_r)
-                if row_i == 0: columns.append('r(micro)')
-                data[row_i].append(micro_avg_f1)
-                if row_i == 0: columns.append('f1(micro)')
+                cached_metric['values'].append(micro_avg_p)
+                cached_metric['names'].append('p(micro)')                
+                cached_metric['values'].append(micro_avg_r)
+                cached_metric['names'].append('r(micro)')
+                cached_metric['values'].append(micro_avg_f1)
+                cached_metric['names'].append('f1(micro)')
 
-                data[row_i].append(macro_avg_p)
-                if row_i == 0: columns.append('p(macro)')
-                data[row_i].append(macro_avg_r)
-                if row_i == 0: columns.append('r(macro)')
-                data[row_i].append(macro_avg_f1)
-                if row_i == 0: columns.append('f1(macro)')
+                cached_metric['values'].append(macro_avg_p)
+                cached_metric['names'].append('p(macro)')
+                cached_metric['values'].append(macro_avg_r)
+                cached_metric['names'].append('r(macro)')
+                cached_metric['values'].append(macro_avg_f1)
+                cached_metric['names'].append('f1(macro)')
 
-                data[row_i].append(accuracy)
-                if row_i == 0: columns.append('acc')
+                cached_metric['values'].append(accuracy)
+                cached_metric['names'].append('acc')
 
                 for i, label in enumerate(CHEXPERT_LABELS):
-                    data[row_i].append(ps[i])
-                    if row_i == 0: columns.append(f'p({CHEXPERT_LABEL2SHORT[label]})')
+                    cached_metric['values'].append(ps[i])
+                    cached_metric['names'].append(f'p({CHEXPERT_LABEL2SHORT[label]})')
                 for i, label in enumerate(CHEXPERT_LABELS):
-                    data[row_i].append(rs[i])
-                    if row_i == 0: columns.append(f'r({CHEXPERT_LABEL2SHORT[label]})')
+                    cached_metric['values'].append(rs[i])
+                    cached_metric['names'].append(f'r({CHEXPERT_LABEL2SHORT[label]})')
                 for i, label in enumerate(CHEXPERT_LABELS):
-                    data[row_i].append(f1s[i])
-                    if row_i == 0: columns.append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
+                    cached_metric['values'].append(f1s[i])
+                    cached_metric['names'].append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
                 
             elif mn == 'bleu':            
                 for k in range(4):
                     bleu_k = f'bleu-{k+1}'
                     bleu_score = metrics_dict[bleu_k]                
-                    data[row_i].append(bleu_score[0])
-                    if row_i == 0: columns.append(METRIC2SHORT.get(bleu_k, bleu_k))
+                    cached_metric['values'].append(bleu_score[0])
+                    cached_metric['names'].append(METRIC2SHORT.get(bleu_k, bleu_k))
             elif mn == 'ciderD':
                 scores = metrics_dict[mn]
-                data[row_i].append(scores[0])
-                if row_i == 0: columns.append(METRIC2SHORT.get(mn, mn))
+                cached_metric['values'].append(scores[0])
+                cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
             else:
                 try:
                     scores = metrics_dict[mn]
                     score = sum(scores) / len(scores)
-                    data[row_i].append(score)
+                    cached_metric['values'].append(score)
                 except KeyError:
-                    data[row_i].append(None)
-                if row_i == 0: columns.append(METRIC2SHORT.get(mn, mn))
+                    cached_metric['values'].append(None)
+                cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
+
+            data[row_i].extend(cached_metric['values'])
+            if row_i == 0: columns.extend(cached_metric['names'])
     
+    # Save updated cache to disk if required
+    if needs_update:
+        save_to_pickle(metrics_cache, _REPORT_LEVEL_METRICS_CACHE_PATH)
+        print(f'Report level metrics updated and saved to {_REPORT_LEVEL_METRICS_CACHE_PATH}')
+
     return pd.DataFrame(data=data, columns=columns)
 
 class ReportGenExamplePlotter:

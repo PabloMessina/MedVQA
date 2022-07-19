@@ -1,3 +1,4 @@
+from medvqa.metrics.classification.multilabel_prf1 import DatasetAwareMultiLabelMacroAvgF1, DatasetAwareMultiLabelMicroAvgF1
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
@@ -46,6 +47,11 @@ def attach_dataset_aware_exactmatch_question(engine, allowed_dataset_ids, record
                 record_scores=record_scores)
     em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
 
+def attach_dataset_aware_exactmatch_answer(engine, allowed_dataset_ids, record_scores=False):
+    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_answers', 'answers'),
+                allowed_dataset_ids=allowed_dataset_ids,
+                record_scores=record_scores)
+    em.attach(engine, MetricNames.EXACTMATCH_ANSWER)
 
 def attach_bleu(engine, device, record_scores=False):
     # if ks is None:
@@ -142,6 +148,21 @@ def attach_dataset_aware_question_labels_f1score(engine, allowed_dataset_ids, re
                                 allowed_dataset_ids=allowed_dataset_ids,
                                 record_scores=record_scores)
     met.attach(engine, MetricNames.QLABELSF1)
+
+def attach_dataset_aware_question_labels_macroavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.QLABELS_MACROAVGF1)
+
+def attach_dataset_aware_question_labels_microavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.QLABELS_MICROAVGF1)
+
+def attach_chexpert_labels_microavgf1(engine, device):
+    met = MultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
+    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+
 
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),

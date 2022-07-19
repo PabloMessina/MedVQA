@@ -7,7 +7,12 @@ from medvqa.models.nlp.question_decoder import QuestionDecoder
 from medvqa.models.vqa.answer_decoder import AnswerDecoder
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
-from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
+from medvqa.utils.constants import (
+    CHEXPERT_LABELS,
+    CHEXPERT_GENDERS,
+    CHEXPERT_ORIENTATIONS,
+    CHEXPERT_TASKS,
+)
 
 class QuestionEncoding:
     BILSTM = 'bilstm'
@@ -24,21 +29,26 @@ class OpenEndedVQA(nn.Module):
                  freeze_cnn=False,
                  n_medical_tags=None,
                  n_questions=None,
+                 n_questions_aux_task=None,
                  classify_orientation=False,
                  classify_chexpert=False,
                  classify_questions=False,
                  eos_idx=None,
                  padding_idx=None,
-                 use_chexpert_forward=False,
+                 chexpert_mode=None,
                  **unused_kwargs,
                  ):
+        print(f'OpenEndedVQA(): n_questions = {n_questions}, n_questions_aux_task = {n_questions_aux_task}')
         super().__init__()
-        self.name = 'oevqa(densenet121+bilstm+lstm)'
+
         self.embedding_table = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=embed_size,
             padding_idx=0,
         )
+
+        if chexpert_mode == CHEXPERT_TASKS.VQA:
+            assert question_encoding == QuestionEncoding.ONE_HOT
         
         # Load pre-trained CNN weights
         if densenet_pretrained_weights_path:
@@ -55,6 +65,7 @@ class OpenEndedVQA(nn.Module):
         if freeze_cnn: freeze_parameters(self.image_encoder)
 
         self.question_encoding = question_encoding
+        self.chexpert_mode = chexpert_mode
         
         # Question encoding
         if question_encoding == QuestionEncoding.BILSTM:
@@ -98,7 +109,6 @@ class OpenEndedVQA(nn.Module):
         if n_medical_tags is not None:
             self.W_tags = nn.Linear(image_local_feat_size * 2, n_medical_tags)
             self.tags_aux_task = True
-            if freeze_cnn: freeze_parameters(self.W_tags)
         else:
             self.tags_aux_task = False
         
@@ -107,9 +117,6 @@ class OpenEndedVQA(nn.Module):
             self.W_ori_mimiccxr = nn.Linear(image_local_feat_size * 2, len(MIMICCXR_IMAGE_ORIENTATIONS))
             self.W_ori_iuxray = nn.Linear(image_local_feat_size * 2, len(IUXRAY_IMAGE_ORIENTATIONS))
             self.orien_aux_task = True
-            if freeze_cnn:
-                freeze_parameters(self.W_ori_mimiccxr)
-                freeze_parameters(self.W_ori_iuxray)
         else:
             self.orien_aux_task = False
 
@@ -117,25 +124,29 @@ class OpenEndedVQA(nn.Module):
         if classify_chexpert:
             self.W_chx = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_LABELS))
             self.chx_aux_task = True
-            if freeze_cnn: freeze_parameters(self.W_chx)
         else:
             self.chx_aux_task = False
 
         # 4) questions classification
         if classify_questions:
-            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions)
+            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions_aux_task)
             self.q_aux_task = True
-            if freeze_cnn: freeze_parameters(self.W_q)
         else:
             self.q_aux_task = False
 
-        if use_chexpert_forward:
+        if chexpert_mode is not None:
             self.W_gender_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_GENDERS))
             self.W_ori_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_ORIENTATIONS))
-            if freeze_cnn:
-                freeze_parameters(self.W_gender_chexpert)
-                freeze_parameters(self.W_ori_chexpert)
 
+    @property
+    def name(self):
+        strings = [
+            'dense121',
+            'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot',
+            'lstm',
+        ]
+        name = f'oevqa({"+".join(strings)})'
+        return name
 
     def forward(
         self,
@@ -164,29 +175,24 @@ class OpenEndedVQA(nn.Module):
 
         output = {}
 
+        question_vectors = None
+
         if chexpert_forward:
             output['pred_chexpert'] = self.W_chx(global_feat)
             output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
             output['pred_orientation'] = self.W_ori_chexpert(global_feat)
             output['pred_gender'] = self.W_gender_chexpert(global_feat)
+            if self.chexpert_mode == CHEXPERT_TASKS.VQA:
+                # process questions
+                question_vectors = self.question_encoder(questions)
         else:        
             # process questions
             if self.question_encoding == QuestionEncoding.BILSTM:
                 question_vectors = self.question_encoder(questions, question_lengths)
             else: # one-hot
-                question_vectors = self.question_encoder(questions)
+                question_vectors = self.question_encoder(questions)            
 
-            # predict answers
-            if mode == 'train':
-                pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
-            elif beam_search_k:
-                pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
-            else:
-                pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)
-
-            output['pred_answers'] = pred_answers
-
-            # recover questions from vectors
+            # recover questions from vectors if in BILSTM mode
             if self.question_encoding == QuestionEncoding.BILSTM:
                 pred_questions = self.question_decoder(question_vectors, questions, question_lengths)
                 output['pred_questions'] = pred_questions
@@ -208,5 +214,15 @@ class OpenEndedVQA(nn.Module):
 
             if self.q_aux_task:
                 output['pred_qlabels'] = self.W_q(global_feat)
+
+        # predict answers (if required)
+        if question_vectors is not None:
+            if mode == 'train':
+                pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
+            elif beam_search_k:
+                pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
+            else:
+                pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)
+            output['pred_answers'] = pred_answers
 
         return output

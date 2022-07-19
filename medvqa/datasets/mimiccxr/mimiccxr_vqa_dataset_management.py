@@ -18,12 +18,13 @@ from medvqa.datasets.image_processing import (
 )
 from medvqa.utils.files import (
     get_cached_json_file,
+    get_file_path_with_hashing_if_too_long,
     load_pickle,
     save_to_pickle,
     MAX_FILENAME_LENGTH,
 )
 from medvqa.utils.hashing import hash_string
-from medvqa.utils.constants import ReportEvalMode
+from medvqa.utils.constants import CHEXPERT_LABELS, ReportEvalMode
 from medvqa.datasets.preprocessing import (
     get_average_question_positions,
     get_question_frequencies,
@@ -78,7 +79,8 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
     return final_path
 
 def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, report_eval_mode=None,
-                                    pretrained_checkpoint_path=None, n_questions_per_report=None):
+                                    pretrained_checkpoint_path=None, n_questions_per_report=None,
+                                    qclass_threshold=None):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
@@ -86,20 +88,24 @@ def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, rep
     if report_eval_mode is not None:        
         strings.append(f'report_eval_mode={report_eval_mode}')
         
-        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION.value or\
-           report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR.value:
+        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+           report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
+           report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
             assert pretrained_checkpoint_path is not None
             strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
         
-        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION.value or\
-           report_eval_mode == ReportEvalMode.MOST_POPULAR.value:
+        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+           report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
+           report_eval_mode == ReportEvalMode.MOST_POPULAR:
             assert n_questions_per_report is not None
             strings.append(f'n_questions_per_report={n_questions_per_report}')
 
-    file_path = os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_test_data__({";".join(strings)}).pkl')
-    if len(file_path) > MAX_FILENAME_LENGTH:
-        h = hash_string(file_path)
-        file_path = os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_test_data__(hash={h[0]},{h[1]}).pkl')
+        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+           report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+           assert qclass_threshold is not None
+           strings.append(f'qclass_threshold={qclass_threshold}')
+
+    file_path = get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_test_data__', strings)
     return file_path
 
 def _get_orientation_id(orientation):
@@ -109,19 +115,28 @@ def _get_orientation_id(orientation):
         return 0
 
 def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
-        n_questions_per_report=None, qa_adapted_reports_filename=None, image_transform=None,
-        image_local_feat_size=None, n_questions=None, pretrained_weights=None,
+        n_questions_per_report=None, qclass_threshold=None,
+        qa_adapted_reports_filename=None, image_transform=None,
+        image_local_feat_size=None, n_questions_aux_task=None, pretrained_weights=None,
         pretrained_checkpoint_path=None, train_split_data=None,
+        chexpert_one_hot_offset=None,
         batch_size=None):
 
+    # Filepath
     strings = [
         f'split={split_name}',
         f'report_eval_mode={report_eval_mode}',
         f'dataset={qa_adapted_reports_filename}',
     ]
     if n_questions_per_report is not None:
-        strings.append(f'n_questions_per_report={n_questions_per_report}')
-    file_path = os.path.join(MIMICCXR_CACHE_DIR, f'questions_per_report({";".join(strings)}).pkl')
+        strings.append(f'n_questions_per_report={n_questions_per_report}')        
+    if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+            report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+        assert pretrained_checkpoint_path is not None
+        assert qclass_threshold is not None
+        strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
+        strings.append(f'qclass_threshold={qclass_threshold}')
+    file_path = get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'questions_per_report', strings)
 
     data = load_pickle(file_path)
     if data is not None:
@@ -132,28 +147,41 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
 
     data = {}
 
-    if report_eval_mode == ReportEvalMode.GROUND_TRUTH.value:        
+    if report_eval_mode == ReportEvalMode.GROUND_TRUTH:
         for ri in split_data['report_ids']:
             data[ri] = mimiccxr_qa_reports['reports'][ri]['question_ids']
 
-    elif report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION.value:
-        assert n_questions_per_report != None
+    elif report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
+         report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+        assert n_questions_per_report is not None
+        assert qclass_threshold is not None
+        assert chexpert_one_hot_offset is not None
         test_report_ids = set(split_data['report_ids'])
         train_report_ids = [i for i in range(len(mimiccxr_qa_reports['reports'])) if i not in test_report_ids]
         question_scores = get_average_question_positions(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename, train_report_ids)
         questions = classify_and_rank_questions(split_data['image_paths'],
                                     image_transform,
                                     image_local_feat_size,
-                                    n_questions,
+                                    n_questions_aux_task,
                                     pretrained_weights,
                                     batch_size,
-                                    n_questions_per_report)
+                                    n_questions_per_report,
+                                    qclass_threshold)
         assert len(questions) == len(split_data['report_ids'])
         question_scorer = lambda j : question_scores[j]
-        for i, ri in enumerate(split_data['report_ids']):
-            data[ri] = sorted(questions[i], key=question_scorer)
 
-    elif report_eval_mode == ReportEvalMode.MOST_POPULAR.value:
+        if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION:            
+            for i, ri in enumerate(split_data['report_ids']):            
+                classified_question_ids = sorted(questions[i], key=question_scorer)
+                data[ri] = classified_question_ids
+        else: # hybrid method
+            chexpert_question_ids = [chexpert_one_hot_offset + x for x in range(1, len(CHEXPERT_LABELS))]
+            for i, ri in enumerate(split_data['report_ids']):
+                classified_question_ids = sorted(questions[i], key=question_scorer)
+                assert all(x not in chexpert_question_ids for x in classified_question_ids)
+                data[ri] = chexpert_question_ids + classified_question_ids        
+
+    elif report_eval_mode == ReportEvalMode.MOST_POPULAR:
         assert n_questions_per_report != None
         test_report_ids = set(split_data['report_ids'])
         train_report_ids = [i for i in range(len(mimiccxr_qa_reports['reports'])) if i not in test_report_ids]
@@ -165,7 +193,7 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
         for ri in split_data['report_ids']:
             data[ri] = question_ids
 
-    elif report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR.value:
+    elif report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
         assert pretrained_weights is not None
         assert pretrained_checkpoint_path is not None
         assert train_split_data is not None
@@ -182,6 +210,10 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
             assert ri != nearest_ri
             data[ri] = mimiccxr_qa_reports['reports'][nearest_ri]['question_ids']
     
+    elif report_eval_mode == ReportEvalMode.CHEXPERT_LABELS:
+        question_ids = list(range(1, len(CHEXPERT_LABELS)))
+        for ri in split_data['report_ids']:
+            data[ri] = question_ids
     else:
         assert False, f'Unknown report_eval_mode = {report_eval_mode}'
     
@@ -292,7 +324,7 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
     if self.report_eval_mode is not None:
         assert split_name == 'test', 'report_eval_mode should not only be used with the test split'
         
-        if self.report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR.value:
+        if self.report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
             train_split_data = _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict,
                                                'train', lambda split : split != 'test')
         else:
@@ -302,18 +334,27 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
                         qa_adapted_reports_filename=qa_adapted_reports_filename,
                         image_transform=self.transform,
                         image_local_feat_size=self.image_local_feat_size,
-                        n_questions=self.n_questions,
+                        n_questions_aux_task=self.n_questions_aux_task,
                         pretrained_weights=self.pretrained_weights,
                         batch_size=self.batch_size,
                         n_questions_per_report=self.n_questions_per_report,
+                        qclass_threshold=self.qclass_threshold,
                         pretrained_checkpoint_path=self.pretrained_checkpoint_path,
+                        chexpert_one_hot_offset=self.chexpert_one_hot_offset,
                         train_split_data=train_split_data)
     else:
         questions_per_report = None
     
     print('Preprocessing MIMIC-CXR vqa dataset ...')
-       
-    question_list = mimiccxr_qa_reports['questions']
+
+    # Define question_list to use
+    if self.report_eval_mode == ReportEvalMode.CHEXPERT_LABELS:
+        question_list = CHEXPERT_LABELS
+    elif self.report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+        question_list = CHEXPERT_LABELS + mimiccxr_qa_reports['questions']
+    else:
+        question_list = mimiccxr_qa_reports['questions']
+                                
     report_ids = split_data['report_ids']
     image_paths = split_data['image_paths']
     orientation_ids = split_data['orientation_ids']
@@ -351,7 +392,6 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
         for i in tqdm(range(len(report_ids))):
 
             ri = report_ids[i]
-            report = mimiccxr_qa_reports['reports'][ri]
             image_path = image_paths[i]
             orientation_id = orientation_ids[i]
             question_ids = questions_per_report[ri]
@@ -378,6 +418,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 qa_adapted_reports_filename,
                 split_kwargs,
                 tokenizer,
+                collate_batch_fn_chexpert_mode = None,
                 verbose_question = True,
                 classify_tags = False,
                 medical_tags_per_report_filename = None,
@@ -395,6 +436,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 imbalance_reduction_coef = 1,
                 allowed_questions = None,
                 one_question_per_batch = False,
+                include_chexpert_mode = False,
+                use_chexpert_mode_only = False,
+                chexpert_one_hot_offset = None,
                 debug = False):
         
         self.tokenizer = tokenizer
@@ -412,6 +456,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         preprocessing_save_path,
                         MIMICCXR_CACHE_DIR,
                         num_workers,
+                        collate_batch_fn_chexpert_mode = collate_batch_fn_chexpert_mode,
                         verbose_question = verbose_question,
                         classify_tags = classify_tags,
                         rid2tags_filename = medical_tags_per_report_filename,
@@ -429,6 +474,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         allowed_questions = allowed_questions,
                         qa_adapted_reports_filename = qa_adapted_reports_filename,
                         one_question_per_batch = one_question_per_batch,
+                        include_chexpert_mode = include_chexpert_mode,
+                        use_chexpert_mode_only = use_chexpert_mode_only,
+                        chexpert_one_hot_offset = chexpert_one_hot_offset,
                         debug = debug)
 
     def _preprocess_data(self):
@@ -455,8 +503,10 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 image_local_feat_size = None,
                 pretrained_checkpoint_path = None,
                 pretrained_weights = None,
-                n_questions = None,
-                n_questions_per_report = None,                
+                n_questions_aux_task = None,
+                n_questions_per_report = None,
+                qclass_threshold = None,
+                chexpert_one_hot_offset = None,
                 **unused_kwargs):
 
         print('report_eval_mode =', report_eval_mode)
@@ -471,18 +521,20 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.report_eval_mode = report_eval_mode
         self.transform = transform
         self.image_local_feat_size = image_local_feat_size
-        self.n_questions = n_questions
+        self.n_questions_aux_task = n_questions_aux_task
         self.pretrained_weights = pretrained_weights
         self.batch_size = batch_size
         self.n_questions_per_report = n_questions_per_report
+        self.qclass_threshold = qclass_threshold
         self.pretrained_checkpoint_path = pretrained_checkpoint_path
+        self.chexpert_one_hot_offset = chexpert_one_hot_offset
 
         if pretrained_weights is not None:
             assert pretrained_checkpoint_path is not None
         
         preprocessing_save_path = get_test_preprocessing_save_path(
                         qa_adapted_reports_filename, tokenizer, report_eval_mode,
-                        pretrained_checkpoint_path, n_questions_per_report)
+                        pretrained_checkpoint_path, n_questions_per_report, qclass_threshold)
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,

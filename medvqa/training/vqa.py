@@ -6,7 +6,7 @@ from ignite.engine import Engine
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.models.vqa.answer_decoder import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
-from medvqa.utils.constants import IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID
+from medvqa.utils.constants import CHEXPERT_TASKS, IUXRAY_DATASET_ID, IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         question_encoding = QuestionEncoding.BILSTM,
@@ -31,6 +31,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         question_criterion=None,
         # chexpert dataset
         chexpert_aux_criterion=None,
+        chexpert_mode=None,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -45,6 +46,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
     if not include_answer:
         assert max_answer_length is not None
+
+    use_chexpert_vqa = chexpert_mode == CHEXPERT_TASKS.VQA
     
     def step_fn__mimiccxr_iuxray(batch):
 
@@ -57,6 +60,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             question_lengths = batch['ql']
         if include_answer:
             answers = batch['a'].to(device)
+
+        is_mimiccxr = (dataset_id == MIMICCXR_DATASET_ID or dataset_id == MIMICCXR_DATASET_ID__CHEXPERT_MODE)
         
         if classify_tags:
             tags = batch['tags'].to(device)
@@ -93,7 +98,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     model_kwargs['max_answer_length'] = max_answer_length
 
             if classify_orientation:
-                if dataset_id == MIMICCXR_DATASET_ID:
+                if is_mimiccxr:
                     model_kwargs['mimiccxr_foward'] = True
                 else:
                     model_kwargs['iuxray_foward'] = True
@@ -114,7 +119,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if classify_tags:
                     pred_tags_logits = model_output['pred_tags']            
                 if classify_orientation:
-                    if dataset_id == MIMICCXR_DATASET_ID:
+                    if is_mimiccxr:
                         pred_orientation_logits = model_output['mimiccxr_pred_orientation']
                     else:
                         pred_orientation_logits = model_output['iuxray_pred_orientation']
@@ -132,12 +137,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         losses.append(question_loss)
                     if include_answer:
                         answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                        losses.append(answer_loss)                    
+                        losses.append(answer_loss)
                     if classify_tags:
                         tags_loss = tags_criterion(pred_tags_logits, tags.float())
                         losses.append(tags_loss)
                     if classify_orientation:
-                        if dataset_id == MIMICCXR_DATASET_ID:
+                        if is_mimiccxr:
                             orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
                         else:
                             orientation_loss = iuxray_orientation_criterion(pred_orientation_logits, orientation)
@@ -173,7 +178,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             'idxs': idxs,
             'pred_answers': tokenizer.clean_batch(pred_answers.detach()),
             'dataset_id': dataset_id,
-        }            
+        }
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
         if verbose_question:
@@ -220,6 +225,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         orientations = batch['o'].to(device)
         genders = batch['g'].to(device)
         chexpert = batch['l'].to(device)
+        if use_chexpert_vqa:
+            questions = batch['q'].to(device)
+            answers = batch['a'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -230,6 +238,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 'images': images,
                 'chexpert_forward': True,
             }
+            if use_chexpert_vqa:
+                model_kwargs['questions'] = questions
+                model_kwargs['answers'] = answers
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -240,6 +251,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 pred_chexpert_probs = model_output['pred_chexpert_probs']
                 pred_orientation_logits = model_output['pred_orientation']
                 pred_gender_logits = model_output['pred_gender']
+                if use_chexpert_vqa:
+                    if training:
+                        pred_answer_logits = model_output['pred_answers']
+                    else:
+                        pred_answers = model_output['pred_answers']
 
                 if training:                    
                     # Compute losses
@@ -247,6 +263,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     orientation_loss = chexpert_aux_criterion(pred_orientation_logits, orientations)
                     gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)                    
                     batch_loss = chexpert_loss + orientation_loss + gender_loss
+                    if use_chexpert_vqa:
+                        answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        batch_loss += answer_loss
 
                     # Backward pass + optimizer step if training
                     assert batch_loss is not None
@@ -259,34 +278,46 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         
         output = {
             'idxs': idxs,
+            'dataset_id': dataset_id,
         }            
         if training:
             output['loss'] = batch_loss.detach()
             
+        # chexpert labels
         output['chexpert'] = chexpert.detach().cpu()
         output['pred_chexpert'] = (pred_chexpert_logits.detach() > 0).cpu()
         output['pred_chexpert_probs'] = pred_chexpert_probs.detach().cpu()
         if training:
             output['chexpert_loss'] = chexpert_loss.detach()
 
+        # orientation
         output['orientation'] = orientations.detach()
-        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
-        output['dataset_id'] = dataset_id
+        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()        
         if training:
             output['orientation_loss'] = orientation_loss.detach()
 
+        # gender
         output['gender'] = genders.detach()
-        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
-        output['dataset_id'] = dataset_id
+        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()        
         if training:
             output['gender_loss'] = gender_loss.detach()
 
+        # answers (vqa)
+        if use_chexpert_vqa:
+            if training:
+                pred_answers = pred_answer_logits.argmax(-1)        
+                output['answer_loss'] = answer_loss.detach()            
+            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+            output['answers'] = tokenizer.clean_batch(answers.detach())                
+
         return output
 
+    _mim_iu_datasets = [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID,
+             MIMICCXR_DATASET_ID__CHEXPERT_MODE, IUXRAY_DATASET_ID__CHEXPERT_MODE]
     def step_fn(unused_engine, batch):        
         dataset_id = batch['dataset_id']
         # print(f"step_fn(dataset_id={dataset_id})")
-        if dataset_id == MIMICCXR_DATASET_ID or dataset_id == IUXRAY_DATASET_ID:
+        if dataset_id in _mim_iu_datasets:
             return step_fn__mimiccxr_iuxray(batch)
         if dataset_id == CHEXPERT_DATASET_ID:
             return step_fn__chexpert(batch)
@@ -301,6 +332,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                use_amp=False,
                training=False,
                train_with_chexpert_dataset=False,
+               chexpert_mode=None,
                optimizer=None):
     # Criterion
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
@@ -330,6 +362,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
 
     if train_with_chexpert_dataset:
         chexpert_aux_criterion = nn.CrossEntropyLoss()
+        assert chexpert_mode is not None
     else:
         chexpert_aux_criterion = None
 
@@ -356,6 +389,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           question_criterion=question_criterion,
                           # chexpert dataset
                           chexpert_aux_criterion=chexpert_aux_criterion,
+                          chexpert_mode=chexpert_mode,
                           )
     engine = Engine(step_fn)
     return engine

@@ -33,11 +33,11 @@ def get_step_fn(model, optimizer, training, device,
         # Extract elements from batch
         idxs = batch['idx']
         images = batch['i'].to(device)
+        dataset_id = batch['dataset_id']
         
         if classify_tags:
             tags = batch['tags'].to(device)
-        if classify_orientation:
-            dataset_id = batch['dataset_id']
+        if classify_orientation:            
             orientation = batch['orientation'].to(device)
         if classify_chexpert:
             chexpert = batch['chexpert'].to(device)
@@ -111,6 +111,7 @@ def get_step_fn(model, optimizer, training, device,
         
         output = {
             'idxs': idxs,
+            'dataset_id': dataset_id,
         }            
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()        
@@ -122,7 +123,6 @@ def get_step_fn(model, optimizer, training, device,
         if classify_orientation:
             output['orientation'] = orientation.detach()
             output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
-            output['dataset_id'] = dataset_id
             if training:
                 output['orientation_loss'] = orientation_loss.detach()
         if classify_chexpert:
@@ -157,6 +157,7 @@ def get_step_fn(model, optimizer, training, device,
             model_kwargs = {
                 'images': images,
                 'chexpert_forward': True,
+                'dataset_id': dataset_id,
             }
 
             # Forward pass
@@ -198,14 +199,12 @@ def get_step_fn(model, optimizer, training, device,
             output['chexpert_loss'] = chexpert_loss.detach()
 
         output['orientation'] = orientations.detach()
-        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
-        output['dataset_id'] = dataset_id
+        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()        
         if training:
             output['orientation_loss'] = orientation_loss.detach()
 
         output['gender'] = genders.detach()
-        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
-        output['dataset_id'] = dataset_id
+        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()        
         if training:
             output['gender_loss'] = gender_loss.detach()
 

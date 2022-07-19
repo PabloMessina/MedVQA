@@ -1,5 +1,3 @@
-from enum import Enum
-
 CHEXPERT_LABELS = [
     'No Finding',
     'Enlarged Cardiomediastinum',
@@ -38,6 +36,10 @@ CHEXPERT_GENDERS = ['Female', 'Male']
 
 CHEXPERT_ORIENTATIONS = ['FrontalAP', 'Lateral', 'FrontalPA']
 
+class CHEXPERT_TASKS:
+    CLASSIFICATION = 'classification'
+    VQA = 'vqa'
+
 CHEXPERT_METRICS = [
     'chexpert_accuracy',
     'chexpert_prf1s',
@@ -59,6 +61,7 @@ class MetricNames:
     CHEXPERT_PRF1S = 'chexpert_prf1s'
     BLEU_QUESTION = 'bleu_question'
     EXACTMATCH_QUESTION = 'exactmatch_question'
+    EXACTMATCH_ANSWER = 'exactmatch_answer'
     BLEU = 'bleu'
     BLEU_1 = 'bleu-1'
     BLEU_2 = 'bleu-2'
@@ -97,6 +100,7 @@ METRIC2SHORT = {
     'chexpert_prf1s': 'chx_prf1s',
     'bleu_question': 'bq',
     'exactmatch_question': 'emq',
+    'exactmatch_answer': 'ema',
     'bleu': 'b',
     'bleu-1': 'b1',
     'bleu-2': 'b2',
@@ -133,9 +137,13 @@ METRIC2SHORT = {
 IUXRAY_DATASET_ID = 0
 MIMICCXR_DATASET_ID = 1
 CHEXPERT_DATASET_ID = 2
+IUXRAY_DATASET_ID__CHEXPERT_MODE = 3
+MIMICCXR_DATASET_ID__CHEXPERT_MODE = 4
 
-class ReportEvalMode(Enum):
+class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'
     MOST_POPULAR = 'most-popular'
     QUESTION_CLASSIFICATION = 'question-classification'
     NEAREST_NEIGHBOR = 'nearest-neighbor'
+    CHEXPERT_LABELS = 'chexpert-labels'
+    CHEXPERT_AND_QUESTION_CLASSIFICATION = 'chexpert+qclass'

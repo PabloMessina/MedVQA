@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
+from medvqa.models.common import freeze_parameters
 from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 
 class ImageQuestionClassifier(nn.Module):
@@ -56,8 +57,9 @@ class DensenetVisualModule(nn.Module):
                 classify_chexpert=False,
                 classify_questions=False,
                 n_medical_tags=None,
-                n_questions=None,
+                n_questions_aux_task=None,
                 use_chexpert_forward=False,
+                freeze_cnn=False,
                 **unused_kwargs,
         ):
         super().__init__()
@@ -75,6 +77,8 @@ class DensenetVisualModule(nn.Module):
             densenet = models.densenet121(pretrained=True)
 
         self.image_encoder = densenet.features
+
+        if freeze_cnn: freeze_parameters(self.image_encoder)
 
         # Optional auxiliary tasks        
         
@@ -102,7 +106,7 @@ class DensenetVisualModule(nn.Module):
 
         # 4) questions classification
         if classify_questions:
-            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions)
+            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions_aux_task)
             self.q_aux_task = True
         else:
             self.q_aux_task = False

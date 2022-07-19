@@ -1,6 +1,6 @@
 import torch.nn as nn
-from .dataset_aware_loss import DatasetAwareLoss
 from .wbce import WeigthedBCEByClassLoss
+from .dataset_aware_loss import DatasetAwareLoss
 
 _BINARY_MULTILABEL_LOSSES = {
     'bce': nn.BCEWithLogitsLoss,

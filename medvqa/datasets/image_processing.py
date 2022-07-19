@@ -1,4 +1,3 @@
-from cv2 import dft
 import torch
 import torchvision.transforms as T
 from torch.utils.data import Dataset, DataLoader
@@ -90,7 +89,8 @@ class ImageDataset(Dataset):
     def __getitem__(self, i):
         return {'i': self.transform(Image.open(self.images[i]).convert('RGB')) }
 
-def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size, top_k):
+def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,
+        top_k, threshold, min_num_q_per_report=5):
 
     print(f'** Ranking the top {top_k} questions per image according to image classifier:')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -106,17 +106,24 @@ def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n
     question_ids = list(range(n_questions))
     assert top_k <= n_questions
     i = 0
+    K = min(min_num_q_per_report, top_k)
     with torch.set_grad_enabled(False):
         classifier.train(False)        
         for batch in tqdm(dataloader):
             images = batch['i'].to(device)
-            logits = classifier(images)
+            logits = classifier(images)                        
             logits = logits.detach()
-            assert logits.size(1) == n_questions
-            for j in range(logits.size(0)):
-                question_ids.sort(key=lambda k:logits[j][k], reverse=True)
-                questions[i + j] = question_ids[:top_k]
-            i += logits.size(0)
+            probs = torch.sigmoid(logits)
+            assert probs.size(1) == n_questions
+            for j in range(probs.size(0)):
+                question_ids.sort(key=lambda k:probs[j][k], reverse=True)
+                # questions[i + j] =  question_ids[:top_k]
+                questions[i + j] = [qid for k, qid in enumerate(question_ids) if k  < top_k and probs[j][qid] >= threshold]
+                if len(questions[i+j]) < K:
+                    questions[i + j] =  question_ids[:K]
+                assert 0 < len(questions[i + j]) <= top_k
+            i += probs.size(0)
+    print('average num of questions per report:', sum(len(q) for q in questions) / len(questions))
 
     del classifier
     del dataset

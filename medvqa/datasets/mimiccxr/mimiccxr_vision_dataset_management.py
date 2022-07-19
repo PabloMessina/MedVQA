@@ -17,6 +17,7 @@ class MIMICCXR_VisualModuleTrainer(VM_Trainer):
                 imbalance_reduction_coef = 1,
                 validation_only = False,
                 one_question_per_batch = False,
+                question_balanced = False,
         ):
         preprocessed_data_path = os.path.join(MIMICCXR_CACHE_DIR, preprocessed_data_filename)
         super().__init__(transform, batch_size, collate_batch_fn,
@@ -32,7 +33,8 @@ class MIMICCXR_VisualModuleTrainer(VM_Trainer):
                         question_labels_filename = question_labels_filename,
                         imbalance_reduction_coef = imbalance_reduction_coef,
                         validation_only = validation_only,
-                        one_question_per_batch = one_question_per_batch)
+                        one_question_per_batch = one_question_per_batch,
+                        question_balanced = question_balanced)
 
 class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
 
