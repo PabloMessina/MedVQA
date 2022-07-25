@@ -6,6 +6,7 @@ from medvqa.utils.common import CACHE_DIR
 import os
 
 IUXRAY_DATASET_DIR = os.environ['IUXRAY_DATASET_DIR']
+IUXRAY_DATASET_AUX_DIR = os.environ['IUXRAY_DATASET_AUX_DIR']
 IUXRAY_IMAGE_INFO_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'info.json')
 IUXRAY_REPORTS_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'reports/reports.json')
 IUXRAY_REPORTS_MIN_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'reports/reports.min.json')

@@ -26,5 +26,10 @@ def get_merge_metrics_fn(train_metric_names, val_metric_names, metric_weights, w
 
     return merge_metrics_fn
 
-def get_hybrid_score_name(metric_names):
-    return '+'.join(METRIC2SHORT[m] for m in metric_names)
+def get_hybrid_score_name(*metric_names):
+    unique = set()
+    for names in metric_names:
+        assert type(names) is list
+        unique.update(names)
+    sorted_unique = sorted(list(unique))
+    return '+'.join(METRIC2SHORT[m] for m in sorted_unique)

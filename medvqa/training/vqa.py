@@ -4,13 +4,14 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
-from medvqa.models.vqa.answer_decoder import AnswerDecoding
+from medvqa.models.common import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
 from medvqa.utils.constants import CHEXPERT_TASKS, IUXRAY_DATASET_ID, IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         question_encoding = QuestionEncoding.BILSTM,
         answer_decoding = AnswerDecoding.TEACHER_FORCING,
+        shift_answer = False,
         beam_search_k = None,
         include_answer=True,
         max_answer_length=None,
@@ -60,6 +61,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             question_lengths = batch['ql']
         if include_answer:
             answers = batch['a'].to(device)
+            if shift_answer:
+                answers_start = answers[:, :-1]
+                answers_end = answers[:, 1:]
 
         is_mimiccxr = (dataset_id == MIMICCXR_DATASET_ID or dataset_id == MIMICCXR_DATASET_ID__CHEXPERT_MODE)
         
@@ -87,7 +91,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
             if training:
                 model_kwargs['mode'] = 'train'
-                model_kwargs['answers'] = answers
+                if shift_answer:
+                    model_kwargs['answers'] = answers_start
+                else:
+                    model_kwargs['answers'] = answers
             else:
                 model_kwargs['mode'] = 'eval'
                 if use_beam_search:
@@ -136,7 +143,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
                         losses.append(question_loss)
                     if include_answer:
-                        answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        # print('pred_answer_logits.shape =', pred_answer_logits.shape)
+                        # print('answers.shape =', answers.shape)
+                        # answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        if shift_answer:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                        else:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
                         losses.append(answer_loss)
                     if classify_tags:
                         tags_loss = tags_criterion(pred_tags_logits, tags.float())
@@ -228,6 +241,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if use_chexpert_vqa:
             questions = batch['q'].to(device)
             answers = batch['a'].to(device)
+            if shift_answer:
+                answers_start = answers[:, :-1]
+                answers_end = answers[:, 1:]
         
         with torch.set_grad_enabled(training):
 
@@ -237,10 +253,24 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             model_kwargs = {
                 'images': images,
                 'chexpert_forward': True,
+                'device': device,
             }
             if use_chexpert_vqa:
                 model_kwargs['questions'] = questions
-                model_kwargs['answers'] = answers
+                if training:
+                    model_kwargs['mode'] = 'train'
+                    if shift_answer:
+                        model_kwargs['answers'] = answers_start
+                    else:
+                        model_kwargs['answers'] = answers
+                else:
+                    model_kwargs['mode'] = 'eval'
+                    if use_beam_search:
+                        model_kwargs['beam_search_k'] = beam_search_k
+                    if include_answer:
+                        model_kwargs['max_answer_length'] = answers.size(1)
+                    else:                    
+                        model_kwargs['max_answer_length'] = max_answer_length
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -264,7 +294,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)                    
                     batch_loss = chexpert_loss + orientation_loss + gender_loss
                     if use_chexpert_vqa:
-                        answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        # answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        if shift_answer:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                        else:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
                         batch_loss += answer_loss
 
                     # Backward pass + optimizer step if training
@@ -328,12 +362,16 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert, classify_questions,
                question_encoding, answer_decoding, device,
                binary_loss_name='bce',
+               shift_answer=False,
                beam_search_k=None, include_answer=True, max_answer_length=None,
                use_amp=False,
                training=False,
                train_with_chexpert_dataset=False,
                chexpert_mode=None,
                optimizer=None):
+    
+    print(f'get_engine(): shift_answer={shift_answer}')
+    
     # Criterion
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
     
@@ -374,6 +412,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           question_encoding=question_encoding,
                           answer_decoding=answer_decoding,
                           beam_search_k=beam_search_k,
+                          shift_answer=shift_answer,
                           # tags auxiliary task
                           classify_tags=classify_tags,
                           tags_criterion=tags_criterion,

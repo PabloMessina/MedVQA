@@ -2,6 +2,7 @@ from ignite.handlers import Checkpoint, DiskSaver
 from ignite.engine import Events
 from torch import Tensor
 import operator
+from medvqa.losses.schedulers import LRSchedulerNames
 
 from medvqa.utils.constants import METRIC2SHORT, MetricNames
 from medvqa.utils.metrics import average_ignoring_nones
@@ -93,11 +94,15 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
     
     return handler
 
-def get_lr_sch_handler(trainer, validator, lr_scheduler, merge_metrics_fn):
+def get_lr_sch_handler(lr_scheduler, lr_scheduler_name, score_fn=None):
 
-    def handler():
-        value = merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
-        lr_scheduler.step(value)
+    if lr_scheduler_name == LRSchedulerNames.ReduceLROnPlateau:
+        assert score_fn is not None
+        def handler():
+            lr_scheduler.step(score_fn())
+    else:
+        def handler():
+            lr_scheduler.step()
 
     return handler
 

@@ -119,7 +119,14 @@ class Tokenizer:
         clean = []
         for id in sentence:
             if not isinstance(id, int):
-                id = id.item()
+                try:
+                    id = id.item()
+                except ValueError:
+                    print('sentence.shape=',sentence.shape)
+                    print('sentence=',sentence)
+                    print('id=',id)
+                    print('type(id)=',type(id))
+                    raise
             if id == self.token2id[self.END_TOKEN]:
                 break
             if id >= 3 and (len(clean) == 0 or clean[-1] != id):
@@ -133,7 +140,12 @@ class Tokenizer:
         return self.ids2string(ids)
     
     def clean_batch(self, batch):
-        clean_sentences = [None] * len(batch)
-        for i in range(len(batch)):
-            clean_sentences[i] = self.clean_sentence(batch[i])
+        try:
+            clean_sentences = [None] * len(batch)
+            for i in range(len(batch)):
+                clean_sentences[i] = self.clean_sentence(batch[i])
+        except ValueError:
+            print('batch.shape=',batch.shape)
+            print('batch=',batch)
+            raise
         return clean_sentences

@@ -4,10 +4,7 @@ import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 
-from medvqa.datasets.chexpert import (
-    CHEXPERT_DATASET_DIR,
-    CHEXPERT_TRAIN_VAL_CSV_PATH,
-)
+from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CSV_PATH
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.datasets.vqa import CompositeInfiniteDataset
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1

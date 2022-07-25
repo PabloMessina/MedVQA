@@ -10,12 +10,7 @@ from medvqa.models.nlp.stacked_lstm_cell import StackedLSTMCell
 #     x = x.expand(expanded_shape).reshape(final_shape)
 #     return x
 
-class AnswerDecoding:
-    TEACHER_FORCING = 'teacher-forcing'
-    GREEDY_SEARCH = 'greedy-search'
-    BEAM_SEARCH = 'beam-search'
-
-class AnswerDecoder(nn.Module):
+class LSTMAnswerDecoder(nn.Module):
   
     def __init__(
         self,
@@ -156,7 +151,7 @@ class AnswerDecoder(nn.Module):
             # assert y.shape == (batch_size, self.embed_size)
 
         output = torch.stack(output, 1)
-        # assert output.shape == (batch_size, max_answer_length, self.vocab_size)
+        assert output.shape == (batch_size, max_answer_length)
         return output
 
     def beam_search_decoding(

@@ -4,9 +4,10 @@ import torchvision.models as models
 from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
 from medvqa.models.nlp.question_decoder import QuestionDecoder
-from medvqa.models.vqa.answer_decoder import AnswerDecoder
+from medvqa.models.vqa.lstm_answer_decoder import LSTMAnswerDecoder
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
+from medvqa.models.vqa.transformer_answer_decoder import TransformerAnswerDecoder
 from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CHEXPERT_GENDERS,
@@ -18,12 +19,20 @@ class QuestionEncoding:
     BILSTM = 'bilstm'
     ONE_HOT = 'one-hot'
 
+class AnswerDecoding:
+    LSTM = 'lstm'
+    TRANSFORMER  = 'transformer'
+
 class OpenEndedVQA(nn.Module):
 
     def __init__(self, vocab_size, start_idx, embed_size, answer_hidden_size,
-                 n_lstm_layers,
                  question_vec_size, image_local_feat_size, dropout_prob, device,                 
                  question_encoding = QuestionEncoding.BILSTM,
+                 answer_decoding =  AnswerDecoding.LSTM,
+                 n_lstm_layers=None,
+                 transf_dec_nhead=None,
+                 transf_dec_dim_forward=None,
+                 transf_dec_num_layers=None,
                  question_hidden_size = None,
                  densenet_pretrained_weights_path=None,
                  freeze_cnn=False,
@@ -38,7 +47,8 @@ class OpenEndedVQA(nn.Module):
                  chexpert_mode=None,
                  **unused_kwargs,
                  ):
-        print(f'OpenEndedVQA(): n_questions = {n_questions}, n_questions_aux_task = {n_questions_aux_task}')
+        print(f'OpenEndedVQA(): n_questions = {n_questions}, n_questions_aux_task = {n_questions_aux_task}'
+              f' question_encoding = {question_encoding}, answer_decoding = {answer_decoding}')
         super().__init__()
 
         self.embedding_table = nn.Embedding(
@@ -65,6 +75,7 @@ class OpenEndedVQA(nn.Module):
         if freeze_cnn: freeze_parameters(self.image_encoder)
 
         self.question_encoding = question_encoding
+        self.answer_decoding = answer_decoding
         self.chexpert_mode = chexpert_mode
         
         # Question encoding
@@ -91,18 +102,33 @@ class OpenEndedVQA(nn.Module):
             assert False, f'Unknown question encoding strategy {question_encoding}'
           
         # Answer decoding
-        self.answer_decoder = AnswerDecoder(self.embedding_table,
-                                            image_local_feat_size,
-                                            question_vec_size,
-                                            embed_size,
-                                            answer_hidden_size,
-                                            n_lstm_layers,
-                                            start_idx,
-                                            vocab_size,
-                                            dropout_prob,
-                                            eos_idx=eos_idx,
-                                            padding_idx=padding_idx)
-        
+        if answer_decoding == AnswerDecoding.LSTM:
+            self.answer_decoder = LSTMAnswerDecoder(self.embedding_table,
+                                                    image_local_feat_size,
+                                                    question_vec_size,
+                                                    embed_size,
+                                                    answer_hidden_size,
+                                                    n_lstm_layers,
+                                                    start_idx,
+                                                    vocab_size,
+                                                    dropout_prob,
+                                                    eos_idx=eos_idx,
+                                                    padding_idx=padding_idx)
+        elif answer_decoding == AnswerDecoding.TRANSFORMER:
+            self.answer_decoder = TransformerAnswerDecoder(self.embedding_table,
+                                                           embed_size,
+                                                           answer_hidden_size,
+                                                           question_vec_size,
+                                                           image_local_feat_size,
+                                                           transf_dec_nhead,
+                                                           transf_dec_dim_forward,
+                                                           transf_dec_num_layers,
+                                                           start_idx,
+                                                           vocab_size,
+                                                           dropout_prob)
+        else:
+            assert False, f'Unknown answer decoding modul {answer_decoding}'
+            
         # Optional auxiliary tasks        
         
         # 1) medical tags prediction
@@ -143,7 +169,7 @@ class OpenEndedVQA(nn.Module):
         strings = [
             'dense121',
             'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot',
-            'lstm',
+            'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf',
         ]
         name = f'oevqa({"+".join(strings)})'
         return name
@@ -217,12 +243,18 @@ class OpenEndedVQA(nn.Module):
 
         # predict answers (if required)
         if question_vectors is not None:
-            if mode == 'train':
-                pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
-            elif beam_search_k:
-                pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
-            else:
-                pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)
+            if self.answer_decoding == AnswerDecoding.LSTM: # LSTM-based decoding            
+                if mode == 'train':
+                    pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
+                elif beam_search_k:
+                    pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
+                else:
+                    pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)                
+            else: # Transformr-based decoding
+                if mode == 'train':
+                    pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers, device)
+                else:
+                    pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device)
             output['pred_answers'] = pred_answers
 
         return output

@@ -498,7 +498,7 @@ def train_model(
     if save: # only if we want to save checkpoints to disk
         checkpoint_handler = get_checkpoint_handler(model_wrapper, checkpoint_folder_path, trainer,
                                                     epoch_offset=model_wrapper.get_epoch(),
-                                                    score_name=get_hybrid_score_name(set(train_metrics_to_merge + val_metrics_to_merge)),
+                                                    score_name=get_hybrid_score_name(train_metrics_to_merge, val_metrics_to_merge),
                                                     score_fn=score_fn)
 
     # Logging

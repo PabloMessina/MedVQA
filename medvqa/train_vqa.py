@@ -2,13 +2,13 @@ import  os
 import argparse
 
 import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chexpert.chexpert_dataset_management import Chexpert_VQA_Trainer, Chexpert_VisualModuleTrainer
 from medvqa.losses.optimizers import create_optimizer
-from medvqa.models.vqa.answer_decoder import AnswerDecoding
+from medvqa.losses.schedulers import create_lr_scheduler
+from medvqa.models.common import AnswerDecoding
 
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.training.utils import append_metric_name
@@ -95,16 +95,25 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
     parser.add_argument('--vocab-min-freq', type=int, default=5,
                         help='Min frequency of tokens in vocabulary')
-    parser.add_argument('--embed-size', type=int, default=128,
+    parser.add_argument('--embed-size', type=int, default=256,
                         help='Size of word embeddings')
     parser.add_argument('--question-encoding', type=str, default='bilstm',
                         help='Method used to encode the question (bilstm, one-hot)')
+    parser.add_argument('--answer-decoding', type=str, default='lstm',
+                        help='Method used to decode the answer (lstm, transformer)')
     parser.add_argument('--question-hidden-size', type=int, default=128,
                         help='Size of question hidden state vectors')
-    parser.add_argument('--answer-hidden-size', type=int, default=128,
+    parser.add_argument('--answer-hidden-size', type=int, default=256,
                         help='Size of answer hidden state vectors')
+    
+    # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
                         help='Number of LSTM layers to use in the answer decoder')
+    # Transformer decoder
+    parser.add_argument('--transf-dec-nhead', type=int, default=2)
+    parser.add_argument('--transf-dec-dim-forward', type=int, default=256)
+    parser.add_argument('--transf-dec-num-layers', type=int, default=2)
+    
     parser.add_argument('--question-vec-size', type=int, default=128,
                         help='Size of vector that encodes the question')
     parser.add_argument('--image-local-feat-size', type=int, default=1024,
@@ -114,12 +123,14 @@ def parse_args(args=None):
     parser.add_argument('--densenet-pretrained-weights-path', type=str, default='',
                         help='Path to densenet 121 pretrained weights')
     parser.add_argument('--optimizer-name', type=str, default='adam')
+    
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate')
-    parser.add_argument('--lr-decay', type=float, default=0.76,
-                        help='Learning rate decay')
-    parser.add_argument('--lr-decay-patience', type=int, default=2,
-                        help='Learning rate decay patience')
+    parser.add_argument('--scheduler', type=str, default='reduce-lr-on-plateau')
+    parser.add_argument('--lr-decay', type=float, default=0.76, help='Learning rate decay')
+    parser.add_argument('--lr-decay-patience', type=int, default=2, help='Learning rate decay patience')
+    parser.add_argument('--warmup-and-decay-args', type=str, default=None)
+    
     parser.add_argument('--n-val-examples-per-question', type=int, default=10,
                         help='Number of validation examples per question')
     parser.add_argument('--min-train-examples-per-question', type=int, default=100,
@@ -280,7 +291,6 @@ def train_model(
     assert train_iuxray or train_mimiccxr
     question_encoding = model_kwargs.get('question_encoding', QuestionEncoding.BILSTM)
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT
-    freeze_cnn = model_kwargs['freeze_cnn']    
 
     # auxiliary task: medical tags prediction
     classify_tags = auxiliary_tasks_kwargs['classify_tags']
@@ -362,9 +372,8 @@ def train_model(
     optimizer = create_optimizer(params=model.parameters(), **optimizer_kwargs)
 
     # Learning rate scheduler
-    count_print('Defining ReduceLROnPlateau scheduler ...')
-    lr_scheduler = ReduceLROnPlateau(optimizer, mode='max', verbose=True,
-                                     **lr_scheduler_kwargs)
+    count_print('Defining scheduler ...')
+    lr_scheduler = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')    
@@ -372,6 +381,7 @@ def train_model(
                          classify_questions, question_encoding, AnswerDecoding.TEACHER_FORCING,
                          device, binary_loss_name=training_kwargs['binary_loss_name'],
                          use_amp=use_amp, training=True,
+                         shift_answer=(model_kwargs['answer_decoding'] == 'transformer'),
                          train_with_chexpert_dataset=train_chexpert, chexpert_mode=chexpert_mode,
                          optimizer=optimizer)
     validator = get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert,
@@ -626,8 +636,10 @@ def train_model(
     timer = Timer()
     timer.attach(trainer, start=Events.EPOCH_STARTED)
     timer.attach(validator, start=Events.EPOCH_STARTED)
-    
-    # Learning rate scheduler
+
+    # Learning rate scheduler handler
+    count_print('Defining learning rate scheduler handler ...')
+
     train_metrics_to_merge = [MetricNames.CIDER_D, MetricNames.WMEDCOMP]
     val_metrics_to_merge = [MetricNames.CIDER_D, MetricNames.WMEDCOMP]
     if verbose_question:
@@ -647,9 +659,10 @@ def train_model(
     if _use_exactmatch_answer:
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.EXACTMATCH_ANSWER)    
     
-    merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.3, 0.7)
+    merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.3, 0.7)    
+    score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
 
-    lr_sch_handler = get_lr_sch_handler(trainer, validator, lr_scheduler, merge_metrics_fn)
+    lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
 
     # Checkpoint saving
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
@@ -658,25 +671,8 @@ def train_model(
     
     if checkpoint_folder_path is None: # first time
         if save: # only if we want to save checkpoints to disk            
-            model_args = [
-                'densenet121',
-                model_kwargs["embed_size"],
-                model_kwargs["question_hidden_size"] if verbose_question else None,
-                model_kwargs["answer_hidden_size"],
-                model_kwargs["n_lstm_layers"],
-                model_kwargs["question_vec_size"],
-                model_kwargs["image_local_feat_size"],
-                model_kwargs["dropout_prob"],
-                f'qenc={question_encoding}',
-            ]
-            if pretrained_checkpoint_folder_path is not None:
-                model_args.append('pretr')
-            if freeze_cnn:
-                model_args.append('frozen')
-            model_string = ','.join(map(str, model_args))
             checkpoint_folder_path = get_checkpoint_folder_path('vqa', merged_dataset_name, model.name,
                 # f'voc-minf={vocab_min_freq}',
-                f'model-args=({model_string})',
                 f'cnn-pretr={int(bool(model_kwargs["densenet_pretrained_weights_path"]))}',
                 f'dws={",".join(map(str, _train_weights))}' \
                     if len(_train_weights) > 1 else None,
@@ -711,16 +707,16 @@ def train_model(
         count_print('Loading model from checkpoint ...')
         print('checkpoint_path =', checkpoint_path)
         model_wrapper.load_checkpoint(checkpoint_path, device, model_only=override_lr)
-    
-    score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
 
     if save: # only if we want to save checkpoints to disk
         checkpoint_handler = get_checkpoint_handler(model_wrapper, checkpoint_folder_path, trainer,
                                                     epoch_offset=model_wrapper.get_epoch(),
-                                                    score_name=get_hybrid_score_name(set(train_metrics_to_merge + val_metrics_to_merge)),
+                                                    score_name=get_hybrid_score_name(train_metrics_to_merge, val_metrics_to_merge),
                                                     score_fn=score_fn)
 
     # Logging
+    count_print('Defining log_metrics_handler ...')
+    
     metrics_to_print=['loss', MetricNames.ANSWER_LOSS, MetricNames.CIDER_D, MetricNames.WMEDCOMP]
     if verbose_question:
         metrics_to_print.append(MetricNames.QUESTION_LOSS)
@@ -756,7 +752,7 @@ def train_model(
     
     # Attach handlers    
     trainer.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
-    trainer.add_event_handler(Events.EPOCH_STARTED, lambda : print(f'(1) Training stage (lr = {lr_scheduler.optimizer.param_groups[0]["lr"]:.6f}) ...'))
+    trainer.add_event_handler(Events.EPOCH_STARTED, lambda : print(f'(1) Training stage (lr = {optimizer.param_groups[0]["lr"]:.6f}) ...'))
     trainer.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     trainer.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
     trainer.add_event_handler(Events.EPOCH_COMPLETED, lambda : validator.run(val_dataloader,
@@ -784,9 +780,13 @@ def train_from_scratch(
     freeze_cnn,
     embed_size,
     question_encoding,
+    answer_decoding,
     question_hidden_size,
     answer_hidden_size,
     n_lstm_layers,
+    transf_dec_nhead,
+    transf_dec_dim_forward,
+    transf_dec_num_layers,
     question_vec_size,
     image_local_feat_size,
     dropout_prob,
@@ -796,8 +796,10 @@ def train_from_scratch(
     optimizer_name,
     lr,
     # lr_scheduler's args
+    scheduler,
     lr_decay,
     lr_decay_patience,
+    warmup_and_decay_args,
     # Dataset args
     n_val_examples_per_question,
     min_train_examples_per_question,
@@ -874,9 +876,9 @@ def train_from_scratch(
         freeze_cnn = freeze_cnn,
         embed_size = embed_size,
         question_encoding = question_encoding,
+        answer_decoding = answer_decoding,
         question_hidden_size = question_hidden_size,
         answer_hidden_size = answer_hidden_size,
-        n_lstm_layers = n_lstm_layers,
         question_vec_size = question_vec_size,
         image_local_feat_size = image_local_feat_size,
         dropout_prob = dropout_prob,
@@ -885,6 +887,12 @@ def train_from_scratch(
             if pretrained_checkpoint_folder_path is not None else None,        
         chexpert_mode = chexpert_mode,
         n_questions=n_q_total,
+        # LSTM decoder
+        n_lstm_layers = n_lstm_layers,
+        # Transformer decoder
+        transf_dec_nhead = transf_dec_nhead,
+        transf_dec_dim_forward = transf_dec_dim_forward,
+        transf_dec_num_layers = transf_dec_num_layers,
         # aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
@@ -898,8 +906,10 @@ def train_from_scratch(
         lr = lr,
     )
     lr_scheduler_kwargs = dict(
+        name = scheduler,
         factor = lr_decay,
         patience = lr_decay_patience,
+        warmup_and_decay_args = warmup_and_decay_args,
     )
     if balanced_dataloading:
         assert balanced_split
@@ -1012,9 +1022,12 @@ def train_from_scratch(
 
 def resume_training(
     checkpoint_folder,
+    scheduler,
+    optimizer_name,
     lr,
     lr_decay,
     lr_decay_patience,
+    warmup_and_decay_args,
     batch_size,
     num_workers,
     one_question_per_batch,
@@ -1044,11 +1057,14 @@ def resume_training(
 
     if override_lr:
         optimizer_kwargs = dict(
+            name = optimizer_name,
             lr = lr,
         )
         lr_scheduler_kwargs = dict(
+            name = scheduler,
             factor = lr_decay,
             patience = lr_decay_patience,
+            warmup_and_decay_args = warmup_and_decay_args,
         )
 
     return train_model(tokenizer_kwargs,

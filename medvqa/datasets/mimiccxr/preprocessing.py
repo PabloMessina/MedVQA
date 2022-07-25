@@ -1,7 +1,7 @@
 import re
 import os
 from pathlib import Path
-from medvqa.datasets.mimiccxr import MIMICCXR_DATASET_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_DATASET_DIR, MIMICCXR_JPG_IMAGES_SMALL_DIR
 
 _re_header = re.compile(r'[A-Z]+( +[A-Z]+)*?:')
 
@@ -38,4 +38,9 @@ def extract_findings_and_impression(report_path, debug=False):
 def report_paths_generator():
     for x in range(10, 20):
         for filepath in Path(os.path.join(MIMICCXR_DATASET_DIR, f'files/p{x}/')).rglob("s*.txt"):
+            yield filepath
+
+def image_paths_generator():
+    for x in range(10, 20):
+        for filepath in Path(os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, f'p{x}/')).rglob("*.jpg"):
             yield filepath

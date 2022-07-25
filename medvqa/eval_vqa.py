@@ -6,7 +6,7 @@ import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-from medvqa.models.vqa.answer_decoder import AnswerDecoding
+from medvqa.models.common import AnswerDecoding
 
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.utils.constants import (
