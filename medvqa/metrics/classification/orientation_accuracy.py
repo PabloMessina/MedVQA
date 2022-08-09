@@ -2,13 +2,13 @@ from ignite.exceptions import NotComputableError
 from ignite.engine import Events
 
 from medvqa.utils.constants import MIMICCXR_DATASET_ID
-# import numbers
 
 class DatasetAwareOrientationAccuracy:
 
-    def __init__(self, record_scores=False):
+    def __init__(self, allowed_dataset_ids, record_scores=False):
         self._acc_score = 0
         self._count = 0
+        self.allowed_dataset_ids = allowed_dataset_ids
         self.record_scores = record_scores
         if record_scores:
             self._scores = []
@@ -58,10 +58,11 @@ class DatasetAwareOrientationAccuracy:
 
         def iteration_completed_handler(engine):
             output = engine.state.output
-            pred_orientation = output['pred_orientation']
-            orientation = output['orientation']
             dataset_id = output['dataset_id'] # make sure your step_fn returns this
-            self.update(pred_orientation, orientation, dataset_id)
+            if dataset_id in self.allowed_dataset_ids:
+                pred_orientation = output['pred_orientation']
+                orientation = output['orientation']
+                self.update(pred_orientation, orientation, dataset_id)
 
         def epoch_completed_handler(engine):
             engine.state.metrics[metric_alias] = self.compute()

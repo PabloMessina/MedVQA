@@ -2,20 +2,13 @@ import torch
 import torch.nn as nn
 from medvqa.models.nlp.stacked_lstm_cell import StackedLSTMCell
 
-# def _expand_tensor_for_beamsearch(x, k=3):
-#     x = x.unsqueeze(1)
-#     expanded_shape = list(x.shape)
-#     expanded_shape[1] = k
-#     final_shape = (-1, *expanded_shape[2:])
-#     x = x.expand(expanded_shape).reshape(final_shape)
-#     return x
-
 class LSTMAnswerDecoder(nn.Module):
   
     def __init__(
         self,
         embedding_table,
         image_local_feat_size,
+        image_global_feat_size,
         question_vec_size,
         embed_size,
         hidden_size,
@@ -25,18 +18,21 @@ class LSTMAnswerDecoder(nn.Module):
         dropout_prob,
         eos_idx=None,
         padding_idx=None,
+        use_local_features=True,
     ):
         super().__init__()
         self.embedding_table = embedding_table
         self.image_local_feat_size = image_local_feat_size
+        self.image_global_feat_size = image_global_feat_size
         self.question_vec_size = question_vec_size
         self.embed_size = embed_size
-        self.hidden_size = hidden_size    
+        self.hidden_size = hidden_size
+        self.use_local_features = use_local_features
         self.register_buffer('start_idx', torch.tensor(start_idx))
         if eos_idx is not None: self.eos_idx = eos_idx
         if padding_idx is not None: self.padding_idx = padding_idx
         self.vocab_size = vocab_size
-        self.W_g2o = nn.Linear(image_local_feat_size * 2, hidden_size)
+        self.W_g2o = nn.Linear(image_global_feat_size, hidden_size)
         self.W_h = nn.Linear(question_vec_size, hidden_size, bias=False)
         self.W_c = nn.Linear(question_vec_size, hidden_size, bias=False)
         self.lstm_cell = nn.LSTMCell(input_size=embed_size + hidden_size,
@@ -45,8 +41,11 @@ class LSTMAnswerDecoder(nn.Module):
         self.n_lstm_layers = n_lstm_layers
         if n_lstm_layers > 1:
             self.stacked_lstm_cell = StackedLSTMCell(hidden_size, hidden_size, n_lstm_layers-1)
-        self.W_attn = nn.Linear(image_local_feat_size, hidden_size, bias=False)
-        self.W_u = nn.Linear(image_local_feat_size + hidden_size, hidden_size)
+        if use_local_features:
+            self.W_attn = nn.Linear(image_local_feat_size, hidden_size, bias=False)
+            self.W_u = nn.Linear(image_local_feat_size + hidden_size, hidden_size)
+        else:
+            self.W_u = nn.Linear(image_global_feat_size + hidden_size, hidden_size)
         self.dropout = nn.Dropout(dropout_prob)
         self.W_vocab = nn.Linear(hidden_size, vocab_size)
 
@@ -86,10 +85,15 @@ class LSTMAnswerDecoder(nn.Module):
             else:
                 h_final = h
 
-            e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
-            att = torch.softmax(e,-1)
-            a = (image_local_features * att.unsqueeze(2)).sum(1)
-            # assert a.shape == (batch_size, self.image_local_feat_size)
+            if self.use_local_features: # attention over local features
+                e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
+                att = torch.softmax(e,-1)
+                a = (image_local_features * att.unsqueeze(2)).sum(1)
+                # assert a.shape == (batch_size, self.image_local_feat_size) 
+            else: # fall back to global features
+                a = image_global_features
+                # assert a.shape == (batch_size, self.image_global_feat_size) 
+            
             u = torch.cat((a,h_final),1)
             # assert u.shape == (batch_size, self.hidden_size + self.image_local_feat_size)
             v = self.W_u(u)
@@ -136,10 +140,15 @@ class LSTMAnswerDecoder(nn.Module):
             else:
                 h_final = h
 
-            e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
-            att = torch.softmax(e,-1)
-            a = (image_local_features * att.unsqueeze(2)).sum(1)
-            # assert a.shape == (batch_size, self.image_local_feat_size)
+            if self.use_local_features: # attention over local features
+                e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
+                att = torch.softmax(e,-1)
+                a = (image_local_features * att.unsqueeze(2)).sum(1)
+                # assert a.shape == (batch_size, self.image_local_feat_size) 
+            else: # fall back to global features
+                a = image_global_features
+                # assert a.shape == (batch_size, self.image_global_feat_size) 
+
             u = torch.cat((a,h_final),1)
             # assert u.shape == (batch_size, self.hidden_size + self.image_local_feat_size)
             v = self.W_u(u)
@@ -224,10 +233,15 @@ class LSTMAnswerDecoder(nn.Module):
                 else:
                     h_final = h
 
-                e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
-                att = torch.softmax(e,-1)
-                a = (image_local_features * att.unsqueeze(2)).sum(1)
-                # assert a.shape == (batch_size, self.image_local_feat_size)
+                if self.use_local_features: # attention over local features
+                    e = (self.W_attn(image_local_features) * h_final.unsqueeze(1)).sum(-1)
+                    att = torch.softmax(e,-1)
+                    a = (image_local_features * att.unsqueeze(2)).sum(1)
+                    # assert a.shape == (batch_size, self.image_local_feat_size) 
+                else: # fall back to global features
+                    a = image_global_features
+                    # assert a.shape == (batch_size, self.image_global_feat_size)
+
                 u = torch.cat((a,h_final),1)
                 # assert u.shape == (batch_size, self.hidden_size + self.image_local_feat_size)
                 v = self.W_u(u)

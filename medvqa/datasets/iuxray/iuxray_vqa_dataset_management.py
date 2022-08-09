@@ -129,7 +129,10 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 one_question_per_batch = False,
                 include_chexpert_mode = False,
                 use_chexpert_mode_only = False,
-                chexpert_one_hot_offset = None):
+                chexpert_one_hot_offset = None,
+                include_image = True,
+                use_precomputed_visual_features = False,
+                precomputed_visual_features_path = False):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
@@ -190,7 +193,11 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         one_question_per_batch = one_question_per_batch,
                         include_chexpert_mode = include_chexpert_mode,
                         use_chexpert_mode_only = use_chexpert_mode_only,
-                        chexpert_one_hot_offset = chexpert_one_hot_offset)
+                        chexpert_one_hot_offset = chexpert_one_hot_offset,
+                        include_image = include_image,
+                        use_precomputed_visual_features = use_precomputed_visual_features,
+                        precomputed_visual_features_path = precomputed_visual_features_path,
+                        )
         
     def _preprocess_data(self):
 

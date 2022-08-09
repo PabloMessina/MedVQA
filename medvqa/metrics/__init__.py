@@ -1,4 +1,9 @@
-from medvqa.metrics.classification.multilabel_prf1 import DatasetAwareMultiLabelMacroAvgF1, DatasetAwareMultiLabelMicroAvgF1
+from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
+from medvqa.metrics.classification.multilabel_prf1 import (
+    DatasetAwareMultiLabelMacroAvgF1,
+    DatasetAwareMultiLabelMicroAvgF1,
+)
+from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
@@ -117,6 +122,11 @@ def attach_chexpert_labels_accuracy(engine, device, record_scores=False):
                                 device=device, record_scores=record_scores)
     met.attach(engine, MetricNames.CHXLABELACC)
 
+def attach_dataset_aware_chexpert_labels_accuracy(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelAccuracy(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHXLABELACC)
+
 def attach_chexpert_labels_f1score(engine, device, record_scores=False):
     met = ChexpertLabelsF1score(output_transform = _get_output_transform('pred_chexpert', 'chexpert'),
                                 device=device, record_scores=record_scores)
@@ -124,6 +134,11 @@ def attach_chexpert_labels_f1score(engine, device, record_scores=False):
 
 def attach_chexpert_labels_macroavgf1(engine, device):
     met = MultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
+    met.attach(engine, MetricNames.CHXLABELMACROAVGF1)
+
+def attach_dataset_aware_chexpert_labels_macroavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+                                           allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHXLABELMACROAVGF1)
 
 def attach_chexpert_labels_microavgf1(engine, device):
@@ -136,6 +151,13 @@ def attach_chexpert_labels_prf1(engine, device):
 
 def attach_chexpert_labels_roc_auc(engine, device):
     met = EpochMetric(compute_fn=roc_auc_fn, output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'), device=device)
+    met.attach(engine, MetricNames.CHXLABEL_ROCAUC)
+
+def attach_dataset_aware_chexpert_labels_roc_auc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=roc_auc_fn,
+                                  output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
     met.attach(engine, MetricNames.CHXLABEL_ROCAUC)
 
 def attach_question_labels_f1score(engine, device, record_scores=False):
@@ -163,6 +185,20 @@ def attach_chexpert_labels_microavgf1(engine, device):
     met = MultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
     met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
 
+def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+                                           allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+
+def attach_dataset_aware_vinbig_labels_macroavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.VINBIGMACROAVGF1)
+
+def attach_dataset_aware_vinbig_labels_microavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.VINBIGMICROAVGF1)
 
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
@@ -174,8 +210,8 @@ def attach_question_labels_prf1(engine, device):
     met = MultiLabelPRF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'), device=device)
     met.attach(engine, MetricNames.QLABELS_PRF1)
 
-def attach_dataset_aware_orientation_accuracy(engine, record_scores=False):
-    met = DatasetAwareOrientationAccuracy(record_scores=record_scores)
+def attach_dataset_aware_orientation_accuracy(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareOrientationAccuracy(allowed_dataset_ids, record_scores=record_scores)
     met.attach(engine, MetricNames.ORIENACC)
 
 def attach_dataset_aware_loss(engine, loss_name, allowed_dataset_ids):

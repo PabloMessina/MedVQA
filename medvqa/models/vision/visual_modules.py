@@ -74,7 +74,7 @@ class DensenetVisualModule(nn.Module):
                 densenet = models.densenet121(pretrained=True)
                 print("DenseNet121's pretrained weights loaded from ImageNet")
         else:
-            densenet = models.densenet121(pretrained=True)
+            densenet = models.densenet121(pretrained=False)
 
         self.image_encoder = densenet.features
 

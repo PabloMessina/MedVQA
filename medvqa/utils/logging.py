@@ -1,12 +1,15 @@
 import os
 from medvqa.utils.files import make_dirs_in_filepath
+from termcolor import colored
 
 class CountPrinter:
-    def __init__(self):
+    def __init__(self, color='blue'):
         self.count = 1
+        self.color = color
     def __call__(self, *args):
-        print(f'{self.count}) ', end='')
-        print(*args)
+        print(colored('-' * 50, self.color))
+        print(colored(f'{self.count}) ', self.color), end='')
+        print(*[colored(x, self.color) for x in args])
         self.count += 1
 
 class MetricsLogger:

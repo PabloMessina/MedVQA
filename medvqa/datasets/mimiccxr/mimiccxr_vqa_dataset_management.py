@@ -24,7 +24,7 @@ from medvqa.utils.files import (
     MAX_FILENAME_LENGTH,
 )
 from medvqa.utils.hashing import hash_string
-from medvqa.utils.constants import CHEXPERT_LABELS, ReportEvalMode
+from medvqa.utils.constants import CHEXPERT_LABELS, VINBIG_DISEASES, ReportEvalMode
 from medvqa.datasets.preprocessing import (
     get_average_question_positions,
     get_question_frequencies,
@@ -175,7 +175,7 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
                 classified_question_ids = sorted(questions[i], key=question_scorer)
                 data[ri] = classified_question_ids
         else: # hybrid method
-            chexpert_question_ids = [chexpert_one_hot_offset + x for x in range(1, len(CHEXPERT_LABELS))]
+            chexpert_question_ids = [chexpert_one_hot_offset + x for x in range(len(CHEXPERT_LABELS))]
             for i, ri in enumerate(split_data['report_ids']):
                 classified_question_ids = sorted(questions[i], key=question_scorer)
                 assert all(x not in chexpert_question_ids for x in classified_question_ids)
@@ -211,7 +211,11 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
             data[ri] = mimiccxr_qa_reports['reports'][nearest_ri]['question_ids']
     
     elif report_eval_mode == ReportEvalMode.CHEXPERT_LABELS:
-        question_ids = list(range(1, len(CHEXPERT_LABELS)))
+        question_ids = list(range(len(CHEXPERT_LABELS)))
+        for ri in split_data['report_ids']:
+            data[ri] = question_ids
+    elif report_eval_mode == ReportEvalMode.VINBIG_DISEASES:
+        question_ids = list(range(len(VINBIG_DISEASES)))
         for ri in split_data['report_ids']:
             data[ri] = question_ids
     else:
@@ -439,6 +443,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 include_chexpert_mode = False,
                 use_chexpert_mode_only = False,
                 chexpert_one_hot_offset = None,
+                include_image = True,
+                use_precomputed_visual_features = False,
+                precomputed_visual_features_path = None,
                 debug = False):
         
         self.tokenizer = tokenizer
@@ -477,6 +484,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         include_chexpert_mode = include_chexpert_mode,
                         use_chexpert_mode_only = use_chexpert_mode_only,
                         chexpert_one_hot_offset = chexpert_one_hot_offset,
+                        include_image = include_image,
+                        use_precomputed_visual_features = use_precomputed_visual_features,
+                        precomputed_visual_features_path = precomputed_visual_features_path,
                         debug = debug)
 
     def _preprocess_data(self):
@@ -507,6 +517,9 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 n_questions_per_report = None,
                 qclass_threshold = None,
                 chexpert_one_hot_offset = None,
+                include_image = True,
+                use_precomputed_visual_features = False,
+                precomputed_visual_features_path = None,
                 **unused_kwargs):
 
         print('report_eval_mode =', report_eval_mode)
@@ -549,6 +562,9 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         chexpert_labels_filename = chexpert_labels_filename,
                         classify_questions = classify_questions,
                         question_labels_filename = question_labels_filename,
+                        include_image = include_image,
+                        use_precomputed_visual_features = use_precomputed_visual_features,
+                        precomputed_visual_features_path = precomputed_visual_features_path,
                         dataset_name = 'MIMIC-CXR')
 
     def _preprocess_data(self):

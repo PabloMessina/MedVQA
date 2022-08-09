@@ -5,6 +5,7 @@ from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
 from medvqa.models.nlp.question_decoder import QuestionDecoder
 from medvqa.models.vqa.lstm_answer_decoder import LSTMAnswerDecoder
+from medvqa.models.mlp import MLP
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.vqa.transformer_answer_decoder import TransformerAnswerDecoder
@@ -13,6 +14,7 @@ from medvqa.utils.constants import (
     CHEXPERT_GENDERS,
     CHEXPERT_ORIENTATIONS,
     CHEXPERT_TASKS,
+    VINBIG_DISEASES,
 )
 
 class QuestionEncoding:
@@ -23,62 +25,153 @@ class AnswerDecoding:
     LSTM = 'lstm'
     TRANSFORMER  = 'transformer'
 
+class RawImageEncoding:
+    CNN = 'cnn'
+
+class VisualInputMode:
+    RAW_IMAGE = 'raw-image'
+    PRECOMP_FEAT = 'precomp-feat' # precomputed visual features
+    HYBRID = 'hybrid'
+
+def does_include_image(visual_input_mode):
+    return visual_input_mode in (VisualInputMode.RAW_IMAGE, VisualInputMode.HYBRID)
+
+def does_include_visual_features(visual_input_mode):
+    return visual_input_mode in (VisualInputMode.PRECOMP_FEAT, VisualInputMode.HYBRID)
+
 class OpenEndedVQA(nn.Module):
 
-    def __init__(self, vocab_size, start_idx, embed_size, answer_hidden_size,
-                 question_vec_size, image_local_feat_size, dropout_prob, device,                 
+    def __init__(self,
+                 # Vocab args
+                 vocab_size, embed_size,
+                 start_idx=None,
+                 eos_idx=None,
+                 padding_idx=None,
+                 # Image Encoder args
+                 visual_input_mode=VisualInputMode.RAW_IMAGE,
+                 raw_image_encoding=RawImageEncoding.CNN,
+                 image_local_feat_size=None,
+                 freeze_image_encoder=False,
+                 densenet_pretrained_weights_path=None,
+                 imagenet_pretrained=True,
+                 mlp_in_dim=None,
+                 mlp_out_dim=None,
+                 mlp_hidden_dims=None,
+                 # Question Encoder args
                  question_encoding = QuestionEncoding.BILSTM,
+                 question_vec_size=None,
+                 question_hidden_size=None,
+                 # Answer Decoder args
                  answer_decoding =  AnswerDecoding.LSTM,
+                 answer_hidden_size=None,
                  n_lstm_layers=None,
                  transf_dec_nhead=None,
                  transf_dec_dim_forward=None,
                  transf_dec_num_layers=None,
-                 question_hidden_size = None,
-                 densenet_pretrained_weights_path=None,
-                 freeze_cnn=False,
-                 n_medical_tags=None,
-                 n_questions=None,
-                 n_questions_aux_task=None,
+                 # Auxiliary tasks args
+                 classify_tags=False,
                  classify_orientation=False,
                  classify_chexpert=False,
                  classify_questions=False,
-                 eos_idx=None,
-                 padding_idx=None,
+                 n_medical_tags=None,
+                 n_questions=None,
+                 n_questions_aux_task=None,
+                 # Other args
                  chexpert_mode=None,
+                 use_vinbig=False,
+                 dropout_prob=0,
+                 device=None,
                  **unused_kwargs,
-                 ):
-        print(f'OpenEndedVQA(): n_questions = {n_questions}, n_questions_aux_task = {n_questions_aux_task}'
-              f' question_encoding = {question_encoding}, answer_decoding = {answer_decoding}')
+                 ): 
         super().__init__()
 
+        print('OpenEndedVQA():')
+
+        self.chexpert_mode = chexpert_mode
+        if chexpert_mode == CHEXPERT_TASKS.VQA:
+            assert question_encoding == QuestionEncoding.ONE_HOT
+        
+        # Init vocab embedding table
         self.embedding_table = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=embed_size,
             padding_idx=0,
         )
-
-        if chexpert_mode == CHEXPERT_TASKS.VQA:
-            assert question_encoding == QuestionEncoding.ONE_HOT
         
-        # Load pre-trained CNN weights
-        if densenet_pretrained_weights_path:
-            densenet = models.densenet121(pretrained=False)
-            pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')            
-            densenet.load_state_dict(pretrained_weights, strict=False)
-            print('Using densenet121 with pretrained weights from', densenet_pretrained_weights_path)
-        else:
-            densenet = models.densenet121(pretrained=True)
-            print('Using densenet121 with ImageNet pretrained weights')        
-        # self.image_encoder = nn.Sequential(*list(densenet.children())[:-1])
-        self.image_encoder = densenet.features
-
-        if freeze_cnn: freeze_parameters(self.image_encoder)
-
+        # Init Visual Module
+        self.visual_input_mode = visual_input_mode
+        self._init_visual_module(visual_input_mode, raw_image_encoding, densenet_pretrained_weights_path,
+                            imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
+                            freeze_image_encoder)        
+        
+        # Init Question Encoder
         self.question_encoding = question_encoding
+        self._init_question_encoder(question_encoding, question_hidden_size=question_hidden_size,
+                        embed_size=embed_size, question_vec_size=question_vec_size,
+                        vocab_size=vocab_size, start_idx=start_idx, n_questions=n_questions,
+                        device=device)
+          
+        # Init Answer Decoder
         self.answer_decoding = answer_decoding
-        self.chexpert_mode = chexpert_mode
+        self._init_answer_decoder(image_local_feat_size, question_vec_size, embed_size,
+                            answer_hidden_size, n_lstm_layers, start_idx, eos_idx, padding_idx, vocab_size,
+                            transf_dec_nhead, transf_dec_dim_forward, transf_dec_num_layers, dropout_prob,
+                            use_local_features=does_include_image(visual_input_mode))
+            
+        # Init auxiliary tasks
+        self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
+                              chexpert_mode, use_vinbig, n_medical_tags, n_questions_aux_task)
+
+        # Logging
+        print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
+              f'  question_encoding = {question_encoding}\n  answer_decoding = {answer_decoding}\n'
+              f'  visual_input_mode = {visual_input_mode}\n  name = {self.name}')
+
+    def _init_visual_module(self, visual_input_mode, raw_image_encoding, densenet_pretrained_weights_path,
+                            imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
+                            freeze_image_encoder):
+        global_feat_size = 0
         
-        # Question encoding
+        if does_include_image(visual_input_mode):
+            self._init_raw_image_encoder(raw_image_encoding, densenet_pretrained_weights_path,
+                                         imagenet_pretrained, freeze_image_encoder)
+            global_feat_size += image_local_feat_size * 2
+        
+        if does_include_visual_features(visual_input_mode):
+            self._init_mlp_visual_feat_encoder(mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder)
+            global_feat_size += mlp_out_dim
+        
+        assert global_feat_size > 0
+        self.global_feat_size = global_feat_size
+        print('  self.global_feat_size =', self.global_feat_size)
+    
+    def _init_raw_image_encoder(self, raw_image_encoding, densenet_pretrained_weights_path,
+                                imagenet_pretrained, freeze_image_encoder):
+        if raw_image_encoding == RawImageEncoding.CNN:
+            # Load pre-trained CNN weights
+            if densenet_pretrained_weights_path:
+                densenet = models.densenet121(pretrained=False)
+                pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
+                densenet.load_state_dict(pretrained_weights, strict=False)
+                print("DenseNet121's pretrained weights loaded from", densenet_pretrained_weights_path)
+            elif imagenet_pretrained:
+                densenet = models.densenet121(pretrained=True)
+                print("DenseNet121's pretrained weights loaded from ImageNet")
+            else:
+                densenet = models.densenet121(pretrained=False)
+            self.raw_image_encoder = densenet.features
+        else:
+            assert False, f'Unknown image encoding {raw_image_encoding}'
+
+        if freeze_image_encoder: freeze_parameters(self.raw_image_encoder)
+
+    def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
+        self.mlp_vf_encoder = MLP(in_dim=mlp_in_dim, out_dim=mlp_out_dim, hidden_dims=mlp_hidden_dims)
+        if freeze_image_encoder: freeze_parameters(self.mlp_vf_encoder)
+
+    def _init_question_encoder(self, question_encoding, question_hidden_size=None,
+                               embed_size=None, question_vec_size=None, vocab_size=None,
+                               start_idx=None, n_questions=None, device=None):
         if question_encoding == QuestionEncoding.BILSTM:
             assert question_hidden_size is not None
             self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
@@ -100,11 +193,15 @@ class OpenEndedVQA(nn.Module):
             )
         else:
             assert False, f'Unknown question encoding strategy {question_encoding}'
-          
-        # Answer decoding
-        if answer_decoding == AnswerDecoding.LSTM:
+
+    def _init_answer_decoder(self, image_local_feat_size, question_vec_size, embed_size,
+                            answer_hidden_size, n_lstm_layers, start_idx, eos_idx, padding_idx, vocab_size,
+                            transf_dec_nhead, transf_dec_dim_forward, transf_dec_num_layers, dropout_prob,
+                            use_local_features=True):
+        if self.answer_decoding == AnswerDecoding.LSTM:
             self.answer_decoder = LSTMAnswerDecoder(self.embedding_table,
                                                     image_local_feat_size,
+                                                    self.global_feat_size,
                                                     question_vec_size,
                                                     embed_size,
                                                     answer_hidden_size,
@@ -113,70 +210,88 @@ class OpenEndedVQA(nn.Module):
                                                     vocab_size,
                                                     dropout_prob,
                                                     eos_idx=eos_idx,
-                                                    padding_idx=padding_idx)
-        elif answer_decoding == AnswerDecoding.TRANSFORMER:
+                                                    padding_idx=padding_idx,
+                                                    use_local_features=use_local_features)
+        elif self.answer_decoding == AnswerDecoding.TRANSFORMER:
             self.answer_decoder = TransformerAnswerDecoder(self.embedding_table,
                                                            embed_size,
                                                            answer_hidden_size,
                                                            question_vec_size,
                                                            image_local_feat_size,
+                                                           self.global_feat_size,
                                                            transf_dec_nhead,
                                                            transf_dec_dim_forward,
                                                            transf_dec_num_layers,
                                                            start_idx,
                                                            vocab_size,
-                                                           dropout_prob)
+                                                           dropout_prob,
+                                                           use_local_features=use_local_features)
         else:
-            assert False, f'Unknown answer decoding modul {answer_decoding}'
-            
-        # Optional auxiliary tasks        
+            assert False, f'Unknown answer decoding module {self.answer_decoding}'
+
+    def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
+                              chexpert_mode, use_vinbig, n_medical_tags, n_questions_aux_task):
         
-        # 1) medical tags prediction
-        if n_medical_tags is not None:
-            self.W_tags = nn.Linear(image_local_feat_size * 2, n_medical_tags)
+        # Optional auxiliary tasks       
+        
+        # 1) medical tags classification
+        if classify_tags:
+            assert n_medical_tags is not None
+            self.W_tags = nn.Linear(self.global_feat_size, n_medical_tags)
             self.tags_aux_task = True
         else:
             self.tags_aux_task = False
         
         # 2) orientation classifiction
         if classify_orientation:
-            self.W_ori_mimiccxr = nn.Linear(image_local_feat_size * 2, len(MIMICCXR_IMAGE_ORIENTATIONS))
-            self.W_ori_iuxray = nn.Linear(image_local_feat_size * 2, len(IUXRAY_IMAGE_ORIENTATIONS))
+            self.W_ori_mimiccxr = nn.Linear(self.global_feat_size, len(MIMICCXR_IMAGE_ORIENTATIONS))
+            self.W_ori_iuxray = nn.Linear(self.global_feat_size, len(IUXRAY_IMAGE_ORIENTATIONS))
             self.orien_aux_task = True
         else:
             self.orien_aux_task = False
 
         # 3) chexpert classifiction
         if classify_chexpert:
-            self.W_chx = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_LABELS))
+            self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
             self.chx_aux_task = True
         else:
             self.chx_aux_task = False
 
         # 4) questions classification
         if classify_questions:
-            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions_aux_task)
+            self.W_q = nn.Linear(self.global_feat_size, n_questions_aux_task)
             self.q_aux_task = True
         else:
             self.q_aux_task = False
 
+        # 5) Chexpert-specific tasks
         if chexpert_mode is not None:
-            self.W_gender_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_GENDERS))
-            self.W_ori_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_ORIENTATIONS))
+            self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
+            self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
+
+        # 6) VinBig specific tasks
+        if use_vinbig:
+            self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
 
     @property
-    def name(self):
-        strings = [
-            'dense121',
-            'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot',
-            'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf',
-        ]
+    def name(self):        
+        if self.visual_input_mode == VisualInputMode.HYBRID:
+            vm_str = 'dense121(img)+mlp(vf)'
+        elif self.visual_input_mode == VisualInputMode.PRECOMP_FEAT:
+            vm_str = 'mlp(vf)'
+        elif self.visual_input_mode == VisualInputMode.RAW_IMAGE:
+            vm_str = 'dense121(img)'
+        else: assert False
+        q_enc_str = 'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot'
+        a_dec_str = 'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf'
+        strings = [vm_str, q_enc_str, a_dec_str]
         name = f'oevqa({"+".join(strings)})'
         return name
 
     def forward(
         self,
-        images,
+        raw_images=None,
+        visual_features=None,
         questions=None,
         question_lengths=None,
         answers=None,
@@ -186,18 +301,36 @@ class OpenEndedVQA(nn.Module):
         iuxray_foward=False,
         mimiccxr_foward=False,
         chexpert_forward=False,
+        vinbig_forward=False,
         device=None,
     ):
-        # cnn local features
-        batch_size = images.size(0)
-        local_feat = self.image_encoder(images)
-        feat_size = local_feat.size(1)
-        local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+        # Visual Component                
+        assert (raw_images is not None) or (visual_features is not None)
+        local_feat = None
+        global_list = []        
+        
+        if raw_images is not None:
+            # cnn local features
+            batch_size = raw_images.size(0)
+            local_feat = self.raw_image_encoder(raw_images)
+            feat_size = local_feat.size(1)
+            local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
 
-        # compute global features
-        global_avg_pool = local_feat.mean(1)
-        global_max_pool = local_feat.max(1)[0]
-        global_feat = torch.cat((global_avg_pool, global_max_pool), 1)
+            # compute global features
+            global_avg_pool = local_feat.mean(1)
+            global_max_pool = local_feat.max(1)[0]
+            global_list.append(global_avg_pool)
+            global_list.append(global_max_pool)
+            # global_raw_feat = torch.cat((global_avg_pool, global_max_pool), 1)
+        
+        if visual_features is not None:
+            global_vf  = self.mlp_vf_encoder(visual_features)
+            global_list.append(global_vf)
+
+        if len(global_list) > 1:
+            global_feat = torch.cat(global_list, 1)
+        else:
+            global_feat = global_list[0]
 
         output = {}
 
@@ -211,6 +344,10 @@ class OpenEndedVQA(nn.Module):
             if self.chexpert_mode == CHEXPERT_TASKS.VQA:
                 # process questions
                 question_vectors = self.question_encoder(questions)
+        elif vinbig_forward:
+            output['pred_vinbig'] = self.W_vinbig(global_feat)
+            output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+            question_vectors = self.question_encoder(questions)
         else:        
             # process questions
             if self.question_encoding == QuestionEncoding.BILSTM:

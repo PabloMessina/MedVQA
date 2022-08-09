@@ -5,12 +5,20 @@ import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-from medvqa.datasets.chexpert.chexpert_dataset_management import Chexpert_VQA_Trainer, Chexpert_VisualModuleTrainer
+from medvqa.datasets.chexpert.chexpert_dataset_management import (
+    Chexpert_VQA_Trainer,
+     Chexpert_VisualModuleTrainer,
+)
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VQA_Trainer
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
-from medvqa.models.common import AnswerDecoding
+from medvqa.models.common import AnswerDecoding, load_model_state_dict
 
-from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
+from medvqa.models.vqa.open_ended_vqa import (
+    QuestionEncoding,
+    does_include_image,
+    does_include_visual_features,
+)
 from medvqa.training.utils import append_metric_name
 from medvqa.utils.constants import (
     CHEXPERT_DATASET_ID,
@@ -20,6 +28,8 @@ from medvqa.utils.constants import (
     IUXRAY_DATASET_ID__CHEXPERT_MODE,
     MIMICCXR_DATASET_ID,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
+    VINBIG_DATASET_ID,
+    VINBIG_DISEASES,
     MetricNames,
 )
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
@@ -29,13 +39,15 @@ from medvqa.metrics import (
     attach_dataset_aware_ciderd,
     attach_dataset_aware_exactmatch_question,
     attach_dataset_aware_exactmatch_answer,
+    attach_dataset_aware_vinbig_labels_macroavgf1,
+    attach_dataset_aware_vinbig_labels_microavgf1,
     attach_exactmatch_question,
     attach_dataset_aware_weighted_medical_completeness,
     attach_medical_tags_f1score,
-    attach_chexpert_labels_accuracy,
-    attach_chexpert_labels_macroavgf1,
-    attach_chexpert_labels_microavgf1,
-    attach_chexpert_labels_roc_auc,
+    attach_dataset_aware_chexpert_labels_accuracy,
+    attach_dataset_aware_chexpert_labels_macroavgf1,
+    attach_dataset_aware_chexpert_labels_microavgf1,
+    attach_dataset_aware_chexpert_labels_roc_auc,
     attach_dataset_aware_orientation_accuracy,
     attach_dataset_aware_question_labels_macroavgf1,
     attach_dataset_aware_question_labels_microavgf1,
@@ -82,13 +94,15 @@ from medvqa.utils.logging import CountPrinter
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     
-    # required arguments
+    # --- Required arguments
+
     parser.add_argument('--epochs', type=int, required=True,
                         help='Number of epochs the model will be trained')
     parser.add_argument('--batches-per-epoch', type=int, required=True,
                         help='Number of batches per epoch')
 
-    # optional arguments    
+    # --- Optional arguments
+
     parser.add_argument('--checkpoint-folder', type=str, default=None,
                         help='Relative path to folder with checkpoint to resume training from')    
     parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
@@ -105,6 +119,25 @@ def parse_args(args=None):
                         help='Size of question hidden state vectors')
     parser.add_argument('--answer-hidden-size', type=int, default=256,
                         help='Size of answer hidden state vectors')
+
+    # Image encoder
+    parser.add_argument('--visual-input-mode', type=str, default='raw-image')
+    parser.add_argument('--raw-image-encoding', type=str, default='cnn')
+    parser.add_argument('--image-local-feat-size', type=int, default=1024,
+                        help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
+    parser.add_argument('--densenet-pretrained-weights-path', type=str, default='',
+                        help='Path to densenet 121 pretrained weights')
+    parser.add_argument('--freeze-image-encoder', dest='freeze_image_encoder', action='store_true')
+    parser.set_defaults(freeze_image_encoder=False)
+    parser.add_argument('--imagenet-pretrained', dest='imagenet_pretrained', action='store_true')
+    parser.set_defaults(imagenet_pretrained=False)
+    parser.add_argument('--visual-features-mlp-in-dim', type=int, default=None)
+    parser.add_argument('--visual-features-mlp-out-dim', type=int, default=None)
+    parser.add_argument('--visual-features-mlp-hidden-dims', nargs='+', type=int, default=None)
+    parser.add_argument('--iuxray-precomputed-visual-features-path', type=str, default=None)
+    parser.add_argument('--mimiccxr-precomputed-visual-features-path', type=str, default=None)
+    parser.add_argument('--chexpert-precomputed-visual-features-path', type=str, default=None)
+    parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
     
     # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
@@ -116,12 +149,8 @@ def parse_args(args=None):
     
     parser.add_argument('--question-vec-size', type=int, default=128,
                         help='Size of vector that encodes the question')
-    parser.add_argument('--image-local-feat-size', type=int, default=1024,
-                        help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
     parser.add_argument('--dropout-prob', type=int, default=0,
                         help='Dropout probability')
-    parser.add_argument('--densenet-pretrained-weights-path', type=str, default='',
-                        help='Path to densenet 121 pretrained weights')
     parser.add_argument('--optimizer-name', type=str, default='adam')
     
     parser.add_argument('--lr', type=float, default=1e-3,
@@ -142,20 +171,19 @@ def parse_args(args=None):
     parser.add_argument('--device', type=str, default='GPU',
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
-                        help='Mode of data augmentation used for images')
+                        help='Mode of data augmentation used for images')    
 
-    parser.add_argument('--freeze-cnn', dest='freeze_cnn', action='store_true')
-    parser.set_defaults(freeze_cnn=False)
-
-    parser.add_argument('--mimiccxr-weight', type=float, default=0.73,
+    parser.add_argument('--mimiccxr-weight', type=float, default=1,
                         help='Relative number of batches to sample from MIMIC-CXR dataset (for rebalancing purposes)')
-    parser.add_argument('--chexpert-weight', type=float, default=0.2,
+    parser.add_argument('--chexpert-weight', type=float, default=0.3,
                         help='Relative number of batches to sample from CheXpert dataset (for rebalancing purposes)')
-    parser.add_argument('--iuxray-weight', type=float, default=0.07,
+    parser.add_argument('--vinbig-weight', type=float, default=0.4,
+                        help='Relative number of batches to sample from VinBig dataset (for rebalancing purposes)')
+    parser.add_argument('--iuxray-weight', type=float, default=0.05,
                         help='Relative number of batches to sample from IU X-ray dataset (for rebalancing purposes)')
-    parser.add_argument('--mimiccxr-weight-chexpert-mode', type=float, default=0.15,
+    parser.add_argument('--mimiccxr-weight-chexpert-mode', type=float, default=0.2,
                         help='Relative number of batches to sample from MIMIC-CXR dataset in chexpert mode (for rebalancing purposes)')
-    parser.add_argument('--iuxray-weight-chexpert-mode', type=float, default=0.03,
+    parser.add_argument('--iuxray-weight-chexpert-mode', type=float, default=0.05,
                         help='Relative number of batches to sample from IU X-ray dataset in chexpert mode (for rebalancing purposes)')
 
     parser.add_argument('--mimiccxr-include-chexpert-mode', dest='mimiccxr_include_chexpert_mode', action='store_true')
@@ -204,13 +232,20 @@ def parse_args(args=None):
     parser.add_argument('--override-lr', dest='override_lr', action='store_true')
     parser.set_defaults(override_lr=False)
 
-    parser.add_argument('--no-mimiccxr', dest='train_mimiccxr', action='store_false')
-    parser.set_defaults(train_mimiccxr=True)
-    parser.add_argument('--no-iuxray', dest='train_iuxray', action='store_false')
-    parser.set_defaults(train_iuxray=True)
-    parser.add_argument('--no-chexpert', dest='train_chexpert', action='store_false')
-    parser.set_defaults(train_chexpert=True)
+    parser.add_argument('--use-mimiccxr', dest='train_mimiccxr', action='store_true')
+    parser.set_defaults(train_mimiccxr=False)
+
+    parser.add_argument('--use-iuxray', dest='train_iuxray', action='store_true')
+    parser.set_defaults(train_iuxray=False)
+
+    parser.add_argument('--use-chexpert', dest='train_chexpert', action='store_true')
+    parser.set_defaults(train_chexpert=False)    
     parser.add_argument('--chexpert-mode', type=str, default=None)
+    
+    parser.add_argument('--use-vinbig', dest='train_vinbig', action='store_true')
+    parser.set_defaults(train_vinbig=False)
+    parser.add_argument('--vinbig-train-with-everything', dest='vinbig_train_with_everything', action='store_true')
+    parser.set_defaults(vinbig_train_with_everything=False)
 
     parser.add_argument('--binary-loss-name', type=str, default='bce')
 
@@ -251,6 +286,8 @@ _METRIC_WEIGHTS = {
     MetricNames.CHXLABELMACROAVGF1: 0.5,
     MetricNames.QLABELS_MICROAVGF1: 1,
     MetricNames.QLABELS_MACROAVGF1: 1,
+    MetricNames.VINBIGMICROAVGF1: 0.5,
+    MetricNames.VINBIGMACROAVGF1: 0.5,
     MetricNames.GENDER_ACC: 1,
 }
 
@@ -261,6 +298,8 @@ def train_model(
     lr_scheduler_kwargs,
     mimiccxr_vqa_trainer_kwargs,
     iuxray_vqa_trainer_kwargs,
+    chexpert_dataset_kwargs,
+    vinbig_dataset_kwargs,
     dataloading_kwargs,
     training_kwargs,
     auxiliary_tasks_kwargs,
@@ -272,7 +311,6 @@ def train_model(
     num_workers,
     beam_search_k = None,
     device = 'GPU',
-    allowed_questions = None,
     checkpoint_folder_path = None,
     save = True,
     override_lr = False,
@@ -284,13 +322,17 @@ def train_model(
     train_iuxray = training_kwargs['train_iuxray']
     train_mimiccxr = training_kwargs['train_mimiccxr']
     train_chexpert = training_kwargs['train_chexpert']
+    train_vinbig = training_kwargs['train_vinbig']
     chexpert_mode = training_kwargs['chexpert_mode']
     use_chexpert_mode_only = training_kwargs.get('use_chexpert_mode_only', False)
 
     use_amp = training_kwargs['use_amp']
     assert train_iuxray or train_mimiccxr
+    visual_input_mode = model_kwargs['visual_input_mode']
     question_encoding = model_kwargs.get('question_encoding', QuestionEncoding.BILSTM)
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT
+    include_image = does_include_image(visual_input_mode)
+    include_visual_features = does_include_visual_features(visual_input_mode)
 
     # auxiliary task: medical tags prediction
     classify_tags = auxiliary_tasks_kwargs['classify_tags']
@@ -307,8 +349,6 @@ def train_model(
 
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
-    iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
-    mimiccxr_chexpert_labels_filename = auxiliary_tasks_kwargs['mimiccxr_chexpert_labels_filename']
 
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
@@ -377,16 +417,22 @@ def train_model(
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')    
-    trainer = get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert,
-                         classify_questions, question_encoding, AnswerDecoding.TEACHER_FORCING,
-                         device, binary_loss_name=training_kwargs['binary_loss_name'],
-                         use_amp=use_amp, training=True,
+    trainer = get_engine(model=model, tokenizer=tokenizer, classify_tags=classify_tags, classify_orientation=classify_orientation,
+                         classify_chexpert=classify_chexpert, classify_questions=classify_questions,
+                         question_encoding=question_encoding, answer_decoding=AnswerDecoding.TEACHER_FORCING,
+                         binary_loss_name=training_kwargs['binary_loss_name'],
+                         include_image=include_image, include_visual_features=include_visual_features,
                          shift_answer=(model_kwargs['answer_decoding'] == 'transformer'),
+                         use_amp=use_amp, training=True,
                          train_with_chexpert_dataset=train_chexpert, chexpert_mode=chexpert_mode,
-                         optimizer=optimizer)
-    validator = get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert,
-                         classify_questions, question_encoding, val_answer_decoding,
-                         device, beam_search_k=beam_search_k, training=False, chexpert_mode=chexpert_mode)
+                         use_vinbig_dataset=train_vinbig,
+                         optimizer=optimizer, device=device)
+    validator = get_engine(model=model, tokenizer=tokenizer, classify_tags=classify_tags, classify_orientation=classify_orientation,
+                         classify_chexpert=classify_chexpert, classify_questions=classify_questions,
+                         question_encoding=question_encoding, answer_decoding=val_answer_decoding,
+                         include_image=include_image, include_visual_features=include_visual_features,
+                         beam_search_k=beam_search_k, training=False, chexpert_mode=chexpert_mode,
+                         use_vinbig_dataset=train_vinbig, device=device)
 
     # Define image transform
     count_print('Defining image transform ...')
@@ -398,37 +444,30 @@ def train_model(
     one_hot_question_offsets = dataloading_kwargs.get('one_hot_question_offsets', None)
     if not verbose_question: assert one_hot_question_offsets is not None
     
+    _kwargs = dict(verbose_question = verbose_question,                    
+                   include_image = include_image,
+                   include_visual_features = include_visual_features,
+                   classify_tags = classify_tags,
+                   n_tags = n_medical_tags,
+                   classify_orientation = classify_orientation,
+                   classify_chexpert = classify_chexpert,
+                   classify_questions = classify_questions,
+                   one_hot_question_offsets = one_hot_question_offsets)
     if train_mimiccxr:
-        kwargs = dict(verbose_question = verbose_question,
-                    one_hot_question_offset = one_hot_question_offsets[str(MIMICCXR_DATASET_ID)],
-                    classify_tags = classify_tags,
-                    n_tags = n_medical_tags,
-                    classify_orientation = classify_orientation,
-                    classify_chexpert = classify_chexpert,
-                    classify_questions = classify_questions)
-        mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID, **kwargs)        
-        mimiccxr_chexpert_mode_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID__CHEXPERT_MODE, **kwargs)\
+        mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID, **_kwargs)
+        mimiccxr_chexpert_mode_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID__CHEXPERT_MODE, **_kwargs)\
                 if mimiccxr_vqa_trainer_kwargs['include_chexpert_mode'] else None
-
     if train_iuxray:
-        kwargs = dict(verbose_question = verbose_question,
-                    one_hot_question_offset = one_hot_question_offsets[str(IUXRAY_DATASET_ID)],
-                    classify_tags = classify_tags,
-                    n_tags = n_medical_tags,
-                    classify_orientation = classify_orientation,
-                    classify_chexpert = classify_chexpert,
-                    classify_questions = classify_questions)
-        iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID, **kwargs)
-        iuxray_chexpert_mode_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID__CHEXPERT_MODE, **kwargs)\
+        iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID, **_kwargs)
+        iuxray_chexpert_mode_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID__CHEXPERT_MODE, **_kwargs)\
                 if iuxray_vqa_trainer_kwargs['include_chexpert_mode'] else None
-
     if train_chexpert:
         if chexpert_mode == CHEXPERT_TASKS.CLASSIFICATION:
             chexpert_collate_batch_fn = get_vision_collate_batch_fn(CHEXPERT_DATASET_ID)
         else:
-            chexpert_collate_batch_fn = get_vqa_collate_batch_fn(CHEXPERT_DATASET_ID,
-                                                verbose_question = verbose_question,
-                                                one_hot_question_offset = one_hot_question_offsets[str(CHEXPERT_DATASET_ID)])
+            chexpert_collate_batch_fn = get_vqa_collate_batch_fn(CHEXPERT_DATASET_ID, **_kwargs)
+    if train_vinbig:
+        vinbig_collate_batch_fn = get_vqa_collate_batch_fn(VINBIG_DATASET_ID, **_kwargs)
 
     # Create MIMIC-CXR vqa trainer
     if train_mimiccxr:
@@ -440,17 +479,8 @@ def train_model(
             collate_batch_fn_chexpert_mode = mimiccxr_chexpert_mode_collate_batch_fn,
             num_workers = num_workers,
             tokenizer = tokenizer,
-            mimiccxr_qa_reports = mimiccxr_qa_reports,
-            classify_tags = classify_tags,
-            medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = mimiccxr_question_labels_filename,
-            allowed_questions = allowed_questions,
-            verbose_question = verbose_question,
-            one_question_per_batch = one_question_per_batch,            
+            mimiccxr_qa_reports = mimiccxr_qa_reports,            
+            one_question_per_batch = one_question_per_batch,
             **mimiccxr_vqa_trainer_kwargs,
         )
         if use_chexpert_mode_only: assert mimiccxr_vqa_trainer.include_chexpert_mode
@@ -465,16 +495,7 @@ def train_model(
             collate_batch_fn_chexpert_mode = iuxray_chexpert_mode_collate_batch_fn,
             num_workers = num_workers,
             tokenizer = tokenizer,        
-            iuxray_qa_reports = iuxray_qa_reports,
-            classify_tags = classify_tags,
-            medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = iuxray_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = iuxray_question_labels_filename,
-            allowed_questions = allowed_questions,
-            verbose_question = verbose_question,
+            iuxray_qa_reports = iuxray_qa_reports,            
             one_question_per_batch = one_question_per_batch,
             **iuxray_vqa_trainer_kwargs,
         )
@@ -488,6 +509,7 @@ def train_model(
                 batch_size=batch_size,
                 collate_batch_fn=chexpert_collate_batch_fn,
                 num_workers=num_workers,
+                **chexpert_dataset_kwargs,
             )
         elif chexpert_mode == CHEXPERT_TASKS.VQA:
             count_print('Creating CheXpert vqa trainer ...')
@@ -497,8 +519,20 @@ def train_model(
                 collate_batch_fn=chexpert_collate_batch_fn,
                 num_workers=num_workers,
                 tokenizer=tokenizer,
+                **chexpert_dataset_kwargs,
             )
         else: assert False, f'Unknown chexpert_mode = {chexpert_mode}'
+
+    if train_vinbig:
+        count_print('Creating VinBig vqa trainer ...')
+        vinbig_vqa_trainer = VinBig_VQA_Trainer(
+            transform=img_transform,
+            batch_size=batch_size,
+            collate_batch_fn=vinbig_collate_batch_fn,
+            num_workers=num_workers,
+            tokenizer=tokenizer,
+            **vinbig_dataset_kwargs,
+        )
 
     if debug: # if debugging
         output = {}
@@ -548,6 +582,11 @@ def train_model(
             _dataset_names.append('chexp(cl)')
         else:
             _dataset_names.append('chexp(vqa)')
+    if train_vinbig:
+        _train_weights.append(dataloading_kwargs['vinbig_weight'])
+        _train_dataloaders.append(vinbig_vqa_trainer.train_dataloader)
+        _dataset_names.append('vinbig(vqa)')        
+        _val_dataloaders.append(vinbig_vqa_trainer.val_dataloader)
     
     assert len(_train_dataloaders) > 0
     assert len(_val_dataloaders) > 0
@@ -575,11 +614,14 @@ def train_model(
 
     _iu_mim_datasets = [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID]
     _iu_mim_datasets_chexp_mode =  [IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEXPERT_MODE]    
-    _vqa_datasets = _iu_mim_datasets + _iu_mim_datasets_chexp_mode
-    _chexp_mode_vqa_datasets = _iu_mim_datasets_chexp_mode[:]
+    _vqa_datasets = _iu_mim_datasets + _iu_mim_datasets_chexp_mode + [VINBIG_DATASET_ID]
+    _exact_match_answer_datasets = _iu_mim_datasets_chexp_mode + [VINBIG_DATASET_ID]
+    _orientation_datasets = _iu_mim_datasets + _iu_mim_datasets_chexp_mode + [CHEXPERT_DATASET_ID]
+    _chexpert_labels_datasets = _orientation_datasets
+
     if chexpert_mode == CHEXPERT_TASKS.VQA:
         _vqa_datasets.append(CHEXPERT_DATASET_ID)
-        _chexp_mode_vqa_datasets.append(CHEXPERT_DATASET_ID)
+        _exact_match_answer_datasets.append(CHEXPERT_DATASET_ID)
 
     if verbose_question:
         attach_dataset_aware_exactmatch_question(trainer, _vqa_datasets)
@@ -593,8 +635,8 @@ def train_model(
         attach_dataset_aware_weighted_medical_completeness(validator, tokenizer, _iu_mim_datasets)
 
     if _use_exactmatch_answer:
-        attach_dataset_aware_exactmatch_answer(trainer, _chexp_mode_vqa_datasets)
-        attach_dataset_aware_exactmatch_answer(validator, _chexp_mode_vqa_datasets)
+        attach_dataset_aware_exactmatch_answer(trainer, _exact_match_answer_datasets)
+        attach_dataset_aware_exactmatch_answer(validator, _exact_match_answer_datasets)
 
     attach_loss('loss', trainer, device)
 
@@ -606,31 +648,38 @@ def train_model(
         attach_loss(MetricNames.MEDTAGS_LOSS, trainer, device)        
 
     if classify_orientation:
-        attach_dataset_aware_orientation_accuracy(trainer)
-        attach_dataset_aware_orientation_accuracy(validator)
-        attach_loss(MetricNames.ORIENTATION_LOSS, trainer, device)
+        attach_dataset_aware_orientation_accuracy(trainer, _orientation_datasets)
+        attach_dataset_aware_orientation_accuracy(validator, _orientation_datasets)
+        attach_dataset_aware_loss(trainer, MetricNames.ORIENTATION_LOSS, _orientation_datasets)
 
     if classify_chexpert:
-        attach_chexpert_labels_accuracy(trainer, device)
-        attach_chexpert_labels_accuracy(validator, device)
-        attach_chexpert_labels_macroavgf1(trainer, device)
-        attach_chexpert_labels_macroavgf1(validator, device)
-        attach_chexpert_labels_microavgf1(trainer, device)
-        attach_chexpert_labels_microavgf1(validator, device)
-        attach_chexpert_labels_roc_auc(trainer, 'cpu')
-        attach_chexpert_labels_roc_auc(validator, 'cpu')
-        attach_loss(MetricNames.CHEXPERT_LOSS, trainer, device)
+        attach_dataset_aware_chexpert_labels_accuracy(trainer, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_accuracy(validator, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_macroavgf1(trainer, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_macroavgf1(validator, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_microavgf1(trainer, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_microavgf1(validator, _chexpert_labels_datasets)
+        attach_dataset_aware_chexpert_labels_roc_auc(trainer, _chexpert_labels_datasets, 'cpu')
+        attach_dataset_aware_chexpert_labels_roc_auc(validator, _chexpert_labels_datasets, 'cpu')
+        attach_dataset_aware_loss(trainer, MetricNames.CHEXPERT_LOSS, _chexpert_labels_datasets)
 
     if classify_questions:
         attach_dataset_aware_question_labels_macroavgf1(trainer, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)
         attach_dataset_aware_question_labels_microavgf1(trainer, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)
         attach_dataset_aware_question_labels_macroavgf1(validator, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)
         attach_dataset_aware_question_labels_microavgf1(validator, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)
-        attach_dataset_aware_loss(trainer, MetricNames.QLABELS_LOSS, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)        
+        attach_dataset_aware_loss(trainer, MetricNames.QLABELS_LOSS, _iu_mim_datasets + _iu_mim_datasets_chexp_mode)
 
     if train_chexpert:
         attach_dataset_aware_gender_accuracy(trainer, [CHEXPERT_DATASET_ID])
         attach_dataset_aware_loss(trainer, MetricNames.GENDER_LOSS, [CHEXPERT_DATASET_ID])
+
+    if train_vinbig:
+        attach_dataset_aware_vinbig_labels_macroavgf1(trainer, [VINBIG_DATASET_ID])
+        attach_dataset_aware_vinbig_labels_microavgf1(trainer, [VINBIG_DATASET_ID])
+        attach_dataset_aware_loss(trainer, MetricNames.VINBIG_LOSS, [VINBIG_DATASET_ID])        
+        attach_dataset_aware_vinbig_labels_macroavgf1(validator, [VINBIG_DATASET_ID])
+        attach_dataset_aware_vinbig_labels_microavgf1(validator, [VINBIG_DATASET_ID])        
 
     # Timer
     timer = Timer()
@@ -640,24 +689,40 @@ def train_model(
     # Learning rate scheduler handler
     count_print('Defining learning rate scheduler handler ...')
 
-    train_metrics_to_merge = [MetricNames.CIDER_D, MetricNames.WMEDCOMP]
-    val_metrics_to_merge = [MetricNames.CIDER_D, MetricNames.WMEDCOMP]
+    train_metrics_to_merge = []
+    val_metrics_to_merge = []
+    metrics_to_print = ['loss', MetricNames.ANSWER_LOSS]    
+
+    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D)
+    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
     if verbose_question:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.EXACTMATCH_QUESTION)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.EXACTMATCH_QUESTION)
+        metrics_to_print.append(MetricNames.QUESTION_LOSS)
     if classify_tags:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.MEDTAGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.MEDTAGF1)
+        metrics_to_print.append(MetricNames.MEDTAGS_LOSS)
     if classify_orientation:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.ORIENACC )
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.ORIENACC )
+        metrics_to_print.append(MetricNames.ORIENTATION_LOSS)
     if classify_chexpert:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.CHXLABELMICROAVGF1)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.CHXLABELMACROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABELMICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABELMACROAVGF1)
+        metrics_to_print.append(MetricNames.CHEXPERT_LOSS)
+        metrics_to_print.append(MetricNames.CHXLABELACC)
+        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:        
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.QLABELS_MICROAVGF1)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.QLABELS_MACROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.QLABELS_MICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.QLABELS_MACROAVGF1)
+        metrics_to_print.append(MetricNames.QLABELS_LOSS)
     if train_chexpert:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.GENDER_ACC, val=False)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.GENDER_ACC, val=False)
+        metrics_to_print.append(MetricNames.GENDER_LOSS)
+    if train_vinbig:
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGMICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGMACROAVGF1)        
+        metrics_to_print.append(MetricNames.VINBIG_LOSS)
     if _use_exactmatch_answer:
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, MetricNames.EXACTMATCH_ANSWER)    
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.EXACTMATCH_ANSWER)
     
     merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.3, 0.7)    
     score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
@@ -670,7 +735,8 @@ def train_model(
     pretrained_checkpoint_folder_path = model_kwargs.get('pretrained_checkpoint_folder_path', None)
     
     if checkpoint_folder_path is None: # first time
-        if save: # only if we want to save checkpoints to disk            
+        if save: # only if we want to save checkpoints to disk
+            count_print('Defining checkpoint folder path ...')
             checkpoint_folder_path = get_checkpoint_folder_path('vqa', merged_dataset_name, model.name,
                 # f'voc-minf={vocab_min_freq}',
                 f'cnn-pretr={int(bool(model_kwargs["densenet_pretrained_weights_path"]))}',
@@ -691,15 +757,18 @@ def train_model(
                         lr_scheduler_kwargs = lr_scheduler_kwargs,
                         mimiccxr_vqa_trainer_kwargs = mimiccxr_vqa_trainer_kwargs,
                         iuxray_vqa_trainer_kwargs = iuxray_vqa_trainer_kwargs,
+                        chexpert_dataset_kwargs = chexpert_dataset_kwargs,
+                        vinbig_dataset_kwargs = vinbig_dataset_kwargs,
                         dataloading_kwargs = dataloading_kwargs,
                         training_kwargs = training_kwargs,
                         auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
 
         if pretrained_checkpoint_folder_path is not None:
             pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
-            count_print(f'Loading pretrained weights from {pretrained_checkpoint_path} ...')
+            count_print(f'Loading pretrained weights ...')
+            print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
             checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
-            model_wrapper.model.load_state_dict(checkpoint['model'], strict=False)
+            load_model_state_dict(model_wrapper.model, checkpoint['model'])
             print('Checkpoint successfully loaded!')
     
     else: # resuming
@@ -716,41 +785,14 @@ def train_model(
 
     # Logging
     count_print('Defining log_metrics_handler ...')
-    
-    metrics_to_print=['loss', MetricNames.ANSWER_LOSS, MetricNames.CIDER_D, MetricNames.WMEDCOMP]
-    if verbose_question:
-        metrics_to_print.append(MetricNames.QUESTION_LOSS)
-        metrics_to_print.append(MetricNames.EXACTMATCH_QUESTION)
-    if classify_tags:
-        metrics_to_print.append(MetricNames.MEDTAGS_LOSS)
-        metrics_to_print.append(MetricNames.MEDTAGF1)
-    if classify_orientation:
-        metrics_to_print.append(MetricNames.ORIENTATION_LOSS)
-        metrics_to_print.append(MetricNames.ORIENACC)
-    if classify_chexpert:
-        metrics_to_print.append(MetricNames.CHEXPERT_LOSS)
-        metrics_to_print.append(MetricNames.CHXLABELMICROAVGF1)
-        metrics_to_print.append(MetricNames.CHXLABELMACROAVGF1)
-        metrics_to_print.append(MetricNames.CHXLABELACC)
-        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
-    if classify_questions:
-        metrics_to_print.append(MetricNames.QLABELS_LOSS)
-        metrics_to_print.append(MetricNames.QLABELS_MACROAVGF1)
-        metrics_to_print.append(MetricNames.QLABELS_MICROAVGF1)
-    if train_chexpert:
-        metrics_to_print.append(MetricNames.GENDER_LOSS)
-        metrics_to_print.append(MetricNames.GENDER_ACC)
-    if _use_exactmatch_answer:
-        metrics_to_print.append(MetricNames.EXACTMATCH_ANSWER)
 
     log_metrics_handler = get_log_metrics_handlers(timer,
                                                    metrics_to_print=metrics_to_print,
                                                    log_to_disk=save,
                                                    checkpoint_folder=checkpoint_folder_path)
-    log_iteration_handler = get_log_iteration_handler()
+    log_iteration_handler = get_log_iteration_handler()    
     
-    
-    # Attach handlers    
+    # Attach handlers
     trainer.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
     trainer.add_event_handler(Events.EPOCH_STARTED, lambda : print(f'(1) Training stage (lr = {optimizer.param_groups[0]["lr"]:.6f}) ...'))
     trainer.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
@@ -777,7 +819,13 @@ def train_from_scratch(
     medical_tokenization,
     medical_terms_frequency_filename,
     # Model's args
-    freeze_cnn,
+    visual_input_mode,
+    freeze_image_encoder,
+    raw_image_encoding,
+    imagenet_pretrained,
+    visual_features_mlp_in_dim,
+    visual_features_mlp_out_dim,
+    visual_features_mlp_hidden_dims,
     embed_size,
     question_encoding,
     answer_decoding,
@@ -812,6 +860,10 @@ def train_from_scratch(
     iuxray_balanced_metadata_filename,
     mimiccxr_balanced_metadata_filename,
     n_positive_per_chexpert_label,
+    iuxray_precomputed_visual_features_path,
+    mimiccxr_precomputed_visual_features_path,
+    chexpert_precomputed_visual_features_path,
+    vinbig_precomputed_visual_features_path,
     allowed_questions,
     # Dataloading args
     batch_size,
@@ -819,6 +871,7 @@ def train_from_scratch(
     mimiccxr_weight,
     iuxray_weight,
     chexpert_weight,
+    vinbig_weight,
     mimiccxr_weight_chexpert_mode,
     iuxray_weight_chexpert_mode,
     img_aug_mode,
@@ -827,10 +880,12 @@ def train_from_scratch(
     train_mimiccxr,
     train_iuxray,
     train_chexpert,
+    train_vinbig,
     mimiccxr_include_chexpert_mode,
     iuxray_include_chexpert_mode,
     chexpert_mode,
     use_chexpert_mode_only,
+    vinbig_train_with_everything,
     binary_loss_name,
     use_amp,
     # Variable traning args
@@ -861,44 +916,76 @@ def train_from_scratch(
 ):
     print('----- Training model from scratch ------')
 
+    assert train_mimiccxr or train_iuxray or train_chexpert or train_vinbig
+
+    if mimiccxr_include_chexpert_mode or iuxray_include_chexpert_mode:
+        assert train_chexpert
+
     tokenizer_kwargs = dict(
         vocab_min_freq = vocab_min_freq,
         medical_tokenization = medical_tokenization,
         medical_terms_frequency_filename = medical_terms_frequency_filename,
     )
     
-    n_q_total = n_questions
+    n_q_total = 0
+    if train_iuxray or train_mimiccxr:
+        n_q_total += n_questions
     if train_chexpert and chexpert_mode == CHEXPERT_TASKS.VQA and\
              question_encoding == QuestionEncoding.ONE_HOT:
         n_q_total += len(CHEXPERT_LABELS)
+    if train_vinbig:
+        n_q_total += len(VINBIG_DISEASES)
+    
+    one_hot_question_offsets = {}
+    _offset = 0
+    if train_iuxray or train_mimiccxr:
+        one_hot_question_offsets[str(IUXRAY_DATASET_ID)] = _offset
+        one_hot_question_offsets[str(MIMICCXR_DATASET_ID)] = _offset
+        one_hot_question_offsets[str(IUXRAY_DATASET_ID__CHEXPERT_MODE)] = _offset
+        one_hot_question_offsets[str(MIMICCXR_DATASET_ID__CHEXPERT_MODE)] = _offset
+        _offset += n_questions
+    if train_chexpert:
+        one_hot_question_offsets[str(CHEXPERT_DATASET_ID)] = _offset
+        _offset += len(CHEXPERT_LABELS)
+    if train_vinbig:
+        one_hot_question_offsets[str(VINBIG_DATASET_ID)] = _offset
+        _offset += len(VINBIG_DISEASES)
         
     model_kwargs = dict(
-        freeze_cnn = freeze_cnn,
         embed_size = embed_size,
-        question_encoding = question_encoding,
-        answer_decoding = answer_decoding,
-        question_hidden_size = question_hidden_size,
-        answer_hidden_size = answer_hidden_size,
-        question_vec_size = question_vec_size,
-        image_local_feat_size = image_local_feat_size,
         dropout_prob = dropout_prob,
-        densenet_pretrained_weights_path = densenet_pretrained_weights_path,
         pretrained_checkpoint_folder_path = os.path.join(WORKSPACE_DIR, pretrained_checkpoint_folder_path) \
             if pretrained_checkpoint_folder_path is not None else None,        
         chexpert_mode = chexpert_mode,
         n_questions=n_q_total,
-        # LSTM decoder
+        # Image encoder
+        visual_input_mode = visual_input_mode,
+        raw_image_encoding = raw_image_encoding,
+        freeze_image_encoder = freeze_image_encoder,
+        image_local_feat_size = image_local_feat_size,
+        densenet_pretrained_weights_path = densenet_pretrained_weights_path,
+        imagenet_pretrained = imagenet_pretrained,
+        mlp_in_dim = visual_features_mlp_in_dim,
+        mlp_out_dim = visual_features_mlp_out_dim,
+        mlp_hidden_dims = visual_features_mlp_hidden_dims,
+        # Question encoder
+        question_encoding = question_encoding,
+        question_vec_size = question_vec_size,
+        question_hidden_size = question_hidden_size,
+        # Answer decoder
+        answer_decoding = answer_decoding,
+        answer_hidden_size = answer_hidden_size,
         n_lstm_layers = n_lstm_layers,
-        # Transformer decoder
         transf_dec_nhead = transf_dec_nhead,
         transf_dec_dim_forward = transf_dec_dim_forward,
         transf_dec_num_layers = transf_dec_num_layers,
-        # aux tasks
+        # Aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
         classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
         n_questions_aux_task=n_questions,
+        use_vinbig=train_vinbig,
     )
     
     optimizer_kwargs = dict(
@@ -935,20 +1022,21 @@ def train_from_scratch(
         mimiccxr_weight = mimiccxr_weight,
         iuxray_weight = iuxray_weight,
         chexpert_weight = chexpert_weight,
+        vinbig_weight = vinbig_weight,
         mimiccxr_weight_chexpert_mode = mimiccxr_weight_chexpert_mode,
         iuxray_weight_chexpert_mode = iuxray_weight_chexpert_mode,
+        one_hot_question_offsets = one_hot_question_offsets,
     )
-    if question_encoding == QuestionEncoding.ONE_HOT:
-        one_hot_question_offsets = {}
-        _offset = 0
-        if train_iuxray or train_mimiccxr:
-            one_hot_question_offsets[str(IUXRAY_DATASET_ID)] = _offset
-            one_hot_question_offsets[str(MIMICCXR_DATASET_ID)] = _offset
-            _offset += n_questions
-        if train_chexpert:
-            one_hot_question_offsets[str(CHEXPERT_DATASET_ID)] = _offset
-            _offset += len(CHEXPERT_LABELS)
-        dataloading_kwargs['one_hot_question_offsets'] = one_hot_question_offsets
+    
+    verbose_question = question_encoding != QuestionEncoding.ONE_HOT
+
+    include_image = does_include_image(visual_input_mode)
+    include_visual_features = does_include_visual_features(visual_input_mode)
+    if include_visual_features:
+        if train_mimiccxr: assert mimiccxr_precomputed_visual_features_path is not None
+        if train_iuxray: assert iuxray_precomputed_visual_features_path is not None
+        if train_chexpert: assert chexpert_precomputed_visual_features_path is not None
+        if train_vinbig: assert vinbig_precomputed_visual_features_path is not None
     
     mimiccxr_vqa_trainer_kwargs = dict(
         split_kwargs = split_kwargs,
@@ -959,6 +1047,18 @@ def train_from_scratch(
         include_chexpert_mode = mimiccxr_include_chexpert_mode,
         use_chexpert_mode_only = use_chexpert_mode_only,
         chexpert_one_hot_offset = one_hot_question_offsets[str(CHEXPERT_DATASET_ID)],
+        include_image = include_image,
+        use_precomputed_visual_features = include_visual_features,
+        precomputed_visual_features_path = mimiccxr_precomputed_visual_features_path,
+        classify_tags = classify_tags,
+        medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
+        classify_orientation = classify_orientation,
+        classify_chexpert = classify_chexpert,
+        chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+        classify_questions = classify_questions,
+        question_labels_filename = mimiccxr_question_labels_filename,
+        allowed_questions = allowed_questions,
+        verbose_question = verbose_question,
     )
     iuxray_vqa_trainer_kwargs = dict(
         split_kwargs = split_kwargs,
@@ -969,13 +1069,37 @@ def train_from_scratch(
         include_chexpert_mode = iuxray_include_chexpert_mode,
         use_chexpert_mode_only = use_chexpert_mode_only,
         chexpert_one_hot_offset = one_hot_question_offsets[str(CHEXPERT_DATASET_ID)],
-    )    
+        include_image = include_image,
+        use_precomputed_visual_features = include_visual_features,
+        precomputed_visual_features_path = iuxray_precomputed_visual_features_path,
+        classify_tags = classify_tags,
+        medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
+        classify_orientation = classify_orientation,
+        classify_chexpert = classify_chexpert,
+        chexpert_labels_filename = iuxray_chexpert_labels_filename,
+        classify_questions = classify_questions,
+        question_labels_filename = iuxray_question_labels_filename,
+        allowed_questions = allowed_questions,
+        verbose_question = verbose_question,        
+    )
+    chexpert_dataset_kwargs = dict(
+        include_image = include_image,
+        use_precomputed_visual_features = include_visual_features,
+        precomputed_visual_features_path = chexpert_precomputed_visual_features_path,
+    )
+    vinbig_dataset_kwargs = dict(
+        include_image = include_image,
+        use_precomputed_visual_features = include_visual_features,
+        precomputed_visual_features_path = vinbig_precomputed_visual_features_path,
+        train_with_everything = vinbig_train_with_everything,
+    )
     
     training_kwargs = dict(
         use_amp = use_amp,
         train_mimiccxr = train_mimiccxr,
         train_iuxray = train_iuxray,
         train_chexpert = train_chexpert,
+        train_vinbig = train_vinbig,
         chexpert_mode = chexpert_mode,
         use_chexpert_mode_only = use_chexpert_mode_only,
         binary_loss_name = binary_loss_name,
@@ -1005,6 +1129,8 @@ def train_from_scratch(
                 lr_scheduler_kwargs,
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
+                chexpert_dataset_kwargs,
+                vinbig_dataset_kwargs,
                 dataloading_kwargs,
                 training_kwargs,
                 auxiliary_tasks_kwargs,
@@ -1015,7 +1141,6 @@ def train_from_scratch(
                 one_question_per_batch,
                 num_workers,
                 beam_search_k=beam_search_k,
-                allowed_questions=allowed_questions,
                 device=device,
                 save=save,
                 debug=debug)
@@ -1034,7 +1159,6 @@ def resume_training(
     val_answer_decoding,
     epochs = 1,
     batches_per_epoch = 1000,
-    allowed_questions = None,
     device = 'GPU',
     save = True,
     override_lr = False,    
@@ -1051,6 +1175,8 @@ def resume_training(
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']
     mimiccxr_vqa_trainer_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
+    chexpert_dataset_kwargs = metadata['chexpert_dataset_kwargs']
+    vinbig_dataset_kwargs = metadata['vinbig_dataset_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
     training_kwargs = metadata['training_kwargs']
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
@@ -1067,12 +1193,15 @@ def resume_training(
             warmup_and_decay_args = warmup_and_decay_args,
         )
 
-    return train_model(tokenizer_kwargs,
+    return train_model(
+                tokenizer_kwargs,
                 model_kwargs,
                 optimizer_kwargs,
                 lr_scheduler_kwargs,
                 mimiccxr_vqa_trainer_kwargs,
                 iuxray_vqa_trainer_kwargs,
+                chexpert_dataset_kwargs,
+                vinbig_dataset_kwargs,
                 dataloading_kwargs,
                 training_kwargs,
                 auxiliary_tasks_kwargs,
@@ -1082,7 +1211,6 @@ def resume_training(
                 batches_per_epoch,
                 one_question_per_batch,
                 num_workers,
-                allowed_questions = allowed_questions,
                 device = device,
                 checkpoint_folder_path = checkpoint_folder,
                 save = save,

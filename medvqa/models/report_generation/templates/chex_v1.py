@@ -11,6 +11,10 @@ Chosen sentences from the dataset to represent each disease.
 """
 
 TEMPLATES_CHEXPERT_v1 = {
+    'No Finding': {
+        0: 'findings are present',
+        1: 'no findings',
+    },
     'Cardiomegaly': {
         0: 'heart size is normal',
         1: 'the heart is enlarged',

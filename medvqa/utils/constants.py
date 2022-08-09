@@ -45,6 +45,17 @@ CHEXPERT_METRICS = [
     'chexpert_prf1s',
 ]
 
+VINBIG_DISEASES = [
+    'Aortic enlargement', 'Atelectasis', 'Calcification',
+    'Cardiomegaly', 'Clavicle fracture', 'Consolidation', 'Edema',
+    'Emphysema', 'Enlarged PA', 'ILD', 'Infiltration', 'Lung Opacity',
+    'Lung cavity', 'Lung cyst', 'Mediastinal shift', 'Nodule/Mass',
+    'Pleural effusion', 'Pleural thickening', 'Pneumothorax',
+    'Pulmonary fibrosis', 'Rib fracture', 'Other lesion', 'COPD',
+    'Lung tumor', 'Pneumonia', 'Tuberculosis', 'Other disease',
+    'No finding',
+]
+
 NLP_METRICS = [
     'bleu_question',
     'bleu',
@@ -86,10 +97,13 @@ class MetricNames:
     QLABELS_PRF1 = 'qlabels_prf1'
     QLABELS_MACROAVGF1 = 'qlabels_macroavgf1'
     QLABELS_MICROAVGF1 = 'qlabels_microavgf1'
+    VINBIGMACROAVGF1 = 'vinbigmacroavgf1'
+    VINBIGMICROAVGF1 = 'vinbigmicroavgf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
     ORIENTATION_LOSS = 'orientation_loss'
     CHEXPERT_LOSS = 'chexpert_loss'
+    VINBIG_LOSS = 'vinbig_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
@@ -125,10 +139,13 @@ METRIC2SHORT = {
     'qlabels_prf1': 'qlprf1',
     'qlabels_macroavgf1': 'qlmacf1',
     'qlabels_microavgf1': 'qlmicf1',
+    'vinbigmacroavgf1': 'vnbgmacf1',
+    'vinbigmicroavgf1': 'vnbgmicf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
+    'vinbig_loss': 'vnbg_loss',
     'qlabels_loss': 'ql_loss',
     'gender_loss': 'gloss',
     'gender_acc': 'gacc',
@@ -139,6 +156,7 @@ MIMICCXR_DATASET_ID = 1
 CHEXPERT_DATASET_ID = 2
 IUXRAY_DATASET_ID__CHEXPERT_MODE = 3
 MIMICCXR_DATASET_ID__CHEXPERT_MODE = 4
+VINBIG_DATASET_ID = 5
 
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'
@@ -147,3 +165,4 @@ class ReportEvalMode:
     NEAREST_NEIGHBOR = 'nearest-neighbor'
     CHEXPERT_LABELS = 'chexpert-labels'
     CHEXPERT_AND_QUESTION_CLASSIFICATION = 'chexpert+qclass'
+    VINBIG_DISEASES = 'vinbig-diseases'

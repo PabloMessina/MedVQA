@@ -42,8 +42,18 @@ def _append_cnn_frozen_column(df, results):
     column = []
     for r in results:
         metadata = load_json_file(os.path.join(WORKSPACE_DIR, 'models', r[0], r[1], 'metadata.json'))
-        column.append(metadata['model_kwargs'].get('freeze_cnn', False))
-    df['cnn-frozen'] = column    
+        frozen = metadata['model_kwargs'].get('freeze_cnn', False) or\
+                 metadata['model_kwargs'].get('freeze_image_encoder', False)
+        column.append(frozen)
+    df['cnn-frozen'] = column
+
+def _append_model_column(df, results):
+    models = []
+    for x in results:
+        s = x[1].index('_',16)+1
+        e = x[1].index('_',s)
+        models.append(x[1][s:e])
+    df['model'] = models
 
 def _append_method_columns__report_level(df, results):
     # General approach
@@ -52,6 +62,8 @@ def _append_method_columns__report_level(df, results):
     df['timestamp'] = [x[1][:15] for x in results]
     # Datasets used
     df['datasets'] = [x[1][16:x[1].index('_',16)] for x in results]
+    # Model
+    _append_model_column(df, results)
     # Eval mode
     eval_modes = []
     for x in results:
@@ -74,6 +86,8 @@ def _append_method_columns__visual_module(df, results):
     df['timestamp'] = [x[1][:15] for x in results]
     # Datasets used
     df['datasets'] = [x[1][16:x[1].index('_',16)] for x in results]
+    # Model
+    _append_model_column(df, results)
     # CNN frozen
     _append_cnn_frozen_column(df, results)
 

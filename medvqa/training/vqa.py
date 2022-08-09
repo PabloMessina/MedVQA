@@ -6,14 +6,24 @@ from ignite.engine import Engine
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.models.common import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
-from medvqa.utils.constants import CHEXPERT_TASKS, IUXRAY_DATASET_ID, IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE
+from medvqa.utils.constants import (
+    CHEXPERT_TASKS,
+    IUXRAY_DATASET_ID,
+    IUXRAY_DATASET_ID__CHEXPERT_MODE,
+    MIMICCXR_DATASET_ID,
+    CHEXPERT_DATASET_ID,
+    MIMICCXR_DATASET_ID__CHEXPERT_MODE,
+    VINBIG_DATASET_ID,
+)
 
-def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
+def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,        
         question_encoding = QuestionEncoding.BILSTM,
         answer_decoding = AnswerDecoding.TEACHER_FORCING,
         shift_answer = False,
         beam_search_k = None,
         include_answer=True,
+        include_image=True,
+        include_visual_features=False,
         max_answer_length=None,
         # automatic mixed precision
         use_amp=False,
@@ -33,6 +43,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # chexpert dataset
         chexpert_aux_criterion=None,
         chexpert_mode=None,
+        # vinbig dataset
+        vinbig_criterion=None,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -55,8 +67,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # Extract elements from batch
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
-        images = batch['i'].to(device)
         questions = batch['q'].to(device)
+        if include_image:
+            images = batch['i'].to(device)
+        if include_visual_features:
+            visual_features = batch['vf'].to(device)
         if verbose_question:
             question_lengths = batch['ql']
         if include_answer:
@@ -82,10 +97,15 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
             # Prepare args for model forward
             model_kwargs = {
-                'images': images,
                 'questions': questions,
                 'device': device,
             }
+            
+            if include_image:
+                model_kwargs['raw_images'] = images
+            if include_visual_features:
+                model_kwargs['visual_features'] = visual_features
+
             if verbose_question:
                 model_kwargs['question_lengths'] = question_lengths
 
@@ -234,10 +254,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # Extract elements from batch
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
-        images = batch['i'].to(device)
         orientations = batch['o'].to(device)
         genders = batch['g'].to(device)
         chexpert = batch['l'].to(device)
+        if include_image:
+            images = batch['i'].to(device)
+        if include_visual_features:
+            visual_features = batch['vf'].to(device)
         if use_chexpert_vqa:
             questions = batch['q'].to(device)
             answers = batch['a'].to(device)
@@ -251,10 +274,15 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
             # Prepare args for model forward
             model_kwargs = {
-                'images': images,
                 'chexpert_forward': True,
                 'device': device,
             }
+
+            if include_image:
+                model_kwargs['raw_images'] = images
+            if include_visual_features:
+                model_kwargs['visual_features'] = visual_features
+
             if use_chexpert_vqa:
                 model_kwargs['questions'] = questions
                 if training:
@@ -346,15 +374,121 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
         return output
 
+    def step_fn__vinbig(batch):
+
+        # Extract elements from batch
+        idxs = batch['idx']
+        dataset_id = batch['dataset_id']
+        vinbig_labels = batch['l'].to(device)
+        questions = batch['q'].to(device)
+        answers = batch['a'].to(device)
+        if shift_answer:
+            answers_start = answers[:, :-1]
+            answers_end = answers[:, 1:]
+        if include_image:
+            images = batch['i'].to(device)
+        if include_visual_features:
+            visual_features = batch['vf'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'vinbig_forward': True,
+                'device': device,
+            }
+
+            if include_image:
+                model_kwargs['raw_images'] = images
+            if include_visual_features:
+                model_kwargs['visual_features'] = visual_features
+            
+            model_kwargs['questions'] = questions
+            if training:
+                model_kwargs['mode'] = 'train'
+                if shift_answer:
+                    model_kwargs['answers'] = answers_start
+                else:
+                    model_kwargs['answers'] = answers
+            else:
+                model_kwargs['mode'] = 'eval'
+                if use_beam_search:
+                    model_kwargs['beam_search_k'] = beam_search_k
+                if include_answer:
+                    model_kwargs['max_answer_length'] = answers.size(1)
+                else:                    
+                    model_kwargs['max_answer_length'] = max_answer_length
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+
+                model_output = model(**model_kwargs)
+                
+                pred_vinbig_logits = model_output['pred_vinbig']
+                pred_vinbig_probs = model_output['pred_vinbig_probs']
+                if training:
+                    pred_answer_logits = model_output['pred_answers']
+                else:
+                    pred_answers = model_output['pred_answers']
+
+                if training:
+                    # Compute losses
+                    vinbig_loss = vinbig_criterion(pred_vinbig_logits, vinbig_labels.float())                    
+                    batch_loss = vinbig_loss                    
+                    if shift_answer:
+                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                    else:
+                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                    batch_loss += answer_loss
+
+                    # Backward pass + optimizer step if training
+                    assert batch_loss is not None
+                    scaler.scale(batch_loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    # batch_loss.backward()
+                    # optimizer.step()
+                    optimizer.zero_grad()
+        
+        output = {
+            'idxs': idxs,
+            'dataset_id': dataset_id,
+        }            
+        if training:
+            output['loss'] = batch_loss.detach()
+            
+        # vinbig labels
+        output['vinbig_labels'] = vinbig_labels.detach().cpu()
+        output['pred_vinbig_labels'] = (pred_vinbig_logits.detach() > 0).cpu()
+        output['pred_vinbig_probs'] = pred_vinbig_probs.detach().cpu()
+        if training:
+            output['vinbig_loss'] = vinbig_loss.detach()
+
+        # answers (vqa)
+        if use_chexpert_vqa:
+            if training:
+                pred_answers = pred_answer_logits.argmax(-1)        
+                output['answer_loss'] = answer_loss.detach()            
+            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+            output['answers'] = tokenizer.clean_batch(answers.detach())                
+
+        return output
+
+
     _mim_iu_datasets = [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID,
              MIMICCXR_DATASET_ID__CHEXPERT_MODE, IUXRAY_DATASET_ID__CHEXPERT_MODE]
-    def step_fn(unused_engine, batch):        
+    
+    def step_fn(unused_engine, batch):
         dataset_id = batch['dataset_id']
         # print(f"step_fn(dataset_id={dataset_id})")
         if dataset_id in _mim_iu_datasets:
             return step_fn__mimiccxr_iuxray(batch)
         if dataset_id == CHEXPERT_DATASET_ID:
             return step_fn__chexpert(batch)
+        if dataset_id == VINBIG_DATASET_ID:
+            return step_fn__vinbig(batch)
         assert False, f'Unknown dataset_id {dataset_id}'
     
     return step_fn
@@ -362,12 +496,14 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert, classify_questions,
                question_encoding, answer_decoding, device,
                binary_loss_name='bce',
-               shift_answer=False,
-               beam_search_k=None, include_answer=True, max_answer_length=None,
+               include_image=True, include_visual_features=False,
+               shift_answer=False, include_answer=True,
+               beam_search_k=None, max_answer_length=None,
                use_amp=False,
                training=False,
                train_with_chexpert_dataset=False,
                chexpert_mode=None,
+               use_vinbig_dataset=False,
                optimizer=None):
     
     print(f'get_engine(): shift_answer={shift_answer}')
@@ -403,10 +539,17 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
         assert chexpert_mode is not None
     else:
         chexpert_aux_criterion = None
+    
+    if use_vinbig_dataset:
+        vinbig_criterion = get_binary_multilabel_loss(binary_loss_name)
+    else:
+        vinbig_criterion = None
 
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                          include_answer=include_answer, max_answer_length=max_answer_length,
+                          include_visual_features=include_visual_features,
+                          include_image=include_image, include_answer=include_answer,
+                          max_answer_length=max_answer_length,
                           training=training,
                           device=device, use_amp=use_amp,
                           question_encoding=question_encoding,
@@ -429,6 +572,8 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           # chexpert dataset
                           chexpert_aux_criterion=chexpert_aux_criterion,
                           chexpert_mode=chexpert_mode,
+                          # vinbig dataset
+                          vinbig_criterion=vinbig_criterion,
                           )
     engine = Engine(step_fn)
     return engine

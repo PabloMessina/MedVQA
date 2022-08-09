@@ -29,12 +29,14 @@ class TransformerAnswerDecoder(nn.Module):
         hidden_size,
         question_vec_size,
         image_local_feat_size,
+        image_global_feat_size,
         nhead,
         dim_feedforward,
         num_layers,
         start_idx,
         vocab_size,
         dropout_prob,
+        use_local_features = True,
     ):
         assert embed_size == hidden_size
         super().__init__()
@@ -49,8 +51,10 @@ class TransformerAnswerDecoder(nn.Module):
             d_model=hidden_size, nhead=nhead, dim_feedforward=dim_feedforward
         ), num_layers=num_layers)
         self.W_vocab = nn.Linear(hidden_size, vocab_size)
-        self.W_local_feat = nn.Linear(image_local_feat_size, hidden_size)    
-        self.W_global_feat = nn.Linear(image_local_feat_size * 2, hidden_size)
+        self.use_local_features = use_local_features
+        if use_local_features:
+            self.W_local_feat = nn.Linear(image_local_feat_size, hidden_size)
+        self.W_global_feat = nn.Linear(image_global_feat_size, hidden_size)
         self.W_q = nn.Linear(question_vec_size, hidden_size)
 
     def generate_square_subsequent_mask(self, sz):
@@ -60,12 +64,18 @@ class TransformerAnswerDecoder(nn.Module):
 
     def get_image_question_memory(self, local_feat, global_feat, question_vectors):
         # merge image and question
-        batch_size = local_feat.size(0)
-        image_question_memory = torch.cat((
-            self.W_local_feat(local_feat),
-            self.W_global_feat(global_feat).view(batch_size, 1, -1),
-            self.W_q(question_vectors).view(batch_size, 1, -1),
-        ), 1)
+        batch_size = global_feat.size(0)
+        if self.use_local_features:
+            image_question_memory = torch.cat((
+                self.W_local_feat(local_feat),
+                self.W_global_feat(global_feat).view(batch_size, 1, -1),
+                self.W_q(question_vectors).view(batch_size, 1, -1),
+            ), 1)
+        else:
+            image_question_memory = torch.cat((
+                self.W_global_feat(global_feat).view(batch_size, 1, -1),
+                self.W_q(question_vectors).view(batch_size, 1, -1),
+            ), 1)
         return image_question_memory
     
     def teacher_forcing_decoding(self, local_feat, global_feat, question_vectors, answers, device):
@@ -88,7 +98,7 @@ class TransformerAnswerDecoder(nn.Module):
         return vocab_logits
 
     def greedy_search_decoding(self, local_feat, global_feat, question_vectors, max_answer_length, device):
-        batch_size = local_feat.size(0)
+        batch_size = global_feat.size(0)
         image_question_memory = self.get_image_question_memory(local_feat, global_feat, question_vectors)
         image_question_memory = image_question_memory.permute(1,0,2)
         decoded_tokens = self.start_idx.expand(batch_size).unsqueeze(0)
