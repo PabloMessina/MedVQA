@@ -153,6 +153,7 @@ def _evaluate_model(
     tokenizer_kwargs,
     model_kwargs,
     dataloading_kwargs,
+    image_transform_kwargs,
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
     auxiliary_tasks_kwargs,
@@ -246,9 +247,9 @@ def _evaluate_model(
     max_answer_length = _estimate_maximum_answer_length([iuxray_qa_reports, mimiccxr_qa_reports], tokenizer)
     print('max_answer_length =', max_answer_length)    
     
-    # Default image transform
+    # Default image transform (no augmentations)
     count_print('Defining image transform ...')
-    img_transform = get_image_transform()
+    img_transform = get_image_transform(**image_transform_kwargs)
 
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -486,6 +487,8 @@ def evaluate_model(
     tokenizer_kwargs = metadata['tokenizer_kwargs']
     model_kwargs = metadata['model_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+    image_transform_kwargs = metadata['image_transform_kwargs']
+    image_transform_kwargs['augmentation_mode'] = None # no data augmentation
     mimiccxr_vqa_evaluator_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
@@ -496,6 +499,7 @@ def evaluate_model(
                 tokenizer_kwargs,
                 model_kwargs,
                 dataloading_kwargs,
+                image_transform_kwargs,
                 mimiccxr_vqa_evaluator_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 auxiliary_tasks_kwargs,

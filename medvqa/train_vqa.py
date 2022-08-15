@@ -11,11 +11,12 @@ from medvqa.datasets.chexpert.chexpert_dataset_management import (
 )
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VQA_Trainer
 from medvqa.losses.optimizers import create_optimizer
-from medvqa.losses.schedulers import create_lr_scheduler
+from medvqa.losses.schedulers import LRSchedulerNames, create_lr_scheduler
 from medvqa.models.common import AnswerDecoding, load_model_state_dict
 
 from medvqa.models.vqa.open_ended_vqa import (
     QuestionEncoding,
+    RawImageEncoding,
     does_include_image,
     does_include_visual_features,
 )
@@ -122,11 +123,10 @@ def parse_args(args=None):
 
     # Image encoder
     parser.add_argument('--visual-input-mode', type=str, default='raw-image')
-    parser.add_argument('--raw-image-encoding', type=str, default='cnn')
+    parser.add_argument('--raw-image-encoding', type=str, default=RawImageEncoding.DENSENET_121)
     parser.add_argument('--image-local-feat-size', type=int, default=1024,
                         help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
-    parser.add_argument('--densenet-pretrained-weights-path', type=str, default='',
-                        help='Path to densenet 121 pretrained weights')
+    parser.add_argument('--image-encoder-pretrained-weights-path', type=str, default=None)
     parser.add_argument('--freeze-image-encoder', dest='freeze_image_encoder', action='store_true')
     parser.set_defaults(freeze_image_encoder=False)
     parser.add_argument('--imagenet-pretrained', dest='imagenet_pretrained', action='store_true')
@@ -138,6 +138,7 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--chexpert-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
+    parser.add_argument('--clip-version', type=str, default=None)
     
     # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
@@ -159,6 +160,7 @@ def parse_args(args=None):
     parser.add_argument('--lr-decay', type=float, default=0.76, help='Learning rate decay')
     parser.add_argument('--lr-decay-patience', type=int, default=2, help='Learning rate decay patience')
     parser.add_argument('--warmup-and-decay-args', type=str, default=None)
+    parser.add_argument('--warmup-and-cosine-args', type=str, default=None)
     
     parser.add_argument('--n-val-examples-per-question', type=int, default=10,
                         help='Number of validation examples per question')
@@ -171,7 +173,8 @@ def parse_args(args=None):
     parser.add_argument('--device', type=str, default='GPU',
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
-                        help='Mode of data augmentation used for images')    
+                        help='Mode of data augmentation used for images')
+    parser.add_argument('--image-size', nargs='+', type=int, default=(255,255))
 
     parser.add_argument('--mimiccxr-weight', type=float, default=1,
                         help='Relative number of batches to sample from MIMIC-CXR dataset (for rebalancing purposes)')
@@ -301,6 +304,7 @@ def train_model(
     chexpert_dataset_kwargs,
     vinbig_dataset_kwargs,
     dataloading_kwargs,
+    image_transform_kwargs,
     training_kwargs,
     auxiliary_tasks_kwargs,
     val_answer_decoding,
@@ -413,7 +417,7 @@ def train_model(
 
     # Learning rate scheduler
     count_print('Defining scheduler ...')
-    lr_scheduler = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
+    lr_scheduler, update_lr_batchwise = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')    
@@ -426,7 +430,8 @@ def train_model(
                          use_amp=use_amp, training=True,
                          train_with_chexpert_dataset=train_chexpert, chexpert_mode=chexpert_mode,
                          use_vinbig_dataset=train_vinbig,
-                         optimizer=optimizer, device=device)
+                         optimizer=optimizer, device=device,
+                         update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler)
     validator = get_engine(model=model, tokenizer=tokenizer, classify_tags=classify_tags, classify_orientation=classify_orientation,
                          classify_chexpert=classify_chexpert, classify_questions=classify_questions,
                          question_encoding=question_encoding, answer_decoding=val_answer_decoding,
@@ -436,7 +441,7 @@ def train_model(
 
     # Define image transform
     count_print('Defining image transform ...')
-    img_transform = get_image_transform(augmentation_mode=dataloading_kwargs['img_aug_mode'])
+    img_transform = get_image_transform(**image_transform_kwargs)
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -727,7 +732,8 @@ def train_model(
     merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.3, 0.7)    
     score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
 
-    lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
+    if not update_lr_batchwise:
+        lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
 
     # Checkpoint saving
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
@@ -739,7 +745,7 @@ def train_model(
             count_print('Defining checkpoint folder path ...')
             checkpoint_folder_path = get_checkpoint_folder_path('vqa', merged_dataset_name, model.name,
                 # f'voc-minf={vocab_min_freq}',
-                f'cnn-pretr={int(bool(model_kwargs["densenet_pretrained_weights_path"]))}',
+                f'visenc-pretr={int(bool(model_kwargs["image_encoder_pretrained_weights_path"]))}',
                 f'dws={",".join(map(str, _train_weights))}' \
                     if len(_train_weights) > 1 else None,
                 'medtok' if medical_tokenization else None,
@@ -760,6 +766,7 @@ def train_model(
                         chexpert_dataset_kwargs = chexpert_dataset_kwargs,
                         vinbig_dataset_kwargs = vinbig_dataset_kwargs,
                         dataloading_kwargs = dataloading_kwargs,
+                        image_transform_kwargs = image_transform_kwargs,
                         training_kwargs = training_kwargs,
                         auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
 
@@ -802,7 +809,8 @@ def train_model(
     validator.add_event_handler(Events.EPOCH_STARTED, lambda : print('(2) Validation stage ...'))
     validator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     validator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
-    validator.add_event_handler(Events.EPOCH_COMPLETED, lr_sch_handler)
+    if not update_lr_batchwise:
+        validator.add_event_handler(Events.EPOCH_COMPLETED, lr_sch_handler)
     if save: # only if we want to save checkpoints to disk
         validator.add_event_handler(Events.EPOCH_COMPLETED, checkpoint_handler)
 
@@ -838,8 +846,9 @@ def train_from_scratch(
     question_vec_size,
     image_local_feat_size,
     dropout_prob,
-    densenet_pretrained_weights_path,
+    image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
+    clip_version,
     # Optimizer's args
     optimizer_name,
     lr,
@@ -848,6 +857,9 @@ def train_from_scratch(
     lr_decay,
     lr_decay_patience,
     warmup_and_decay_args,
+    warmup_and_cosine_args,
+    # Image transform args
+    image_size,
     # Dataset args
     n_val_examples_per_question,
     min_train_examples_per_question,
@@ -950,6 +962,12 @@ def train_from_scratch(
     if train_vinbig:
         one_hot_question_offsets[str(VINBIG_DATASET_ID)] = _offset
         _offset += len(VINBIG_DISEASES)
+
+    use_clip = raw_image_encoding in (RawImageEncoding.CLIP_RESNET, RawImageEncoding.CLIP_VIT)
+    if use_clip:
+        assert clip_version is not None
+        assert image_size == 224 or image_size == [224, 224]
+        if type(image_size) is list: image_size = tuple(image_size)
         
     model_kwargs = dict(
         embed_size = embed_size,
@@ -963,11 +981,12 @@ def train_from_scratch(
         raw_image_encoding = raw_image_encoding,
         freeze_image_encoder = freeze_image_encoder,
         image_local_feat_size = image_local_feat_size,
-        densenet_pretrained_weights_path = densenet_pretrained_weights_path,
+        image_encoder_pretrained_weights_path = image_encoder_pretrained_weights_path,
         imagenet_pretrained = imagenet_pretrained,
         mlp_in_dim = visual_features_mlp_in_dim,
         mlp_out_dim = visual_features_mlp_out_dim,
         mlp_hidden_dims = visual_features_mlp_hidden_dims,
+        clip_version = clip_version,
         # Question encoder
         question_encoding = question_encoding,
         question_vec_size = question_vec_size,
@@ -997,6 +1016,8 @@ def train_from_scratch(
         factor = lr_decay,
         patience = lr_decay_patience,
         warmup_and_decay_args = warmup_and_decay_args,
+        warmup_and_cosine_args = warmup_and_cosine_args,
+        n_batches_per_epoch = batches_per_epoch,
     )
     if balanced_dataloading:
         assert balanced_split
@@ -1018,7 +1039,6 @@ def train_from_scratch(
         )    
     
     dataloading_kwargs = dict(
-        img_aug_mode = img_aug_mode,
         mimiccxr_weight = mimiccxr_weight,
         iuxray_weight = iuxray_weight,
         chexpert_weight = chexpert_weight,
@@ -1026,6 +1046,12 @@ def train_from_scratch(
         mimiccxr_weight_chexpert_mode = mimiccxr_weight_chexpert_mode,
         iuxray_weight_chexpert_mode = iuxray_weight_chexpert_mode,
         one_hot_question_offsets = one_hot_question_offsets,
+    )
+
+    image_transform_kwargs = dict(
+        image_size = image_size,
+        augmentation_mode = img_aug_mode,
+        use_clip_transform = use_clip,
     )
     
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT
@@ -1132,6 +1158,7 @@ def train_from_scratch(
                 chexpert_dataset_kwargs,
                 vinbig_dataset_kwargs,
                 dataloading_kwargs,
+                image_transform_kwargs,
                 training_kwargs,
                 auxiliary_tasks_kwargs,
                 val_answer_decoding,
@@ -1153,6 +1180,7 @@ def resume_training(
     lr_decay,
     lr_decay_patience,
     warmup_and_decay_args,
+    warmup_and_cosine_args,
     batch_size,
     num_workers,
     one_question_per_batch,
@@ -1161,7 +1189,7 @@ def resume_training(
     batches_per_epoch = 1000,
     device = 'GPU',
     save = True,
-    override_lr = False,    
+    override_lr = False,
     debug = False,
     **unused_kwargs,
 ):
@@ -1178,6 +1206,7 @@ def resume_training(
     chexpert_dataset_kwargs = metadata['chexpert_dataset_kwargs']
     vinbig_dataset_kwargs = metadata['vinbig_dataset_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+    image_transform_kwargs = metadata['image_transform_kwargs']
     training_kwargs = metadata['training_kwargs']
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
 
@@ -1191,6 +1220,8 @@ def resume_training(
             factor = lr_decay,
             patience = lr_decay_patience,
             warmup_and_decay_args = warmup_and_decay_args,
+            warmup_and_cosine_args = warmup_and_cosine_args,
+            n_batches_per_epoch = batches_per_epoch,
         )
 
     return train_model(
@@ -1203,6 +1234,7 @@ def resume_training(
                 chexpert_dataset_kwargs,
                 vinbig_dataset_kwargs,
                 dataloading_kwargs,
+                image_transform_kwargs,
                 training_kwargs,
                 auxiliary_tasks_kwargs,
                 val_answer_decoding,

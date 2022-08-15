@@ -15,6 +15,12 @@ from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import ImageAugmentationTransforms
 
+try:
+    from torchvision.transforms import InterpolationMode
+    BICUBIC = InterpolationMode.BICUBIC
+except ImportError:
+    BICUBIC = Image.BICUBIC
+
 _AUGMENTATION_MODES = [
     'random-color',
     'random-spatial',
@@ -27,12 +33,30 @@ def get_image_transform(
     std = (0.229, 0.224, 0.225),
     augmentation_mode = None,
     default_prob=0.3,
+    use_clip_transform=False
 ):
 
-    tf_resize = T.Resize(image_size)
+    if type(image_size) is int:
+        use_center_crop = True
+    elif type(image_size) is list or type(image_size) is tuple:
+        use_center_crop = False
+        assert len(image_size) == 2
+    else: assert False    
+
+    if use_clip_transform:
+        tf_resize = T.Resize(image_size, interpolation=BICUBIC)
+        tf_normalize = T.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))        
+    else:
+        tf_resize = T.Resize(image_size)
+        tf_normalize = T.Normalize(mean, std)
+    
     tf_totensor = T.ToTensor()
-    tf_normalize = T.Normalize(mean, std)
-    default_transform = T.Compose([tf_resize, tf_totensor, tf_normalize])
+    
+    if use_center_crop:
+        tf_ccrop = T.CenterCrop(image_size)
+        default_transform = T.Compose([tf_resize, tf_ccrop, tf_totensor, tf_normalize])
+    else:
+        default_transform = T.Compose([tf_resize, tf_totensor, tf_normalize])
 
     if augmentation_mode is None:
         print('Returning default transform')
@@ -44,13 +68,25 @@ def get_image_transform(
 
     if augmentation_mode == 'random-color':
         aug_transforms = image_aug_transforms.get_color_transforms()
-        final_transforms = [
+        if use_center_crop:
+            final_transforms = [
+                T.Compose([tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
+                for tf_aug in aug_transforms
+            ]
+        else:
+            final_transforms = [
             T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
     elif augmentation_mode == 'random-spatial':
         aug_transforms = image_aug_transforms.get_spatial_transforms()
-        final_transforms = [
+        if use_center_crop:
+            final_transforms = [
+                T.Compose([tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
+                for tf_aug in aug_transforms
+            ]
+        else:
+            final_transforms = [
             T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
@@ -60,7 +96,10 @@ def get_image_transform(
         final_transforms = []
         for stf in spatial_transforms:
             for ctf in color_transforms:
-                final_transforms.append(T.Compose([tf_resize, stf, ctf, tf_totensor, tf_normalize]))
+                if use_center_crop:
+                    final_transforms.append(T.Compose([tf_resize, tf_ccrop, stf, ctf, tf_totensor, tf_normalize]))
+                else:
+                    final_transforms.append(T.Compose([tf_resize, stf, ctf, tf_totensor, tf_normalize]))
     else:
         assert False
 

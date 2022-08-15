@@ -45,6 +45,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         chexpert_mode=None,
         # vinbig dataset
         vinbig_criterion=None,
+        # batchwise learning rate updatse
+        update_lr_batchwise=False,
+        lr_scheduler=None,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -59,6 +62,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
     if not include_answer:
         assert max_answer_length is not None
+
+    if update_lr_batchwise:
+        assert lr_scheduler is not None
 
     use_chexpert_vqa = chexpert_mode == CHEXPERT_TASKS.VQA
     
@@ -436,7 +442,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if training:
                     # Compute losses
                     vinbig_loss = vinbig_criterion(pred_vinbig_logits, vinbig_labels.float())                    
-                    batch_loss = vinbig_loss                    
+                    batch_loss = vinbig_loss
                     if shift_answer:
                         answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
                     else:
@@ -484,12 +490,16 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         dataset_id = batch['dataset_id']
         # print(f"step_fn(dataset_id={dataset_id})")
         if dataset_id in _mim_iu_datasets:
-            return step_fn__mimiccxr_iuxray(batch)
-        if dataset_id == CHEXPERT_DATASET_ID:
-            return step_fn__chexpert(batch)
-        if dataset_id == VINBIG_DATASET_ID:
-            return step_fn__vinbig(batch)
-        assert False, f'Unknown dataset_id {dataset_id}'
+            output = step_fn__mimiccxr_iuxray(batch)
+        elif dataset_id == CHEXPERT_DATASET_ID:
+            output = step_fn__chexpert(batch)
+        elif dataset_id == VINBIG_DATASET_ID:
+            output = step_fn__vinbig(batch)
+        else: assert False, f'Unknown dataset_id {dataset_id}'
+        # update learning rate batchwise
+        if update_lr_batchwise:
+            lr_scheduler.step()
+        return output
     
     return step_fn
 
@@ -504,7 +514,8 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                train_with_chexpert_dataset=False,
                chexpert_mode=None,
                use_vinbig_dataset=False,
-               optimizer=None):
+               optimizer=None,
+               update_lr_batchwise=False, lr_scheduler=None):
     
     print(f'get_engine(): shift_answer={shift_answer}')
     
@@ -574,6 +585,9 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           chexpert_mode=chexpert_mode,
                           # vinbig dataset
                           vinbig_criterion=vinbig_criterion,
+                          # batchwise learning rate updates
+                          update_lr_batchwise=update_lr_batchwise,
+                          lr_scheduler=lr_scheduler,
                           )
     engine = Engine(step_fn)
     return engine

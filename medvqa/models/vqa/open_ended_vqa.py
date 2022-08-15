@@ -1,9 +1,15 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
 from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
 from medvqa.models.nlp.question_decoder import QuestionDecoder
+from medvqa.models.vision.visual_modules import (
+    CLIP_RESNET_GLOBAL_FEAT_SIZE,
+    CLIP_VIT_GLOBAL_FEAT_SIZE,
+    create_clip_vit_feature_extractor,
+    create_clip_resnet_feature_extractor,
+    create_densenet121_feature_extractor,
+)
 from medvqa.models.vqa.lstm_answer_decoder import LSTMAnswerDecoder
 from medvqa.models.mlp import MLP
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
@@ -26,7 +32,9 @@ class AnswerDecoding:
     TRANSFORMER  = 'transformer'
 
 class RawImageEncoding:
-    CNN = 'cnn'
+    DENSENET_121 = 'densenet-121'
+    CLIP_RESNET = 'clip-resnet'
+    CLIP_VIT = 'clip-vit'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -49,14 +57,15 @@ class OpenEndedVQA(nn.Module):
                  padding_idx=None,
                  # Image Encoder args
                  visual_input_mode=VisualInputMode.RAW_IMAGE,
-                 raw_image_encoding=RawImageEncoding.CNN,
+                 raw_image_encoding=RawImageEncoding.DENSENET_121,
                  image_local_feat_size=None,
                  freeze_image_encoder=False,
-                 densenet_pretrained_weights_path=None,
+                 image_encoder_pretrained_weights_path=None,
                  imagenet_pretrained=True,
                  mlp_in_dim=None,
                  mlp_out_dim=None,
                  mlp_hidden_dims=None,
+                 clip_version=None,
                  # Question Encoder args
                  question_encoding = QuestionEncoding.BILSTM,
                  question_vec_size=None,
@@ -87,6 +96,8 @@ class OpenEndedVQA(nn.Module):
 
         print('OpenEndedVQA():')
 
+        print('  image_encoder_pretrained_weights_path', image_encoder_pretrained_weights_path)
+
         self.chexpert_mode = chexpert_mode
         if chexpert_mode == CHEXPERT_TASKS.VQA:
             assert question_encoding == QuestionEncoding.ONE_HOT
@@ -100,9 +111,10 @@ class OpenEndedVQA(nn.Module):
         
         # Init Visual Module
         self.visual_input_mode = visual_input_mode
-        self._init_visual_module(visual_input_mode, raw_image_encoding, densenet_pretrained_weights_path,
+        self.clip_version = clip_version
+        self._init_visual_module(visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
                             imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            freeze_image_encoder)        
+                            clip_version, freeze_image_encoder)
         
         # Init Question Encoder
         self.question_encoding = question_encoding
@@ -127,15 +139,15 @@ class OpenEndedVQA(nn.Module):
               f'  question_encoding = {question_encoding}\n  answer_decoding = {answer_decoding}\n'
               f'  visual_input_mode = {visual_input_mode}\n  name = {self.name}')
 
-    def _init_visual_module(self, visual_input_mode, raw_image_encoding, densenet_pretrained_weights_path,
+    def _init_visual_module(self, visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
                             imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            freeze_image_encoder):
+                            clip_version, freeze_image_encoder):
         global_feat_size = 0
         
         if does_include_image(visual_input_mode):
-            self._init_raw_image_encoder(raw_image_encoding, densenet_pretrained_weights_path,
-                                         imagenet_pretrained, freeze_image_encoder)
-            global_feat_size += image_local_feat_size * 2
+            self._init_raw_image_encoder(raw_image_encoding, image_encoder_pretrained_weights_path,
+                                         imagenet_pretrained, clip_version, freeze_image_encoder)
+            global_feat_size += self._get_raw_image_encoder_global_feat_size(image_local_feat_size)
         
         if does_include_visual_features(visual_input_mode):
             self._init_mlp_visual_feat_encoder(mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder)
@@ -144,25 +156,26 @@ class OpenEndedVQA(nn.Module):
         assert global_feat_size > 0
         self.global_feat_size = global_feat_size
         print('  self.global_feat_size =', self.global_feat_size)
-    
-    def _init_raw_image_encoder(self, raw_image_encoding, densenet_pretrained_weights_path,
-                                imagenet_pretrained, freeze_image_encoder):
-        if raw_image_encoding == RawImageEncoding.CNN:
-            # Load pre-trained CNN weights
-            if densenet_pretrained_weights_path:
-                densenet = models.densenet121(pretrained=False)
-                pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
-                densenet.load_state_dict(pretrained_weights, strict=False)
-                print("DenseNet121's pretrained weights loaded from", densenet_pretrained_weights_path)
-            elif imagenet_pretrained:
-                densenet = models.densenet121(pretrained=True)
-                print("DenseNet121's pretrained weights loaded from ImageNet")
-            else:
-                densenet = models.densenet121(pretrained=False)
-            self.raw_image_encoder = densenet.features
-        else:
-            assert False, f'Unknown image encoding {raw_image_encoding}'
 
+    def _get_raw_image_encoder_global_feat_size(self, image_local_feat_size):
+        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
+            return 2 * image_local_feat_size
+        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
+            return CLIP_VIT_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
+            return CLIP_RESNET_GLOBAL_FEAT_SIZE
+        assert False
+    
+    def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
+                                imagenet_pretrained, clip_version, freeze_image_encoder):
+        self.raw_image_encoding = raw_image_encoding        
+        if raw_image_encoding == RawImageEncoding.DENSENET_121:
+            self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
+        elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
+            self.raw_image_encoder = create_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
+        elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
+            self.raw_image_encoder = create_clip_resnet_feature_extractor(clip_version, pretrained_weights_path)
+        else: assert False, f'Unknown image encoding {raw_image_encoding}'
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder)
 
     def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
@@ -275,12 +288,19 @@ class OpenEndedVQA(nn.Module):
 
     @property
     def name(self):        
+        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
+            img_str = 'dense121'
+        elif self.raw_image_encoding in (RawImageEncoding.CLIP_VIT,
+                                         RawImageEncoding.CLIP_RESNET):
+            img_str = f'clip-{self.clip_version}'
+        else: assert False
+        vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
-            vm_str = 'dense121(img)+mlp(vf)'
+            vm_str = f'{img_str}+{vf_str}'
         elif self.visual_input_mode == VisualInputMode.PRECOMP_FEAT:
-            vm_str = 'mlp(vf)'
+            vm_str = vf_str
         elif self.visual_input_mode == VisualInputMode.RAW_IMAGE:
-            vm_str = 'dense121(img)'
+            vm_str = img_str
         else: assert False
         q_enc_str = 'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot'
         a_dec_str = 'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf'
@@ -310,19 +330,33 @@ class OpenEndedVQA(nn.Module):
         global_list = []        
         
         if raw_images is not None:
-            # cnn local features
-            batch_size = raw_images.size(0)
-            local_feat = self.raw_image_encoder(raw_images)
-            feat_size = local_feat.size(1)
-            local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
 
-            # compute global features
-            global_avg_pool = local_feat.mean(1)
-            global_max_pool = local_feat.max(1)[0]
-            global_list.append(global_avg_pool)
-            global_list.append(global_max_pool)
-            # global_raw_feat = torch.cat((global_avg_pool, global_max_pool), 1)
-        
+            if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
+                # densenet local features
+                local_feat = self.raw_image_encoder(raw_images)
+                batch_size = raw_images.size(0)
+                feat_size = local_feat.size(1)
+                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+
+                # compute global features
+                global_avg_pool = local_feat.mean(1)
+                global_max_pool = local_feat.max(1)[0]
+                global_list.append(global_avg_pool)
+                global_list.append(global_max_pool)
+
+            elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
+                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
+                batch_size = raw_images.size(0)
+                feat_size = local_feat.size(1)
+                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)                
+                global_list.append(global_feat)
+            
+            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
+                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
+                global_list.append(global_feat)
+            
+            else: assert False
+
         if visual_features is not None:
             global_vf  = self.mlp_vf_encoder(visual_features)
             global_list.append(global_vf)

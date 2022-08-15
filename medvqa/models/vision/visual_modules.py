@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+import clip
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.common import freeze_parameters
@@ -64,20 +65,7 @@ class DensenetVisualModule(nn.Module):
         ):
         super().__init__()
         self.name = 'densenet121'
-        if pretrained:
-            if densenet_pretrained_weights_path:
-                densenet = models.densenet121(pretrained=False)
-                pretrained_weights = torch.load(densenet_pretrained_weights_path, map_location='cuda')
-                densenet.load_state_dict(pretrained_weights, strict=False)
-                print("DenseNet121's pretrained weights loaded from", densenet_pretrained_weights_path)
-            else:
-                densenet = models.densenet121(pretrained=True)
-                print("DenseNet121's pretrained weights loaded from ImageNet")
-        else:
-            densenet = models.densenet121(pretrained=False)
-
-        self.image_encoder = densenet.features
-
+        self.image_encoder = create_densenet121_feature_extractor(densenet_pretrained_weights_path, pretrained)
         if freeze_cnn: freeze_parameters(self.image_encoder)
 
         # Optional auxiliary tasks        
@@ -151,3 +139,88 @@ class DensenetVisualModule(nn.Module):
                 output['pred_qlabels'] = self.W_q(global_feat)
         
         return output
+
+def create_densenet121_feature_extractor(pretrained_weights_path=None, imagenet_pretrained=False):
+    # Load pre-trained CNN weights
+    if pretrained_weights_path is not None:
+        densenet = models.densenet121(pretrained=False)
+        pretrained_weights = torch.load(pretrained_weights_path, map_location='cuda')
+        densenet.load_state_dict(pretrained_weights, strict=False)
+        print("DenseNet121's pretrained weights loaded from", pretrained_weights_path)
+    elif imagenet_pretrained:
+        densenet = models.densenet121(pretrained=True)
+        print("DenseNet121's pretrained weights loaded from ImageNet")
+    else:
+        densenet = models.densenet121(pretrained=False)
+    return densenet.features
+
+_VALID_CLIP_VIT_VERSIONS = ['ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
+_VALID_CLIP_RESNET_VERSIONS = ['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64']
+
+def _get_clip_vit_modified_forward(dtype):    
+    def forward(self, x: torch.Tensor, return_local_features=False):
+        x = x.type(dtype)
+        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        x = x + self.positional_embedding.to(x.dtype)
+        x = self.ln_pre(x)
+
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = self.transformer(x)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+        
+        if return_local_features:
+            global_features = self.ln_post(x[:, 0, :])        
+            if self.proj is not None:
+                global_features = global_features @ self.proj
+            local_features = x[:, 1:, :]
+            return global_features, local_features
+        else:
+            x = self.ln_post(x[:, 0, :])
+            if self.proj is not None:
+                x = x @ self.proj        
+            return x
+    return forward
+
+def _clip_resnet_modified_forward(self, x, return_local_features=False):
+    x = x.type(self.conv1.weight.dtype)
+    x = self.relu1(self.bn1(self.conv1(x)))
+    x = self.relu2(self.bn2(self.conv2(x)))
+    x = self.relu3(self.bn3(self.conv3(x)))
+    x = self.avgpool(x)
+    x = self.layer1(x)
+    x = self.layer2(x)
+    x = self.layer3(x)
+    x = self.layer4(x)
+    x_pooled = self.attnpool(x)
+    if return_local_features:
+        return x_pooled, x
+    return x_pooled
+
+
+CLIP_VIT_GLOBAL_FEAT_SIZE = 512
+CLIP_VIT_LOCAL_FEAT_SIZE = 768
+CLIP_RESNET_GLOBAL_FEAT_SIZE = 1024
+
+def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
+    data = torch.load(pretrained_weights_path)
+    model.load_state_dict(data['state_dict'])
+    print('Pre-trained weights successfully loaded from', pretrained_weights_path)
+
+def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
+    assert clip_vit_version in _VALID_CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
+    model, _ = clip.load(clip_vit_version,)
+    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    vit = model.visual.float()
+    vit.forward = _get_clip_vit_modified_forward(model.dtype).__get__(vit) # HACK
+    return vit
+
+def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights_path):
+    assert clip_resnet_version in _VALID_CLIP_RESNET_VERSIONS, f'Unknown CLIP ResNet version {clip_resnet_version}'
+    model, _ = clip.load(clip_resnet_version)
+    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    resnet = model.visual.float()
+    resnet.forward = _clip_resnet_modified_forward.__get__(resnet) # HACK
+    return resnet

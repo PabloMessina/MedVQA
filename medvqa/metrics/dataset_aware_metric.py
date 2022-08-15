@@ -109,7 +109,7 @@ class DatasetAwareEpochMetric(DatasetAwareMetric):
     def compute(self):
         if len(self._predictions) < 1 or len(self._targets) < 1:
             raise NotComputableError("EpochMetric must have at least one example before it can be computed.")
-
+        
         _prediction_tensor = torch.cat(self._predictions, dim=0)
         _target_tensor = torch.cat(self._targets, dim=0)
         result = self.compute_fn(_prediction_tensor, _target_tensor)

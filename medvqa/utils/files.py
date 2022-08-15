@@ -70,6 +70,7 @@ def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
     timestamp = get_timestamp()
     folder_name = f'{timestamp}_{dataset_name}_{model_name}'
     if args: folder_name = f'{folder_name}_{"_".join(arg for arg in args if arg is not None)}'
+    folder_name = folder_name.replace(os.path.sep, '-') # prevent possible bugs
     full_path = os.path.join(WORKSPACE_DIR, 'models', task, folder_name)
     os.makedirs(full_path, exist_ok=True)
     return full_path
