@@ -5,7 +5,15 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MultiLabelBinarizer
 
-from medvqa.utils.constants import CHEXPERT_DATASET_ID, IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE, VINBIG_DATASET_ID
+from medvqa.utils.constants import (
+    CXR14_DATASET_ID,
+    CHEXPERT_DATASET_ID,
+    IUXRAY_DATASET_ID__CHEXPERT_MODE,
+    MIMICCXR_DATASET_ID,
+    IUXRAY_DATASET_ID,
+    MIMICCXR_DATASET_ID__CHEXPERT_MODE,
+    VINBIG_DATASET_ID,
+)
 
 INFINITE_DATASET_LENGTH = int(1e18)
 
@@ -182,7 +190,7 @@ def multi_cyclic_dataloaders_generator(dataloaders):
 def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question_offset=None, one_hot_question_offsets=None,
                             include_image=True, include_visual_features=False, include_answer=True,
                             classify_tags=False, n_tags=None, classify_orientation=False,
-                            classify_chexpert=False, classify_questions=False):
+                            classify_chexpert=False, classify_questions=False, use_merged_findings=False):
 
     if classify_tags:
         mlb = MultiLabelBinarizer(list(range(n_tags)))
@@ -238,7 +246,7 @@ def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question
 
             return batch_dict
 
-    elif dataset_id == CHEXPERT_DATASET_ID:
+    elif dataset_id in [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]:
         
         def collate_batch_fn(batch):
             indexes = list(range(len(batch)))        

@@ -6,9 +6,12 @@ from medvqa.models.nlp.question_decoder import QuestionDecoder
 from medvqa.models.vision.visual_modules import (
     CLIP_RESNET_GLOBAL_FEAT_SIZE,
     CLIP_VIT_GLOBAL_FEAT_SIZE,
+    HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE,
+    HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT,
     create_clip_vit_feature_extractor,
     create_clip_resnet_feature_extractor,
     create_densenet121_feature_extractor,
+    create_huggingface_clip_vit_feature_extractor,
 )
 from medvqa.models.vqa.lstm_answer_decoder import LSTMAnswerDecoder
 from medvqa.models.mlp import MLP
@@ -20,6 +23,7 @@ from medvqa.utils.constants import (
     CHEXPERT_GENDERS,
     CHEXPERT_ORIENTATIONS,
     CHEXPERT_TASKS,
+    CXR14_LABELS,
     VINBIG_DISEASES,
 )
 
@@ -35,6 +39,8 @@ class RawImageEncoding:
     DENSENET_121 = 'densenet-121'
     CLIP_RESNET = 'clip-resnet'
     CLIP_VIT = 'clip-vit'
+    CLIP_VIT__HUGGINGFACE = 'clip-vit-huggingface'
+    CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -85,9 +91,12 @@ class OpenEndedVQA(nn.Module):
                  n_medical_tags=None,
                  n_questions=None,
                  n_questions_aux_task=None,
+                 use_cxr14=False,
+                 use_vinbig=False,
+                 merge_findings=False,
+                 n_findings=None,
                  # Other args
                  chexpert_mode=None,
-                 use_vinbig=False,
                  dropout_prob=0,
                  device=None,
                  **unused_kwargs,
@@ -132,7 +141,8 @@ class OpenEndedVQA(nn.Module):
             
         # Init auxiliary tasks
         self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_vinbig, n_medical_tags, n_questions_aux_task)
+                              chexpert_mode, use_cxr14, use_vinbig, n_medical_tags, n_questions_aux_task,
+                              merge_findings=merge_findings, n_findings=n_findings)
 
         # Logging
         print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
@@ -164,6 +174,8 @@ class OpenEndedVQA(nn.Module):
             return CLIP_VIT_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             return CLIP_RESNET_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+            return HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE
         assert False
     
     def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
@@ -171,10 +183,12 @@ class OpenEndedVQA(nn.Module):
         self.raw_image_encoding = raw_image_encoding        
         if raw_image_encoding == RawImageEncoding.DENSENET_121:
             self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
-            self.raw_image_encoder = create_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
         elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             self.raw_image_encoder = create_clip_resnet_feature_extractor(clip_version, pretrained_weights_path)
+        elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
+            self.raw_image_encoder = create_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
+        elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+            self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
         else: assert False, f'Unknown image encoding {raw_image_encoding}'
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder)
 
@@ -243,9 +257,11 @@ class OpenEndedVQA(nn.Module):
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
     def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_vinbig, n_medical_tags, n_questions_aux_task):
+                              chexpert_mode, use_cxr14, use_vinbig, n_medical_tags, n_questions_aux_task,
+                              merge_findings=False, n_findings=None):
         
-        # Optional auxiliary tasks       
+        # Optional auxiliary tasks
+        self.merge_findings = merge_findings
         
         # 1) medical tags classification
         if classify_tags:
@@ -263,28 +279,36 @@ class OpenEndedVQA(nn.Module):
         else:
             self.orien_aux_task = False
 
-        # 3) chexpert classifiction
-        if classify_chexpert:
-            self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
-            self.chx_aux_task = True
-        else:
-            self.chx_aux_task = False
-
-        # 4) questions classification
+        # 3) questions classification
         if classify_questions:
             self.W_q = nn.Linear(self.global_feat_size, n_questions_aux_task)
             self.q_aux_task = True
         else:
             self.q_aux_task = False
 
-        # 5) Chexpert-specific tasks
-        if chexpert_mode is not None:
+        # 4) Chexpert & CRX14's specific tasks: gender & orientaition
+        if chexpert_mode is not None or use_cxr14:
             self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
             self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
 
-        # 6) VinBig specific tasks
-        if use_vinbig:
-            self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
+        if merge_findings:
+            assert n_findings is not None
+            self.W_findings = nn.Linear(self.global_feat_size, n_findings)
+        else:        
+            # 5) chexpert classifiction
+            if classify_chexpert:
+                self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
+                self.chx_aux_task = True
+            else:
+                self.chx_aux_task = False
+
+            # 6) CXR14 specific tasks
+            if use_cxr14:
+                self.W_cxr14 = nn.Linear(self.global_feat_size, len(CXR14_LABELS))
+
+            # 7) VinBig specific tasks
+            if use_vinbig:
+                self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
 
     @property
     def name(self):        
@@ -293,6 +317,8 @@ class OpenEndedVQA(nn.Module):
         elif self.raw_image_encoding in (RawImageEncoding.CLIP_VIT,
                                          RawImageEncoding.CLIP_RESNET):
             img_str = f'clip-{self.clip_version}'
+        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+            img_str = HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT[self.clip_version]
         else: assert False
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -321,6 +347,7 @@ class OpenEndedVQA(nn.Module):
         iuxray_foward=False,
         mimiccxr_foward=False,
         chexpert_forward=False,
+        cxr14_forward=False,
         vinbig_forward=False,
         device=None,
     ):
@@ -355,6 +382,11 @@ class OpenEndedVQA(nn.Module):
                 global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
                 global_list.append(global_feat)
             
+            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+                tmp = self.raw_image_encoder(raw_images)
+                global_feat, local_feat = tmp.pooler_output, tmp.last_hidden_state
+                global_list.append(global_feat)
+            
             else: assert False
 
         if visual_features is not None:
@@ -367,22 +399,33 @@ class OpenEndedVQA(nn.Module):
             global_feat = global_list[0]
 
         output = {}
-
         question_vectors = None
 
+        if self.merge_findings:
+            output['pred_findings'] = self.W_findings(global_feat)
+            output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
+
         if chexpert_forward:
-            output['pred_chexpert'] = self.W_chx(global_feat)
-            output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+            if self.chexpert_mode == CHEXPERT_TASKS.VQA:                
+                question_vectors = self.question_encoder(questions)            
             output['pred_orientation'] = self.W_ori_chexpert(global_feat)
             output['pred_gender'] = self.W_gender_chexpert(global_feat)
-            if self.chexpert_mode == CHEXPERT_TASKS.VQA:
-                # process questions
-                question_vectors = self.question_encoder(questions)
-        elif vinbig_forward:
-            output['pred_vinbig'] = self.W_vinbig(global_feat)
-            output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+            if not self.merge_findings:
+                output['pred_chexpert'] = self.W_chx(global_feat)
+                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+        elif cxr14_forward:
             question_vectors = self.question_encoder(questions)
-        else:        
+            output['pred_orientation'] = self.W_ori_chexpert(global_feat) # weight sharing with chexpert
+            output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
+            if not self.merge_findings:
+                output['pred_cxr14'] = self.W_cxr14(global_feat)
+                output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
+        elif vinbig_forward:
+            question_vectors = self.question_encoder(questions)
+            if not self.merge_findings:
+                output['pred_vinbig'] = self.W_vinbig(global_feat)
+                output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+        else:
             # process questions
             if self.question_encoding == QuestionEncoding.BILSTM:
                 question_vectors = self.question_encoder(questions, question_lengths)
@@ -399,18 +442,18 @@ class OpenEndedVQA(nn.Module):
             if self.tags_aux_task:
                 output['pred_tags'] = self.W_tags(global_feat)
             
-            if self.orien_aux_task:            
+            if self.orien_aux_task:
                 if iuxray_foward:
                     output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
                 if mimiccxr_foward:
                     output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)
-            
-            if self.chx_aux_task:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
 
             if self.q_aux_task:
                 output['pred_qlabels'] = self.W_q(global_feat)
+
+            if not self.merge_findings and self.chx_aux_task:
+                output['pred_chexpert'] = self.W_chx(global_feat)
+                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
 
         # predict answers (if required)
         if question_vectors is not None:
@@ -421,11 +464,12 @@ class OpenEndedVQA(nn.Module):
                     pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
                 else:
                     pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)                
-            else: # Transformr-based decoding
+            elif self.answer_decoding == AnswerDecoding.TRANSFORMER: # Transformr-based decoding
                 if mode == 'train':
                     pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers, device)
                 else:
                     pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device)
+            else: assert False
             output['pred_answers'] = pred_answers
 
         return output

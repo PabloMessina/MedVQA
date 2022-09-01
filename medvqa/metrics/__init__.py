@@ -31,9 +31,15 @@ from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 
 from medvqa.utils.constants import MetricNames
 
-def _get_output_transform(pred_key, gt_key):
-    def output_transform(output):
-        return output[pred_key], output[gt_key]
+def _get_output_transform(pred_key, gt_key, valid_class_indices=None):
+    if valid_class_indices is None:
+        def output_transform(output):
+            return output[pred_key], output[gt_key]
+    else:
+        print('_get_output_transform(): valid_class_indices =', valid_class_indices)
+        def output_transform(output):
+            return output[pred_key][:, valid_class_indices],\
+                   output[gt_key][:, valid_class_indices]
     return output_transform
 
 # def attach_bleu_question(engine, device, record_scores=False):
@@ -122,8 +128,8 @@ def attach_chexpert_labels_accuracy(engine, device, record_scores=False):
                                 device=device, record_scores=record_scores)
     met.attach(engine, MetricNames.CHXLABELACC)
 
-def attach_dataset_aware_chexpert_labels_accuracy(engine, allowed_dataset_ids):
-    met = DatasetAwareMultiLabelAccuracy(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+def attach_dataset_aware_chexpert_labels_accuracy(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelAccuracy(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHXLABELACC)
 
@@ -136,8 +142,8 @@ def attach_chexpert_labels_macroavgf1(engine, device):
     met = MultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
     met.attach(engine, MetricNames.CHXLABELMACROAVGF1)
 
-def attach_dataset_aware_chexpert_labels_macroavgf1(engine, allowed_dataset_ids):
-    met = DatasetAwareMultiLabelMacroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+def attach_dataset_aware_chexpert_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices),
                                            allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHXLABELMACROAVGF1)
 
@@ -153,9 +159,9 @@ def attach_chexpert_labels_roc_auc(engine, device):
     met = EpochMetric(compute_fn=roc_auc_fn, output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'), device=device)
     met.attach(engine, MetricNames.CHXLABEL_ROCAUC)
 
-def attach_dataset_aware_chexpert_labels_roc_auc(engine, allowed_dataset_ids, device):
+def attach_dataset_aware_chexpert_labels_roc_auc(engine, allowed_dataset_ids, device, class_indices=None):
     met = DatasetAwareEpochMetric(compute_fn=roc_auc_fn,
-                                  output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'),
+                                  output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert', class_indices),
                                   allowed_dataset_ids=allowed_dataset_ids,
                                   device=device)
     met.attach(engine, MetricNames.CHXLABEL_ROCAUC)
@@ -185,20 +191,30 @@ def attach_chexpert_labels_microavgf1(engine, device):
     met = MultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
     met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
 
-def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids):
-    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert'),
+def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices),
                                            allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
 
-def attach_dataset_aware_vinbig_labels_macroavgf1(engine, allowed_dataset_ids):
-    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels'),
+def attach_dataset_aware_vinbig_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.VINBIGMACROAVGF1)
 
-def attach_dataset_aware_vinbig_labels_microavgf1(engine, allowed_dataset_ids):
-    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels'),
+def attach_dataset_aware_vinbig_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.VINBIGMICROAVGF1)
+
+def attach_dataset_aware_cxr14_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_cxr14', 'cxr14', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CXR14MACROAVGF1)
+
+def attach_dataset_aware_cxr14_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_cxr14', 'cxr14', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CXR14MICROAVGF1)
 
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),

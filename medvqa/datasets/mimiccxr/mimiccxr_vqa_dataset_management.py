@@ -50,13 +50,14 @@ def _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
 
 def get_mimiccxr_image_paths(report):
     filepath = report['filepath']
-    part_id, subject_id, study_id = map(int, _MIMICCXR_STUDY_REGEX.findall(filepath)[0])        
+    part_id, subject_id, study_id = map(int, _MIMICCXR_STUDY_REGEX.findall(filepath)[0])
     images = glob.glob(_MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
     return images
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
                                        balanced_metadata_filename = None,
-                                       chexpert_labels_filename = None):
+                                       chexpert_labels_filename = None,
+                                       train_with_all = False):
     
     split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
     tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
@@ -71,6 +72,8 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
         strings.append(f'balanced_metadata={balanced_metadata_filename}')
     if chexpert_labels_filename:
         strings.append(f'chexpert_labels={chexpert_labels_filename}')
+    if train_with_all:
+        strings.append('train_with_all')
     merged_string = ";".join(strings)
     final_path = os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_preprocessed_train_data__({merged_string}).pkl')
     if len(final_path) > MAX_FILENAME_LENGTH:
@@ -122,6 +125,8 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
         chexpert_one_hot_offset=None,
         batch_size=None):
 
+    print('_precompute_questions_per_report():')
+
     # Filepath
     strings = [
         f'split={split_name}',
@@ -140,7 +145,8 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
 
     data = load_pickle(file_path)
     if data is not None:
-        print('questions per report data loaded from', file_path)
+        print('   questions per report data loaded from', file_path)
+        print('   len(data) =', len(data))
         return data
 
     mimiccxr_qa_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
@@ -213,7 +219,7 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
     elif report_eval_mode == ReportEvalMode.CHEXPERT_LABELS:
         question_ids = list(range(len(CHEXPERT_LABELS)))
         for ri in split_data['report_ids']:
-            data[ri] = question_ids
+            data[ri] = question_ids        
     elif report_eval_mode == ReportEvalMode.VINBIG_DISEASES:
         question_ids = list(range(len(VINBIG_DISEASES)))
         for ri in split_data['report_ids']:
@@ -222,17 +228,20 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
         assert False, f'Unknown report_eval_mode = {report_eval_mode}'
     
     save_to_pickle(data, file_path)
-    print('questions per report data saved to', file_path)
+    print('   len(data) =', len(data))
+    print('   questions per report data saved to', file_path)
     
     return data
 
 def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, split_name, split_lambda):
 
+    print(f'Obtaining {split_name} data ...')
+
     file_path = os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_{split_name}_split(dataset={qa_adapted_reports_filename}).pkl')
     
     data = load_pickle(file_path)
     if data is not None:
-        print(f'{split_name} data loaded from', file_path)
+        print(f'   {split_name} data loaded from', file_path)
         return data
     
     broken_images = set()
@@ -256,15 +265,20 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
         # assert len(views) == len(images)
         
         dicom_id = None
-        if len(views) == 1:
-            dicom_id = views[0][0]
-            orientation = views[0][1]
-        else:
+        for view in views:
+            if view[1] == 'PA':
+                dicom_id = view[0]
+                orientation = view[1]
+                break
+        if dicom_id is None:
             for view in views:
-                if view[1] == 'PA' or view[1] == 'AP':
+                if view[1] == 'AP':
                     dicom_id = view[0]
                     orientation = view[1]
                     break
+        if dicom_id is None and len(views) > 0:
+            dicom_id = views[0][0]
+            orientation = views[0][1]        
             
         if (dicom_id is not None and split_lambda(split_dict[(subject_id, study_id, dicom_id)]) and
                 (subject_id, study_id, dicom_id) not in broken_images):
@@ -276,7 +290,9 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
             data['orientation_ids'].append(orientation_id)
 
     save_to_pickle(data, file_path)
-    print(f'{split_name} data saved to', file_path)
+    print(f'   len(report_ids) =', len(data['report_ids']))
+    print(f'   len(set(report_ids)) =', len(set(data['report_ids'])))
+    print(f'   {split_name} data saved to', file_path)
     
     return data    
 
@@ -326,7 +342,7 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
     split_data = _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, split_name, split_lambda)
 
     if self.report_eval_mode is not None:
-        assert split_name == 'test', 'report_eval_mode should not only be used with the test split'
+        assert split_name == 'test', 'report_eval_mode should only be used with the test split'
         
         if self.report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
             train_split_data = _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict,
@@ -400,6 +416,8 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
             orientation_id = orientation_ids[i]
             question_ids = questions_per_report[ri]
 
+            # assert len(question_ids) > 0, mimiccxr_qa_reports['reports'][ri]
+
             for qid in question_ids:
                 question = question_list[qid]
                 self.report_ids.append(ri)
@@ -407,6 +425,9 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
                 self.images.append(image_path)
                 self.questions.append(tokenizer.string2ids(question.lower()))
                 self.orientations.append(orientation_id)
+
+    # assert len(report_ids) == len(set(report_ids))
+    # assert set(self.report_ids) == set(report_ids)
         
     self.report_ids = np.array(self.report_ids, dtype=int)
     self.question_ids = np.array(self.question_ids, dtype=int)
@@ -446,6 +467,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 include_image = True,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
+                use_merged_findings = False,
+                findings_remapper = None,
+                n_findings = None,
                 debug = False):
         
         self.tokenizer = tokenizer
@@ -487,6 +511,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         include_image = include_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
+                        use_merged_findings = use_merged_findings,
+                        findings_remapper = findings_remapper,
+                        n_findings = n_findings,
                         debug = debug)
 
     def _preprocess_data(self):
@@ -565,6 +592,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         include_image = include_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
+                        chexpert_one_hot_offset = chexpert_one_hot_offset,
                         dataset_name = 'MIMIC-CXR')
 
     def _preprocess_data(self):

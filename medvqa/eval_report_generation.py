@@ -24,13 +24,13 @@ from medvqa.utils.constants import (
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.metrics import (
-    attach_chexpert_labels_macroavgf1,
-    attach_chexpert_labels_microavgf1,
-    attach_chexpert_labels_roc_auc,
+    attach_dataset_aware_chexpert_labels_accuracy,
+    attach_dataset_aware_chexpert_labels_macroavgf1,
+    attach_dataset_aware_chexpert_labels_microavgf1,
+    attach_dataset_aware_chexpert_labels_roc_auc,
+    attach_dataset_aware_question_labels_macroavgf1,
     attach_exactmatch_question,
-    attach_question_labels_f1score,
     attach_medical_tags_f1score,
-    attach_chexpert_labels_accuracy,
     attach_dataset_aware_orientation_accuracy,
 )
 from medvqa.models.checkpoint import (
@@ -59,7 +59,7 @@ from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQ
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.datasets.preprocessing import get_sentences
-from medvqa.utils.logging import CountPrinter
+from medvqa.utils.logging import CountPrinter, print_blue
 from medvqa.evaluation.report_generation import (
     recover_reports,
     compute_report_level_metrics,
@@ -97,13 +97,16 @@ def parse_args():
 
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
+
+    parser.add_argument('--max-processes-for-chexpert-labeler', type=int, default=10)
     
     return parser.parse_args()
 
-def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer, results_folder_path, parenthesis_text=None):
+def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer, results_folder_path,
+                                           parenthesis_text=None, max_processes=10):
     metrics = compute_report_level_metrics(results_dict[f'{dataset_name}_reports']['gt_reports'],
                                            results_dict[f'{dataset_name}_reports']['gen_reports'],
-                                           tokenizer)
+                                           tokenizer, max_processes=max_processes)
     if parenthesis_text is not None:
         save_path = os.path.join(results_folder_path, f'{dataset_name}_report_level_metrics({parenthesis_text}).pkl')
     else:
@@ -157,6 +160,7 @@ def _evaluate_model(
     mimiccxr_vqa_evaluator_kwargs,
     iuxray_vqa_trainer_kwargs,
     auxiliary_tasks_kwargs,
+    trainer_engine_kwargs,
     answer_decoding,
     eval_mode,
     n_questions_per_report = None,
@@ -169,6 +173,7 @@ def _evaluate_model(
     use_amp = False,
     eval_iuxray = True,
     eval_mimiccxr = True,
+    max_processes_for_chexpert_labeler = 10,
 ):
     assert eval_iuxray or eval_mimiccxr
     assert eval_mode is not None
@@ -182,6 +187,7 @@ def _evaluate_model(
     visual_input_mode = model_kwargs['visual_input_mode']
     include_image = does_include_image(visual_input_mode)
     include_visual_features = does_include_visual_features(visual_input_mode)
+    use_merged_findings = trainer_engine_kwargs.get('use_merged_findings', False)
 
     # auxiliary task: medical tags prediction
     classify_tags = auxiliary_tasks_kwargs['classify_tags']
@@ -333,7 +339,7 @@ def _evaluate_model(
             classify_chexpert = classify_chexpert,
             chexpert_labels_filename = iuxray_chexpert_labels_filename,
             classify_questions = classify_questions,
-            question_labels_filename = mimiccxr_question_labels_filename,
+            question_labels_filename = iuxray_question_labels_filename,
             validation_only = True,
             report_eval_mode = eval_mode,
             ignore_medical_tokenization = tokenizer.medical_tokenization,
@@ -355,26 +361,37 @@ def _evaluate_model(
                            classify_questions, question_encoding, answer_decoding,
                            device, use_amp=use_amp, training=False, include_answer=False,
                            include_image=include_image, include_visual_features=include_visual_features,
-                           max_answer_length=max_answer_length)
+                           max_answer_length=max_answer_length,
+                           use_merged_findings=use_merged_findings)
 
     # Attach metrics, losses, timer and events to engines    
     count_print('Attaching metrics, losses, timer and events to engines ...')
 
     # Metrics
+
+    _iu_mim_datasets = [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID]
+    _chexpert_labels_datasets = _iu_mim_datasets[:]
+    _orientation_datasets = _iu_mim_datasets[:]
+
+    if use_merged_findings:
+        _findings_remapper = trainer_engine_kwargs['findings_remapper']
+        _chexpert_class_indices = _findings_remapper[str(CHEXPERT_DATASET_ID)]
+    else:
+        _chexpert_class_indices = None
+
     if verbose_question:
         attach_exactmatch_question(evaluator, device, record_scores=True)
     if classify_tags:
         attach_medical_tags_f1score(evaluator, device, record_scores=True)
     if classify_orientation:
-        attach_dataset_aware_orientation_accuracy(
-            evaluator, [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID], record_scores=True)
+        attach_dataset_aware_orientation_accuracy(evaluator, _orientation_datasets, record_scores=True)
     if classify_chexpert:
-        attach_chexpert_labels_accuracy(evaluator, device)
-        attach_chexpert_labels_macroavgf1(evaluator, device)
-        attach_chexpert_labels_microavgf1(evaluator, device)
-        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
+        attach_dataset_aware_chexpert_labels_accuracy(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
+        attach_dataset_aware_chexpert_labels_macroavgf1(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
+        attach_dataset_aware_chexpert_labels_microavgf1(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
+        attach_dataset_aware_chexpert_labels_roc_auc(evaluator, _chexpert_labels_datasets, 'cpu', _chexpert_class_indices)        
     if classify_questions:
-        attach_question_labels_f1score(evaluator, device, record_scores=True)
+        attach_dataset_aware_question_labels_macroavgf1(evaluator, _iu_mim_datasets)
 
     # Accumulators
     attach_accumulator(evaluator, 'idxs')
@@ -408,10 +425,10 @@ def _evaluate_model(
         metrics_to_print.append(MetricNames.CHXLABELACC)
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
     if classify_questions:
-        metrics_to_print.append(MetricNames.QLABELSF1)
+        metrics_to_print.append(MetricNames.QLABELS_MACROAVGF1)
 
     log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
-    log_iteration_handler = get_log_iteration_handler()    
+    log_iteration_handler = get_log_iteration_handler()
 
     # Attach handlers    
     evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
@@ -435,11 +452,12 @@ def _evaluate_model(
         results_dict['iuxray_reports'] = recover_reports(
             results_dict['iuxray_metrics'],
             results_dict['iuxray_dataset'],
-            tokenizer, iuxray_qa_reports,
+            tokenizer, eval_mode, iuxray_qa_reports,
             verbose_question=verbose_question,
         )
         results_dict['iuxray_report_metrics'] = _compute_and_save_report_level_metrics(
-            results_dict, 'iuxray', tokenizer, results_folder_path, parenthesis_text=eval_mode_text)
+            results_dict, 'iuxray', tokenizer, results_folder_path, parenthesis_text=eval_mode_text,
+            max_processes=max_processes_for_chexpert_labeler)
 
     if eval_mimiccxr:
         print('\n========================')
@@ -448,16 +466,20 @@ def _evaluate_model(
         print('len(dataloader) =', len(mimiccxr_vqa_evaluator.test_dataloader))
         evaluator.run(mimiccxr_vqa_evaluator.test_dataloader)
         
+        print_blue('Computing metrics ...')
         results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
         results_dict['mimiccxr_dataset'] = mimiccxr_vqa_evaluator.test_dataset            
         results_dict['mimiccxr_reports'] = recover_reports(
             results_dict['mimiccxr_metrics'],
             results_dict['mimiccxr_dataset'],
-            tokenizer, mimiccxr_qa_reports,
+            tokenizer, eval_mode, mimiccxr_qa_reports,
             verbose_question=verbose_question,
         )
+        print(f'recovered reports: len(gen_reports)={len(results_dict["mimiccxr_reports"]["gen_reports"])}, '
+                f'len(gt_reports)={len(results_dict["mimiccxr_reports"]["gt_reports"])}')
         results_dict['mimiccxr_report_metrics'] = _compute_and_save_report_level_metrics(
-            results_dict, 'mimiccxr', tokenizer, results_folder_path, parenthesis_text=eval_mode_text)
+            results_dict, 'mimiccxr', tokenizer, results_folder_path, parenthesis_text=eval_mode_text,
+            max_processes=max_processes_for_chexpert_labeler)
 
     torch.cuda.empty_cache()
     if return_results:
@@ -471,12 +493,13 @@ def evaluate_model(
     qclass_threshold = None,
     eval_checkpoint_folder = None,
     batch_size = 100,
-    num_workers = 0,
+    num_workers = 0,    
     device = 'GPU',
     return_results = False,
     use_amp = False,
     eval_iuxray = True,
     eval_mimiccxr = True,
+    max_processes_for_chexpert_labeler = 10,
 ):
     print('----- Evaluating model ------')
 
@@ -494,6 +517,7 @@ def evaluate_model(
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs['batch_size'] = batch_size
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
+    trainer_engine_kwargs = metadata['trainer_engine_kwargs']
 
     return _evaluate_model(
                 tokenizer_kwargs,
@@ -503,6 +527,7 @@ def evaluate_model(
                 mimiccxr_vqa_evaluator_kwargs,
                 iuxray_vqa_trainer_kwargs,
                 auxiliary_tasks_kwargs,
+                trainer_engine_kwargs,
                 answer_decoding,
                 eval_mode,
                 n_questions_per_report = n_questions_per_report,
@@ -515,6 +540,7 @@ def evaluate_model(
                 use_amp = use_amp,
                 eval_iuxray = eval_iuxray,
                 eval_mimiccxr = eval_mimiccxr,
+                max_processes_for_chexpert_labeler = max_processes_for_chexpert_labeler,
             )
 
 if __name__ == '__main__':

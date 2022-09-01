@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from medvqa.datasets.utils import deduplicate_indices
+from medvqa.datasets.utils import adapt_label_matrix_as_merged_findings, deduplicate_indices
 from medvqa.utils.files import (
     get_cached_pickle_file,
     load_pickle,
@@ -20,7 +20,7 @@ from medvqa.datasets.dataloading_utils import (
     get_imbalance_reduced_weights,
     INFINITE_DATASET_LENGTH,
 )
-from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 
 def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
@@ -96,6 +96,28 @@ def _get_diverse_samples(k, indices, class_getter, max_tries=200):
         classes.append(c)
     assert len(samples) > 0
     return samples
+
+def _assign_all_data_to_train(report_ids, question_ids):
+    
+    # split indices by question
+    n = len(report_ids)
+    train_indices = dict()
+    for i in range(n):
+        qid = question_ids[i]
+        try:
+            tmp = train_indices[qid]
+        except KeyError:
+            tmp = train_indices[qid] = []
+        tmp.append(i)
+    
+    # convert to numpy arrays
+    for qid in train_indices.keys():
+        train_indices[qid] = np.array(train_indices[qid], dtype=int)
+
+    print(f'All data assigned to train: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
+          f' len(val_indices) = 0')
+
+    return train_indices
 
 def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
         n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50,
@@ -305,7 +327,116 @@ class VQADataset(Dataset):
             output['qlabels'] = self.question_labels[rid]
         return output
 
-class VQA_Base:
+class LabelBasedVQAClass:
+
+    def __init__(self, label_names, templates, labels_offset=None, use_merged_findings=False,
+                labels2mergedfindings=None, n_findings=None, labels=None):
+        assert labels_offset is not None
+        self.label_names = label_names
+        self.templates = templates
+        self.use_merged_findings = use_merged_findings
+        self.labels_offset = labels_offset
+        if use_merged_findings:
+            assert labels2mergedfindings is not None
+            assert n_findings is not None
+            assert labels is not None
+            self.labels2mergedfindings = labels2mergedfindings
+            self.finding_labels = adapt_label_matrix_as_merged_findings(
+                labels, n_findings, self.labels2mergedfindings)
+
+    def _create_label_based_dataset_and_dataloader(self, indices, labels, tokenizer,
+                                batch_size, num_workers, collate_batch_fn, report_ids=None,
+                                infinite=True, n_samples=None, min_pos_to_include=0,
+                                log_weighting=False, create_vqa_kwargs={}):
+        disease_datasets = []
+        if log_weighting:
+            pos_counts = []
+
+        for i in range(len(self.label_names)):
+            pos_indices = []
+            neg_indices = []
+            for j in indices:
+                jj = j if report_ids is None else report_ids[j]
+                if labels[jj][i] == 1:
+                    pos_indices.append(j)
+                else:
+                    neg_indices.append(j)
+
+            if n_samples is not None:
+                if len(pos_indices) > n_samples:
+                    pos_indices = random.sample(pos_indices, n_samples)
+                if len(neg_indices) > n_samples:
+                    neg_indices = random.sample(neg_indices, n_samples)
+
+            if len(pos_indices) < min_pos_to_include:
+                print(f'ignoring label = {self.label_names[i]}, reason: too few positive examples ({len(pos_indices)})')
+                continue
+
+            if self.use_merged_findings:
+                q_id = self.labels_offset + self.labels2mergedfindings[i]
+            else:
+                q_id = self.labels_offset + i
+            
+            print(f'label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+
+            if log_weighting:
+                pos_counts.append(len(pos_indices))
+            
+            # positive
+            if len(pos_indices) > 0:
+                pos_indices = np.array(pos_indices, dtype=int)
+                pos_answer = tokenizer.string2ids(self.templates[self.label_names[i]][1].lower())
+                pos_dataset = self._create_vqa_dataset(q=q_id, a=pos_answer, indices=pos_indices,
+                                                       infinite=infinite, **create_vqa_kwargs)
+            else:
+                pos_dataset = None
+
+            # negative
+            if len(neg_indices) > 0:
+                neg_indices = np.array(neg_indices, dtype=int)
+                neg_answer = tokenizer.string2ids(self.templates[self.label_names[i]][0].lower())
+                neg_dataset = self._create_vqa_dataset(q=q_id, a=neg_answer, indices=neg_indices,
+                                                       infinite=infinite, **create_vqa_kwargs)
+            else:
+                neg_dataset = None
+
+            # merging
+            assert pos_dataset or neg_dataset
+            if pos_dataset and neg_dataset: # merge
+                if infinite:
+                    comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
+                else:
+                    comp_dataset = CompositeDataset([pos_dataset, neg_dataset])
+                disease_datasets.append(comp_dataset)
+            else:
+                disease_datasets.append(pos_dataset if pos_dataset else neg_dataset)
+            assert disease_datasets[-1] is not None            
+        
+        # final dataset
+        if infinite:
+            if log_weighting:
+                weights = get_imbalance_reduced_weights(pos_counts, 0.4)
+            else: # uniform weights
+                weights = [1] * len(disease_datasets)
+            dataset = CompositeInfiniteDataset(disease_datasets, weights)
+        else:
+            dataset = CompositeDataset(disease_datasets)        
+
+        # dataloader
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                num_workers=num_workers,
+                                collate_fn=collate_batch_fn,
+                                pin_memory=True)
+        
+        return dataset, dataloader
+
+    def _create_vqa_dataset(self, q, a, indices, **kwargs):
+        raise NotImplementedError('Make sure your specialized class implements this function')
+
+
+class VQA_Base(LabelBasedVQAClass):
 
     def __init__(self, training, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,                
@@ -323,11 +454,16 @@ class VQA_Base:
                 load_split_from_path = None,
                 balanced_split = False,
                 balanced_metadata_path = None,
+                train_with_all = False,
                 use_report_eval_mode = False,
                 verbose_question = True,
                 include_image = True,
+                chexpert_one_hot_offset = None,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
+                use_merged_findings=False,
+                findings_remapper=None,
+                n_findings=None,
                 debug = False,
         ):
         
@@ -345,6 +481,10 @@ class VQA_Base:
         self.include_image = include_image
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.precomputed_visual_features_path = precomputed_visual_features_path
+        self.train_with_all = train_with_all
+        self.use_merged_findings = use_merged_findings
+
+        self.chexpert_labels = None
         
         if classify_tags:
             assert rid2tags_path is not None
@@ -364,6 +504,9 @@ class VQA_Base:
             self.chexpert_labels = get_cached_pickle_file(chexpert_labels_path) \
                 if chexpert_labels_path is not None else None
 
+        if self.chexpert_labels is not None:
+            self.chexpert_labels = np.array(self.chexpert_labels)
+
         if use_report_eval_mode:
             assert load_split_from_path is not None
             self._load_split_from_path(load_split_from_path)
@@ -380,7 +523,9 @@ class VQA_Base:
             if debug or first_time:                
                 self._preprocess_data()
                 if training:
-                    if load_split_from_path is not None:
+                    if train_with_all:
+                        self._assign_all_data_to_train()
+                    elif load_split_from_path is not None:
                         self._load_split_from_path(load_split_from_path)
                     elif balanced_split:
                         self._split_data_train_val__balanced(**split_kwargs)
@@ -390,8 +535,19 @@ class VQA_Base:
                     self._save_data(preprocessing_save_path)
 
         self._preprocess_noncachable_data()
+
+        super().__init__(
+            label_names=CHEXPERT_LABELS,
+            templates=TEMPLATES_CHEXPERT_v1,
+            labels_offset=chexpert_one_hot_offset,
+            use_merged_findings=use_merged_findings,
+            labels2mergedfindings=findings_remapper[CHEXPERT_DATASET_ID] if use_merged_findings else None,
+            n_findings=n_findings,
+            labels = self.chexpert_labels,
+        )
         
         print(f'batch_size = {batch_size}')
+        print(f'len(self.report_ids) = {len(self.report_ids)}, len(set(self.report_ids)) = {len(set(self.report_ids))}')
         self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn, num_workers, collate_batch_fn_chexpert_mode)
         print('done!')
 
@@ -414,7 +570,13 @@ class VQA_Base:
         raise NotImplementedError('Make sure your specialized class implements this function')
 
     def _create_vqa_dataset(self, indices, shuffle_indices=True, include_answer=True, fixed_qa_pair=False,
-                            fixed_q=None, fixed_a=None, infinite=True):
+                            q=None, a=None, infinite=True):
+        
+        if self.classify_chexpert:
+            labels = self.finding_labels if self.use_merged_findings else self.chexpert_labels
+        else:
+            labels = None
+
         kwargs = dict(
             report_ids=self.report_ids,
             images=self.images,
@@ -433,7 +595,7 @@ class VQA_Base:
             orientations = self.orientations if self.classify_orientation else None,
             # aux task: chexpert labels
             classify_chexpert = self.classify_chexpert,
-            chexpert_labels = self.chexpert_labels if self.classify_chexpert else None,
+            chexpert_labels = labels,
             # aux task: question labels
             classify_questions = self.classify_questions,
             question_labels = self.question_labels if self.classify_questions else None,
@@ -443,8 +605,8 @@ class VQA_Base:
         
         if fixed_qa_pair:
             kwargs['fixed_qa_pair'] = True
-            kwargs['question'] = fixed_q
-            kwargs['answer'] = fixed_a
+            kwargs['question'] = q
+            kwargs['answer'] = a
         else:
             kwargs['questions'] = self.questions if self.verbose_question else self.question_ids        
         
@@ -481,7 +643,8 @@ class VQA_Base:
         self.answers = data['answers']
         if self.training:
             self.train_indices = data['train_indices']
-            self.val_indices = data['val_indices']
+            if not self.train_with_all:
+                self.val_indices = data['val_indices']
         if self.classify_orientation:
             self.orientations = data['orientations']
         print('\tYes, it is, data successfully loaded :)')
@@ -499,12 +662,18 @@ class VQA_Base:
         )
         if self.training:
             data['train_indices'] = self.train_indices
-            data['val_indices'] = self.val_indices
+            if not self.train_with_all:
+                data['val_indices'] = self.val_indices
         if self.classify_orientation:
             data['orientations'] = self.orientations
         save_to_pickle(data, preprocessing_save_path)
         print('\tdone!')
         return True
+
+    def _assign_all_data_to_train(self):
+
+        print('Assigning all data to training ...')        
+        self.train_indices = _assign_all_data_to_train(self.report_ids, self.question_ids)
     
     def _split_data_train_val(self,
                               n_val_examples_per_question=10,
@@ -554,14 +723,14 @@ class BalancedTreeNode:
             datasets = [child.get_dataset(vqa_trainer) for child in self.children]
             return CompositeInfiniteDataset(datasets, self.weights)
 
-
-def _get_cached_balanced_train_datasets_path(preprocessing_save_path, batch_size, allowed_question_ids=None):    
+def _get_cached_balanced_train_datasets_path(preprocessing_save_path, batch_size, imbalance_reduction_coef, allowed_question_ids=None):
+    strings = []
+    strings.append(f'bs={batch_size}')
+    strings.append(f'imb_redu_coef={imbalance_reduction_coef}')
     if allowed_question_ids is not None:
         aqi_string = '(' + ','.join(map(str, allowed_question_ids)) + ')'
-        filepath = f'{preprocessing_save_path}.balanced_train_data(bs={batch_size},aqi={aqi_string}).pkl'
-    else:
-        filepath = f'{preprocessing_save_path}.balanced_train_data(bs={batch_size}).pkl'
-
+        strings.append(f'aqi={aqi_string}')
+    filepath = f'{preprocessing_save_path}.balanced_train_data({",".join(strings)}).pkl'
     if len(filepath) > MAX_FILENAME_LENGTH:
         h = hash_string(filepath)
         filepath = os.path.join(os.path.dirname(preprocessing_save_path), f'balanced_train_data(hash={h[0]},{h[1]}).pkl')
@@ -590,6 +759,7 @@ class VQA_Trainer(VQA_Base):
                 balanced_metadata_filename = None,
                 imbalance_reduction_coef = 1,
                 validation_only = False,
+                train_with_all = False,
                 include_answer = True,
                 use_report_eval_mode = False,
                 allowed_questions = None,
@@ -601,6 +771,9 @@ class VQA_Trainer(VQA_Base):
                 include_image = True,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
+                use_merged_findings=False,
+                findings_remapper=None,
+                n_findings=None,
                 debug = False,
         ):
 
@@ -616,6 +789,7 @@ class VQA_Trainer(VQA_Base):
         
         self.balanced_dataloading = balanced_dataloading
         self.validation_only = validation_only
+        self.train_with_all = train_with_all
         self.cache_dir = cache_dir
         self.imbalance_reduction_coef = imbalance_reduction_coef
         self.one_question_per_batch = one_question_per_batch
@@ -653,11 +827,16 @@ class VQA_Trainer(VQA_Base):
                 load_split_from_path = load_split_from_path,
                 balanced_split = balanced_split,
                 balanced_metadata_path = balanced_metadata_path,
+                train_with_all = train_with_all,
                 verbose_question = verbose_question,
                 include_image = include_image,
+                chexpert_one_hot_offset = chexpert_one_hot_offset,
                 use_report_eval_mode = use_report_eval_mode,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
+                use_merged_findings = use_merged_findings,
+                findings_remapper = findings_remapper,
+                n_findings = n_findings,
                 debug = debug)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers, collate_batch_fn_chexpert_mode=None):
@@ -667,13 +846,15 @@ class VQA_Trainer(VQA_Base):
                     self._generate_train_dataset__balanced(batch_size)
                 else:
                     self._generate_train_dataset(batch_size)
-            self._generate_val_dataset()
+            if not self.train_with_all:
+                self._generate_val_dataset()
             self._generate_train_val_dataloaders(batch_size, collate_batch_fn, num_workers)
 
         if self.include_chexpert_mode:
             if not self.validation_only:
                 self._generate_train_dataset_and_dataloader__chexpert_mode(batch_size, collate_batch_fn_chexpert_mode, num_workers)
-            self._generate_val_dataset_and_dataloader__chexpert_mode(batch_size, collate_batch_fn_chexpert_mode, num_workers)
+            if not self.train_with_all:
+                self._generate_val_dataset_and_dataloader__chexpert_mode(batch_size, collate_batch_fn_chexpert_mode, num_workers)
 
 
     def _get_composite_dataset(self, datasets, weights, batch_size):
@@ -716,7 +897,7 @@ class VQA_Trainer(VQA_Base):
     def _generate_train_dataset__balanced(self, batch_size):
 
         cached_balanced_train_datasets_path = _get_cached_balanced_train_datasets_path(
-            self.preprocessing_save_path, batch_size, self.allowed_question_ids)
+            self.preprocessing_save_path, batch_size, self.imbalance_reduction_coef, self.allowed_question_ids)
         cached_data = load_pickle(cached_balanced_train_datasets_path)
         if cached_data is not None:
             print(f'Balanced train data loaded from {cached_balanced_train_datasets_path}')
@@ -727,6 +908,7 @@ class VQA_Trainer(VQA_Base):
             return
 
         print('Computing balanced datasets from scratch ...')
+        print(f'self.imbalance_reduction_coef = {self.imbalance_reduction_coef}')
 
         health_metadata = self.balanced_metadata['healthy']
         tags_based_class_metadata = self.balanced_metadata['tags_based_class']
@@ -820,65 +1002,22 @@ class VQA_Trainer(VQA_Base):
         self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')    
     
-    def _generate_dataset_and_dataloader__chexpert_mode(self, indices, batch_size, collate_batch_fn, num_workers, infinite=True, n_samples=None):
-        n = len(indices)
-        print('n =', n)
+    def _generate_dataset_and_dataloader__chexpert_mode(self, indices, batch_size, collate_batch_fn,
+                                                        num_workers, infinite=True, n_samples=None):
 
-        disease_datasets = []
-        for i in range(len(CHEXPERT_LABELS)):
-            pos_indices = []
-            neg_indices = []
-            for j in indices:
-                if self.chexpert_labels[self.report_ids[j]][i] == 1:
-                    pos_indices.append(j)
-                else:
-                    neg_indices.append(j)
-            
-            q_id = self.chexpert_one_hot_offset + i
-            
-            if n_samples is not None:
-                if len(pos_indices) > n_samples:
-                    pos_indices = random.sample(pos_indices, n_samples)
-                if len(neg_indices) > n_samples:
-                    neg_indices = random.sample(neg_indices, n_samples)
-            
-            print(f'label = {i}, onehot={q_id} len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
-            
-            # positive
-            pos_indices = np.array(pos_indices, dtype=int)
-            pos_answer = self.tokenizer.string2ids(TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][1].lower())
-            pos_dataset = self._create_vqa_dataset(pos_indices, fixed_qa_pair=True, fixed_q=q_id,
-                                                   fixed_a=pos_answer, infinite=infinite)
-
-            # negative
-            neg_indices = np.array(neg_indices, dtype=int)
-            neg_answer = self.tokenizer.string2ids(TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][0].lower())
-            neg_dataset = self._create_vqa_dataset(neg_indices, fixed_qa_pair=True, fixed_q=q_id,
-                                                   fixed_a=neg_answer, infinite=infinite)
-
-            # merged
-            if infinite:
-                comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
-            else:
-                comp_dataset = CompositeDataset([pos_dataset, neg_dataset])
-            disease_datasets.append(comp_dataset)
-        
-        # final dataset
-        if infinite:
-            dataset = CompositeInfiniteDataset(disease_datasets, [1] * len(disease_datasets))
-        else:
-            dataset = CompositeDataset(disease_datasets)
-
-        # dataloader
-        dataloader = DataLoader(dataset,
-                                batch_size=batch_size,
-                                shuffle=False,
-                                num_workers=num_workers,
-                                collate_fn=collate_batch_fn,
-                                pin_memory=True)
-        
-        return dataset, dataloader
-
+        return self._create_label_based_dataset_and_dataloader(
+            indices=indices,
+            labels=self.chexpert_labels,
+            tokenizer=self.tokenizer,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=infinite,
+            n_samples=n_samples,
+            report_ids=self.report_ids,
+            create_vqa_kwargs=dict(
+                fixed_qa_pair=True,
+            ))
 
     def _generate_train_dataset_and_dataloader__chexpert_mode(self, batch_size, collate_batch_fn, num_workers):                
         print('Generating perfectly balanced train dataset in chexpert mode ...')        
@@ -896,7 +1035,7 @@ class VQA_Trainer(VQA_Base):
         print('Generating balanced validation dataset in chexpert mode ...')
         dedup_indices = deduplicate_indices(self.val_indices, self.report_ids)
         dataset, dataloader = self._generate_dataset_and_dataloader__chexpert_mode(
-            dedup_indices, batch_size, collate_batch_fn, num_workers, infinite=False, n_samples=30)
+            dedup_indices, batch_size, collate_batch_fn, num_workers, infinite=False, n_samples=40)
         self.val_dataset__chexpert_mode = dataset
         self.val_dataloader__chexpert_mode = dataloader
         print('len(self.val_dataset__chexpert_mode) =', len(self.val_dataset__chexpert_mode))
@@ -921,12 +1060,13 @@ class VQA_Trainer(VQA_Base):
                                             collate_fn=collate_batch_fn,
                                             num_workers=num_workers,
                                             pin_memory=True)        
-        self.val_dataloader = DataLoader(self.val_dataset,
-                                         batch_size=batch_size,
-                                         shuffle=False,
-                                         collate_fn=collate_batch_fn,
-                                         num_workers=num_workers,
-                                         pin_memory=True)
+        if not self.train_with_all:
+            self.val_dataloader = DataLoader(self.val_dataset,
+                                            batch_size=batch_size,
+                                            shuffle=False,
+                                            collate_fn=collate_batch_fn,
+                                            num_workers=num_workers,
+                                            pin_memory=True)
 
 class VQA_Evaluator(VQA_Base):
     
@@ -947,6 +1087,7 @@ class VQA_Evaluator(VQA_Base):
                 include_image = True,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
+                chexpert_one_hot_offset = None,
                 debug = False,
         ):
 
@@ -971,10 +1112,14 @@ class VQA_Evaluator(VQA_Base):
                 include_image = include_image,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
+                chexpert_one_hot_offset = chexpert_one_hot_offset,
                 debug = debug)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers, *unused_args):
+        print('VQA_Evaluator():')
         self.test_indices = list(range(len(self.report_ids)))
+        print(f'  len(self.test_indices) = {len(self.test_indices)}, '
+              f'len(set(self.report_ids)) = {len(set(self.report_ids))}')
         self._generate_test_dataset()
         self._generate_test_dataloader(batch_size, collate_batch_fn, num_workers)
 

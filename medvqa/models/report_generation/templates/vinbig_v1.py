@@ -70,7 +70,7 @@ TEMPLATES_VINBIG_v1 = {
     'Pleural thickening': {
         0: 'no pleural thickening',
         1: 'pleural thickening is seen',
-    },    
+    },
     'Pneumothorax': {
         0: 'no pneumothorax is seen',
         1: 'there is pneumothorax',

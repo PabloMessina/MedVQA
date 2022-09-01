@@ -6,6 +6,7 @@ from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.common import freeze_parameters
 from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
+from transformers import AutoModel
 
 class ImageQuestionClassifier(nn.Module):
 
@@ -60,54 +61,69 @@ class DensenetVisualModule(nn.Module):
                 n_medical_tags=None,
                 n_questions_aux_task=None,
                 use_chexpert_forward=False,
+                merge_findings=False,
+                n_findings=False,
+                chexpert_indices=None,
                 freeze_cnn=False,
                 **unused_kwargs,
         ):
         super().__init__()
         self.name = 'densenet121'
-        self.image_encoder = create_densenet121_feature_extractor(densenet_pretrained_weights_path, pretrained)
-        if freeze_cnn: freeze_parameters(self.image_encoder)
+        self.raw_image_encoder = create_densenet121_feature_extractor(densenet_pretrained_weights_path, pretrained)
+        if freeze_cnn: freeze_parameters(self.raw_image_encoder)
 
-        # Optional auxiliary tasks        
+        self.global_feat_size = 2 * image_local_feat_size        
+        self.merge_findings = merge_findings
+
+        # Optional auxiliary tasks
         
-        # 1) medical tags prediction
+        # 1) medical tags classification
         if classify_tags:
-            self.W_tags = nn.Linear(image_local_feat_size * 2, n_medical_tags)
+            assert n_medical_tags is not None
+            self.W_tags = nn.Linear(self.global_feat_size, n_medical_tags)
             self.tags_aux_task = True
         else:
             self.tags_aux_task = False
         
         # 2) orientation classifiction
         if classify_orientation:
-            self.W_ori_mimiccxr = nn.Linear(image_local_feat_size * 2, len(MIMICCXR_IMAGE_ORIENTATIONS))
-            self.W_ori_iuxray = nn.Linear(image_local_feat_size * 2, len(IUXRAY_IMAGE_ORIENTATIONS))
+            self.W_ori_mimiccxr = nn.Linear(self.global_feat_size, len(MIMICCXR_IMAGE_ORIENTATIONS))
+            self.W_ori_iuxray = nn.Linear(self.global_feat_size, len(IUXRAY_IMAGE_ORIENTATIONS))
             self.orien_aux_task = True
         else:
             self.orien_aux_task = False
 
-        # 3) chexpert classifiction
-        if classify_chexpert:
-            self.W_chx = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_LABELS))
-            self.chx_aux_task = True
-        else:
-            self.chx_aux_task = False
-
-        # 4) questions classification
+        # 3) questions classification
         if classify_questions:
-            self.W_q = nn.Linear(image_local_feat_size * 2, n_questions_aux_task)
+            self.W_q = nn.Linear(self.global_feat_size, n_questions_aux_task)
             self.q_aux_task = True
         else:
             self.q_aux_task = False
 
+        if merge_findings:
+            assert n_findings is not None
+            assert chexpert_indices is not None
+            self.W_findings = nn.Linear(self.global_feat_size, n_findings)
+            self.chexpert_indices = chexpert_indices
+            if classify_chexpert:
+                self.chx_aux_task = True
+        else:        
+            # 5) chexpert classifiction
+            if classify_chexpert:
+                self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
+                self.chx_aux_task = True
+            else:
+                self.chx_aux_task = False
+
         if use_chexpert_forward:
-            self.W_gender_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_GENDERS))
-            self.W_ori_chexpert = nn.Linear(image_local_feat_size * 2, len(CHEXPERT_ORIENTATIONS))
+            self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
+            self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
 
     def forward(self, images, iuxray_foward=False, mimiccxr_foward=False, chexpert_forward=False):
         
         # local features
         batch_size = images.size(0)
-        local_feat = self.image_encoder(images)
+        local_feat = self.raw_image_encoder(images)
         feat_size = local_feat.size(1)
         local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
         
@@ -133,7 +149,10 @@ class DensenetVisualModule(nn.Module):
                 if mimiccxr_foward:
                     output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)        
             if self.chx_aux_task:
-                output['pred_chexpert'] = self.W_chx(global_feat)
+                if self.merge_findings:                    
+                    output['pred_chexpert'] = self.W_findings(global_feat)[:, self.chexpert_indices]
+                else:
+                    output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
             if self.q_aux_task:
                 output['pred_qlabels'] = self.W_q(global_feat)
@@ -154,8 +173,17 @@ def create_densenet121_feature_extractor(pretrained_weights_path=None, imagenet_
         densenet = models.densenet121(pretrained=False)
     return densenet.features
 
-_VALID_CLIP_VIT_VERSIONS = ['ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
-_VALID_CLIP_RESNET_VERSIONS = ['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64']
+_CLIP_VIT_VERSIONS = ['ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
+_CLIP_RESNET_VERSIONS = ['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64']
+_HUGGINGFACE_CLIP_VIT_VERSIONS = [
+    'CenIA/clip-vit-bio-clinical-bert-finetuned',
+    'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text',
+]
+
+HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT = {
+    'CenIA/clip-vit-bio-clinical-bert-finetuned': 'CenIA/clip-vit-bcbf',
+    'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text': 'CenIA/clip-vit-bcbfft',
+}
 
 def _get_clip_vit_modified_forward(dtype):    
     def forward(self, x: torch.Tensor, return_local_features=False):
@@ -199,10 +227,10 @@ def _clip_resnet_modified_forward(self, x, return_local_features=False):
         return x_pooled, x
     return x_pooled
 
-
 CLIP_VIT_GLOBAL_FEAT_SIZE = 512
 CLIP_VIT_LOCAL_FEAT_SIZE = 768
 CLIP_RESNET_GLOBAL_FEAT_SIZE = 1024
+HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE = 768
 
 def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
     data = torch.load(pretrained_weights_path)
@@ -210,7 +238,7 @@ def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
     print('Pre-trained weights successfully loaded from', pretrained_weights_path)
 
 def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
-    assert clip_vit_version in _VALID_CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
+    assert clip_vit_version in _CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
     model, _ = clip.load(clip_vit_version,)
     if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
     vit = model.visual.float()
@@ -218,9 +246,16 @@ def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path)
     return vit
 
 def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights_path):
-    assert clip_resnet_version in _VALID_CLIP_RESNET_VERSIONS, f'Unknown CLIP ResNet version {clip_resnet_version}'
+    assert clip_resnet_version in _CLIP_RESNET_VERSIONS, f'Unknown CLIP ResNet version {clip_resnet_version}'
     model, _ = clip.load(clip_resnet_version)
     if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
     resnet = model.visual.float()
     resnet.forward = _clip_resnet_modified_forward.__get__(resnet) # HACK
     return resnet
+
+def create_huggingface_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
+    assert clip_vit_version in _HUGGINGFACE_CLIP_VIT_VERSIONS, f'Unknown Hugginface CLIP ViT version {clip_vit_version}'
+    model = AutoModel.from_pretrained(clip_vit_version, use_auth_token=True)
+    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    vit = model.vision_model.float()
+    return vit

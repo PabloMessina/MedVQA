@@ -2,6 +2,9 @@ import os
 from medvqa.utils.files import make_dirs_in_filepath
 from termcolor import colored
 
+def print_blue(*args):
+    print(*[colored(x, 'blue') for x in args])
+
 class CountPrinter:
     def __init__(self, color='blue'):
         self.count = 1

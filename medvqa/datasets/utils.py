@@ -1,3 +1,18 @@
+import numpy as np
+
+from medvqa.utils.constants import (
+    CHEXPERT_CXR14_SYNONYMS,
+    CHEXPERT_DATASET_ID,
+    CHEXPERT_LABELS,
+    CHEXPERT_VINBIG_SYNONYMS,
+    CXR14_DATASET_ID,
+    CXR14_LABELS,
+    CXR14_VINBIG_SYNONYMS,
+    VINBIG_DATASET_ID,
+    VINBIG_DISEASES,
+)
+from medvqa.utils.data_structures import UnionFind
+
 def deduplicate_indices(indices, report_ids):
     seen = set()
     indices_ = []
@@ -6,3 +21,77 @@ def deduplicate_indices(indices, report_ids):
             seen.add(report_ids[i])
             indices_.append(i)
     return indices_
+
+def get_merged_findings(use_chexpert=True, use_cxr14=True, use_vinbig=True):
+    assert use_chexpert or use_cxr14 or use_vinbig
+    
+    n = 0
+    original_labels = []
+    offsets = {}
+    if use_chexpert:
+        offsets[CHEXPERT_DATASET_ID] = n
+        original_labels += CHEXPERT_LABELS
+        n += len(CHEXPERT_LABELS)
+    if use_cxr14:
+        offsets[CXR14_DATASET_ID] = n
+        original_labels += CXR14_LABELS
+        n += len(CXR14_LABELS)
+    if use_vinbig:
+        offsets[VINBIG_DATASET_ID] = n
+        original_labels += VINBIG_DISEASES
+        n += len(VINBIG_DISEASES)   
+
+    uf = UnionFind(n)
+    
+    def _merge_findings(use1, use2, synonyms, id1, id2, labels1, labels2):
+        if use1 and use2:
+            for a, b in synonyms:
+                assert a in labels1
+                assert b in labels2
+                ai = offsets[id1] + labels1.index(a)
+                bi = offsets[id2] + labels2.index(b)
+                uf.unionSet(ai, bi)
+
+    uses = [use_chexpert, use_cxr14, use_vinbig]
+    ids = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, VINBIG_DATASET_ID]
+    labels = [CHEXPERT_LABELS, CXR14_LABELS, VINBIG_DISEASES]
+    synonyms = [CHEXPERT_CXR14_SYNONYMS, CHEXPERT_VINBIG_SYNONYMS, CXR14_VINBIG_SYNONYMS]
+    for i in range(len(uses)):
+        for j in range(i+1, len(uses)):
+            _merge_findings(uses[i], uses[j], synonyms[i+j-1], ids[i], ids[j], labels[i], labels[j])
+    
+    count = 0
+    tmp = dict()
+    labels_remapping = dict()
+    final_labels = []
+    for i in range(len(uses)):
+        offset = offsets[ids[i]]        
+        new_labels = [None] * len(labels[i])
+        for j in range(len(labels[i])):
+            try:
+                new_labels[j] = tmp[uf.findSet(offset + j)]
+            except KeyError:
+                new_labels[j] = tmp[uf.findSet(offset + j)] = count
+                final_labels.append(original_labels[uf.findSet(offset + j)])
+                count += 1
+        labels_remapping[ids[i]] = new_labels    
+    
+    return labels_remapping, final_labels
+
+def adapt_label_matrix_as_merged_findings(label_matrix, n_findings, new_labels):
+    print(f'Adapting label matrix of shape = {label_matrix.shape} ...')
+    assert len(new_labels) < n_findings
+    assert label_matrix.shape[1] == len(new_labels)
+    n = label_matrix.shape[0]
+    m = len(new_labels)
+    new_matrix = np.zeros((n, n_findings), dtype=np.int8)
+    for i in range(n):
+        for j in range(m):
+            if label_matrix[i][j] == 1:
+                new_matrix[i][new_labels[j]] = 1
+    print('   new_matrix.shape =', new_matrix.shape)
+    print('   Done!')
+    return new_matrix
+        
+
+    

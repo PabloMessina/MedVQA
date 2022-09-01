@@ -9,6 +9,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 
 from medvqa.utils.constants import (
+    CHEXPERT_DATASET_ID,
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
     MetricNames,
@@ -52,10 +53,10 @@ def parse_args(args=None):
     # required arguments
     parser.add_argument('--checkpoint-folder', type=str, required=True,
                         help='Relative path to folder with checkpoint to evaluate')
-    parser.add_argument('--mimiccxr-preprocessed-test-data-filename', type=str, required=True)
-    parser.add_argument('--iuxray-preprocessed-train-data-filename', type=str, required=True)
 
-    # optional arguments    
+    # optional arguments
+    parser.add_argument('--mimiccxr-preprocessed-test-data-filename', type=str, default=None)
+    parser.add_argument('--iuxray-preprocessed-train-data-filename', type=str, default=None)
     parser.add_argument('--batch-size', type=int, default=140,
                         help='Batch size')
     parser.add_argument('--device', type=str, default='GPU',
@@ -219,7 +220,7 @@ def _evaluate_model(
         attach_medical_tags_f1score(evaluator, device)
 
     if classify_orientation:
-        attach_dataset_aware_orientation_accuracy(evaluator)
+        attach_dataset_aware_orientation_accuracy(evaluator, [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID])
 
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)        
@@ -274,7 +275,6 @@ def _evaluate_model(
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
 
     # Run evaluation
-
     metrics_to_save = metrics_to_print    
     results_folder_path = get_results_folder_path(checkpoint_folder_path)    
     results_dict = {}
@@ -320,6 +320,9 @@ def evaluate_model(
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)    
     metadata = load_metadata(checkpoint_folder)
     model_kwargs = metadata['model_kwargs']
+    if model_kwargs.get('merge_findings', False):
+        model_kwargs['chexpert_indices'] =\
+            metadata['trainer_engine_kwargs']['findings_remapper'][str(CHEXPERT_DATASET_ID)]
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
     mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size,
             mimiccxr_preprocessed_test_data_filename, auxiliary_tasks_kwargs)

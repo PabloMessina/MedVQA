@@ -32,18 +32,41 @@ CHEXPERT_LABEL2SHORT = {
     'Fracture': 'F',
 }
 
-CHEXPERT_GENDERS = ['Female', 'Male']
-
-CHEXPERT_ORIENTATIONS = ['FrontalAP', 'Lateral', 'FrontalPA']
-
-class CHEXPERT_TASKS:
-    CLASSIFICATION = 'classification'
-    VQA = 'vqa'
-
-CHEXPERT_METRICS = [
-    'chexpert_accuracy',
-    'chexpert_prf1s',
+CXR14_LABELS = [
+    'No Finding',
+    'Atelectasis',
+    'Cardiomegaly',
+    'Consolidation',
+    'Edema',
+    'Effusion',
+    'Emphysema',
+    'Fibrosis',
+    'Hernia',
+    'Infiltration',
+    'Mass',
+    'Nodule',
+    'Pleural_Thickening',
+    'Pneumonia',
+    'Pneumothorax',
 ]
+
+CXR14_LABEL2SHORT = {
+    'No Finding': 'NF',
+    'Atelectasis' : 'A',
+    'Cardiomegaly' : 'Card',
+    'Consolidation' : 'Cons',
+    'Edema' : 'Ed',
+    'Effusion': 'Ef',
+    'Emphysema': 'Emp',
+    'Fibrosis': 'Fib',
+    'Hernia': 'Her',
+    'Infiltration': 'Inf',
+    'Mass': 'Mass',
+    'Nodule': 'Nod',
+    'Pleural_Thickening' : 'Pthi',
+    'Pneumonia': 'Pn',
+    'Pneumothorax': 'Ptho',
+}
 
 VINBIG_DISEASES = [
     'Aortic enlargement', 'Atelectasis', 'Calcification',
@@ -54,6 +77,76 @@ VINBIG_DISEASES = [
     'Pulmonary fibrosis', 'Rib fracture', 'Other lesion', 'COPD',
     'Lung tumor', 'Pneumonia', 'Tuberculosis', 'Other disease',
     'No finding',
+]
+
+CHEXPERT_CXR14_SYNONYMS = [
+    ('No Finding', 'No Finding'),
+    ('Cardiomegaly', 'Cardiomegaly'),
+    ('Edema', 'Edema'),
+    ('Consolidation', 'Consolidation'),
+    ('Pneumonia', 'Pneumonia'),
+    ('Atelectasis', 'Atelectasis'),
+    ('Pneumothorax', 'Pneumothorax'),
+    ('Pleural Effusion', 'Effusion'),
+]
+
+CHEXPERT_VINBIG_SYNONYMS = [
+    ('No Finding', 'No finding'),
+    ('Cardiomegaly', 'Cardiomegaly'),
+    ('Lung Opacity', 'Lung Opacity'),
+    ('Edema', 'Edema'),
+    ('Consolidation', 'Consolidation'),
+    ('Pneumonia', 'Pneumonia'),
+    ('Atelectasis', 'Atelectasis'),
+    ('Pneumothorax', 'Pneumothorax'),
+    ('Pleural Effusion', 'Pleural effusion'),
+]
+
+CXR14_VINBIG_SYNONYMS = [
+    ('No Finding', 'No finding'),
+    ('Atelectasis', 'Atelectasis'),
+    ('Cardiomegaly', 'Cardiomegaly'),
+    ('Consolidation', 'Consolidation'),
+    ('Edema', 'Edema'),
+    ('Effusion', 'Pleural effusion'),
+    ('Emphysema', 'Emphysema'),
+    ('Fibrosis', 'Pulmonary fibrosis'),
+    ('Infiltration', 'Infiltration'),
+    ('Pleural_Thickening', 'Pleural thickening'),
+    ('Pneumonia', 'Pneumonia'),
+    ('Pneumothorax', 'Pneumothorax'),
+]
+
+CHEXPERT_GENDERS = ['Female', 'Male']
+CHEXPERT_ORIENTATIONS = ['FrontalAP', 'Lateral', 'FrontalPA']
+CHEXPERT_ORIENTATION2ID = {
+    'FrontalAP': 0,
+    'Lateral': 1,
+    'FrontalPA': 2
+}
+CHEXPERT_GENDER2ID = {
+    'Female': 0,
+    'Male': 1,
+}
+
+CXR14_GENDERS = ['F', 'M']
+CXR14_ORIENTATIONS = ['AP', 'PA']
+CXR14_ORIENTATION2ID = {
+    'AP': 0,
+    'PA': 2 # make consistent with chexpert
+}
+CXR14_GENDER2ID = {
+    'F': 0,
+    'M': 1,
+}
+
+class CHEXPERT_TASKS:
+    CLASSIFICATION = 'classification'
+    VQA = 'vqa'
+
+CHEXPERT_METRICS = [
+    'chexpert_accuracy',
+    'chexpert_prf1s',
 ]
 
 NLP_METRICS = [
@@ -99,11 +192,14 @@ class MetricNames:
     QLABELS_MICROAVGF1 = 'qlabels_microavgf1'
     VINBIGMACROAVGF1 = 'vinbigmacroavgf1'
     VINBIGMICROAVGF1 = 'vinbigmicroavgf1'
+    CXR14MACROAVGF1 = 'cxr14_macroavgf1'
+    CXR14MICROAVGF1 = 'cxr14_microavgf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
     ORIENTATION_LOSS = 'orientation_loss'
     CHEXPERT_LOSS = 'chexpert_loss'
     VINBIG_LOSS = 'vinbig_loss'
+    CXR14_LOSS = 'cxr14_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
@@ -141,11 +237,14 @@ METRIC2SHORT = {
     'qlabels_microavgf1': 'qlmicf1',
     'vinbigmacroavgf1': 'vnbgmacf1',
     'vinbigmicroavgf1': 'vnbgmicf1',
+    'cxr14_macroavgf1': 'cxr14macf1',
+    'cxr14_microavgf1': 'cxr14micf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
     'vinbig_loss': 'vnbg_loss',
+    'cxr14_loss': 'cxr14_loss',
     'qlabels_loss': 'ql_loss',
     'gender_loss': 'gloss',
     'gender_acc': 'gacc',
@@ -157,6 +256,7 @@ CHEXPERT_DATASET_ID = 2
 IUXRAY_DATASET_ID__CHEXPERT_MODE = 3
 MIMICCXR_DATASET_ID__CHEXPERT_MODE = 4
 VINBIG_DATASET_ID = 5
+CXR14_DATASET_ID = 6
 
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'

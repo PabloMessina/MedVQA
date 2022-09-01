@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import random
@@ -22,15 +23,18 @@ from medvqa.utils.constants import (
     CHEXPERT_LABEL2SHORT,
     CHEXPERT_LABELS,
     METRIC2SHORT,
+    VINBIG_DISEASES,
+    ReportEvalMode,
 )
 from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
 from medvqa.utils.metrics import chexpert_label_array_to_string
-from medvqa.utils.common import CACHE_DIR
+from medvqa.utils.common import CACHE_DIR, get_timestamp
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
 
-def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbose_question=True):
+def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
+                    qa_adapted_dataset=None, verbose_question=True):
     idxs = metrics_dict['idxs']
     report_ids = [dataset.report_ids[i] for i in idxs]
     rid2indices = dict()
@@ -42,26 +46,44 @@ def recover_reports(metrics_dict, dataset, tokenizer, qa_adapted_dataset, verbos
     for indices in rid2indices.values():
         indices.sort()
 
+    if verbose_question:
+        def _get_q(i):
+            return tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
+    elif report_eval_mode in [ReportEvalMode.GROUND_TRUTH, ReportEvalMode.MOST_POPULAR,
+                            ReportEvalMode.NEAREST_NEIGHBOR, ReportEvalMode.QUESTION_CLASSIFICATION]:
+        def _get_q(i):
+            q_id = dataset.questions[idxs[i]]
+            return qa_adapted_dataset['questions'][q_id]
+    elif report_eval_mode == ReportEvalMode.CHEXPERT_LABELS:
+        def _get_q(i):
+            q_id = dataset.questions[idxs[i]]
+            return  CHEXPERT_LABELS[q_id]
+    elif report_eval_mode == ReportEvalMode.VINBIG_DISEASES:
+        def _get_q(i):
+            q_id = dataset.questions[idxs[i]]
+            return VINBIG_DISEASES[q_id]
+    elif report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+        def _get_q(i):
+            q_id = dataset.questions[idxs[i]]
+            if q_id < len(qa_adapted_dataset['questions']):
+                return qa_adapted_dataset['questions'][q_id]
+            q_id -= len(qa_adapted_dataset['questions'])
+            return CHEXPERT_LABELS[q_id]
+    else: assert False
+        
     gen_reports = []
     gt_reports = []
     for rid, indices in rid2indices.items():
         report = qa_adapted_dataset['reports'][rid]
+        
         gt_report = '.\n '.join(report['sentences'][i].lower() for i in report['matched'])
         gt_report = tokenizer.clean_text(gt_report)
         gt_reports.append({'rid': rid, 'text': gt_report})
-
+        
         gen_report = {'q':[], 'a': []}
+
         for i in indices:
-            if verbose_question:
-                q = tokenizer.ids2string(tokenizer.clean_sentence(dataset.questions[idxs[i]]))
-            else:
-                # HACK: fix this in the future
-                q_id = dataset.questions[idxs[i]]
-                if q_id < len(qa_adapted_dataset['questions']):
-                    q = qa_adapted_dataset['questions'][q_id]
-                else:
-                    q_id -= len(qa_adapted_dataset['questions'])
-                    q = CHEXPERT_LABELS[q_id]
+            q = _get_q(i)
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
             gen_report['q'].append(q)
             gen_report['a'].append(a)
@@ -102,7 +124,9 @@ def recover_reports__template_based(metrics_dict, dataset, qa_adapted_dataset, c
         'gen_reports': gen_reports,
     }
 
-def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_names = _REPORT_LEVEL_METRIC_NAMES):
+def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
+                                metric_names=_REPORT_LEVEL_METRIC_NAMES,
+                                max_processes=10):
 
     n = len(gt_reports)
     gt_texts = []
@@ -164,8 +188,13 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer, metric_name
         gt_texts = [tokenizer.ids2string(x) for x in gt_texts]
         gen_texts = [tokenizer.ids2string(x) for x in gen_texts]
         labeler = ChexpertLabeler()
-        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts, tmp_suffix='_gt', update_cache_on_disk=True)
-        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix='_gen', update_cache_on_disk=False)
+        tmp_anticolission_code = f'_{get_timestamp()}_{random.random()}'
+        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts, tmp_suffix=tmp_anticolission_code,
+                                            update_cache_on_disk=True, remove_tmp_files=True,
+                                            n_chunks=max_processes, max_processes=max_processes)
+        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix=tmp_anticolission_code,
+                                            update_cache_on_disk=False, remove_tmp_files=True,
+                                            n_chunks=max_processes, max_processes=max_processes)
     
     return metrics
 
@@ -295,6 +324,34 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
         save_to_pickle(metrics_cache, _REPORT_LEVEL_METRICS_CACHE_PATH)
         print(f'Report level metrics updated and saved to {_REPORT_LEVEL_METRICS_CACHE_PATH}')
 
+    return pd.DataFrame(data=data, columns=columns)
+
+def get_chexpert_based_outputs_dataframe(metrics_paths):
+
+    columns = ['metrics_path']
+    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
+        columns.append(f'{key}-vqa')
+    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
+        columns.append(f'{key}-vm')
+    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
+        columns.append(f'{key}-agreement')
+    data = [[] for _ in range(len(metrics_paths))]
+    
+    for row_i, metrics_path in enumerate(metrics_paths):
+        data[row_i].append(metrics_path)
+        metrics_dict = load_pickle(metrics_path)['metrics']
+        for pair in [
+            ('pred_chexpert_vqa', 'chexpert'),
+            ('pred_chexpert', 'chexpert'),
+            ('pred_chexpert_vqa', 'pred_chexpert'),
+        ]:
+            try:
+                mets = metrics_dict[pair]
+            except KeyError:
+                print(metrics_dict.keys())
+                raise
+            for key in ('f1', 'p', 'r'):
+                data[row_i].append(np.mean(mets[key]))
     return pd.DataFrame(data=data, columns=columns)
 
 class ReportGenExamplePlotter:

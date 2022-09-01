@@ -1,32 +1,39 @@
 import os
 import numpy as np
 import pandas as pd
-import random
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from medvqa.datasets.vinbig import (
     VINBIG_LABELS_CSV_PATH,
-    VINBIG_256x256_IMAGES_FOLDER,
+    VINBIG_ORIGINAL_IMAGES_FOLDER,
     VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH,
     VINBIG_IMAGE_LABELS_TEST_CSV_PATH,
     N_IMAGES_TRAIN,
     N_IMAGES_TEST,
 )
-from medvqa.utils.constants import VINBIG_DISEASES
+from medvqa.utils.constants import VINBIG_DATASET_ID, VINBIG_DISEASES
 
-from medvqa.datasets.dataloading_utils import (
-    INFINITE_DATASET_LENGTH,
-    CompositeDataset,
-    CompositeInfiniteDataset,
-    get_imbalance_reduced_weights,
-)
-from medvqa.datasets.vqa import load_precomputed_visual_features
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
+from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.vinbig_v1 import TEMPLATES_VINBIG_v1
 
 def merge_labels(*labels_list):
     merged = np.zeros((len(VINBIG_DISEASES),), np.int8)
     merged[-1] = 1
+    
+    # First check: majority thinks it's healthy
+    healthy_count = 0
+    for labels in labels_list:
+        if labels[-1] == 1:
+            assert labels.sum() == 1
+            healthy_count += 1
+        else:
+            assert labels.sum() > 0
+    if healthy_count >= len(labels_list) - 1:
+        return merged
+
+    # General case: union of labels
     for labels in labels_list:
         if labels[-1] == 0: # no findings
             merged[-1] = 0
@@ -35,10 +42,18 @@ def merge_labels(*labels_list):
                 merged[i] = 1
     return merged
 
-class VinBigTrainerBase:
-    def __init__(self):
+class VinBigTrainingData:
+    TRAIN_ONLY = 'train'
+    TEST_ONLY = 'test'
+    ALL = 'all'
 
-        print('Loading dataframe from', VINBIG_LABELS_CSV_PATH)
+class VinBigTrainerBase(LabelBasedVQAClass):
+    
+    def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None):
+
+        print('Loading dataframe from:'
+                f'\n  {VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH}'
+                f'\n  {VINBIG_IMAGE_LABELS_TEST_CSV_PATH}')
         df_labels_train = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)
         df_labels_test = pd.read_csv(VINBIG_IMAGE_LABELS_TEST_CSV_PATH)
 
@@ -63,11 +78,12 @@ class VinBigTrainerBase:
         self.test_indices = [i + N_IMAGES_TRAIN for i in range(N_IMAGES_TEST)]
 
         # Image paths
-        self.image_paths = [os.path.join(VINBIG_256x256_IMAGES_FOLDER, f'{img_id}.png') for img_id in image_ids]
+        self.image_paths = [os.path.join(VINBIG_ORIGINAL_IMAGES_FOLDER, f'{img_id}.png') for img_id in image_ids]
 
         # Labels
         labels = np.empty((N_IMAGES_TRAIN + N_IMAGES_TEST, len(VINBIG_DISEASES)), dtype=np.int8)
         self.labels = labels
+        
         # train labels
         tmp = VINBIG_DISEASES[:]
         tmp[tmp.index('Other disease')] = 'Other diseases' # HACK
@@ -78,23 +94,65 @@ class VinBigTrainerBase:
                 train_labels[3 * i + 1],
                 train_labels[3 * i + 2]
             )
+        
         # test labels
         labels[N_IMAGES_TRAIN:] = df_labels_test[VINBIG_DISEASES].values
+
+        # sanity check train labels
+        self._sanity_check_train_labels()
+
+        super().__init__(
+            label_names=VINBIG_DISEASES,
+            templates=TEMPLATES_VINBIG_v1,
+            labels_offset=0,
+            use_merged_findings=use_merged_findings,
+            labels2mergedfindings=findings_remapper[VINBIG_DATASET_ID] if use_merged_findings else None,
+            n_findings=n_findings,
+            labels=self.labels,
+        )
+
+    def _sanity_check_train_labels(self):
+        print('Sanity checking train labels ...')
+        df_labels = pd.read_csv(VINBIG_LABELS_CSV_PATH) # these are labels from kaggle's challenge
+        label_names = df_labels.columns[1:]
+        label_indices = [VINBIG_DISEASES.index(x) for x in label_names]
+        gt_labels = df_labels[label_names].values
+        assert self.labels.shape[0] == gt_labels.shape[0]
+        assert self.labels.shape[1] > gt_labels.shape[1]
+        m = gt_labels.shape[1]
+        mismatches = 0
+        for i in range(N_IMAGES_TRAIN):
+            try:
+                assert all(self.labels[i][label_indices[j]] == gt_labels[i][j] for j in range(m))
+            except AssertionError:
+                mismatches += 1
+                if mismatches > 4: # tolerate no more than 4 mismatches (empirical heuristic)
+                    raise
+        print('Done!')
 
 class VinBig_VQA_Trainer(VinBigTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
                 include_image=True,
                 use_precomputed_visual_features=False,
                 precomputed_visual_features_path=None,
-                train_with_everything = True,
+                training_data = VinBigTrainingData.ALL,
+                use_validation = True,
+                use_merged_findings=False,
+                findings_remapper=None,
+                n_findings=None,
         ):
-        super().__init__()
+        super().__init__(
+            use_merged_findings=use_merged_findings,
+            findings_remapper=findings_remapper,
+            n_findings=n_findings,
+        )
         
         self.transform = transform
         self.include_image = include_image
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.tokenizer = tokenizer
-        self.train_with_everything = train_with_everything
+        self.training_data = training_data
+        self.use_validation = use_validation
 
         if use_precomputed_visual_features:
             assert precomputed_visual_features_path is not None
@@ -109,87 +167,44 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
             self.idx2visfeatidx = None
         
         print('Generating train dataset and dataloader')
-        train_indices = self.train_indices + self.test_indices if train_with_everything else self.train_indices
+        if training_data == VinBigTrainingData.TRAIN_ONLY:
+            train_indices = self.train_indices
+        elif training_data == VinBigTrainingData.TEST_ONLY:
+            train_indices = self.test_indices
+        elif training_data == VinBigTrainingData.ALL:
+            train_indices = self.train_indices + self.test_indices
+        else: assert False, f'Unknown training_data = {training_data}'         
+        
         self.train_dataset, self.train_dataloader = self._generate_dataset_and_dataloader(
-            train_indices, batch_size, collate_batch_fn, num_workers, infinite=True
+            train_indices, batch_size, collate_batch_fn, num_workers, infinite=True, min_pos_to_include=10,
         )
-        print('Generating val dataset and dataloader')
-        self.val_dataset, self.val_dataloader = self._generate_dataset_and_dataloader(
-            self.test_indices, batch_size, collate_batch_fn, num_workers, infinite=False, n_samples=20,
-        )
+
+        if use_validation:
+            print('Generating val dataset and dataloader')
+            self.val_dataset, self.val_dataloader = self._generate_dataset_and_dataloader(
+                self.test_indices, batch_size, collate_batch_fn, num_workers, infinite=False, n_samples=20,
+            )
 
     def _generate_dataset_and_dataloader(self, indices, batch_size, collate_batch_fn, num_workers,
-                                         infinite=True, n_samples=None):
-        # balanced dataset
-        disease_datasets = []
-        pos_counts = []
-        for i in range(0, len(VINBIG_DISEASES)):
-            pos_indices = []
-            neg_indices = []
-            for j in indices:
-                if self.labels[j][i] == 1:
-                    pos_indices.append(j)
-                elif self.labels[j][i] == 0:
-                    neg_indices.append(j)
-                else: assert False
+                                         infinite=True, n_samples=None, min_pos_to_include=0):
 
-            if n_samples is not None:
-                if len(pos_indices) > n_samples:
-                    pos_indices = random.sample(pos_indices, n_samples)
-                if len(neg_indices) > n_samples:
-                    neg_indices = random.sample(neg_indices, n_samples)
-            
-            print(f'label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
-            
-            pos_counts.append(len(pos_indices))
-
-            # positive            
-            if len(pos_indices) > 0:
-                pos_indices = np.array(pos_indices, dtype=int)
-                pos_answer = self.tokenizer.string2ids(TEMPLATES_VINBIG_v1[VINBIG_DISEASES[i]][1].lower())
-                pos_dataset = self._create_vqa_dataset(q=i, a=pos_answer, indices=pos_indices, infinite=infinite)
-            else:
-                pos_dataset = None
-
-            # negative
-            if len(neg_indices) > 0:
-                neg_indices = np.array(neg_indices, dtype=int)
-                neg_answer = self.tokenizer.string2ids(TEMPLATES_VINBIG_v1[VINBIG_DISEASES[i]][0].lower())
-                neg_dataset = self._create_vqa_dataset(q=i, a=neg_answer, indices=neg_indices, infinite=infinite)
-            else:
-                neg_dataset = None
-            
-            assert pos_dataset or neg_dataset            
-            if pos_dataset and neg_dataset: # merge
-                if infinite:
-                    comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
-                else:
-                    comp_dataset = CompositeDataset([pos_dataset, neg_dataset])
-                disease_datasets.append(comp_dataset)
-            else:
-                disease_datasets.append(pos_dataset if pos_dataset else neg_dataset)
-            assert disease_datasets[-1] is not None
-
-        # final dataset
-        if infinite:
-            weights = get_imbalance_reduced_weights(pos_counts, 0.2)
-            dataset = CompositeInfiniteDataset(disease_datasets, weights)
-        else:
-            dataset = CompositeDataset(disease_datasets)
-
-        # dataloader
-        dataloader = DataLoader(dataset,
-                                batch_size=batch_size,
-                                shuffle=False,
-                                num_workers=num_workers,
-                                collate_fn=collate_batch_fn,
-                                pin_memory=True)
-        
-        return dataset, dataloader
+        return self._create_label_based_dataset_and_dataloader(
+            indices=indices,
+            labels=self.labels,
+            tokenizer=self.tokenizer,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=infinite,
+            n_samples=n_samples,
+            min_pos_to_include=min_pos_to_include,
+            log_weighting=True,
+        )
     
     def _create_vqa_dataset(self, q, a, indices, infinite):
+        labels = self.finding_labels if self.use_merged_findings else self.labels
         return VinBigVQADataset(
-            self.image_paths, self.transform, self.labels,
+            self.image_paths, self.transform, labels,
             question=q, answer=a, indices=indices,
             include_image=self.include_image,
             use_precomputed_visual_features=self.use_precomputed_visual_features,

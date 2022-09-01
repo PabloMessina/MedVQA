@@ -83,6 +83,10 @@ class ChexpertLabelerJob:
         # Build command
         self.cmd = (f'docker run -v {TMP_FOLDER}:/data chexpert-labeler:latest '
         f'python label.py --reports_path /data/{input_filename} --output_path /data/{output_filename}')
+    
+    def remove_input_output_files(self):
+        os.remove(self.input_path)
+        os.remove(self.output_path)
 
 def merge_raw_labels(labels_list):        
     merged = np.zeros((len(CHEXPERT_LABELS),), np.int8)
@@ -97,7 +101,8 @@ def merge_raw_labels(labels_list):
                 merged[i] = 1
     return merged
 
-def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_processes=1, verbose=True):
+def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_processes=1,
+                                    verbose=True, remove_tmp_files=False):
 
     n = len(texts)
     chunk_size = n // n_chunks + (n % n_chunks > 0)
@@ -173,6 +178,11 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
 
     assert offset == n
 
+    # Remove tmp files if required
+    if remove_tmp_files:
+        for job in jobs:
+            job.remove_input_output_files()
+
     return out_labels
 
 class ChexpertLabeler:
@@ -186,7 +196,8 @@ class ChexpertLabeler:
             print(f'Cache successfully loaded from {self.cache_path}')
 
     def get_labels(self, texts, fill_empty=0, fill_uncertain=1,
-                   tmp_suffix='', update_cache_on_disk=False):
+                    n_chunks=10, max_processes=10, tmp_suffix='',
+                    update_cache_on_disk=False, remove_tmp_files=False):
 
         if self.verbose:
             print(f'(*) Chexpert: labeling {len(texts)} texts ...')
@@ -210,8 +221,9 @@ class ChexpertLabeler:
 
         if len(unlabeled_texts) > 0:
             labels = invoke_chexpert_labeler_process(unlabeled_texts, tmp_suffix,
-                                                     n_chunks=10, max_processes=10,
-                                                     verbose=self.verbose)
+                                                     n_chunks=n_chunks, max_processes=max_processes,
+                                                     verbose=self.verbose,
+                                                     remove_tmp_files=remove_tmp_files)
             for hash, label in zip(unlabeled_hashes, labels):
                 self.cache[hash] = label
             

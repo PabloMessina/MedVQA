@@ -34,7 +34,8 @@ def get_iuxray_image_paths(report):
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
                                        balanced_metadata_filename=None,
                                        chexpert_labels_filename=None,
-                                       ignore_medical_tokenization=False):    
+                                       ignore_medical_tokenization=False,
+                                       train_with_all=False):
     
     split_params_string = f'({",".join(str(split_kwargs[k]) for k in sorted(list(split_kwargs.keys())))})'
     tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
@@ -49,6 +50,8 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
         strings.append(f'balanced_metadata={balanced_metadata_filename}')
     if chexpert_labels_filename:
         strings.append(f'chexpert_labels={chexpert_labels_filename}')
+    if train_with_all:
+        strings.append('train_with_all')
     merged_string = ";".join(strings)
     final_path = os.path.join(IUXRAY_CACHE_DIR, f'iuxray_preprocessed_train_data__({merged_string}).pkl')
     if len(final_path) > MAX_FILENAME_LENGTH:
@@ -123,6 +126,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 balanced_metadata_filename = None,
                 imbalance_reduction_coef = 1,
                 validation_only = False,
+                train_with_all = False,
                 report_eval_mode = None,
                 ignore_medical_tokenization = False,
                 allowed_questions = None,
@@ -132,7 +136,11 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 chexpert_one_hot_offset = None,
                 include_image = True,
                 use_precomputed_visual_features = False,
-                precomputed_visual_features_path = False):
+                precomputed_visual_features_path = False,
+                use_merged_findings = False,
+                findings_remapper = None,
+                n_findings = None,
+                ):
 
         self.tokenizer = tokenizer
         self.iuxray_metadata = iuxray_metadata
@@ -155,14 +163,15 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                 preprocessing_save_path = _get_train_preprocessing_save_path(
                                 qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
                                 chexpert_labels_filename if balanced_split else None,
-                                ignore_medical_tokenization=True)
+                                ignore_medical_tokenization=True, train_with_all=train_with_all)
                 load_split_from_path = _get_train_preprocessing_save_path(
                                 qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
                                 chexpert_labels_filename if balanced_split else None)
             else:
                 preprocessing_save_path = _get_train_preprocessing_save_path(
                                 qa_adapted_reports_filename, split_kwargs, tokenizer, balanced_metadata_filename,
-                                chexpert_labels_filename if balanced_split else None)
+                                chexpert_labels_filename if balanced_split else None,
+                                train_with_all=train_with_all)
                 load_split_from_path = None
 
         super().__init__(transform, batch_size, collate_batch_fn,
@@ -186,6 +195,7 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         balanced_metadata_filename = balanced_metadata_filename,
                         imbalance_reduction_coef = imbalance_reduction_coef,
                         validation_only = validation_only,
+                        train_with_all = train_with_all,
                         include_answer = report_eval_mode == None,
                         use_report_eval_mode = report_eval_mode != None,
                         allowed_questions = allowed_questions,
@@ -197,6 +207,9 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
                         include_image = include_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
+                        use_merged_findings = use_merged_findings,
+                        findings_remapper = findings_remapper,
+                        n_findings = n_findings,
                         )
         
     def _preprocess_data(self):

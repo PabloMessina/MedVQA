@@ -6,22 +6,14 @@ from torch.utils.data import Dataset, DataLoader
 
 from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CSV_PATH
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
-from medvqa.datasets.vqa import CompositeInfiniteDataset, load_precomputed_visual_features
+from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
-from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_GENDER2ID, CHEXPERT_LABELS, CHEXPERT_ORIENTATION2ID
 
-_orientation2id = {
-    'FrontalAP': 0,
-    'Lateral': 1,
-    'FrontalPA': 2
-}
-_gender2id = {
-    'Female': 0,
-    'Male': 1,
-}
 
-class ChexpertTrainerBase:
-    def __init__(self):
+class ChexpertTrainerBase(LabelBasedVQAClass):
+
+    def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None):
 
         print('Loading dataframe from', CHEXPERT_TRAIN_VAL_CSV_PATH)
         df = pd.read_csv(CHEXPERT_TRAIN_VAL_CSV_PATH)
@@ -45,14 +37,14 @@ class ChexpertTrainerBase:
         print('Loading orientations')
         orientations = np.empty((n,), dtype=int)
         for i, x in enumerate(df_orien):
-            orientations[i] = _orientation2id[x]
+            orientations[i] = CHEXPERT_ORIENTATION2ID[x]
         self.orientations = orientations
         
         # gender
         print('Loading genders')
         genders = np.empty((n,), dtype=int)
         for i, x in enumerate(df_gender):
-            genders[i] = _gender2id[x]
+            genders[i] = CHEXPERT_GENDER2ID[x]
         self.genders = genders
 
         # chexpert labels
@@ -60,6 +52,16 @@ class ChexpertTrainerBase:
         labels = df_labels.fillna(0).to_numpy().astype(np.int8)
         labels = np.where(labels == -1, 1, labels)
         self.labels = labels
+
+        super().__init__(
+            label_names=CHEXPERT_LABELS,
+            templates=TEMPLATES_CHEXPERT_v1,
+            labels_offset=0,
+            use_merged_findings=use_merged_findings,
+            labels2mergedfindings=findings_remapper[CHEXPERT_DATASET_ID] if use_merged_findings else None,
+            n_findings=n_findings,
+            labels=self.labels,
+        )
 
 class Chexpert_VisualModuleTrainer(ChexpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers):        
@@ -80,8 +82,13 @@ class Chexpert_VQA_Trainer(ChexpertTrainerBase):
                 include_image=True,
                 use_precomputed_visual_features=False,
                 precomputed_visual_features_path=None,
+                use_merged_findings=False, findings_remapper=None, n_findings=None,
         ):
-        super().__init__()
+        super().__init__(
+            use_merged_findings=use_merged_findings,
+            findings_remapper=findings_remapper,
+            n_findings=n_findings,
+        )
         
         self.transform = transform
         self.include_image = include_image
@@ -98,55 +105,27 @@ class Chexpert_VQA_Trainer(ChexpertTrainerBase):
         else:
             self.precomputed_visual_features = None
             self.idx2visfeatidx = None
-        
-        # balanced dataset
-        
-        n = len(self.labels)
-        disease_datasets = []
-        for i in range(len(CHEXPERT_LABELS)):
-            pos_indices = []
-            neg_indices = []
-            for j in range(n):
-                if self.labels[j][i] == 1:
-                    pos_indices.append(j)
-                else:
-                    neg_indices.append(j)
-            
-            print(f'label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
-            
-            # positive
-            pos_indices = np.array(pos_indices, dtype=int)
-            pos_answer = tokenizer.string2ids(TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][1].lower())
-            pos_dataset = self._create_vqa_dataset(q=i, a=pos_answer, indices=pos_indices)
 
-            # negative
-            neg_indices = np.array(neg_indices, dtype=int)
-            neg_answer = tokenizer.string2ids(TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][0].lower())
-            neg_dataset = self._create_vqa_dataset(q=i, a=neg_answer, indices=neg_indices)
-            
-            # merged
-            comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
-            disease_datasets.append(comp_dataset)
-        
-        self.dataset = CompositeInfiniteDataset(disease_datasets, [1] * len(disease_datasets))
+        self.dataset, self.dataloader = self._create_label_based_dataset_and_dataloader(
+            indices=list(range(len(self.labels))),
+            labels=self.labels,
+            tokenizer=tokenizer,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=True,
+        )
 
-        # dataloader
-        self.dataloader = DataLoader(self.dataset,
-                                    batch_size=batch_size,
-                                    shuffle=False,
-                                    num_workers=num_workers,
-                                    collate_fn=collate_batch_fn,
-                                    pin_memory=True)
-
-    def _create_vqa_dataset(self, q, a, indices):
+    def _create_vqa_dataset(self, q, a, indices, infinite=True):
+        labels = self.finding_labels if self.use_merged_findings else self.labels
         return ChexpertVQADataset(
-            self.image_paths, self.transform, self.orientations, self.genders, self.labels,
+            self.image_paths, self.transform, self.orientations, self.genders, labels,
             question=q, answer=a, indices=indices,
             include_image=self.include_image,
             use_precomputed_visual_features=self.use_precomputed_visual_features,
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx = self.idx2visfeatidx,
-            infinite=True
+            infinite=infinite
         )
 
 class ChexpertImageDataset(Dataset):

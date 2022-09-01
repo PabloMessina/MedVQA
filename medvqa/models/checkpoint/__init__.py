@@ -12,7 +12,7 @@ def _split_checkpoint_name(name):
     epoch, _, metric_name, metric_value = matched.groups()
     return CheckpointInfo(name, int(epoch), metric_name, float(metric_value))
 
-def get_checkpoint_filepath(folder):
+def get_checkpoint_filepath(folder, verbose=True):
     checkpoint_names = [f for f in os.listdir(folder) if f.endswith('.pt')]
     if len(checkpoint_names) == 0:
         raise Exception('No checkpoints found in', folder)
@@ -21,7 +21,8 @@ def get_checkpoint_filepath(folder):
     best_value = -9999
     best_epoch = -1
     best_name = None
-    print('checkpoint_names =', checkpoint_names)
+    if verbose:
+        print('checkpoint_names =', checkpoint_names)
     for name in checkpoint_names:
         info = _split_checkpoint_name(name)
         if info.value > best_value or (info.value == best_value and info.epoch > best_epoch):
