@@ -1,0 +1,94 @@
+\b(day|week|month|year)s? \b(ago|earlier)\b
+\bmonths\b
+\b(two|three|four|five|six|seven|eight|[2-8])\b.*\b(views|images|films|days|weeks|months|years)
+\bno.*\bavailable
+\b(morning|noon|afternoon|evening|night)\b
+\bobtained\b
+\b(correlation|repeat|comparison|radiograph|evaluation|read|view).*(requested|suggested|advised|required|indicated|needed)
+\b(correlation|comparison).*\b(stud(y|ies)|examination|film)
+\brequest.*\bview
+\bsuggest.*\bimaging
+\bcompar.*\d+:\d+
+\bat \d+:\d+
+\b\d+(:\d+)? \b[ap]\.?m\.?\b
+\b(consider).*\b(treatment|followup|repeat|dedicated|imag|evaluat|HRCT|exam)
+\bnurse\b
+^\d+\.?$
+\bfollow(-| )?up
+(radiograph|\bimage).*\b(repeat)
+\brepeat.*\b(view|image|radiograph)
+\bdictation
+\be-?mail
+\bplease\b
+\byour\b
+\bquestions?\b
+correlate (with|for)
+\bclinical.*\bcorrelat
+\bcorrelat.*\bclinical
+\ball day
+\bdid not eat
+best correlate
+\bdr\.
+\bby dr\b
+\binvok
+\b(additional|further|more\b|subsequent|better).*\b(imaging|evaluat|exam|assess|investigat|characterization|radiograph|detail)
+clinically (warranted|indicated)
+(warranted|indicated) clinically
+\bbetter (position|assess)
+necessary for evaluation
+(was|were|ha(s|ve) been) (discussed|reported|reviewed)
+\bphone\b
+\btelephone\b
+\bpaged (at|to|for)\b
+\breport\b
+\brecords
+\bfor detail.*\bsee
+\bdashboard
+similar to.*\bfilm from
+\bif uncertain
+\bcan be\b.*\b(evaluated|performed)
+\bhelp\b.*\bevaluat
+\?$
+\bfor( direct)? comparison\b
+^\.$
+technologist
+on the outside study
+\bsubmitted
+radiologist
+acqui(sition|red)
+\bstarted to
+above information
+\bphysician
+\bmid( )?day\b
+over this period
+\bchange.*\bover.*\btime
+\binstitution\b
+\bdementia
+\bemergency\b
+\bdepartment\b
+\bcough
+\brunny nose
+\bsore throat
+\baddended
+\bnotification
+\b(fe)?male\b
+\b(wo)?man\b
+\byear(-| )old\b
+\bto document\b
+\bresident\b
+\bon call\b
+\bfor (more|further)\b
+\bnot tailored
+\bteam\b
+\bhospital
+\balcohol
+\bbenefi(t|c)
+consultation
+\bdegrade
+reassessment
+feasible
+\bsuboptimal
+\b(limit|difficult).*\b(assess|evaluat|study|underpen|exam)
+\b(assess|evaluat|study|underpen|exam).*\b(limit|difficult)
+communicated
+\bdated\b
