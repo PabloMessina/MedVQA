@@ -1,34 +1,28 @@
 import os
 from tqdm import tqdm
 from medvqa.datasets.mimiccxr.preprocessing import (
-    extract_findings_and_impression,
-    report_paths_generator
+    extract_report_and_patient_background,
+    get_reports_txt_paths
 )
 from medvqa.utils.files import make_dirs_in_filepath
 from medvqa.utils.common import CACHE_DIR
 
 if __name__ == '__main__':
-    
-    report_file_paths = [None] * 300000
 
     print('Loading MIMIC-CXR\'s report file paths ...')
-    for i, filepath in tqdm(enumerate(report_paths_generator())):
-        report_file_paths[i] = filepath
-    assert report_file_paths[i] is not None
-    assert report_file_paths[i+1] is None
-    report_file_paths = report_file_paths[:i+1]
+    report_file_paths = get_reports_txt_paths()
 
-    failed_paths = []
+    n_failed_paths = 0
     save_path = os.path.join(CACHE_DIR, 'mimiccxr', 'findings+impression.txt')
     print(f'Saving findings + impressions to {save_path} ...')
     make_dirs_in_filepath(save_path)
     with open(save_path, 'w') as f:
         for path in tqdm(report_file_paths):
-            report = extract_findings_and_impression(path.as_posix())
+            report = extract_report_and_patient_background(path.as_posix())['report']
             if report:
                 f.write(f'{report}\n')
             else:
-                failed_paths.append(path)
+                n_failed_paths += 1
     
-    print(f'Num failed paths = {len(failed_paths)}')
+    print(f'Num failed paths = {n_failed_paths}')
     print('Done!')

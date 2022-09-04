@@ -12,4 +12,5 @@ MIMICCXR_JPG_DIR = os.environ['MIMICCXR_JPG_DIR']
 MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-metadata.csv')
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
+MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP']

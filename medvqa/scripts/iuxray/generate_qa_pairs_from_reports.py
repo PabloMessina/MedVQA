@@ -35,6 +35,7 @@ if __name__ == '__main__':
                     text = findings + '. ' + impression
             qa_info = qa_extractor.generate_qa_pairs_compact_version(text)
             qa_info['filename'] = x['filename']
+            qa_info['background'] = x['indication']
             qa_adapted_reports.append(qa_info)
     
     qa_dataset = {
