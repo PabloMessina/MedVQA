@@ -294,6 +294,57 @@ def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question
 
     return collate_batch_fn
 
+def get_multimodal_collate_batch_fn(dataset_id, classify_orientation=False, classify_chexpert=False, classify_questions=False):
+
+    if dataset_id in [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID]:
+        def collate_batch_fn(batch):
+            indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['t']), reverse=True)
+            batch_dict = {}
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
+            batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+            batch_dict['t'] = nn.utils.rnn.pad_sequence(
+                sequences = [torch.tensor(batch[i]['t']) for i in indexes],
+                batch_first=True,
+                padding_value=0,
+            )
+            batch_dict['tl'] = torch.tensor([len(batch[i]['t']) for i in indexes])
+            # Auxiliary tasks
+            if classify_orientation:
+                batch_dict['orientation'] = torch.tensor([batch[i]['orientation'] for i in indexes])            
+            if classify_chexpert:
+                batch_dict['chexpert'] = torch.tensor([batch[i]['chexpert'] for i in indexes])
+            if classify_questions:
+                batch_dict['qlabels'] = torch.tensor([batch[i]['qlabels'] for i in indexes])                
+            return batch_dict
+
+    elif dataset_id in [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]:        
+        def collate_batch_fn(batch):
+            indexes = list(range(len(batch)))        
+            batch_dict = dict()
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])            
+            batch_dict['o'] = torch.tensor([batch[i]['o'] for i in indexes])
+            batch_dict['g'] = torch.tensor([batch[i]['g'] for i in indexes])
+            batch_dict['l'] = torch.tensor([batch[i]['l'] for i in indexes])
+            batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+            return batch_dict
+
+    elif dataset_id == VINBIG_DATASET_ID:
+        def collate_batch_fn(batch):
+            indexes = list(range(len(batch)))
+            batch_dict = dict()
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])            
+            batch_dict['l'] = torch.tensor([batch[i]['l'] for i in indexes])
+            batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+            return batch_dict
+    
+    else: assert False, f'Unknown dataset_id {dataset_id}'
+
+    return collate_batch_fn
+
+
 def qa_collate_batch_fn(batch):
     indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
     batch_dict = dict()

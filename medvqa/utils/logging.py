@@ -5,6 +5,9 @@ from termcolor import colored
 def print_blue(*args):
     print(*[colored(x, 'blue') for x in args])
 
+def print_red(*args):
+    print(*[colored(x, 'red') for x in args])
+
 class CountPrinter:
     def __init__(self, color='blue'):
         self.count = 1

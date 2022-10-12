@@ -1,4 +1,5 @@
 from ignite.metrics import Metric
+from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 # from ignite.exceptions import NotComputableError
 # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from medvqa.utils.nlp import indexes_to_string
@@ -62,6 +63,28 @@ class Bleu(Metric):
     def reset(self):
         self.scorer = bleu_scorer.BleuScorer(n=4)
         super().reset()
+
+    def update(self, output):
+        pred_sentences, gt_sentences = output
+        for pred_s, gt_s in zip(pred_sentences, gt_sentences):
+            pred_s = indexes_to_string(pred_s)
+            gt_s = indexes_to_string(gt_s)
+            self.scorer += (pred_s, [gt_s])
+
+    def compute(self):
+        scores, scores_by_instance = self.scorer.compute_score()
+        if self.record_scores:
+            return scores, scores_by_instance
+        return scores
+
+class DatasetAwareBleu(DatasetAwareMetric):
+
+    def __init__(self, output_transform, allowed_dataset_ids, record_scores=False):
+        self.record_scores = record_scores
+        super().__init__(output_transform, allowed_dataset_ids)
+    
+    def reset(self):
+        self.scorer = bleu_scorer.BleuScorer(n=4)
 
     def update(self, output):
         pred_sentences, gt_sentences = output

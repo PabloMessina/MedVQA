@@ -161,7 +161,7 @@ class DensenetVisualModule(nn.Module):
 
 def create_densenet121_feature_extractor(pretrained_weights_path=None, imagenet_pretrained=False):
     # Load pre-trained CNN weights
-    if pretrained_weights_path is not None:
+    if pretrained_weights_path:
         densenet = models.densenet121(pretrained=False)
         pretrained_weights = torch.load(pretrained_weights_path, map_location='cuda')
         densenet.load_state_dict(pretrained_weights, strict=False)
@@ -178,11 +178,27 @@ _CLIP_RESNET_VERSIONS = ['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64']
 _HUGGINGFACE_CLIP_VIT_VERSIONS = [
     'CenIA/clip-vit-bio-clinical-bert-finetuned',
     'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned',
 ]
+
+CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
+CLIP_VERSION_2_IMAGE_MEAN_STD = {}
+_tmp = _CLIP_VIT_VERSIONS + _CLIP_RESNET_VERSIONS
+_tmp.append('CenIA/clip-vit-bio-clinical-bert-finetuned')
+_tmp.append('CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text')
+for _k in _tmp:
+    CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = CLIP_DEFAULT_IMAGE_MEAN_STD
+_tmp = ['CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned']
+for _k in _tmp:
+    CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
 HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT = {
     'CenIA/clip-vit-bio-clinical-bert-finetuned': 'CenIA/clip-vit-bcbf',
     'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text': 'CenIA/clip-vit-bcbfft',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned': 'CenIA/clip-vte-vit-lp16bcbf',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned': 'CenIA/clip-vte-vit-bp16bcbf',
 }
 
 def _get_clip_vit_modified_forward(dtype):    
@@ -231,6 +247,7 @@ CLIP_VIT_GLOBAL_FEAT_SIZE = 512
 CLIP_VIT_LOCAL_FEAT_SIZE = 768
 CLIP_RESNET_GLOBAL_FEAT_SIZE = 1024
 HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE = 768
+HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE = 1024
 
 def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
     data = torch.load(pretrained_weights_path)

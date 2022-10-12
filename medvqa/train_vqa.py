@@ -114,7 +114,7 @@ def parse_args(args=None):
                         help='Relative path to folder with checkpoint to resume training from')    
     parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
-    parser.add_argument('--vocab-min-freq', type=int, default=5,
+    parser.add_argument('--vocab-min-freq', type=int, default=10,
                         help='Min frequency of tokens in vocabulary')
     parser.add_argument('--embed-size', type=int, default=256,
                         help='Size of word embeddings')
@@ -435,6 +435,14 @@ def train_model(
                          start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
                          device=device, **model_kwargs)
     model = model.to(device)
+
+    # Check dataset weights
+    if dataloading_kwargs['chexpert_weight'] == 0:
+        train_chexpert = False
+    if dataloading_kwargs['cxr14_weight'] == 0:
+        train_cxr14 = False
+    if dataloading_kwargs['vinbig_weight'] == 0:
+        train_vinbig = False
 
     # Optimizer
     count_print('Defining optimizer ...')
@@ -1049,6 +1057,7 @@ def train_from_scratch(
                 RawImageEncoding.CLIP_RESNET,
                 RawImageEncoding.CLIP_VIT,
                 RawImageEncoding.CLIP_VIT__HUGGINGFACE,
+                RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE,
                 RawImageEncoding.CLIP_RESNET__HUGGINGFACE)
     if use_clip:
         assert clip_version is not None
@@ -1155,6 +1164,7 @@ def train_from_scratch(
         image_size = image_size,
         augmentation_mode = img_aug_mode,
         use_clip_transform = use_clip,
+        clip_version = clip_version,
     )
     
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT

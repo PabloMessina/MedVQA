@@ -2,14 +2,21 @@ import os
 from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
 from medvqa.utils.hashing import update_hash
 
-def get_sentences(qa_adapted_datasets, include_unmatched = True):
-    for dataset in qa_adapted_datasets:
-        for report in dataset['reports']:
-            for idx in report['matched']:
-                yield report['sentences'][idx].lower()
-            if include_unmatched:
-                for idx in report['unmatched']:
+def get_sentences(qa_adapted_datasets, mode='report', include_unmatched=True):
+    if mode == 'report':
+        for dataset in qa_adapted_datasets:
+            for report in dataset['reports']:
+                for idx in report['matched']:
                     yield report['sentences'][idx].lower()
+                if include_unmatched:
+                    for idx in report['unmatched']:
+                        yield report['sentences'][idx].lower()
+    elif mode == 'background':
+        for dataset in qa_adapted_datasets:
+            for report in dataset['reports']:
+                text = report['background']
+                if text: yield text
+    else: assert False, f'Unknown mode {mode}'
 
 def get_average_question_positions(cache_dir, qa_adapted_dataset_filename, report_ids):
 

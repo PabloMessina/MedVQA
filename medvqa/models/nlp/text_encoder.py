@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 
-class QuestionEncoder_BiLSTM(nn.Module):
+class BiLSTMBasedTextEncoder(nn.Module):
     
     def __init__(self, embedding_table, embed_size, hidden_size, output_size, device):
         super().__init__()
@@ -19,16 +19,16 @@ class QuestionEncoder_BiLSTM(nn.Module):
         )
         self.W_out = nn.Linear(hidden_size * 4, output_size)
   
-    def forward(self, questions, lengths):
-        embedded_questions = self.embedding_table(questions)
-        packed_questions = pack_padded_sequence(embedded_questions, lengths, batch_first=True)
-        batch_size, max_question_length = questions.shape
+    def forward(self, texts, lengths):
+        embedded_texts = self.embedding_table(texts)
+        packed_texts = pack_padded_sequence(embedded_texts, lengths, batch_first=True)
+        batch_size, max_question_length = texts.shape
 
         assert max_question_length == lengths.max()
 
         h0 = self.init_hidden_state(batch_size)
         c0 = self.init_cell_state(batch_size)
-        _, (hidden_states, cell_states) = self.lstm(packed_questions, (h0, c0))
+        _, (hidden_states, cell_states) = self.lstm(packed_texts, (h0, c0))
         # all_hidden_states, _ = pad_packed_sequence(output,
         #                                            batch_first=True,
         #                                            padding_value=0,

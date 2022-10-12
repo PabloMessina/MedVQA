@@ -1,6 +1,7 @@
 import  os
 import numpy as np
 import argparse
+import re
 from copy import deepcopy
 
 import torch
@@ -35,7 +36,9 @@ from medvqa.metrics import (
 )
 from medvqa.models.checkpoint import (
     get_checkpoint_filepath,
+    get_matching_checkpoint_epoch,
     load_metadata,
+    split_checkpoint_name,
 )
 from medvqa.utils.common import (
     WORKSPACE_DIR,
@@ -75,7 +78,7 @@ def parse_args():
 
     # optional arguments
     parser.add_argument('--n-questions-per-report', type=int, default=None)
-    parser.add_argument('--qclass-threshold', type=float, default=0)
+    parser.add_argument('--qclass-threshold', type=float, default=None)
     parser.add_argument('--batch-size', type=int, default=140,
                         help='Batch size')
     parser.add_argument('--device', type=str, default='GPU',
@@ -86,6 +89,8 @@ def parse_args():
 
     parser.add_argument('--eval-checkpoint-folder', type=str, default=None,
                         help='Optional checkpoint folder to load weights from for evaluation')
+    parser.add_argument('--precomputed-question-probs-path', type=str, default=None)
+    parser.add_argument('--precomputed-question-thresholds-path', type=str, default=None)
 
     parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
     parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
@@ -115,23 +120,38 @@ def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer
     print (f'Report-level metrics successfully saved to {save_path}')
     return metrics
 
-def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, checkpoint_path):
+def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
+                        checkpoint_path, precomputed_question_probs_path):
     strings = [f'eval_mode={eval_mode}']
     if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
        eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
        eval_mode == ReportEvalMode.MOST_POPULAR:
-       assert n_questions_per_report is not None
-       strings.append(f'n_q_per_report={n_questions_per_report}')
+        assert n_questions_per_report is not None
+        strings.append(f'n_q_per_rep={n_questions_per_report}')
     if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or \
        eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
-       assert qclass_threshold is not None
-       strings.append(f'qclass_threshold={qclass_threshold}')
+        if qclass_threshold is not None:
+            strings.append(f'qclass_thr={qclass_threshold}')
     if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or \
-       eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or \
-       eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
+       eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+        assert checkpoint_path is not None or precomputed_question_probs_path is not None
+        if precomputed_question_probs_path is not None:
+            if 'ensemble' in precomputed_question_probs_path:
+                tmp = re.findall(r'_ensemble\((.*)\)_', precomputed_question_probs_path)[0]
+                strings.append(f'ensemble=({tmp})')
+            else:
+                timestamp = os.path.basename(os.path.abspath(os.path.join(precomputed_question_probs_path, os.pardir)))[:15]
+                strings.append(f'probs={timestamp}')
+                strings.append(f'epoch={get_matching_checkpoint_epoch(precomputed_question_probs_path)}')
+        else:
+            timestamp = os.path.basename(os.path.abspath(os.path.join(checkpoint_path, os.pardir)))[:15]
+            strings.append(f'chkpt={timestamp}')
+            strings.append(f'epoch={split_checkpoint_name(os.path.basename(checkpoint_path)).epoch}')
+    if eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
        assert checkpoint_path is not None       
        timestamp = os.path.basename(os.path.abspath(os.path.join(checkpoint_path, os.pardir)))[:15]
        strings.append(f'chkpt={timestamp}')
+       strings.append(f'epoch={split_checkpoint_name(os.path.basename(checkpoint_path)).epoch}')
     return ';'.join(strings)
 
 def _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer):
@@ -169,6 +189,8 @@ def _evaluate_model(
     device = 'GPU',
     checkpoint_folder_path = None,
     eval_checkpoint_folder_path = None,
+    precomputed_question_probs_path = None,
+    precomputed_question_thresholds_path = None,
     return_results = False,
     use_amp = False,
     eval_iuxray = True,
@@ -319,6 +341,8 @@ def _evaluate_model(
             n_questions_aux_task = model_kwargs['n_questions_aux_task'],
             pretrained_weights = pretrained_weights,
             pretrained_checkpoint_path = pretrained_checkpoint_path,
+            precomputed_question_probs_path = precomputed_question_probs_path,
+            precomputed_question_thresholds_path = precomputed_question_thresholds_path,
             n_questions_per_report = n_questions_per_report,
             qclass_threshold = qclass_threshold,
             **mimiccxr_vqa_evaluator_kwargs,
@@ -438,7 +462,8 @@ def _evaluate_model(
     # Run evaluation
     results_dict = dict(tokenizer = tokenizer)
     results_folder_path = get_results_folder_path(checkpoint_folder_path)    
-    eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, pretrained_checkpoint_path)
+    eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
+                                         pretrained_checkpoint_path, precomputed_question_probs_path)
 
     if eval_iuxray:
         print('\n========================')
@@ -492,6 +517,8 @@ def evaluate_model(
     n_questions_per_report = None,
     qclass_threshold = None,
     eval_checkpoint_folder = None,
+    precomputed_question_probs_path = None,
+    precomputed_question_thresholds_path = None,
     batch_size = 100,
     num_workers = 0,    
     device = 'GPU',
@@ -536,6 +563,8 @@ def evaluate_model(
                 num_workers = num_workers,
                 checkpoint_folder_path = checkpoint_folder,
                 eval_checkpoint_folder_path = eval_checkpoint_folder,
+                precomputed_question_probs_path = precomputed_question_probs_path,
+                precomputed_question_thresholds_path = precomputed_question_thresholds_path,
                 return_results = return_results,
                 use_amp = use_amp,
                 eval_iuxray = eval_iuxray,

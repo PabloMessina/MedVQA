@@ -20,7 +20,7 @@ from medvqa.utils.constants import ReportEvalMode
 
 _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
 
-def _get_iuxray_image_path(image_name):
+def get_iuxray_image_path(image_name):
     return _IUXRAY_IMAGE_PATH_TEMPLATE.format(image_name)
 
 def get_iuxray_image_paths(report):
@@ -28,7 +28,7 @@ def get_iuxray_image_paths(report):
     iuxray_metadata = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
     metadata = iuxray_metadata[filename]
     images = metadata['images']
-    image_paths = [_get_iuxray_image_path(f'{img["id"]}.png') for img in images]
+    image_paths = [get_iuxray_image_path(f'{img["id"]}.png') for img in images]
     return image_paths
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
@@ -265,16 +265,18 @@ class IUXRAY_VQA_Trainer(VQA_Trainer):
             sentences = report['sentences']
             
             image_path = None
-            
-            if len(images) == 1:
-                image_name = f'{images[0]["id"]}.png'
-                if image_name not in invalid_images:
-                    image_path = _get_iuxray_image_path(image_name)
-            else:
+
+            for elem in images:
+                image_name = f'{elem["id"]}.png'
+                if image_name not in invalid_images and iuxray_image_info['classification'][image_name] == 'frontal':
+                    image_path = get_iuxray_image_path(image_name)
+                    break
+
+            if image_path is None:
                 for elem in images:
                     image_name = f'{elem["id"]}.png'
-                    if image_name not in invalid_images and iuxray_image_info['classification'][image_name] == 'frontal':
-                        image_path = _get_iuxray_image_path(image_name)
+                    if image_name not in invalid_images:
+                        image_path = get_iuxray_image_path(image_name)
                         break
 
             # print(f'ri={ri}, images={images}, image_path={image_path}')

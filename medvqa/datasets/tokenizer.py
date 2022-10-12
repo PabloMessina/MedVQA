@@ -16,25 +16,27 @@ import os
 import re
 
 _IGNORE_REGEX = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
+_VALID_PUNCTUATIONS = ['.', ',', ':']
 
-def _get_vocab_filepath(qa_adapted_filenames, min_freq):
-    filename = f'vocab__min_freq={min_freq}__from({";".join(qa_adapted_filenames)}).pkl'
+def _get_vocab_filepath(qa_adapted_filenames, min_freq, mode):
+    filename = f'vocab__min_freq={min_freq}__mode={mode}__from({";".join(qa_adapted_filenames)}).pkl'
     return os.path.join(CACHE_DIR, filename)
 
 class Tokenizer:
     
     PAD_TOKEN = '<pad>'
     START_TOKEN = '<s>'
-    END_TOKEN = '</s>'    
+    END_TOKEN = '</s>'
     
     def __init__(self, qa_adapted_dataset_paths, min_freq=5, overwrite=False,
-                medical_terms_frequency_filename = None):
+                mode='report', medical_terms_frequency_filename = None):
 
+        assert mode in ('report', 'background')
         assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
 
         qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
 
-        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq)
+        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq, mode)
         
         if medical_terms_frequency_filename is not None:
             self.med_tags_extractor = MedicalTagsExtractor(medical_terms_frequency_filename)
@@ -48,10 +50,10 @@ class Tokenizer:
             self.id2token = load_pickle(vocab_filepath)
 
         if overwrite or self.id2token is None:
-            # process Q&A datasets            
+            # process Q&A datasets
             vocab = dict()
             qa_adapted_datasets = [get_cached_json_file(path) for path in qa_adapted_dataset_paths]
-            for sentence in tqdm(get_sentences(qa_adapted_datasets)):
+            for sentence in tqdm(get_sentences(qa_adapted_datasets, mode=mode)):
                 for token in wordpunct_tokenize(sentence):
                     if _IGNORE_REGEX.search(token):
                         continue
@@ -59,16 +61,20 @@ class Tokenizer:
             # filter by frequency
             filtered_vocab = set(word for word, freq in vocab.items() if freq >= min_freq)
 
-            # include questions' vocab
-            questions = load_json_file(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
-            for item in questions:
-                for token in item['question'][:-1].split():
-                    filtered_vocab.add(token)
+            # valid punctuations
+            filtered_vocab.update(_VALID_PUNCTUATIONS)
 
-            # include medical terms
-            with open(MEDICAL_TERMS_PATH) as f:
-                for line in f.readlines():                    
-                    filtered_vocab.add(line.strip())
+            if mode == 'report':
+                # include questions' vocab
+                questions = load_json_file(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
+                for item in questions:
+                    for token in item['question'][:-1].split():
+                        filtered_vocab.add(token)
+
+                # include medical terms
+                with open(MEDICAL_TERMS_PATH) as f:
+                    for line in f.readlines():                    
+                        filtered_vocab.add(line.strip())
             
             # sort
             filtered_vocab = sorted(list(filtered_vocab))

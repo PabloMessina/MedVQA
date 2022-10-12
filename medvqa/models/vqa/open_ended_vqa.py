@@ -1,12 +1,13 @@
 import torch
-import torch.nn as nn
+from torch import nn
 from medvqa.models.common import freeze_parameters
-from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
-from medvqa.models.nlp.question_decoder import QuestionDecoder
+from medvqa.models.nlp.text_encoder import BiLSTMBasedTextEncoder
+from medvqa.models.nlp.text_decoder import LSTMBasedTextDecoder
 from medvqa.models.vision.visual_modules import (
     CLIP_RESNET_GLOBAL_FEAT_SIZE,
     CLIP_VIT_GLOBAL_FEAT_SIZE,
     HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE,
+    HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE,
     HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT,
     create_clip_vit_feature_extractor,
     create_clip_resnet_feature_extractor,
@@ -40,6 +41,7 @@ class RawImageEncoding:
     CLIP_RESNET = 'clip-resnet'
     CLIP_VIT = 'clip-vit'
     CLIP_VIT__HUGGINGFACE = 'clip-vit-huggingface'
+    CLIP_VIT_LARGE__HUGGINGFACE = 'clip-vit-large-huggingface'
     CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
 
 class VisualInputMode:
@@ -176,6 +178,8 @@ class OpenEndedVQA(nn.Module):
             return CLIP_RESNET_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
             return HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
+            return HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE
         assert False
     
     def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
@@ -187,7 +191,8 @@ class OpenEndedVQA(nn.Module):
             self.raw_image_encoder = create_clip_resnet_feature_extractor(clip_version, pretrained_weights_path)
         elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
             self.raw_image_encoder = create_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+        elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
+             raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(clip_version, pretrained_weights_path)
         else: assert False, f'Unknown image encoding {raw_image_encoding}'
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder)
@@ -201,12 +206,12 @@ class OpenEndedVQA(nn.Module):
                                start_idx=None, n_questions=None, device=None):
         if question_encoding == QuestionEncoding.BILSTM:
             assert question_hidden_size is not None
-            self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
+            self.question_encoder = BiLSTMBasedTextEncoder(self.embedding_table,
                                                         embed_size,
                                                         question_hidden_size,
                                                         question_vec_size,
                                                         device)
-            self.question_decoder = QuestionDecoder(self.embedding_table,
+            self.question_decoder = LSTMBasedTextDecoder(self.embedding_table,
                                             embed_size,
                                             question_hidden_size,
                                             question_vec_size,
@@ -317,7 +322,8 @@ class OpenEndedVQA(nn.Module):
         elif self.raw_image_encoding in (RawImageEncoding.CLIP_VIT,
                                          RawImageEncoding.CLIP_RESNET):
             img_str = f'clip-{self.clip_version}'
-        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
+             self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             img_str = HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT[self.clip_version]
         else: assert False
         vf_str = 'mlp(vf)'
@@ -382,7 +388,8 @@ class OpenEndedVQA(nn.Module):
                 global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
                 global_list.append(global_feat)
             
-            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
+            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
+                 self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
                 tmp = self.raw_image_encoder(raw_images)
                 global_feat, local_feat = tmp.pooler_output, tmp.last_hidden_state
                 global_list.append(global_feat)

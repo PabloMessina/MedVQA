@@ -26,6 +26,7 @@ from medvqa.losses import DatasetAwareLoss
 
 from ignite.metrics import RunningAverage, EpochMetric
 import operator
+from medvqa.metrics.nlp.bleu import DatasetAwareBleu
 from medvqa.metrics.nlp.cider import DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 
@@ -77,6 +78,11 @@ def attach_bleu(engine, device, record_scores=False):
     met = Bleu(output_transform = _get_output_transform('pred_answers', 'answers'),
                 device = device, record_scores=record_scores)
     met.attach(engine, MetricNames.BLEU)
+
+def attach_dataset_aware_bleu_background(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareBleu(output_transform=_get_output_transform('pred_backgrounds', 'backgrounds'),
+                           allowed_dataset_ids=allowed_dataset_ids, record_scores=record_scores)
+    met.attach(engine, MetricNames.BLEU_BACKGROUND)
 
 def attach_rougel(engine, device, record_scores=False):
     met = RougeL(output_transform = _get_output_transform('pred_answers', 'answers'),

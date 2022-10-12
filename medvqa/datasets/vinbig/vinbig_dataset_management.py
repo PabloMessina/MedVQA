@@ -213,6 +213,49 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
             infinite=infinite,
         )
 
+class VinBig_Visual_Trainer(VinBigTrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
+                training_data = VinBigTrainingData.ALL,
+                use_merged_findings=False, findings_remapper=None, n_findings=None,
+        ):
+        super().__init__(
+            use_merged_findings=use_merged_findings,
+            findings_remapper=findings_remapper,
+            n_findings=n_findings,
+        )
+        
+        self.transform = transform
+        self.training_data = training_data
+        
+        print('Generating train dataset and dataloader')
+        if training_data == VinBigTrainingData.TRAIN_ONLY:
+            train_indices = self.train_indices
+        elif training_data == VinBigTrainingData.TEST_ONLY:
+            train_indices = self.test_indices
+        elif training_data == VinBigTrainingData.ALL:
+            train_indices = self.train_indices + self.test_indices
+        else: assert False, f'Unknown training_data = {training_data}'
+        
+        self.train_dataset, self.train_dataloader = self._create_label_based_dataset_and_dataloader(
+            indices=train_indices,
+            labels=self.labels,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=True,
+            min_pos_to_include=0,
+            log_weighting=True,
+            include_qa=False,
+        )
+    
+    def _create_visual_dataset(self, indices, infinite):
+        labels = self.finding_labels if self.use_merged_findings else self.labels
+        return VinBigVisualDataset(
+            self.image_paths, self.transform, labels,
+            indices=indices,
+            infinite=infinite,
+        )
+
 class VinBigVQADataset(Dataset):
     
     def __init__(self, image_paths, transform, labels, question, answer, indices,
@@ -266,3 +309,29 @@ class VinBigVQADataset(Dataset):
         if self.use_precomputed_visual_features:
             output['vf'] = self.precomputed_visual_features[self.idx2visfeatidx[idx]]
         return output
+
+class VinBigVisualDataset(Dataset):
+    
+    def __init__(self, image_paths, transform, labels, indices, suffle_indices=True, infinite=False):
+        self.images = image_paths
+        self.transform = transform
+        self.labels = labels
+        self.infinite = infinite
+        self.indices = indices
+        
+        if suffle_indices: np.random.shuffle(self.indices)
+        self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        indices = self.indices
+        if self.infinite:
+            i %= len(indices)
+        idx = indices[i]
+        return dict(
+            idx=idx,
+            i=self.transform(Image.open(self.images[idx]).convert('RGB')),
+            l=self.labels[idx],
+        )

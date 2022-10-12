@@ -9,6 +9,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
+    cohen_kappa_score,
 )
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
@@ -329,17 +330,20 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
 def get_chexpert_based_outputs_dataframe(metrics_paths):
 
     columns = ['metrics_path']
-    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
-        columns.append(f'{key}-vqa')
-    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
-        columns.append(f'{key}-vm')
-    for key in ('f1(macro)', 'p(macro)', 'r(macro)'):
-        columns.append(f'{key}-agreement')
+    _cols = ('f1(macro)', 'p(macro)', 'r(macro)', 'f1(micro)', 'p(micro)', 'r(micro)', 'cohenkappa')
+    for key in _cols: columns.append(f'{key}-vqa')
+    for key in _cols: columns.append(f'{key}-vm')    
+    for key in _cols: columns.append(f'{key}-agreement')
     data = [[] for _ in range(len(metrics_paths))]
+
+    _keys = ('f1_macro_avg', 'p_macro_avg', 'r_macro_avg',
+            'f1_micro_avg', 'p_micro_avg', 'r_micro_avg',
+             'cohen_kappa_score')
     
     for row_i, metrics_path in enumerate(metrics_paths):
         data[row_i].append(metrics_path)
-        metrics_dict = load_pickle(metrics_path)['metrics']
+        results = load_pickle(metrics_path)
+        metrics_dict = results['metrics']
         for pair in [
             ('pred_chexpert_vqa', 'chexpert'),
             ('pred_chexpert', 'chexpert'),
@@ -350,8 +354,13 @@ def get_chexpert_based_outputs_dataframe(metrics_paths):
             except KeyError:
                 print(metrics_dict.keys())
                 raise
-            for key in ('f1', 'p', 'r'):
-                data[row_i].append(np.mean(mets[key]))
+            try:
+                for key in _keys:
+                    data[row_i].append(mets[key])
+            except KeyError:
+                print(metrics_path)
+                raise
+
     return pd.DataFrame(data=data, columns=columns)
 
 class ReportGenExamplePlotter:

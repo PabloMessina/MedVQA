@@ -88,14 +88,38 @@ class CXR14_VQA_Trainer(CXR14TrainerBase):
             question=q, answer=a, indices=indices, infinite=infinite
         )
 
+class CXR14_VisualModuleTrainer(CXR14TrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
+                use_merged_findings=False, findings_remapper=None, n_findings=None):
+        
+        super().__init__(
+            use_merged_findings=use_merged_findings,
+            findings_remapper=findings_remapper,
+            n_findings=n_findings,
+        )
+        
+        self.transform = transform
+        self.dataset, self.dataloader = self._create_label_based_dataset_and_dataloader(
+            indices=list(range(len(self.labels))),
+            labels=self.labels,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=True,
+            include_qa=False,
+        )
+
+    def _create_visual_dataset(self, indices, infinite=True):
+        labels = self.finding_labels if self.use_merged_findings else self.labels
+        return CXR14VisualDataset(
+            self.image_paths, self.transform, self.orientations, self.genders, labels,
+            indices=indices, infinite=infinite
+        )
+
 class CXR14VQADataset(Dataset):
     
     def __init__(self, image_paths, transform, orientations, genders, labels,
-                question, answer, indices,
-                suffle_indices = True,
-                # infinite mode
-                infinite = False,
-        ):
+                question, answer, indices, suffle_indices = True, infinite = False):
         self.images = image_paths
         self.transform = transform
         self.orientations = orientations
@@ -124,6 +148,38 @@ class CXR14VQADataset(Dataset):
             l=self.labels[idx],
             q=self.question,
             a=self.answer,
+            i=self.transform(Image.open(self.images[idx]).convert('RGB')),
+        )
+        return output
+
+class CXR14VisualDataset(Dataset):
+    
+    def __init__(self, image_paths, transform, orientations, genders, labels,
+                indices, suffle_indices = True, infinite = False):
+        self.images = image_paths
+        self.transform = transform
+        self.orientations = orientations
+        self.genders = genders
+        self.labels = labels
+        self.infinite = infinite
+        self.indices = indices
+        
+        if suffle_indices: np.random.shuffle(self.indices)
+        self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        indices = self.indices
+        if self.infinite:
+            i %= len(indices)
+        idx = indices[i]
+        output = dict(
+            idx=idx,
+            o=self.orientations[idx],
+            g=self.genders[idx],
+            l=self.labels[idx],
             i=self.transform(Image.open(self.images[idx]).convert('RGB')),
         )
         return output

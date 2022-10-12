@@ -1,6 +1,6 @@
 import torch.nn as nn
-from medvqa.models.nlp.question_encoder import QuestionEncoder_BiLSTM
-from medvqa.models.nlp.question_decoder import QuestionDecoder
+from medvqa.models.nlp.text_encoder import BiLSTMBasedTextEncoder
+from medvqa.models.nlp.text_decoder import LSTMBasedTextDecoder
 from medvqa.models.qa.answer_decoder import AnswerDecoder
 
 class OpenEndedQA(nn.Module):
@@ -14,12 +14,12 @@ class OpenEndedQA(nn.Module):
             embedding_dim=embed_size,
             padding_idx=0,
         )
-        self.question_encoder = QuestionEncoder_BiLSTM(self.embedding_table,
+        self.question_encoder = BiLSTMBasedTextEncoder(self.embedding_table,
                                                        embed_size,
                                                        question_hidden_size,
                                                        question_vec_size,
                                                        device)
-        self.question_decoder = QuestionDecoder(self.embedding_table,
+        self.question_decoder = LSTMBasedTextDecoder(self.embedding_table,
                                             embed_size,
                                             question_hidden_size,
                                             question_vec_size,

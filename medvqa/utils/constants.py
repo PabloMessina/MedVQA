@@ -163,9 +163,10 @@ NLP_METRICS = [
 class MetricNames:
     CHEXPERT_ACCURACY = 'chexpert_accuracy'
     CHEXPERT_PRF1S = 'chexpert_prf1s'
-    BLEU_QUESTION = 'bleu_question'
     EXACTMATCH_QUESTION = 'exactmatch_question'
     EXACTMATCH_ANSWER = 'exactmatch_answer'
+    BLEU_QUESTION = 'bleu_question'
+    BLEU_BACKGROUND = 'bleu_background'
     BLEU = 'bleu'
     BLEU_1 = 'bleu-1'
     BLEU_2 = 'bleu-2'
@@ -196,6 +197,7 @@ class MetricNames:
     CXR14MICROAVGF1 = 'cxr14_microavgf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
+    BACKGROUND_LOSS = 'background_loss'
     ORIENTATION_LOSS = 'orientation_loss'
     CHEXPERT_LOSS = 'chexpert_loss'
     VINBIG_LOSS = 'vinbig_loss'
@@ -208,9 +210,10 @@ class MetricNames:
 METRIC2SHORT = {
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',
-    'bleu_question': 'bq',
     'exactmatch_question': 'emq',
     'exactmatch_answer': 'ema',
+    'bleu_question': 'bq',
+    'bleu_background': 'b_bg',
     'bleu': 'b',
     'bleu-1': 'b1',
     'bleu-2': 'b2',
@@ -241,6 +244,7 @@ METRIC2SHORT = {
     'cxr14_microavgf1': 'cxr14micf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
+    'background_loss': 'bg_loss',
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
     'vinbig_loss': 'vnbg_loss',

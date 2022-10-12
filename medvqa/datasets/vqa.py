@@ -316,7 +316,7 @@ class VQADataset(Dataset):
         if self.include_image:
             output['i'] = self.transform(Image.open(self.images[idx]).convert('RGB'))
         if self.include_answer:
-            output['a'] = self.answer if self.fixed_qa_pair else self.answers[idx]        
+            output['a'] = self.answer if self.fixed_qa_pair else self.answers[idx]
         if self.classify_tags:
             output['tags'] = self.rid2tags[rid]
         if self.classify_orientation:
@@ -344,10 +344,9 @@ class LabelBasedVQAClass:
             self.finding_labels = adapt_label_matrix_as_merged_findings(
                 labels, n_findings, self.labels2mergedfindings)
 
-    def _create_label_based_dataset_and_dataloader(self, indices, labels, tokenizer,
-                                batch_size, num_workers, collate_batch_fn, report_ids=None,
-                                infinite=True, n_samples=None, min_pos_to_include=0,
-                                log_weighting=False, create_vqa_kwargs={}):
+    def _create_label_based_dataset_and_dataloader(self, indices, labels, batch_size, num_workers, collate_batch_fn,
+                                tokenizer=None, report_ids=None, infinite=True, n_samples=None, min_pos_to_include=0,
+                                log_weighting=False, create_dataset_kwargs={}, include_qa=True):
         disease_datasets = []
         if log_weighting:
             pos_counts = []
@@ -372,12 +371,14 @@ class LabelBasedVQAClass:
                 print(f'ignoring label = {self.label_names[i]}, reason: too few positive examples ({len(pos_indices)})')
                 continue
 
-            if self.use_merged_findings:
-                q_id = self.labels_offset + self.labels2mergedfindings[i]
+            if include_qa:
+                if self.use_merged_findings:
+                    q_id = self.labels_offset + self.labels2mergedfindings[i]
+                else:
+                    q_id = self.labels_offset + i            
+                print(f'label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
             else:
-                q_id = self.labels_offset + i
-            
-            print(f'label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+                print(f'label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
 
             if log_weighting:
                 pos_counts.append(len(pos_indices))
@@ -385,18 +386,24 @@ class LabelBasedVQAClass:
             # positive
             if len(pos_indices) > 0:
                 pos_indices = np.array(pos_indices, dtype=int)
-                pos_answer = tokenizer.string2ids(self.templates[self.label_names[i]][1].lower())
-                pos_dataset = self._create_vqa_dataset(q=q_id, a=pos_answer, indices=pos_indices,
-                                                       infinite=infinite, **create_vqa_kwargs)
+                if include_qa:
+                    pos_answer = tokenizer.string2ids(self.templates[self.label_names[i]][1].lower())
+                    pos_dataset = self._create_vqa_dataset(q=q_id, a=pos_answer, indices=pos_indices,
+                                                        infinite=infinite, **create_dataset_kwargs)
+                else:
+                    pos_dataset = self._create_visual_dataset(indices=pos_indices, infinite=infinite, **create_dataset_kwargs)
             else:
                 pos_dataset = None
 
             # negative
             if len(neg_indices) > 0:
                 neg_indices = np.array(neg_indices, dtype=int)
-                neg_answer = tokenizer.string2ids(self.templates[self.label_names[i]][0].lower())
-                neg_dataset = self._create_vqa_dataset(q=q_id, a=neg_answer, indices=neg_indices,
-                                                       infinite=infinite, **create_vqa_kwargs)
+                if include_qa:
+                    neg_answer = tokenizer.string2ids(self.templates[self.label_names[i]][0].lower())
+                    neg_dataset = self._create_vqa_dataset(q=q_id, a=neg_answer, indices=neg_indices,
+                                                        infinite=infinite, **create_dataset_kwargs)
+                else:
+                    neg_dataset = self._create_visual_dataset(indices=neg_indices, infinite=infinite, **create_dataset_kwargs)
             else:
                 neg_dataset = None
 
@@ -433,6 +440,9 @@ class LabelBasedVQAClass:
         return dataset, dataloader
 
     def _create_vqa_dataset(self, q, a, indices, **kwargs):
+        raise NotImplementedError('Make sure your specialized class implements this function')
+    
+    def _create_visual_dataset(self, indices, **kwargs):
         raise NotImplementedError('Make sure your specialized class implements this function')
 
 
@@ -1015,7 +1025,7 @@ class VQA_Trainer(VQA_Base):
             infinite=infinite,
             n_samples=n_samples,
             report_ids=self.report_ids,
-            create_vqa_kwargs=dict(
+            create_dataset_kwargs=dict(
                 fixed_qa_pair=True,
             ))
 

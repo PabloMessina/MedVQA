@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CSV_PATH
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
@@ -66,16 +66,22 @@ class ChexpertTrainerBase(LabelBasedVQAClass):
 class Chexpert_VisualModuleTrainer(ChexpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers):        
         super().__init__()
-        # dataset
-        self.dataset = ChexpertImageDataset(self.image_paths, transform, self.orientations,
-                                       self.genders, self.labels, infinite=True)        
-        # dataloader
-        self.dataloader = DataLoader(self.dataset,
-                                    batch_size=batch_size,
-                                    shuffle=False,
-                                    num_workers=num_workers,
-                                    collate_fn=collate_batch_fn,
-                                    pin_memory=True)
+        self.transform = transform
+        self.dataset, self.dataloader = self._create_label_based_dataset_and_dataloader(
+            indices= np.arange(len(self.labels)),
+            labels=self.labels,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=True,
+            include_qa=False,
+        )
+
+    def _create_visual_dataset(self, indices, infinite=True):
+        return ChexpertImageDataset(
+            self.image_paths, self.transform, self.orientations, self.genders, self.labels,
+            indices=indices, infinite=infinite
+        )
 
 class Chexpert_VQA_Trainer(ChexpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
@@ -130,7 +136,7 @@ class Chexpert_VQA_Trainer(ChexpertTrainerBase):
 
 class ChexpertImageDataset(Dataset):
     
-    def __init__(self, image_paths, transform, orientations, genders, chexpert_labels,
+    def __init__(self, image_paths, transform, orientations, genders, chexpert_labels, indices,
                 suffle_indices = True,
                 # infinite mode
                 infinite = False,
@@ -141,7 +147,7 @@ class ChexpertImageDataset(Dataset):
         self.genders = genders
         self.labels = chexpert_labels
         self.infinite = infinite
-        self.indices = np.arange(len(self.images))
+        self.indices = indices
         if suffle_indices: np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)        
     

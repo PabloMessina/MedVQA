@@ -11,6 +11,10 @@ from medvqa.models.vision import (
     ImageQuestionClassifier,
     ImageFeatureExtractor,
 )
+from medvqa.models.vision.visual_modules import (
+    CLIP_DEFAULT_IMAGE_MEAN_STD,
+    CLIP_VERSION_2_IMAGE_MEAN_STD,
+)
 from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import ImageAugmentationTransforms
@@ -33,7 +37,8 @@ def get_image_transform(
     std = (0.229, 0.224, 0.225),
     augmentation_mode = None,
     default_prob=0.3,
-    use_clip_transform=False
+    use_clip_transform=False,
+    clip_version=None,
 ):
 
     if type(image_size) is int:
@@ -45,10 +50,13 @@ def get_image_transform(
 
     if use_clip_transform:
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
-        tf_normalize = T.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))        
+        mean, std = CLIP_VERSION_2_IMAGE_MEAN_STD.get(clip_version, CLIP_DEFAULT_IMAGE_MEAN_STD)
+        tf_normalize = T.Normalize(mean, std)
     else:
         tf_resize = T.Resize(image_size)
         tf_normalize = T.Normalize(mean, std)
+
+    print(f'mean = {mean}, std = {std}')
     
     tf_totensor = T.ToTensor()
     
@@ -119,7 +127,7 @@ inv_normalize = T.Normalize(
     std=[1/0.229, 1/0.224, 1/0.255]
 )
 
-class ImageDataset(Dataset):    
+class ImageDataset(Dataset):
     def __init__(self, images, transform):
         self.images = images
         self.transform = transform    

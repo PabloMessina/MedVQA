@@ -2625,6 +2625,7 @@ square
 stab
 stabilization
 stabilizing
+stable
 staghorn
 standard
 staple

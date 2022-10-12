@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 
 import torch
+from sklearn.metrics import cohen_kappa_score
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
@@ -105,7 +106,7 @@ def _recover_chexpert(chexpert, pred_chexpert, idxs, report_ids, gen_reports):
                     labels.append(1)
                 else: assert False
             _pred_chexpert_vqa.append(labels)
-        _pred_chexpert_vqa = np.array(_pred_chexpert_vqa)
+        _pred_chexpert_vqa = torch.tensor(_pred_chexpert_vqa)
         return dict(
             chexpert = torch.stack([chexpert[i] for i in indices]),
             pred_chexpert = torch.stack([pred_chexpert[i] for i in indices]),
@@ -120,8 +121,9 @@ def _compute_metrics(chexpert, pred_chexpert, pred_chexpert_vqa):
     for i in range(len(names)):
         for j in range(i+1, len(names)):
             met.update((labels[i], labels[j]))
-            output[(names[i], names[j])] = met.compute()
+            tmp = output[(names[i], names[j])] = met.compute()
             met.reset()
+            tmp['cohen_kappa_score'] = cohen_kappa_score(labels[i].view(-1), labels[j].view(-1))
     return output
 
 def _evaluate_model(
@@ -360,10 +362,9 @@ def _evaluate_model(
     ) 
     output = dict(
         gt_reports=reports['gt_reports'],
-        gen_reports=reports['gen_reports'],
-        gt_chexpert=_gt_chexpert,
-        pred_chexpert=_pred_chexpert,
+        gen_reports=reports['gen_reports'],        
         metrics=_compute_metrics(**chexperts),
+        **chexperts,
     )
     save_path = os.path.join(results_folder_path, f'mimiccxr_chexpert_based_output.pkl')
     save_to_pickle(output, save_path)

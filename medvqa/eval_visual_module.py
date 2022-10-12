@@ -97,7 +97,9 @@ def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, p
     keys = [
         f'{dataset_name}_vision_trainer_kwargs',
         f'{dataset_name}_vqa_trainer_kwargs',
+        f'{dataset_name}_trainer_kwargs',
     ]
+    # pprint(metadata)
     kwargs = None
     for key in keys:
         if key in metadata:
@@ -114,6 +116,13 @@ def _recover_iuxray_vision_trainer_kwargs(metadata, batch_size, preprocessed_dat
 
 def _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, preprocessed_data_filename, aux_tasks_kwargs):
     return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size, preprocessed_data_filename, aux_tasks_kwargs)
+
+def _adapt_checkpoint_keys(checkpoint):
+    keys = [k for k in checkpoint.keys()]
+    for key in keys:
+        if key.startswith('image_encoder.'):
+            checkpoint['raw_' + key] = checkpoint[key]
+    return checkpoint
 
 def _evaluate_model(
     model_kwargs,
@@ -135,8 +144,8 @@ def _evaluate_model(
     # Pull out some args from kwargs
 
     # auxiliary task: medical tags prediction
-    classify_tags = auxiliary_tasks_kwargs['classify_tags']
-    n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
+    classify_tags = auxiliary_tasks_kwargs.get('classify_tags', False)
+    n_medical_tags = auxiliary_tasks_kwargs.get('n_medical_tags', None)
     if classify_tags:
         assert n_medical_tags is not None        
     
@@ -228,10 +237,10 @@ def _evaluate_model(
         attach_chexpert_labels_roc_auc(evaluator, 'cpu')
 
     if classify_questions:
-        attach_question_labels_prf1(evaluator, device)    
+        attach_question_labels_prf1(evaluator, device)
 
     if return_results:
-        attach_accumulator(evaluator, 'idxs')        
+        attach_accumulator(evaluator, 'idxs')
         if classify_tags:
             attach_accumulator(evaluator, 'pred_tags')
         if classify_orientation:
@@ -266,16 +275,16 @@ def _evaluate_model(
     count_print('Loading model from checkpoint ...')
     print('checkpoint_path = ', checkpoint_path)
     checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model'], strict=False)
+    model.load_state_dict(_adapt_checkpoint_keys(checkpoint['model']), strict=False)
     print('Checkpoint successfully loaded!')
 
     # Attach handlers    
     evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
+    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
 
     # Run evaluation
-    metrics_to_save = metrics_to_print    
+    metrics_to_save = metrics_to_print
     results_folder_path = get_results_folder_path(checkpoint_folder_path)    
     results_dict = {}
 

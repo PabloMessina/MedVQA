@@ -4,7 +4,7 @@ from medvqa.utils.files import read_lines_from_txt, load_pickle
 from nltk.tokenize import wordpunct_tokenize
 import os
 
-_VALID_PUNCTUATIONS = ['.', ',' ':']
+_VALID_PUNCTUATIONS = ['.', ',', ':']
 
 class MedicalTagsExtractor:
 

@@ -1,21 +1,25 @@
 import os
-import re
 import glob
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
+    MIMICCXR_BROKEN_IMAGES,
     MIMICCXR_CACHE_DIR,
-    MIMICCXR_JPG_IMAGES_SMALL_DIR,
+    MIMICCXR_IMAGE_PATH_TEMPLATE,
+    MIMICCXR_IMAGE_REGEX,
     MIMICCXR_METADATA_CSV_PATH,
     MIMICCXR_SPLIT_CSV_PATH,
     MIMICCXR_IMAGE_ORIENTATIONS,
+    MIMICCXR_STUDY_REGEX,
+    get_mimiccxr_image_path,
 )
 from medvqa.datasets.image_processing import (
     classify_and_rank_questions,
     get_nearest_neighbors,
 )
+from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.utils.files import (
     get_cached_json_file,
     get_file_path_with_hashing_if_too_long,
@@ -29,29 +33,12 @@ from medvqa.datasets.preprocessing import (
     get_average_question_positions,
     get_question_frequencies,
 )
-
-_MIMICCXR_IMAGE_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
-_MIMICCXR_STUDY_REGEX = re.compile(r'/p(\d+)/p(\d+)/s(\d+)\.txt')
-_MIMICCXR_IMAGE_REGEX = re.compile(r'p(\d+)/p(\d+)/s(\d+)/(.*)\.jpg$')
-_MIMICCXR_BROKEN_IMAGES = set([
-    'p11/p11285576/s54979966/03b2e67c-70631ff8-685825fb-6c989456-621ca64d.jpg',
-    'p15/p15223781/s52459604/56b8afd3-5f6d4419-8699d79e-6913a2bd-35a08557.jpg',
-    'p15/p15223781/s52459604/93020995-6b84ca33-2e41e00d-5d6e3bee-87cfe5c6.jpg',
-    # Appears empty
-    'p10/p10291098/s57194260/0539ee33-9d402e49-a9cc6d36-7aabc539-3d80a62b.jpg',
-    # Blur empty images
-    'p15/p15355458/s52423703/0b6f08b2-72deda00-d7ccc375-8278269f-b4e11c36.jpg',
-    'p18/p18461911/s57183218/151abebe-2a750a5c-09c181bb-1a9016ef-92d8910e.jpg',
-    'p19/p19839145/s54889255/f674e474-817bb713-8f16c90c-608cf869-2829cae7.jpg',
-])
-
-def _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
-    return _MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
+from medvqa.utils.logging import print_red
 
 def get_mimiccxr_image_paths(report):
     filepath = report['filepath']
-    part_id, subject_id, study_id = map(int, _MIMICCXR_STUDY_REGEX.findall(filepath)[0])
-    images = glob.glob(_MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
+    part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
+    images = glob.glob(MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
     return images
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs, tokenizer,
@@ -82,19 +69,28 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
     return final_path
 
 def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, report_eval_mode=None,
-                                    pretrained_checkpoint_path=None, n_questions_per_report=None,
-                                    qclass_threshold=None):
+                                    pretrained_checkpoint_path=None, precomputed_question_probs_path=None,
+                                    precomputed_question_thresholds_path=None,
+                                    n_questions_per_report=None, qclass_threshold=None):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
     ]    
     if report_eval_mode is not None:        
         strings.append(f'report_eval_mode={report_eval_mode}')
-        
+
         if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
-           report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
-           report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
-            assert pretrained_checkpoint_path is not None
+           report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
+            assert pretrained_checkpoint_path is not None or\
+                   precomputed_question_probs_path is not None
+            if precomputed_question_probs_path is not None:
+                strings.append(f'precomputed_question_probs_path={precomputed_question_probs_path}')
+                strings.append(f'timestamp={os.path.getmtime(precomputed_question_probs_path)}')
+            else:              
+                strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
+        
+        if report_eval_mode == ReportEvalMode.NEAREST_NEIGHBOR:
+            assert pretrained_checkpoint_path is not None 
             strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
         
         if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
@@ -105,8 +101,12 @@ def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, rep
 
         if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
            report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
-           assert qclass_threshold is not None
-           strings.append(f'qclass_threshold={qclass_threshold}')
+            assert (qclass_threshold is not None) != (precomputed_question_thresholds_path is not None)
+            if qclass_threshold:
+                strings.append(f'qclass_threshold={qclass_threshold}')
+            else:
+                strings.append(f'precomputed_question_thresholds_path={precomputed_question_thresholds_path}')
+        
 
     file_path = get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_test_data__', strings)
     return file_path
@@ -117,13 +117,52 @@ def _get_orientation_id(orientation):
     except ValueError:
         return 0
 
+def _rank_questions(report_ids, precomputed_question_probs_path, n_questions, top_k,
+        min_num_q_per_report=5, threshold=None, precomputed_question_thresholds_path=None):
+    assert (threshold is None) != (precomputed_question_thresholds_path is None)
+    print_red('_rank_questions(): loading question probabilities from', precomputed_question_probs_path)
+    question_probs = load_pickle(precomputed_question_probs_path)
+    if precomputed_question_thresholds_path is not None:
+        print_red('_rank_questions(): loading question thresholds from', precomputed_question_thresholds_path)
+        thresholds = load_pickle(precomputed_question_thresholds_path)
+    question_ids = list(range(n_questions))
+    questions = [None] * len(report_ids)
+    K = min(min_num_q_per_report, top_k)
+    for i, rid in enumerate(report_ids):
+        probs = question_probs[rid]
+        if threshold:
+            probs -= threshold 
+        else:
+            probs -= thresholds
+        question_ids.sort(key=lambda k:probs[k], reverse=True)
+        questions[i] = [qid for k, qid in enumerate(question_ids) if k < top_k and probs[qid] >= 0]
+        if len(questions[i]) < K:
+            questions[i] = question_ids[:K]
+            assert 0 < len(questions[i]) <= top_k
+    print_red('_rank_questions(): average num of questions per report:', sum(len(q) for q in questions) / len(questions))
+    return questions
+
+def _sanity_check_questions(questions, report_ids, mimiccxr_qa_reports):
+    n_q = len(mimiccxr_qa_reports['questions'])
+    gt = np.zeros((len(report_ids), n_q))
+    pred = np.zeros((len(report_ids), n_q))
+    for i, ri in enumerate(report_ids):
+        for j in mimiccxr_qa_reports['reports'][ri]['question_ids']:
+            gt[i][j] = 1
+        for j in questions[i]:
+            pred[i][j] = 1
+    met = MultiLabelPRF1(device='cpu')
+    met.update((pred, gt))
+    res = met.compute()
+    print_red(f'_sanity_check_questions(): f1(macro)={res["f1_macro_avg"]}, f1(micro)={res["f1_micro_avg"]}')
+
 def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
         n_questions_per_report=None, qclass_threshold=None,
         qa_adapted_reports_filename=None, image_transform=None,
         image_local_feat_size=None, n_questions_aux_task=None, pretrained_weights=None,
-        pretrained_checkpoint_path=None, train_split_data=None,
-        chexpert_one_hot_offset=None,
-        batch_size=None):
+        pretrained_checkpoint_path=None, precomputed_question_probs_path=None,
+        precomputed_question_thresholds_path=None,
+        train_split_data=None, chexpert_one_hot_offset=None, batch_size=None):
 
     print('_precompute_questions_per_report():')
 
@@ -137,10 +176,17 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
         strings.append(f'n_questions_per_report={n_questions_per_report}')        
     if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
             report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
-        assert pretrained_checkpoint_path is not None
-        assert qclass_threshold is not None
-        strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
-        strings.append(f'qclass_threshold={qclass_threshold}')
+        assert pretrained_checkpoint_path is not None or precomputed_question_probs_path is not None
+        assert qclass_threshold is not None or precomputed_question_thresholds_path is not None
+        if precomputed_question_probs_path is not None:
+            strings.append(f'precomputed_question_probs_path={precomputed_question_probs_path}')
+            strings.append(f'timestamp={os.path.getmtime(precomputed_question_probs_path)}')
+        else:
+            strings.append(f'pretrained_checkpoint_path={pretrained_checkpoint_path}')
+        if qclass_threshold:
+            strings.append(f'qclass_threshold={qclass_threshold}')
+        else:
+            strings.append(f'precomputed_question_thresholds_path={precomputed_question_thresholds_path}')
     file_path = get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'questions_per_report', strings)
 
     data = load_pickle(file_path)
@@ -160,20 +206,30 @@ def _precompute_questions_per_report(split_name, split_data, report_eval_mode,
     elif report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
          report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
         assert n_questions_per_report is not None
-        assert qclass_threshold is not None
+        assert qclass_threshold is not None or precomputed_question_thresholds_path is not None
         assert chexpert_one_hot_offset is not None
         test_report_ids = set(split_data['report_ids'])
         train_report_ids = [i for i in range(len(mimiccxr_qa_reports['reports'])) if i not in test_report_ids]
         question_scores = get_average_question_positions(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename, train_report_ids)
-        questions = classify_and_rank_questions(split_data['image_paths'],
-                                    image_transform,
-                                    image_local_feat_size,
-                                    n_questions_aux_task,
-                                    pretrained_weights,
-                                    batch_size,
-                                    n_questions_per_report,
-                                    qclass_threshold)
+        if precomputed_question_probs_path is not None:
+            questions = _rank_questions(split_data['report_ids'],
+                                        precomputed_question_probs_path,
+                                        n_questions_aux_task,
+                                        n_questions_per_report,
+                                        threshold=qclass_threshold,
+                                        precomputed_question_thresholds_path=precomputed_question_thresholds_path)
+        elif pretrained_weights is not None:
+            questions = classify_and_rank_questions(split_data['image_paths'],
+                                        image_transform,
+                                        image_local_feat_size,
+                                        n_questions_aux_task,
+                                        pretrained_weights,
+                                        batch_size,
+                                        n_questions_per_report,
+                                        qclass_threshold)
+        else: assert False        
         assert len(questions) == len(split_data['report_ids'])
+        _sanity_check_questions(questions, split_data['report_ids'], mimiccxr_qa_reports)
         question_scorer = lambda j : question_scores[j]
 
         if report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION:            
@@ -245,8 +301,8 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
         return data
     
     broken_images = set()
-    for path in _MIMICCXR_BROKEN_IMAGES:
-        _, a, b, c = _MIMICCXR_IMAGE_REGEX.findall(path)[0]
+    for path in MIMICCXR_BROKEN_IMAGES:
+        _, a, b, c = MIMICCXR_IMAGE_REGEX.findall(path)[0]
         broken_images.add((int(a), int(b), c))
 
     mimiccxr_qa_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
@@ -259,7 +315,7 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
     
     for ri, report in tqdm(enumerate(mimiccxr_qa_reports['reports'])):
 
-        part_id, subject_id, study_id = map(int, _MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])
+        part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])
         views = image_views_dict[(subject_id, study_id)]
         # images = glob.glob(f'/mnt/workspace/mimic-cxr-jpg/images-small/p{part_id}/p{subject_id}/s{study_id}/*.jpg')
         # assert len(views) == len(images)
@@ -282,7 +338,7 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
             
         if (dicom_id is not None and split_lambda(split_dict[(subject_id, study_id, dicom_id)]) and
                 (subject_id, study_id, dicom_id) not in broken_images):
-            image_path = _get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
+            image_path = get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
             orientation_id = _get_orientation_id(orientation)
             
             data['report_ids'].append(ri)
@@ -360,6 +416,8 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_lambda, split_name
                         n_questions_per_report=self.n_questions_per_report,
                         qclass_threshold=self.qclass_threshold,
                         pretrained_checkpoint_path=self.pretrained_checkpoint_path,
+                        precomputed_question_probs_path=self.precomputed_question_probs_path,
+                        precomputed_question_thresholds_path=self.precomputed_question_thresholds_path,
                         chexpert_one_hot_offset=self.chexpert_one_hot_offset,
                         train_split_data=train_split_data)
     else:
@@ -540,6 +598,8 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 image_local_feat_size = None,
                 pretrained_checkpoint_path = None,
                 pretrained_weights = None,
+                precomputed_question_probs_path = None,
+                precomputed_question_thresholds_path = None,
                 n_questions_aux_task = None,
                 n_questions_per_report = None,
                 qclass_threshold = None,
@@ -567,6 +627,8 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.n_questions_per_report = n_questions_per_report
         self.qclass_threshold = qclass_threshold
         self.pretrained_checkpoint_path = pretrained_checkpoint_path
+        self.precomputed_question_probs_path = precomputed_question_probs_path
+        self.precomputed_question_thresholds_path = precomputed_question_thresholds_path
         self.chexpert_one_hot_offset = chexpert_one_hot_offset
 
         if pretrained_weights is not None:
@@ -574,7 +636,9 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         
         preprocessing_save_path = get_test_preprocessing_save_path(
                         qa_adapted_reports_filename, tokenizer, report_eval_mode,
-                        pretrained_checkpoint_path, n_questions_per_report, qclass_threshold)
+                        pretrained_checkpoint_path, precomputed_question_probs_path,
+                        precomputed_question_thresholds_path,
+                        n_questions_per_report, qclass_threshold)
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,

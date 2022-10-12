@@ -22,13 +22,17 @@ def collect_report_level_results(dataset_name):
 def collect_visual_module_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
     vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
+    mm_dirs = os.listdir(os.path.join(RESULTS_DIR,'multimodal'))
     results = []
-    for dirs, kind in zip([vqa_dirs, vm_dirs], ['vqa', 'visual_module']):
+    for dirs, kind in zip([vqa_dirs, vm_dirs, mm_dirs], ['vqa', 'visual_module', 'multimodal']):
         for exp_name in dirs:
-            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
-                                    if 'visual_module' in x and dataset_name in x]
-            for filename in exp_result_filenames:
-                results.append((kind, exp_name, filename))
+            try:
+                exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
+                                        if ('visual_module' in x or 'multimodal_metrics' in x) and dataset_name in x]
+                for filename in exp_result_filenames:
+                    results.append((kind, exp_name, filename))
+            except NotADirectoryError:
+                pass
     return results
 
 def collect_chexpert_based_output_results():
@@ -40,6 +44,19 @@ def collect_chexpert_based_output_results():
                                     if 'mimiccxr_chexpert_based_output.pkl' in x]
             for filename in exp_result_filenames:
                 results.append((kind, exp_name, filename))
+    return results
+
+def collect_multimodal_question_probs(dataset_name):
+    dirs = os.listdir(os.path.join(RESULTS_DIR,'multimodal'))
+    results = []
+    for exp_name in dirs:
+        try:
+            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, 'multimodal', exp_name))\
+                                    if 'question_probs' in x and dataset_name in x]
+            for filename in exp_result_filenames:
+                results.append(os.path.join(RESULTS_DIR, 'multimodal', exp_name, filename))
+        except NotADirectoryError:
+            continue
     return results
 
 _REPLACEMENT_PAIRS = [
@@ -204,6 +221,11 @@ def _append_method_columns__visual_module(df, results):
     _append_amp_column(df, results)
     _append_merge_findings_column(df, results)
     _append_medical_tokenization_column(df, results)
+    _append_vinbig_mode(df, results)
+    _append_pretrained_column(df, results)
+    _append_batch_size_column(df, results)
+    _append_gradient_accumulation_column(df, results)
+    _append_checkpoint_epoch_column(df, results)
 
 def plot_report_level_metrics(dataset_name):
     results = collect_report_level_results(dataset_name)
@@ -223,4 +245,5 @@ def plot_chexpert_based_output_metrics():
     results = collect_chexpert_based_output_results()
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = get_chexpert_based_outputs_dataframe(metrics_paths)
+    _append_method_columns__report_level(df, results)
     return df
