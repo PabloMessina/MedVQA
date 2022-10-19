@@ -91,6 +91,3 @@ if __name__ == '__main__':
     output_path = os.path.join(CACHE_DIR, f'precomputed_chexpert_labels_{timestamp}.pkl')
     save_to_pickle(hash2label, output_path)
     print(f'Precomputed chexpert labels saved to {output_path}')
-
-
-

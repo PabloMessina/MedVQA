@@ -92,6 +92,9 @@ def parse_args():
     parser.add_argument('--precomputed-question-probs-path', type=str, default=None)
     parser.add_argument('--precomputed-question-thresholds-path', type=str, default=None)
 
+    parser.add_argument('--use-random-image', dest='use_random_image', action='store_true')
+    parser.set_defaults(use_random_image=False)
+
     parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
     parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
     parser.set_defaults(eval_iuxray=True)
@@ -104,6 +107,9 @@ def parse_args():
     parser.set_defaults(use_amp=False)
 
     parser.add_argument('--max-processes-for-chexpert-labeler', type=int, default=10)
+
+    parser.add_argument('--save-for-error-analysis', dest='save_for_error_analysis', action='store_true')
+    parser.set_defaults(save_for_error_analysis=False)
     
     return parser.parse_args()
 
@@ -120,8 +126,45 @@ def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer
     print (f'Report-level metrics successfully saved to {save_path}')
     return metrics
 
+def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_path, parenthesis_text=None):
+    metrics = results_dict[f'{dataset_name}_metrics']
+    dataset = results_dict[f'{dataset_name}_dataset']
+    reports = results_dict[f'{dataset_name}_reports']
+    report_metrics = results_dict[f'{dataset_name}_report_metrics']
+    
+    idxs = metrics['idxs']
+    rids = [x['rid'] for x in reports['gt_reports']]
+    rid2i = dict()
+    for i, idx in enumerate(metrics['idxs']):
+        rid2i[dataset.report_ids[idx]] = i
+
+    image_encoder_pred = dict()
+    met = metrics['pred_orientation']
+    image_encoder_pred['orientation'] = [met[rid2i[rid]].item() for rid in rids]
+    met = metrics['pred_chexpert']
+    image_encoder_pred['chexpert'] = [met[rid2i[rid]].numpy() for rid in rids]
+    met = metrics['pred_qlabels']
+    image_encoder_pred['qlabels'] = [met[rid2i[rid]].numpy() for rid in rids]
+
+    image_encoder_gt = dict()
+    image_encoder_gt['orientation'] = [dataset.orientations[idxs[rid2i[rid]]] for rid in rids]
+    image_encoder_gt['chexpert'] = [dataset.chexpert_labels[rid] for rid in rids]
+    image_encoder_gt['qlabels'] = [dataset.question_labels[rid] for rid in rids]
+
+    output = {
+        'images': [dataset.images[i] for i in idxs],
+        'reports':  results_dict[f'{dataset_name}_reports'],
+        'report_metrics': report_metrics,
+        'image_encoder_gt': image_encoder_gt,
+        'image_encoder_pred': image_encoder_pred,        
+    }
+    parenthesis_text = f'({parenthesis_text})' if parenthesis_text else ''
+    save_path = os.path.join(results_folder_path, f'{dataset_name}_report_results_for_error_analysis{parenthesis_text}.pkl')
+    save_to_pickle(output, save_path)
+    print (f'Report-level results for error analysis successfully saved to {save_path}')
+
 def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
-                        checkpoint_path, precomputed_question_probs_path):
+                        checkpoint_path, precomputed_question_probs_path, use_random_image):
     strings = [f'eval_mode={eval_mode}']
     if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
        eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
@@ -152,6 +195,8 @@ def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
        timestamp = os.path.basename(os.path.abspath(os.path.join(checkpoint_path, os.pardir)))[:15]
        strings.append(f'chkpt={timestamp}')
        strings.append(f'epoch={split_checkpoint_name(os.path.basename(checkpoint_path)).epoch}')
+    if use_random_image:
+        strings.append('rand-img')
     return ';'.join(strings)
 
 def _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer):
@@ -192,10 +237,12 @@ def _evaluate_model(
     precomputed_question_probs_path = None,
     precomputed_question_thresholds_path = None,
     return_results = False,
+    use_random_image = False,
     use_amp = False,
     eval_iuxray = True,
     eval_mimiccxr = True,
     max_processes_for_chexpert_labeler = 10,
+    save_for_error_analysis = False,
 ):
     assert eval_iuxray or eval_mimiccxr
     assert eval_mode is not None
@@ -463,7 +510,8 @@ def _evaluate_model(
     results_dict = dict(tokenizer = tokenizer)
     results_folder_path = get_results_folder_path(checkpoint_folder_path)    
     eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
-                                         pretrained_checkpoint_path, precomputed_question_probs_path)
+                                         pretrained_checkpoint_path, precomputed_question_probs_path,
+                                         use_random_image)
 
     if eval_iuxray:
         print('\n========================')
@@ -506,6 +554,9 @@ def _evaluate_model(
             results_dict, 'mimiccxr', tokenizer, results_folder_path, parenthesis_text=eval_mode_text,
             max_processes=max_processes_for_chexpert_labeler)
 
+        if save_for_error_analysis:
+            _save_results_for_error_analysis(results_dict, 'mimiccxr', results_folder_path, eval_mode_text)
+
     torch.cuda.empty_cache()
     if return_results:
         return results_dict
@@ -519,6 +570,7 @@ def evaluate_model(
     eval_checkpoint_folder = None,
     precomputed_question_probs_path = None,
     precomputed_question_thresholds_path = None,
+    use_random_image = False,
     batch_size = 100,
     num_workers = 0,    
     device = 'GPU',
@@ -527,6 +579,7 @@ def evaluate_model(
     eval_iuxray = True,
     eval_mimiccxr = True,
     max_processes_for_chexpert_labeler = 10,
+    save_for_error_analysis = False,
 ):
     print('----- Evaluating model ------')
 
@@ -541,6 +594,7 @@ def evaluate_model(
     image_transform_kwargs['augmentation_mode'] = None # no data augmentation
     mimiccxr_vqa_evaluator_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
     mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
+    mimiccxr_vqa_evaluator_kwargs['use_random_image'] = use_random_image
     iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
     iuxray_vqa_trainer_kwargs['batch_size'] = batch_size
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
@@ -566,10 +620,12 @@ def evaluate_model(
                 precomputed_question_probs_path = precomputed_question_probs_path,
                 precomputed_question_thresholds_path = precomputed_question_thresholds_path,
                 return_results = return_results,
+                use_random_image = use_random_image,
                 use_amp = use_amp,
                 eval_iuxray = eval_iuxray,
                 eval_mimiccxr = eval_mimiccxr,
                 max_processes_for_chexpert_labeler = max_processes_for_chexpert_labeler,
+                save_for_error_analysis = save_for_error_analysis,
             )
 
 if __name__ == '__main__':

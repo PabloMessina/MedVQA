@@ -236,6 +236,7 @@ class VQADataset(Dataset):
                 fixed_qa_pair=False,
                 include_answer=True,
                 include_image=True,
+                use_random_image=False,
                 shuffle_indices=True,
                 # aux task: medical tags
                 classify_tags=False, rid2tags=None,
@@ -264,6 +265,7 @@ class VQADataset(Dataset):
         self.include_image = include_image
         self.fixed_qa_pair = fixed_qa_pair
         self.use_precomputed_visual_features = use_precomputed_visual_features
+        self.use_random_image = use_random_image
 
         if include_image:
             assert images is not None
@@ -314,7 +316,11 @@ class VQADataset(Dataset):
         if self.use_precomputed_visual_features:
             output['vf'] = self.precomputed_visual_features[self.idx2visfeatidx[idx]]
         if self.include_image:
-            output['i'] = self.transform(Image.open(self.images[idx]).convert('RGB'))
+            if self.use_random_image:
+                img = Image.fromarray(np.uint8(np.random.rand(256, 256, 3)*255))
+            else:
+                img = Image.open(self.images[idx]).convert('RGB')
+            output['i'] = self.transform(img)
         if self.include_answer:
             output['a'] = self.answer if self.fixed_qa_pair else self.answers[idx]
         if self.classify_tags:
@@ -468,6 +474,7 @@ class VQA_Base(LabelBasedVQAClass):
                 use_report_eval_mode = False,
                 verbose_question = True,
                 include_image = True,
+                use_random_image = False,
                 chexpert_one_hot_offset = None,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
@@ -489,6 +496,7 @@ class VQA_Base(LabelBasedVQAClass):
         self.use_report_eval_mode = use_report_eval_mode
         self.verbose_question = verbose_question
         self.include_image = include_image
+        self.use_random_image = use_random_image
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.precomputed_visual_features_path = precomputed_visual_features_path
         self.train_with_all = train_with_all
@@ -597,6 +605,7 @@ class VQA_Base(LabelBasedVQAClass):
             include_answer=include_answer,
             include_image=self.include_image,
             shuffle_indices=shuffle_indices,
+            use_random_image=self.use_random_image,
             # aux task: medical tags
             classify_tags = self.classify_tags,
             rid2tags = self.rid2tags if self.classify_tags else None,
@@ -1095,6 +1104,7 @@ class VQA_Evaluator(VQA_Base):
                 question_labels_filename = None,
                 dataset_name = None,
                 include_image = True,
+                use_random_image = False,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
                 chexpert_one_hot_offset = None,
@@ -1120,6 +1130,7 @@ class VQA_Evaluator(VQA_Base):
                 dataset_name = dataset_name,
                 verbose_question = verbose_question,
                 include_image = include_image,
+                use_random_image = use_random_image,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
                 chexpert_one_hot_offset = chexpert_one_hot_offset,

@@ -71,7 +71,7 @@ def _get_train_preprocessing_save_path(qa_adapted_reports_filename, split_kwargs
 def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, report_eval_mode=None,
                                     pretrained_checkpoint_path=None, precomputed_question_probs_path=None,
                                     precomputed_question_thresholds_path=None,
-                                    n_questions_per_report=None, qclass_threshold=None):
+                                    n_questions_per_report=None, qclass_threshold=None, use_random_image=False):
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
@@ -107,6 +107,7 @@ def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, rep
             else:
                 strings.append(f'precomputed_question_thresholds_path={precomputed_question_thresholds_path}')
         
+        if use_random_image: strings.append('rand_img')
 
     file_path = get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_test_data__', strings)
     return file_path
@@ -605,6 +606,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 qclass_threshold = None,
                 chexpert_one_hot_offset = None,
                 include_image = True,
+                use_random_image = False,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
                 **unused_kwargs):
@@ -638,7 +640,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         qa_adapted_reports_filename, tokenizer, report_eval_mode,
                         pretrained_checkpoint_path, precomputed_question_probs_path,
                         precomputed_question_thresholds_path,
-                        n_questions_per_report, qclass_threshold)
+                        n_questions_per_report, qclass_threshold, use_random_image)
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
@@ -654,6 +656,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         classify_questions = classify_questions,
                         question_labels_filename = question_labels_filename,
                         include_image = include_image,
+                        use_random_image = use_random_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
                         chexpert_one_hot_offset = chexpert_one_hot_offset,
