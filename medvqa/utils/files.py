@@ -66,6 +66,12 @@ def save_to_json(obj, path):
     with open(path, 'w') as f:
         json.dump(obj, f)
 
+def save_to_txt(strings_list, path):
+    make_dirs_in_filepath(path)
+    with open(path, 'w') as f:
+        for s in strings_list:
+            f.write(f'{s}\n')
+
 def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
     timestamp = get_timestamp()
     folder_name = f'{timestamp}_{dataset_name}_{model_name}'

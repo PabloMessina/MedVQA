@@ -3,3 +3,4 @@ __tmp/
 *.egg-info/
 .ipynb_checkpoints
 .env
+.vscode
