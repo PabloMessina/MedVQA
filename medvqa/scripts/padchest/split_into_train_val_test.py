@@ -73,6 +73,8 @@ if __name__ == '__main__':
     for study_id, labels in zip(labels_df['StudyID'], labels_df['Labels']):
         try:
             labels = eval(labels)
+            labels = [label.strip() for label in labels]
+            labels = [label for label in labels if label != '']
         except TypeError:
             print(f'labels = {labels}')
             raise
@@ -90,6 +92,7 @@ if __name__ == '__main__':
                 label2study_ids[label] = []
             label2study_ids[label].append(study_id)
     label_list = list(label2study_ids.keys())
+    print(f'len(label_list) = {len(label_list)}')
 
     used_study_ids = set()
     train_study_ids = []

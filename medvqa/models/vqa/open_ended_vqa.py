@@ -26,6 +26,9 @@ from medvqa.utils.constants import (
     CHEXPERT_TASKS,
     CXR14_LABELS,
     VINBIG_DISEASES,
+    PADCHEST_NUM_LABELS,
+    PADCHEST_NUM_LOCALIZATIONS,
+    PADCHEST_PROJECTIONS,
 )
 
 class QuestionEncoding:
@@ -95,6 +98,7 @@ class OpenEndedVQA(nn.Module):
                  n_questions_aux_task=None,
                  use_cxr14=False,
                  use_vinbig=False,
+                 use_padchest=False,
                  merge_findings=False,
                  n_findings=None,
                  # Other args
@@ -143,7 +147,7 @@ class OpenEndedVQA(nn.Module):
             
         # Init auxiliary tasks
         self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_cxr14, use_vinbig, n_medical_tags, n_questions_aux_task,
+                              chexpert_mode, use_cxr14, use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task,
                               merge_findings=merge_findings, n_findings=n_findings)
 
         # Logging
@@ -262,7 +266,7 @@ class OpenEndedVQA(nn.Module):
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
     def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_cxr14, use_vinbig, n_medical_tags, n_questions_aux_task,
+                              chexpert_mode, use_cxr14, use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task,
                               merge_findings=False, n_findings=None):
         
         # Optional auxiliary tasks
@@ -291,29 +295,38 @@ class OpenEndedVQA(nn.Module):
         else:
             self.q_aux_task = False
 
-        # 4) Chexpert & CRX14's specific tasks: gender & orientaition
-        if chexpert_mode is not None or use_cxr14:
+        # 4) gender classification (chexpert & CRX14 & PadChest)
+        if chexpert_mode is not None or use_cxr14 or use_padchest:
             self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
+
+        # 5) orientation classification (weight sharing among chexpert & CRX14)
+        if chexpert_mode is not None or use_cxr14:
             self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
 
         if merge_findings:
             assert n_findings is not None
             self.W_findings = nn.Linear(self.global_feat_size, n_findings)
         else:        
-            # 5) chexpert classifiction
+            # 6) chexpert classifiction
             if classify_chexpert:
                 self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
                 self.chx_aux_task = True
             else:
                 self.chx_aux_task = False
 
-            # 6) CXR14 specific tasks
+            # 7) CXR14 specific tasks
             if use_cxr14:
                 self.W_cxr14 = nn.Linear(self.global_feat_size, len(CXR14_LABELS))
 
-            # 7) VinBig specific tasks
+            # 8) VinBig specific tasks
             if use_vinbig:
                 self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
+
+            # 9) PadChest specific tasks
+            if use_padchest:
+                self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
+                self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
+                self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
 
     @property
     def name(self):        
@@ -355,6 +368,7 @@ class OpenEndedVQA(nn.Module):
         chexpert_forward=False,
         cxr14_forward=False,
         vinbig_forward=False,
+        padchest_forward=False,
         device=None,
     ):
         # Visual Component                
@@ -432,6 +446,14 @@ class OpenEndedVQA(nn.Module):
             if not self.merge_findings:
                 output['pred_vinbig'] = self.W_vinbig(global_feat)
                 output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+        elif padchest_forward:
+            question_vectors = self.question_encoder(questions)
+            output['pred_orientation'] = self.W_padchest_ori(global_feat)
+            output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
+            output['pred_padchest_labels'] = self.W_padchest_labels(global_feat)
+            output['pred_padchest_labels_probs'] = torch.sigmoid(output['pred_padchest_labels'])
+            output['pred_padchest_loc'] = self.W_padchest_loc(global_feat)
+            output['pred_padchest_loc_probs'] = torch.sigmoid(output['pred_padchest_loc'])
         else:
             # process questions
             if self.question_encoding == QuestionEncoding.BILSTM:

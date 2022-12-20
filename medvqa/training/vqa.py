@@ -15,6 +15,7 @@ from medvqa.utils.constants import (
     CHEXPERT_DATASET_ID,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
+    PADCHEST_DATASET_ID,
 )
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,        
@@ -50,6 +51,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         cxr14_criterion=None,
         # vinbig dataset
         vinbig_criterion=None,
+        # padchest dataset
+        padchest_multilabel_criterion=None,
+        padchest_singlelabel_criterion=None,
         # batchwise learning rate updatse
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -346,7 +350,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     # Compute losses                    
                     labels_loss = findings_criterion(pred_labels_logits, labels.float())
                     orientation_loss = chexpert_aux_criterion(pred_orientation_logits, orientations)
-                    gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)                    
+                    gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)
                     batch_loss = labels_loss + orientation_loss + gender_loss
                     if use_vqa_mode:
                         # answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
@@ -381,7 +385,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
         # gender
         output['gender'] = genders.detach()
-        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()        
+        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
         if training:
             output['gender_loss'] = gender_loss.detach()
 
@@ -484,12 +488,126 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output[f'vinbig_loss'] = vinbig_loss.detach()
 
         # answers (vqa)
-        if use_chexpert_vqa:
+        if training:
+            pred_answers = pred_answer_logits.argmax(-1)        
+            output['answer_loss'] = answer_loss.detach()            
+        output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+        output['answers'] = tokenizer.clean_batch(answers.detach())                
+
+        return output
+
+    def step_fn__padchest(batch):
+            
+        # Extract elements from batch
+        idxs = batch['idx']
+        dataset_id = batch['dataset_id']
+        padchest_labels = batch['l'].to(device)
+        padchest_loc = batch['loc'].to(device)
+        orientations = batch['o'].to(device)
+        genders = batch['g'].to(device)
+        questions = batch['q'].to(device)
+        answers = batch['a'].to(device)
+        if shift_answer:
+            answers_start = answers[:, :-1]
+            answers_end = answers[:, 1:]
+        if include_image:
+            images = batch['i'].to(device)
+
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'padchest_forward': True,
+                'device': device,
+            }
+
+            if include_image:
+                model_kwargs['raw_images'] = images
+            
+            model_kwargs['questions'] = questions
             if training:
-                pred_answers = pred_answer_logits.argmax(-1)        
-                output['answer_loss'] = answer_loss.detach()            
-            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
-            output['answers'] = tokenizer.clean_batch(answers.detach())                
+                model_kwargs['mode'] = 'train'
+                if shift_answer:
+                    model_kwargs['answers'] = answers_start
+                else:
+                    model_kwargs['answers'] = answers
+            else:
+                model_kwargs['mode'] = 'eval'
+                if use_beam_search:
+                    model_kwargs['beam_search_k'] = beam_search_k
+                if include_answer:
+                    model_kwargs['max_answer_length'] = answers.size(1)
+                else:                    
+                    model_kwargs['max_answer_length'] = max_answer_length
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+
+                model_output = model(**model_kwargs)
+                
+                pred_padchest_labels_logits = model_output['pred_padchest_labels']
+                pred_padchest_labels_probs = model_output['pred_padchest_labels_probs']
+                pred_padchest_loc_logits = model_output['pred_padchest_loc']
+                pred_padchest_loc_probs = model_output['pred_padchest_loc_probs']
+                pred_orientation_logits = model_output['pred_orientation']
+                pred_gender_logits = model_output['pred_gender']
+
+                if training:
+                    pred_answer_logits = model_output['pred_answers']
+                else:
+                    pred_answers = model_output['pred_answers']
+
+                if training:
+                    # Compute losses
+                    padchest_label_loss = padchest_multilabel_criterion(pred_padchest_labels_logits, padchest_labels.float())
+                    padchest_loc_loss = padchest_multilabel_criterion(pred_padchest_loc_logits, padchest_loc.float())
+                    orientation_loss = padchest_singlelabel_criterion(pred_orientation_logits, orientations)
+                    gender_loss = padchest_singlelabel_criterion(pred_gender_logits, genders)
+                    batch_loss = padchest_label_loss +\
+                                 padchest_loc_loss +\
+                                 orientation_loss +\
+                                 gender_loss
+                    if shift_answer:
+                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                    else:
+                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                    batch_loss += answer_loss
+
+                    # Backward pass + optimizer step if training
+                    backward_and_optimizer_step(batch_loss)
+
+        output = {
+            'idxs': idxs,
+            'dataset_id': dataset_id,
+        }            
+        if training:
+            output['loss'] = batch_loss.detach()
+            
+        # padchest labels and localizations
+        output['padchest_labels'] = padchest_labels.detach().cpu()
+        output['pred_padchest_labels'] = (pred_padchest_labels_logits.detach() > 0).cpu()
+        output['pred_padchest_probs'] = pred_padchest_labels_probs.detach().cpu()
+        output['padchest_loc'] = padchest_loc.detach().cpu()
+        output['pred_padchest_loc'] = (pred_padchest_loc_logits.detach() > 0).cpu()
+        output['pred_padchest_loc_probs'] = pred_padchest_loc_probs.detach().cpu()
+        output['orientation'] = orientations.detach()
+        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
+        output['gender'] = genders.detach()
+        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()        
+        if training:
+            output['padchest_label_loss'] = padchest_label_loss.detach()
+            output['padchest_loc_loss'] = padchest_loc_loss.detach()
+            output['orientation_loss'] = orientation_loss.detach()
+            output['gender_loss'] = gender_loss.detach()
+
+        # answers (vqa)
+        if training:
+            pred_answers = pred_answer_logits.argmax(-1)
+            output['answer_loss'] = answer_loss.detach()
+        output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+        output['answers'] = tokenizer.clean_batch(answers.detach())                
 
         return output
 
@@ -507,6 +625,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output = step_fn__chexpert_cxr14(batch)
         elif dataset_id == VINBIG_DATASET_ID:
             output = step_fn__vinbig(batch)
+        elif dataset_id == PADCHEST_DATASET_ID:
+            output = step_fn__padchest(batch)
         else: assert False, f'Unknown dataset_id {dataset_id}'
         # update learning rate batchwise
         if update_lr_batchwise:
@@ -536,6 +656,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                train_with_cxr14=False,
                chexpert_mode=None,
                use_vinbig_dataset=False,
+               use_padchest_dataset=False,
                optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None,
                use_merged_findings=False, findings_remapper=None, n_findings=None):
@@ -601,6 +722,13 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
     else:
         vinbig_criterion = None
 
+    if training and use_padchest_dataset:
+        padchest_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name)
+        padchest_singlelabel_criterion = nn.CrossEntropyLoss()
+    else:
+        padchest_multilabel_criterion = None
+        padchest_singlelabel_criterion = None
+
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
                           include_visual_features=include_visual_features,
@@ -634,6 +762,9 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           cxr14_criterion=cxr14_criterion,
                           # vinbig dataset
                           vinbig_criterion=vinbig_criterion,
+                          # padchest dataset
+                          padchest_multilabel_criterion=padchest_multilabel_criterion,
+                          padchest_singlelabel_criterion=padchest_singlelabel_criterion,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,
                           lr_scheduler=lr_scheduler,

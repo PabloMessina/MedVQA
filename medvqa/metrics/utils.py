@@ -32,4 +32,9 @@ def get_hybrid_score_name(*metric_names):
         assert type(names) is list
         unique.update(names)
     sorted_unique = sorted(list(unique))
-    return '+'.join(METRIC2SHORT[m] for m in sorted_unique)
+    short_names = [METRIC2SHORT[m] for m in sorted_unique]
+    hybrid_name = '+'.join(short_names)
+    if len(hybrid_name) > 50:
+        short_names = [x[:2]+x[-2:] if len(x) > 4 else x for x in short_names]
+        hybrid_name = '+'.join(short_names)
+    return hybrid_name
