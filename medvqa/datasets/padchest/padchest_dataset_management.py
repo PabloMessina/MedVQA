@@ -126,12 +126,41 @@ class PadChestVQADataset(Dataset):
 
         return output
 
-class PadChest_VQA_Trainer:
+class PadChestImageDataset(Dataset):
+    def __init__(self, image_paths, transform, indices, shuffle_indices=True, infinite=False):
+        self.image_paths = image_paths
+        self.transform = transform
+        self.indices = indices
+        self.infinite = infinite
 
-    def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
+        if shuffle_indices: np.random.shuffle(self.indices)
+        self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
+
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, idx):
+        if self.infinite: idx %= len(self.indices)
+        idx = self.indices[idx]
+        output = dict(
+            idx=idx,
+            i = self.transform(Image.open(self.image_paths[idx]).point(_65535_to_255).convert('RGB')),
+        )
+        return output
+
+def _parse_and_clean_labels(labels):
+    labels = eval(labels)
+    labels = [label.strip().lower() for label in labels]
+    labels = [label for label in labels if label != '']
+    return labels
+
+class _PadChest_Base:
+
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
                  train_study_ids_path, val_study_ids_path, test_study_ids_path,
                  training_data_mode=PadChestTrainingDataMode.ALL,
-                 use_validation_set=True, include_image=True):
+                 use_validation_set=True, include_image=True,
+                 keep_one_projection_per_study=True):
 
         assert train_study_ids_path is not None, 'Must provide train_study_ids_path'
         assert val_study_ids_path is not None, 'Must provide val_study_ids_path'
@@ -141,7 +170,6 @@ class PadChest_VQA_Trainer:
         self.batch_size = batch_size
         self.collate_batch_fn = collate_batch_fn
         self.num_workers = num_workers
-        self.tokenizer = tokenizer
         self.use_validation_set = use_validation_set
         self.include_image = include_image
 
@@ -172,7 +200,7 @@ class PadChest_VQA_Trainer:
         labels_df = labels_df[labels_df['StudyID'].isin(all_study_ids_set)]
         print(f'Number of rows after filtering: {len(labels_df)} (dropped study ids not in all_study_ids_set)')
 
-        # Filter the labels to only include the sexes we want
+        # Filter the labels to only include the genders we want
         labels_df = labels_df[labels_df['PatientSex_DICOM'].isin(PADCHEST_GENDERS)]
         print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with unexpected PatientSex_DICOM)')
 
@@ -190,11 +218,12 @@ class PadChest_VQA_Trainer:
 
         # For each study, keep only one row according to their projection, as follows:
         # PA > AP > AP_horizontal > L > COSTAL
-        labels_df['Projection_Rank'] = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x))
-        labels_df = labels_df.sort_values(by=['StudyID', 'Projection_Rank'], ascending=True)
-        labels_df = labels_df.drop_duplicates(subset=['StudyID'], keep='first')
-        labels_df = labels_df.drop(columns=['Projection_Rank'])        
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with duplicate StudyID)')
+        if keep_one_projection_per_study:
+            labels_df['Projection_Rank'] = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x))
+            labels_df = labels_df.sort_values(by=['StudyID', 'Projection_Rank'], ascending=True)
+            labels_df = labels_df.drop_duplicates(subset=['StudyID'], keep='first')
+            labels_df = labels_df.drop(columns=['Projection_Rank'])        
+            print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with duplicate StudyID)')
 
         # Image paths
         self.image_paths = [os.path.join(PADCHEST_IMAGES_SMALL_DIR, image_id) for image_id in labels_df['ImageID']]
@@ -205,16 +234,10 @@ class PadChest_VQA_Trainer:
         # Projection labels
         self.projections = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x)).values
 
-        def parse_and_clean_labels(labels):
-            labels = eval(labels)
-            labels = [label.strip().lower() for label in labels]
-            labels = [label for label in labels if label != '']
-            return labels
-
         # Labels
         labels_set = set()
         for labels in labels_df['Labels']:
-            labels = parse_and_clean_labels(labels)
+            labels = _parse_and_clean_labels(labels)
             labels_set.update(labels)
         labels_list = list(labels_set)
         labels_list.sort()
@@ -222,7 +245,7 @@ class PadChest_VQA_Trainer:
         print(f'Number of labels: {len(labels_list)}')        
         labels_matrix = np.zeros((len(labels_df), len(labels_list)), dtype=np.int8)
         for i, labels in enumerate(labels_df['Labels']):
-            labels = parse_and_clean_labels(labels)
+            labels = _parse_and_clean_labels(labels)
             for label in labels:
                 labels_matrix[i, label2idx[label]] = 1
         self.labels_list = labels_list
@@ -250,36 +273,6 @@ class PadChest_VQA_Trainer:
         self.localizations = localizations_matrix
         assert len(self.localizations_list) == PADCHEST_NUM_LOCALIZATIONS
 
-        # Answers based on Labels
-        print('Generating answers based on labels...')
-        labels_answers = []
-        for i, labels in tqdm(enumerate(labels_df['Labels']), total=len(labels_df)):
-            labels = parse_and_clean_labels(labels)
-            answer = ', '.join(labels)
-            labels_answers.append(tokenizer.string2ids(answer))
-        self.labels_answers = labels_answers
-        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(labels_answers))}')
-        # Answers based on Localizations
-        print('Generating answers based on localizations...')
-        localizations_answers = []
-        for i, localizations in tqdm(enumerate(labels_df['Localizations']), total=len(labels_df)):
-            localizations = eval(localizations)
-            localizations = [localization.strip().lower() for localization in localizations]
-            answer = ', '.join(localizations)
-            localizations_answers.append(tokenizer.string2ids(answer))
-        self.localization_answers = localizations_answers    
-        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(localizations_answers))}')
-        print(f'Number of non-empty answers: {sum(len(answer) > 8 for answer in localizations_answers)}')
-        
-        # Answers based on LabelsLocalizationsBySentence
-        print('Generating answers based on labels localizations by sentence...')
-        labels_localizations_answers = []        
-        for labels_localizations_by_sentence in tqdm(labels_df['LabelsLocalizationsBySentence'], total=len(labels_df)):
-            x = _labels_localizations_by_sentence_to_answer_string(labels_localizations_by_sentence)
-            labels_localizations_answers.append(tokenizer.string2ids(x))
-        self.labels_localizations_answers = labels_localizations_answers
-        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(labels_localizations_answers))}')
-
         # Train, val, test indices
         train_indices = []
         val_indices = []
@@ -302,6 +295,53 @@ class PadChest_VQA_Trainer:
             raise ValueError(f'Invalid training data mode: {training_data_mode}')        
         self.val_indices = val_indices
         self.test_indices = test_indices
+
+        self.labels_df = labels_df
+
+
+class PadChest_VQA_Trainer(_PadChest_Base):
+
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
+                 train_study_ids_path, val_study_ids_path, test_study_ids_path,
+                 training_data_mode=PadChestTrainingDataMode.ALL,
+                 use_validation_set=True, include_image=True):
+
+        super().__init__(transform, batch_size, collate_batch_fn, num_workers,
+                            train_study_ids_path, val_study_ids_path, test_study_ids_path,
+                            training_data_mode, use_validation_set, include_image)
+
+        self.tokenizer = tokenizer        
+        labels_df = self.labels_df
+        
+        # Answers based on Labels
+        print('Generating answers based on labels...')
+        labels_answers = []
+        for i, labels in tqdm(enumerate(labels_df['Labels']), total=len(labels_df)):
+            labels = _parse_and_clean_labels(labels)
+            answer = ', '.join(labels)
+            labels_answers.append(tokenizer.string2ids(answer))
+        self.labels_answers = labels_answers
+        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(labels_answers))}')
+        # Answers based on Localizations
+        print('Generating answers based on localizations...')
+        localizations_answers = []
+        for i, localizations in tqdm(enumerate(labels_df['Localizations']), total=len(labels_df)):
+            localizations = eval(localizations)
+            localizations = [localization.strip().lower() for localization in localizations]
+            answer = ', '.join(localizations)
+            localizations_answers.append(tokenizer.string2ids(answer))
+        self.localization_answers = localizations_answers    
+        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(localizations_answers))}')
+        print(f'Number of non-empty answers: {sum(len(answer) > 2 for answer in localizations_answers)}')
+        
+        # Answers based on LabelsLocalizationsBySentence
+        print('Generating answers based on labels localizations by sentence...')
+        labels_localizations_answers = []        
+        for labels_localizations_by_sentence in tqdm(labels_df['LabelsLocalizationsBySentence'], total=len(labels_df)):
+            x = _labels_localizations_by_sentence_to_answer_string(labels_localizations_by_sentence)
+            labels_localizations_answers.append(tokenizer.string2ids(x))
+        self.labels_localizations_answers = labels_localizations_answers
+        print(f'Done. Example answer: {tokenizer.ids2string(random.choice(labels_localizations_answers))}')
 
         # Create datasets and dataloaders
         self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
@@ -349,6 +389,8 @@ class PadChest_VQA_Trainer:
     def _create_dataset_and_dataloader(self, indices, batch_size, collate_batch_fn, num_workers,
             shuffle, infinite, log_weighting, min_pos_to_include=0, n_samples=None, n_samples_per_label=None):
 
+        print('Creating dataset and dataloader...')
+
         # Question ID meaning:
         # 0, 1, ..., len(self.labels_list) - 1: specific labels
         # len(self.labels_list): all labels
@@ -366,8 +408,27 @@ class PadChest_VQA_Trainer:
         q_id = len(self.labels_list) + 1
         indices_ = random.sample(indices, n_samples) if n_samples is not None and\
                                                         n_samples < len(indices) else indices
-        localizations_answers_vqa_dataset = self._create_vqa_dataset(indices_, q_id,
-            answers=self.localization_answers, shuffle=shuffle, infinite=infinite)
+        pos_indices_ = [i for i in indices_ if len(self.localization_answers[i]) > 2]
+        neg_indices_ = [i for i in indices_ if len(self.localization_answers[i]) <= 2]
+        datasets_ = []
+        if len(pos_indices_) > 0:
+            pos_loc_answers_vqa_dataset = self._create_vqa_dataset(pos_indices_, q_id,
+                answers=self.localization_answers, shuffle=shuffle, infinite=infinite)
+            print(f'Example of positive localization answer: {self.localization_answers[random.choice(pos_indices_)]}')
+            datasets_.append(pos_loc_answers_vqa_dataset)
+        if len(neg_indices_) > 0:
+            neg_loc_answers_vqa_dataset = self._create_vqa_dataset(neg_indices_, q_id,
+                answers=self.localization_answers, shuffle=shuffle, infinite=infinite)
+            print(f'Example of negative localization answer: {self.localization_answers[random.choice(neg_indices_)]}')
+            datasets_.append(neg_loc_answers_vqa_dataset)
+        assert len(datasets_) > 0
+        if len(datasets_) == 1:
+            localizations_answers_vqa_dataset = datasets_[0]
+        else:
+            if infinite:
+                localizations_answers_vqa_dataset = CompositeInfiniteDataset(datasets_, [1, 1])
+            else:
+                localizations_answers_vqa_dataset = CompositeDataset(datasets_)
         
         # Labels and localizations answers vqa dataset
         q_id = len(self.labels_list) + 2
@@ -379,7 +440,7 @@ class PadChest_VQA_Trainer:
         # Label-specific vqa datasets
         label_specific_vqa_datasets = []
         pos_counts = []
-        for i, label in enumerate(self.labels_list):
+        for i, label in tqdm(enumerate(self.labels_list)):
             q_id = i
             
             # split indices into positive and negative
@@ -470,6 +531,7 @@ class PadChest_VQA_Trainer:
             pin_memory=True,
         )
 
+        print('Done!')
         return final_vqa_dataset, final_vqa_dataloader
 
     def print_dataset_instance(self, dataset, i):
@@ -515,3 +577,94 @@ class PadChest_VQA_Trainer:
         localizations = row['loc']
         localizations_str = ', '.join(self.localizations_list[i] for i in range(len(localizations)) if localizations[i] == 1)
         print(f'Localizations: {localizations_str}')
+
+class PadChest_MAE_Trainer(_PadChest_Base):
+
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
+                 train_study_ids_path, val_study_ids_path, test_study_ids_path,
+                 training_data_mode=PadChestTrainingDataMode.ALL,
+                 use_validation_set=True):
+
+        super().__init__(transform, batch_size, collate_batch_fn, num_workers,
+                            train_study_ids_path, val_study_ids_path, test_study_ids_path,
+                            training_data_mode, use_validation_set, keep_one_projection_per_study=False)
+
+        # Create datasets and dataloaders
+        self.train_dataset, self.train_dataloader = \
+            self._create_train_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
+        print(f'Train dataset size: {len(self.train_dataset)}')
+        if use_validation_set:
+            self.val_dataset, self.val_dataloader = \
+                self._create_val_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
+            print(f'Val dataset size: {len(self.val_dataset)}')
+
+    def _create_image_dataset(self, indices, shuffle, infinite):
+        return PadChestImageDataset(
+            image_paths=self.image_paths,
+            transform=self.transform,
+            indices=indices,
+            shuffle_indices=shuffle,
+            infinite=infinite,
+        )
+    
+    def _create_train_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
+        print('Creating train dataset and dataloader ...')
+        datasets = []
+        counts = []
+        
+        # Label-specific datasets
+        for i in tqdm(range(len(self.labels_list))):
+            pos_indices = []
+            for j in self.train_indices:
+                if self.labels[j][i] == 1:
+                    pos_indices.append(j)
+            if len(pos_indices) > 0:                
+                counts.append(len(pos_indices))
+                pos_indices = np.array(pos_indices, dtype=np.int32)
+                pos_image_dataset = self._create_image_dataset(pos_indices, shuffle=True, infinite=True)
+                datasets.append(pos_image_dataset)
+        # Dataset with no labels
+        neg_indices = []
+        for j in self.train_indices:
+            if np.sum(self.labels[j]) == 0:
+                neg_indices.append(j)
+        if len(neg_indices) > 0:
+            counts.append(len(neg_indices))
+            neg_indices = np.array(neg_indices, dtype=np.int32)
+            neg_image_dataset = self._create_image_dataset(neg_indices, shuffle=True, infinite=True)
+            datasets.append(neg_image_dataset)
+
+        # Create dataset
+        if len(datasets) == 1:
+            train_dataset = datasets[0]
+        else:
+            weights = get_imbalance_reduced_weights(counts, 0.4)
+            train_dataset = CompositeInfiniteDataset(datasets, weights)
+
+        # Create dataloader
+        train_dataloader = DataLoader(train_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_batch_fn,
+            pin_memory=True,
+        )
+
+        print('Done!')
+        # Return dataset and dataloader
+        return train_dataset, train_dataloader
+
+    def _create_val_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
+        print('Creating val dataset and dataloader ...')
+        val_dataset = self._create_image_dataset(self.val_indices, shuffle=False, infinite=False)
+        val_dataloader = DataLoader(val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_batch_fn,
+            pin_memory=True,
+        )
+        print('Done!')
+        return val_dataset, val_dataloader
+
+        

@@ -122,6 +122,22 @@ def get_image_transform(
     print(f'Returning augmented transforms with mode {augmentation_mode}')
     return transform_fn
 
+def get_pretrain_vit_mae_image_transform(feature_extractor):
+    # source: https://github.com/huggingface/transformers/blob/main/examples/pytorch/image-pretraining/run_mae.py#L299
+    if "shortest_edge" in feature_extractor.size:
+        size = feature_extractor.size["shortest_edge"]
+    else:
+        size = (feature_extractor.size["height"], feature_extractor.size["width"])
+    transforms = T.Compose(
+        [
+            T.RandomResizedCrop(size, scale=(0.2, 1.0), interpolation=InterpolationMode.BICUBIC),
+            T.RandomHorizontalFlip(),
+            T.ToTensor(),
+            T.Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std),
+        ]
+    )
+    return transforms
+
 inv_normalize = T.Normalize(
     mean=[-0.485/0.229, -0.456/0.224, -0.406/0.255],
     std=[1/0.229, 1/0.224, 1/0.255]

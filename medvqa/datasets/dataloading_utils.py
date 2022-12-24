@@ -429,3 +429,12 @@ def get_vision_collate_batch_fn(dataset_id,
     else: assert False, f'Unknown dataset_id {dataset_id}'
 
     return collate_batch_fn
+
+def get_mae_collate_batch_fn(dataset_id):
+    def mae_collate_batch_fn(batch):        
+        batch_dict = dict()
+        batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+        batch_dict['i'] = torch.stack([x['i'] for x in batch])
+        batch_dict['dataset_id'] = dataset_id
+        return batch_dict
+    return mae_collate_batch_fn

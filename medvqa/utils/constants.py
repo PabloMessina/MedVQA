@@ -171,6 +171,7 @@ NLP_METRICS = [
 ]
 
 class MetricNames:
+    LOSS = 'loss'
     CHEXPERT_ACCURACY = 'chexpert_accuracy'
     CHEXPERT_PRF1S = 'chexpert_prf1s'
     EXACTMATCH_QUESTION = 'exactmatch_question'
@@ -224,6 +225,7 @@ class MetricNames:
     GENDER_ACC = 'gender_acc'
 
 METRIC2SHORT = {
+    'loss': 'loss',
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',
     'exactmatch_question': 'emq',

@@ -119,7 +119,7 @@ def parse_args(args=None):
     # --- Optional arguments
 
     parser.add_argument('--checkpoint-folder', type=str, default=None,
-                        help='Relative path to folder with checkpoint to resume training from')    
+                        help='Relative path to folder with checkpoint to resume training from')
     parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
     parser.add_argument('--vocab-min-freq', type=int, default=10,
@@ -579,6 +579,7 @@ def train_model(
         )
         if use_chexpert_mode_only: assert iuxray_vqa_trainer.include_chexpert_mode
 
+    # Create CheXpert trainer
     if train_chexpert:
         if chexpert_mode == CHEXPERT_TASKS.CLASSIFICATION:
             count_print('Creating CheXpert visual module trainer ...')
@@ -601,6 +602,7 @@ def train_model(
             )
         else: assert False, f'Unknown chexpert_mode = {chexpert_mode}'
 
+    # Create CXR14 vqa trainer
     if train_cxr14:
         count_print('Creating CXR14 vqa trainer ...')
         cxr14_vqa_trainer = CXR14_VQA_Trainer(
@@ -612,6 +614,7 @@ def train_model(
             **cxr14_vqa_trainer_kwargs,
         )
 
+    # Create VinBig vqa trainer
     if train_vinbig:
         count_print('Creating VinBig vqa trainer ...')
         vinbig_vqa_trainer = VinBig_VQA_Trainer(
@@ -623,6 +626,7 @@ def train_model(
             **vinbig_dataset_kwargs,
         )
 
+    # Create PadChest vqa trainer
     if train_padchest:
         count_print('Creating PadChest vqa trainer ...')
         padchest_vqa_trainer = PadChest_VQA_Trainer(
@@ -707,9 +711,9 @@ def train_model(
     assert len(_train_dataloaders) > 0
     assert len(_val_dataloaders) > 0
     assert len(_train_dataloaders) == len(_train_weights)
-    print('len(_train_dataloaders) =', len(_train_dataloaders))
-    print('len(_val_dataloaders) =', len(_val_dataloaders))
-    print('_train_weights =', _train_weights)
+    print(f'len(_train_dataloaders) = {len(_train_dataloaders)}')
+    print(f'len(_val_dataloaders) = {len(_val_dataloaders)}')
+    print(f'_train_weights = {_train_weights}')
 
     # final train dataloader
     if len(_train_dataloaders) > 1:

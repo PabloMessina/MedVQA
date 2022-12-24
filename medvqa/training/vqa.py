@@ -6,6 +6,7 @@ from ignite.engine import Engine
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.models.common import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
+from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.utils.constants import (
     CXR14_DATASET_ID,
     CHEXPERT_TASKS,
@@ -54,7 +55,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # padchest dataset
         padchest_multilabel_criterion=None,
         padchest_singlelabel_criterion=None,
-        # batchwise learning rate updatse
+        # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
     ):
@@ -78,19 +79,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     use_chexpert_vqa = chexpert_mode == CHEXPERT_TASKS.VQA
 
     if training:
-        iters_count = 0
-        def backward_and_optimizer_step(batch_loss):
-            nonlocal iters_count
-            assert batch_loss is not None
-            batch_loss = batch_loss / iters_to_accumulate
-            scaler.scale(batch_loss).backward()
-            if (iters_count + 1) % iters_to_accumulate == 0:
-                scaler.step(optimizer)
-                scaler.update()
-                # batch_loss.backward()
-                # optimizer.step()
-                optimizer.zero_grad()                
-            iters_count += 1
+        gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
     
     def step_fn__mimiccxr_iuxray(batch):
 
@@ -225,7 +214,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         batch_loss = None
 
                     # Backward pass + optimizer step if training
-                    backward_and_optimizer_step(batch_loss)
+                    gradient_accumulator.step(batch_loss)
 
         # Compute predicted Q & A
         if training:
@@ -361,7 +350,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         batch_loss += answer_loss
 
                     # Backward pass + optimizer step if training
-                    backward_and_optimizer_step(batch_loss)
+                    gradient_accumulator.step(batch_loss)
         
         output = {
             'idxs': idxs,
@@ -471,7 +460,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     batch_loss += answer_loss
 
                     # Backward pass + optimizer step if training
-                    backward_and_optimizer_step(batch_loss)
+                    gradient_accumulator.step(batch_loss)
         
         output = {
             'idxs': idxs,
@@ -576,7 +565,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     batch_loss += answer_loss
 
                     # Backward pass + optimizer step if training
-                    backward_and_optimizer_step(batch_loss)
+                    gradient_accumulator.step(batch_loss)
 
         output = {
             'idxs': idxs,
