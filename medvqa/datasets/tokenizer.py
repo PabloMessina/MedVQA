@@ -6,6 +6,7 @@ from medvqa.utils.files import (
     load_pickle,
     save_to_pickle,
     load_json_file,
+    get_file_path_with_hashing_if_too_long,
 )
 from medvqa.datasets.preprocessing import get_sentences
 from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
@@ -18,9 +19,22 @@ import re
 _IGNORE_REGEX = re.compile(r'^(\d+(cm|mm|st|th|nd|rd)?|xxxx|jj|[()\[\]\-\\/+#*=><%?;!].*|[:,.].+)$')
 _VALID_PUNCTUATIONS = ['.', ',', ':']
 
-def _get_vocab_filepath(qa_adapted_filenames, min_freq, mode):
-    filename = f'vocab__min_freq={min_freq}__mode={mode}__from({";".join(qa_adapted_filenames)}).pkl'
-    return os.path.join(CACHE_DIR, filename)
+def _get_vocab_filepath(qa_adapted_filenames=None, min_freq=None, mode=None, other_vocab_generators_names=None):
+    strings = []
+    if qa_adapted_filenames is not None:
+        assert type(qa_adapted_filenames) is list
+        if len(qa_adapted_filenames) > 0:
+            assert min_freq is not None
+            assert mode is not None
+            strings.append(f'min_freq={min_freq}')
+            strings.append(f'mode={mode}')
+            strings.extend(qa_adapted_filenames)
+    if other_vocab_generators_names is not None:
+        assert type(other_vocab_generators_names) is list
+        strings.extend(other_vocab_generators_names)    
+    assert len(strings) > 0, 'No strings to hash'
+    prefix = 'vocab'
+    return get_file_path_with_hashing_if_too_long(CACHE_DIR, prefix, strings, 'pkl')
 
 class Tokenizer:
     
@@ -28,15 +42,20 @@ class Tokenizer:
     START_TOKEN = '<s>'
     END_TOKEN = '</s>'
     
-    def __init__(self, qa_adapted_dataset_paths, min_freq=5, overwrite=False,
-                mode='report', medical_terms_frequency_filename = None):
+    def __init__(self, qa_adapted_dataset_paths=None, min_freq=5, overwrite=False,
+                mode='report', medical_terms_frequency_filename = None,
+                other_vocab_generators = None, other_vocab_generators_names = None):
 
-        assert mode in ('report', 'background')
-        assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
+        if qa_adapted_dataset_paths is not None:
+            assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
+            assert len(qa_adapted_dataset_paths) > 0, len(qa_adapted_dataset_paths)
+            assert mode in ('report', 'background'), mode
+            qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
+        else:
+            qa_adapted_filenames = None
 
-        qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
-
-        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq, mode)
+        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq, mode,
+                                            other_vocab_generators_names)
         
         if medical_terms_frequency_filename is not None:
             self.med_tags_extractor = MedicalTagsExtractor(medical_terms_frequency_filename)
@@ -51,15 +70,18 @@ class Tokenizer:
 
         if overwrite or self.id2token is None:
             # process Q&A datasets
-            vocab = dict()
-            qa_adapted_datasets = [get_cached_json_file(path) for path in qa_adapted_dataset_paths]
-            for sentence in tqdm(get_sentences(qa_adapted_datasets, mode=mode)):
-                for token in wordpunct_tokenize(sentence):
-                    if _IGNORE_REGEX.search(token):
-                        continue
-                    vocab[token] = vocab.get(token, 0) + 1
-            # filter by frequency
-            filtered_vocab = set(word for word, freq in vocab.items() if freq >= min_freq)
+            if qa_adapted_dataset_paths is not None:
+                vocab = dict()
+                qa_adapted_datasets = [get_cached_json_file(path) for path in qa_adapted_dataset_paths]
+                for sentence in tqdm(get_sentences(qa_adapted_datasets, mode=mode)):
+                    for token in wordpunct_tokenize(sentence):
+                        if _IGNORE_REGEX.search(token):
+                            continue
+                        vocab[token] = vocab.get(token, 0) + 1
+                # filter by frequency
+                filtered_vocab = set(word for word, freq in vocab.items() if freq >= min_freq)
+            else:
+                filtered_vocab = set()
 
             # valid punctuations
             filtered_vocab.update(_VALID_PUNCTUATIONS)
@@ -75,6 +97,12 @@ class Tokenizer:
                 with open(MEDICAL_TERMS_PATH) as f:
                     for line in f.readlines():                    
                         filtered_vocab.add(line.strip())
+
+            # include other vocab generators
+            if other_vocab_generators is not None:
+                for other_vocab_generator in other_vocab_generators:
+                    for token in other_vocab_generator():
+                        filtered_vocab.add(token)
             
             # sort
             filtered_vocab = sorted(list(filtered_vocab))

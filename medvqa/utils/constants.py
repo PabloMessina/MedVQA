@@ -140,6 +140,16 @@ CXR14_GENDER2ID = {
     'M': 1,
 }
 
+PADCHEST_GENDERS = ['F', 'M']
+PADCHEST_GENDER2ID = {
+    'F': 0,
+    'M': 1,
+}
+PADCHEST_PROJECTIONS = ['PA', 'AP', 'AP_horizontal', 'L', 'COSTAL']
+PADCHEST_NUM_LABELS = 193
+PADCHEST_NUM_QUESTIONS = 193 + 3 # 193 for each label, 1 for all labels, 1 for localizations, 1 for all labels and localizations
+PADCHEST_NUM_LOCALIZATIONS = 104
+
 class CHEXPERT_TASKS:
     CLASSIFICATION = 'classification'
     VQA = 'vqa'
@@ -161,6 +171,7 @@ NLP_METRICS = [
 ]
 
 class MetricNames:
+    LOSS = 'loss'
     CHEXPERT_ACCURACY = 'chexpert_accuracy'
     CHEXPERT_PRF1S = 'chexpert_prf1s'
     EXACTMATCH_QUESTION = 'exactmatch_question'
@@ -195,6 +206,10 @@ class MetricNames:
     VINBIGMICROAVGF1 = 'vinbigmicroavgf1'
     CXR14MACROAVGF1 = 'cxr14_macroavgf1'
     CXR14MICROAVGF1 = 'cxr14_microavgf1'
+    PADCHEST_LABEL_MACROAVGF1 = 'padchest_label_macroavgf1'
+    PADCHEST_LABEL_MICROAVGF1 = 'padchest_label_microavgf1'
+    PADCHEST_LOC_MACROAVGF1 = 'padchest_loc_macroavgf1'
+    PADCHEST_LOC_MICROAVGF1 = 'padchest_loc_microavgf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
     BACKGROUND_LOSS = 'background_loss'
@@ -202,12 +217,15 @@ class MetricNames:
     CHEXPERT_LOSS = 'chexpert_loss'
     VINBIG_LOSS = 'vinbig_loss'
     CXR14_LOSS = 'cxr14_loss'
+    PADCHEST_LABEL_LOSS = 'padchest_label_loss'
+    PADCHEST_LOCALIZATION_LOSS = 'padchest_loc_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
     GENDER_ACC = 'gender_acc'
 
 METRIC2SHORT = {
+    'loss': 'loss',
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',
     'exactmatch_question': 'emq',
@@ -242,6 +260,12 @@ METRIC2SHORT = {
     'vinbigmicroavgf1': 'vnbgmicf1',
     'cxr14_macroavgf1': 'cxr14macf1',
     'cxr14_microavgf1': 'cxr14micf1',
+    'padchest_label_macroavgf1': 'padchxlmacf1',
+    'padchest_label_microavgf1': 'padchxlmicf1',
+    'padchest_loc_macroavgf1': 'padchxlzmacf1',
+    'padchest_loc_microavgf1': 'padchxlzmicf1',
+    'padchest_label_loss': 'padchxl_loss',
+    'padchest_loc_loss': 'padchxlz_loss',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'background_loss': 'bg_loss',
@@ -261,6 +285,7 @@ IUXRAY_DATASET_ID__CHEXPERT_MODE = 3
 MIMICCXR_DATASET_ID__CHEXPERT_MODE = 4
 VINBIG_DATASET_ID = 5
 CXR14_DATASET_ID = 6
+PADCHEST_DATASET_ID = 7
 
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'

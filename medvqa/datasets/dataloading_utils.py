@@ -13,6 +13,7 @@ from medvqa.utils.constants import (
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
+    PADCHEST_DATASET_ID,    
 )
 
 INFINITE_DATASET_LENGTH = int(1e18)
@@ -290,6 +291,28 @@ def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question
                 )
             return batch_dict
     
+    elif dataset_id == PADCHEST_DATASET_ID:
+            
+        def collate_batch_fn(batch):
+            batch_size = len(batch)
+            batch_dict = dict()
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in range(batch_size)])            
+            batch_dict['l'] = torch.tensor([batch[i]['l'] for i in range(batch_size)])
+            batch_dict['loc'] = torch.tensor([batch[i]['loc'] for i in range(batch_size)])
+            batch_dict['q'] = torch.tensor([batch[i]['q'] + one_hot_question_offset for i in range(batch_size)])
+            batch_dict['o'] = torch.tensor([batch[i]['proj'] for i in range(batch_size)])
+            batch_dict['g'] = torch.tensor([batch[i]['g'] for i in range(batch_size)])
+            if include_image:
+                batch_dict['i'] = torch.stack([batch[i]['i'] for i in range(batch_size)])
+            if include_answer:
+                batch_dict['a'] = nn.utils.rnn.pad_sequence(
+                    sequences = [torch.tensor(batch[i]['a']) for i in range(batch_size)],
+                    batch_first=True,
+                    padding_value=0,
+                )
+            return batch_dict
+    
     else: assert False, f'Unknown dataset_id {dataset_id}'
 
     return collate_batch_fn
@@ -420,3 +443,12 @@ def get_vision_collate_batch_fn(dataset_id,
     else: assert False, f'Unknown dataset_id {dataset_id}'
 
     return collate_batch_fn
+
+def get_mae_collate_batch_fn(dataset_id):
+    def mae_collate_batch_fn(batch):        
+        batch_dict = dict()
+        batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+        batch_dict['i'] = torch.stack([x['i'] for x in batch])
+        batch_dict['dataset_id'] = dataset_id
+        return batch_dict
+    return mae_collate_batch_fn

@@ -84,6 +84,11 @@ def attach_dataset_aware_bleu_background(engine, allowed_dataset_ids, record_sco
                            allowed_dataset_ids=allowed_dataset_ids, record_scores=record_scores)
     met.attach(engine, MetricNames.BLEU_BACKGROUND)
 
+def attach_dataset_aware_bleu(engine, allowed_dataset_ids, record_scores=False):
+    met = DatasetAwareBleu(output_transform=_get_output_transform('pred_answers', 'answers'),
+                           allowed_dataset_ids=allowed_dataset_ids, record_scores=record_scores)
+    met.attach(engine, MetricNames.BLEU)
+
 def attach_rougel(engine, device, record_scores=False):
     met = RougeL(output_transform = _get_output_transform('pred_answers', 'answers'),
                     device = device, record_scores=record_scores)
@@ -221,6 +226,26 @@ def attach_dataset_aware_cxr14_labels_microavgf1(engine, allowed_dataset_ids, cl
     met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_cxr14', 'cxr14', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CXR14MICROAVGF1)
+
+def attach_dataset_aware_padchest_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_padchest_labels', 'padchest_labels', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.PADCHEST_LABEL_MACROAVGF1)
+
+def attach_dataset_aware_padchest_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_padchest_labels', 'padchest_labels', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.PADCHEST_LABEL_MICROAVGF1)
+
+def attach_dataset_aware_padchest_localization_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_padchest_loc', 'padchest_loc', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.PADCHEST_LOC_MACROAVGF1)
+
+def attach_dataset_aware_padchest_localization_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_padchest_loc', 'padchest_loc', class_indices),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.PADCHEST_LOC_MICROAVGF1)
 
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),

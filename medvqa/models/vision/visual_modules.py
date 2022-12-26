@@ -269,7 +269,7 @@ def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
 
 def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
     assert clip_vit_version in _CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
-    model, _ = clip.load(clip_vit_version,)
+    model, _ = clip.load(clip_vit_version)
     if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
     vit = model.visual.float()
     vit.forward = _get_clip_vit_modified_forward(model.dtype).__get__(vit) # HACK
