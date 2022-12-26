@@ -13,6 +13,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_SPLIT_CSV_PATH,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
+    choose_dicom_id_and_orientation,
     get_mimiccxr_image_path,
 )
 from medvqa.datasets.image_processing import (
@@ -320,22 +321,8 @@ def _get_split_data(qa_adapted_reports_filename, image_views_dict, split_dict, s
         views = image_views_dict[(subject_id, study_id)]
         # images = glob.glob(f'/mnt/workspace/mimic-cxr-jpg/images-small/p{part_id}/p{subject_id}/s{study_id}/*.jpg')
         # assert len(views) == len(images)
-        
-        dicom_id = None
-        for view in views:
-            if view[1] == 'PA':
-                dicom_id = view[0]
-                orientation = view[1]
-                break
-        if dicom_id is None:
-            for view in views:
-                if view[1] == 'AP':
-                    dicom_id = view[0]
-                    orientation = view[1]
-                    break
-        if dicom_id is None and len(views) > 0:
-            dicom_id = views[0][0]
-            orientation = views[0][1]        
+
+        dicom_id, orientation = choose_dicom_id_and_orientation(views)
             
         if (dicom_id is not None and split_lambda(split_dict[(subject_id, study_id, dicom_id)]) and
                 (subject_id, study_id, dicom_id) not in broken_images):

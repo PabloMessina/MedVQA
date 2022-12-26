@@ -33,3 +33,21 @@ MIMICCXR_BROKEN_IMAGES = set([
 
 def get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
     return MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
+
+def choose_dicom_id_and_orientation(views):
+    dicom_id = None
+    for view in views:
+        if view[1] == 'PA':
+            dicom_id = view[0]
+            orientation = view[1]
+            break
+    if dicom_id is None:
+        for view in views:
+            if view[1] == 'AP':
+                dicom_id = view[0]
+                orientation = view[1]
+                break
+    if dicom_id is None and len(views) > 0:
+        dicom_id = views[0][0]
+        orientation = views[0][1]
+    return dicom_id, orientation

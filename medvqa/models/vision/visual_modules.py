@@ -159,18 +159,24 @@ class DensenetVisualModule(nn.Module):
         
         return output
 
-def create_densenet121_feature_extractor(pretrained_weights_path=None, imagenet_pretrained=False):
+def create_densenet121_feature_extractor(
+    pretrained_weights_path=None,
+    imagenet_pretrained=False,
+    drop_rate=0.0,
+):
+    print('create_densenet121_feature_extractor()')
+    print(f'   drop_rate: {drop_rate}')
     # Load pre-trained CNN weights
     if pretrained_weights_path:
-        densenet = models.densenet121(pretrained=False)
+        densenet = models.densenet121(pretrained=False, drop_rate=drop_rate)
         pretrained_weights = torch.load(pretrained_weights_path, map_location='cuda')
         densenet.load_state_dict(pretrained_weights, strict=False)
         print("DenseNet121's pretrained weights loaded from", pretrained_weights_path)
     elif imagenet_pretrained:
-        densenet = models.densenet121(pretrained=True)
+        densenet = models.densenet121(pretrained=True, drop_rate=drop_rate)
         print("DenseNet121's pretrained weights loaded from ImageNet")
     else:
-        densenet = models.densenet121(pretrained=False)
+        densenet = models.densenet121(pretrained=False, drop_rate=drop_rate)
     return densenet.features
 
 _CLIP_VIT_VERSIONS = ['ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
@@ -180,6 +186,10 @@ _HUGGINGFACE_CLIP_VIT_VERSIONS = [
     'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text',
     'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned',
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned-v3',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned-v2',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v3',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v2',
 ]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
@@ -189,16 +199,19 @@ _tmp.append('CenIA/clip-vit-bio-clinical-bert-finetuned')
 _tmp.append('CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text')
 for _k in _tmp:
     CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = CLIP_DEFAULT_IMAGE_MEAN_STD
-_tmp = ['CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned',
-    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned']
-for _k in _tmp:
-    CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+for _k in _HUGGINGFACE_CLIP_VIT_VERSIONS:
+    if _k not in _tmp:
+        CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
 HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT = {
     'CenIA/clip-vit-bio-clinical-bert-finetuned': 'CenIA/clip-vit-bcbf',
     'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text': 'CenIA/clip-vit-bcbfft',
     'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned': 'CenIA/clip-vte-vit-lp16bcbf',
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned': 'CenIA/clip-vte-vit-bp16bcbf',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned-v3': 'CenIA/clip-vte-vit-lp16bcbf-v3',
+    'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned-v2': 'CenIA/clip-vte-vit-lp16bcbf-v2',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v3': 'CenIA/clip-vte-vit-bp16bcbf-v3',
+    'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v2': 'CenIA/clip-vte-vit-bp16bcbf-v2',
 }
 
 def _get_clip_vit_modified_forward(dtype):    

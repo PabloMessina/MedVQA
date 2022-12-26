@@ -14,11 +14,12 @@ from medvqa.utils.files import (
 )
 
 def _get_train_preprocessed_data_path(qa_adapted_reports_filename, tokenizer):
-    tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
-        f'tokenizer={tokenizer_string}',
     ]
+    if tokenizer is not None:
+        tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
+        strings.append(f'tokenizer={tokenizer_string}')
     return get_file_path_with_hashing_if_too_long(IUXRAY_CACHE_DIR, 'iuxray_preprocessed_multimodal_train_data__', strings)
 
 class IUXRAY_Multimodal_Trainer(MultiModal_Trainer):
@@ -26,7 +27,8 @@ class IUXRAY_Multimodal_Trainer(MultiModal_Trainer):
     def __init__(self, transform, batch_size, collate_batch_fn,
                 num_workers,
                 qa_adapted_reports_filename,
-                tokenizer,
+                tokenizer = None,
+                use_text = True,
                 classify_orientation = False,
                 classify_chexpert = False,
                 chexpert_labels_filename = None,
@@ -36,6 +38,8 @@ class IUXRAY_Multimodal_Trainer(MultiModal_Trainer):
                 imbalance_reduction_coef = 0.4,
                 ):
 
+        if use_text:
+            assert tokenizer is not None, 'Tokenizer must be provided if use_text is True'
         self.tokenizer = tokenizer
         self.iuxray_qa_reports = iuxray_qa_reports
         self.qa_adapted_reports_filename = qa_adapted_reports_filename        
@@ -45,7 +49,8 @@ class IUXRAY_Multimodal_Trainer(MultiModal_Trainer):
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessed_data_path,
                         IUXRAY_CACHE_DIR,
-                        num_workers,                        
+                        num_workers,
+                        use_text = use_text,
                         classify_orientation = classify_orientation,
                         classify_chexpert = classify_chexpert,
                         chexpert_labels_filename = chexpert_labels_filename,

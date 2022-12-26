@@ -515,7 +515,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     
     return step_fn
 
-def _get_dataset_maks(dataset_id, labels_remapper, n_labels, device):
+def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
     mask = [0] * n_labels
     new_labels = labels_remapper[dataset_id]
     for i in range(len(new_labels)):
@@ -576,7 +576,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
 
     if training and classify_chexpert or train_with_chexpert_dataset:
         if use_merged_findings:
-            chexpert_mask = _get_dataset_maks(CHEXPERT_DATASET_ID, findings_remapper, n_findings, device)
+            chexpert_mask = _get_dataset_masks(CHEXPERT_DATASET_ID, findings_remapper, n_findings, device)
             chexpert_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=chexpert_mask)
         else:
             chexpert_criterion = get_binary_multilabel_loss(binary_loss_name)
@@ -585,7 +585,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
 
     if training and train_with_cxr14:
         if use_merged_findings:
-            cxr14_mask = _get_dataset_maks(CXR14_DATASET_ID, findings_remapper, n_findings, device)
+            cxr14_mask = _get_dataset_masks(CXR14_DATASET_ID, findings_remapper, n_findings, device)
             cxr14_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=cxr14_mask)
         else:
             cxr14_criterion = get_binary_multilabel_loss(binary_loss_name)
@@ -594,7 +594,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
     
     if training and use_vinbig_dataset:
         if use_merged_findings:
-            vinbig_mask = _get_dataset_maks(VINBIG_DATASET_ID, findings_remapper, n_findings, device)
+            vinbig_mask = _get_dataset_masks(VINBIG_DATASET_ID, findings_remapper, n_findings, device)
             vinbig_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=vinbig_mask)
         else:
             vinbig_criterion = get_binary_multilabel_loss(binary_loss_name)

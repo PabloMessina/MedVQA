@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import random
@@ -9,7 +8,6 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
-    cohen_kappa_score,
 )
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (

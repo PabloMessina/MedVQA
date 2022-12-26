@@ -11,6 +11,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_SPLIT_CSV_PATH,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
+    choose_dicom_id_and_orientation,
     get_mimiccxr_image_path,
 )
 from medvqa.utils.files import (
@@ -18,12 +19,13 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
 )
 
-def _get_train_preprocessed_data_path(qa_adapted_reports_filename, tokenizer):
-    tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
+def _get_train_preprocessed_data_path(qa_adapted_reports_filename, tokenizer):    
     strings = [
         f'dataset={qa_adapted_reports_filename}',
-        f'tokenizer={tokenizer_string}',
     ]
+    if tokenizer is not None:
+        tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
+        strings.append(f'tokenizer={tokenizer_string}')
     return get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_multimodal_train_data__', strings)
 
 def _get_orientation_id(orientation):
@@ -37,7 +39,8 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
     def __init__(self, transform, batch_size, collate_batch_fn,
                 num_workers,
                 qa_adapted_reports_filename,
-                tokenizer,
+                use_text = True,
+                tokenizer = None,
                 classify_orientation = False,
                 classify_chexpert = False,
                 chexpert_labels_filename = None,
@@ -49,6 +52,8 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
                 include_train = True,
                 imbalance_reduction_coef = 0.4):
         
+        if use_text:
+            assert tokenizer is not None, 'If use_text is True, tokenizer must be provided'
         self.tokenizer = tokenizer
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
         self.mimiccxr_metadata = mimiccxr_metadata
@@ -60,7 +65,8 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessed_data_path,
                         MIMICCXR_CACHE_DIR,
-                        num_workers,                        
+                        num_workers,
+                        use_text=use_text,
                         classify_orientation = classify_orientation,
                         classify_chexpert = classify_chexpert,
                         chexpert_labels_filename = chexpert_labels_filename,
@@ -117,10 +123,11 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
 
         self.report_ids = []
         self.images = []
-        self.backgrounds = []
         self.orientations = []
         self.train_indices = []
         self.test_indices = []
+        if self.use_text:
+            self.backgrounds = []
         
         idx = 0
 
@@ -129,31 +136,18 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
             part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])
             views = image_views_dict[(subject_id, study_id)]
             
-            dicom_id = None
-            for view in views:
-                if view[1] == 'PA':
-                    dicom_id = view[0]
-                    orientation = view[1]
-                    break
-            if dicom_id is None:
-                for view in views:
-                    if view[1] == 'AP':
-                        dicom_id = view[0]
-                        orientation = view[1]
-                        break
-            if dicom_id is None and len(views) > 0:
-                dicom_id = views[0][0]
-                orientation = views[0][1]        
+            dicom_id, orientation = choose_dicom_id_and_orientation(views)
                 
             if (dicom_id is not None and (subject_id, study_id, dicom_id) not in broken_images):            
                 
                 image_path = get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
                 orientation_id = _get_orientation_id(orientation)
-                background = tokenizer.tokenize(report['background'])
                 self.report_ids.append(ri)
                 self.images.append(image_path)
-                self.backgrounds.append(background)
                 self.orientations.append(orientation_id)
+                if self.use_text:
+                    background = tokenizer.tokenize(report['background'])
+                    self.backgrounds.append(background)
 
                 if split_dict[(subject_id, study_id, dicom_id)] == 'test':
                     self.test_indices.append(idx)
@@ -164,7 +158,8 @@ class MIMICCXR_Multimodal_Trainer(MultiModal_Trainer):
             
         self.report_ids = np.array(self.report_ids, dtype=int)    
         self.images = np.array(self.images, dtype=str)
-        self.backgrounds = np.array(self.backgrounds, dtype=object)
         self.orientations = np.array(self.orientations, dtype=int)
         self.train_indices = np.array(self.train_indices, dtype=int)
         self.test_indices = np.array(self.test_indices, dtype=int)
+        if self.use_text:
+            self.backgrounds = np.array(self.backgrounds, dtype=object)

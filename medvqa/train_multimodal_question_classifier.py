@@ -7,7 +7,7 @@ from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VisualModuleTra
 from medvqa.datasets.chexpert.chexpert_dataset_management import Chexpert_VisualModuleTrainer
 from medvqa.datasets.iuxray.iuxray_multimodal_dataset_management import IUXRAY_Multimodal_Trainer
 from medvqa.datasets.mimiccxr.mimiccxr_multimodal_dataset_management import MIMICCXR_Multimodal_Trainer
-from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_Visual_Trainer
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
@@ -97,6 +97,7 @@ def parse_args(args=None):
     parser.add_argument('--raw-image-encoding', type=str, default=RawImageEncoding.DENSENET_121)
     parser.add_argument('--image-local-feat-size', type=int, default=1024,
                         help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
+    parser.add_argument('--image-encoder-dropout', type=float, default=0.0)
     parser.add_argument('--image-encoder-pretrained-weights-path', type=str, default=None)
     parser.add_argument('--freeze-image-encoder', dest='freeze_image_encoder', action='store_true')
     parser.set_defaults(freeze_image_encoder=False)
@@ -200,8 +201,8 @@ def parse_args(args=None):
 _METRIC_WEIGHTS = {
     MetricNames.BLEU_BACKGROUND: 1,
     MetricNames.ORIENACC: 1,
-    MetricNames.CHXLABELMICROAVGF1: 0.5,
-    MetricNames.CHXLABELMACROAVGF1: 0.5,
+    MetricNames.CHXLABELMICROAVGF1: 1,
+    MetricNames.CHXLABELMACROAVGF1: 1,
     MetricNames.CXR14MACROAVGF1: 0.5,
     MetricNames.CXR14MICROAVGF1: 0.5,
     MetricNames.QLABELS_MICROAVGF1: 1,
@@ -312,7 +313,6 @@ def train_model(
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
-    
     _kwargs = dict(classify_orientation = classify_orientation,
                    classify_chexpert = classify_chexpert,
                    classify_questions = classify_questions)
@@ -327,7 +327,6 @@ def train_model(
     if train_vinbig:
         vinbig_collate_batch_fn = get_multimodal_collate_batch_fn(VINBIG_DATASET_ID)
 
-    # Create MIMIC-CXR multimodal trainer
     if train_mimiccxr:
         count_print('Creating MIMIC-CXR multimodal trainer ...')
         mimiccxr_trainer = MIMICCXR_Multimodal_Trainer(
@@ -339,8 +338,7 @@ def train_model(
             mimiccxr_qa_reports = mimiccxr_qa_reports,
             **mimiccxr_trainer_kwargs,
         )
-    
-    # Create IU X-Ray multimodal trainer
+
     if train_iuxray:
         count_print('Creating IU X-Ray multimodal trainer ...')
         iuxray_trainer = IUXRAY_Multimodal_Trainer(
@@ -375,7 +373,7 @@ def train_model(
 
     if train_vinbig:
         count_print('Creating VinBig visual module trainer ...')
-        vinbig_trainer = VinBig_Visual_Trainer(
+        vinbig_trainer = VinBig_VisualModuleTrainer(
             transform=img_transform,
             batch_size=batch_size,
             collate_batch_fn=vinbig_collate_batch_fn,
@@ -544,7 +542,7 @@ def train_model(
     score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
 
     if not update_lr_batchwise:
-        lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
+        lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)
 
     # Checkpoint saving
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
@@ -642,6 +640,7 @@ def train_from_scratch(
     image_local_feat_size,
     embed_size,
     image_encoder_pretrained_weights_path,
+    image_encoder_dropout,
     pretrained_checkpoint_folder_path,
     clip_version,
     text_vec_size,
@@ -736,6 +735,7 @@ def train_from_scratch(
         imagenet_pretrained = imagenet_pretrained,
         clip_version = clip_version,
         use_image_features_in_qclass = use_image_features_in_qclass,
+        image_encoder_dropout = image_encoder_dropout,
         # Text encoder
         text_vec_size = text_vec_size,
         text_hidden_size = text_hidden_size,

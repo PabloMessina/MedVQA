@@ -33,6 +33,7 @@ class ImageTextEncoder(nn.Module):
                  imagenet_pretrained=True,
                  clip_version=None,
                  use_image_features_in_qclass=True,
+                 image_encoder_dropout=0.0,
                  # Text Encoder args
                  text_vec_size=None,
                  text_hidden_size=None,                 
@@ -66,7 +67,8 @@ class ImageTextEncoder(nn.Module):
         
         # Init image encoder
         self._init_raw_image_encoder(raw_image_encoding, image_encoder_pretrained_weights_path,
-                                    imagenet_pretrained, clip_version, freeze_image_encoder)
+                                    imagenet_pretrained, clip_version, freeze_image_encoder,
+                                    image_encoder_dropout)
         self.image_global_feat_size = self._get_raw_image_encoder_global_feat_size(image_local_feat_size)
         
         # Init text encoder
@@ -92,11 +94,13 @@ class ImageTextEncoder(nn.Module):
         assert False
     
     def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
-                                imagenet_pretrained, clip_version, freeze_image_encoder):
+                                imagenet_pretrained, clip_version, freeze_image_encoder,
+                                dropout):
         self.raw_image_encoding = raw_image_encoding
         self.clip_version = clip_version        
         if raw_image_encoding == RawImageEncoding.DENSENET_121:
-            self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
+            self.raw_image_encoder = create_densenet121_feature_extractor(
+                pretrained_weights_path, imagenet_pretrained, drop_rate=dropout)
         elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             self.raw_image_encoder = create_clip_resnet_feature_extractor(clip_version, pretrained_weights_path)
         elif raw_image_encoding == RawImageEncoding.CLIP_VIT:

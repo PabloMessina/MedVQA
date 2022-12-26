@@ -14,6 +14,7 @@ from medvqa.utils.constants import (
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         iters_to_accumulate=1, # for gradient accumulation
+        use_text=True,
         # automatic mixed precision
         use_amp=False,
         # orientation aux task
@@ -63,11 +64,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
         images = batch['i'].to(device)
-        texts = batch['t'].to(device)
-        text_lengths = batch['tl']
 
         is_mimiccxr = (dataset_id == MIMICCXR_DATASET_ID)
 
+        if use_text:
+            texts = batch['t'].to(device)
+            text_lengths = batch['tl']
         if classify_orientation:
             orientation = batch['orientation'].to(device)
         if classify_chexpert:
@@ -82,17 +84,19 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             # Prepare args for model forward
             model_kwargs = {
                 'raw_images': images,
-                'texts': texts,
-                'text_lengths': text_lengths,
                 'mimiccxr_forward': is_mimiccxr,
                 'iuxray_forward': not is_mimiccxr,
             }
+            if use_text:
+                model_kwargs['texts'] = texts
+                model_kwargs['text_lengths'] = text_lengths
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 
                 model_output = model(**model_kwargs)
-                pred_text_logits = model_output['pred_texts']
+                if use_text:
+                    pred_text_logits = model_output['pred_texts']
                 if classify_orientation:
                     if is_mimiccxr:
                         pred_orientation_logits = model_output['mimiccxr_pred_orientation']
@@ -108,8 +112,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if training:                    
                     # Compute losses
                     losses = []
-                    text_loss = nlg_criterion(pred_text_logits.view(-1, pred_text_logits.shape[-1]), texts.view(-1))
-                    losses.append(text_loss)                    
+                    if use_text:
+                        text_loss = nlg_criterion(pred_text_logits.view(-1, pred_text_logits.shape[-1]), texts.view(-1))
+                        losses.append(text_loss)
                     if classify_orientation:
                         if is_mimiccxr:
                             orientation_loss = mimiccxr_orientation_criterion(pred_orientation_logits, orientation)
@@ -128,18 +133,20 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         batch_loss = None
                     # Backward pass + optimizer step if training
                     backward_and_optimizer_step(batch_loss)
-
-        # Recover text
-        pred_texts = pred_text_logits.argmax(-1)
+        
         output = {
             'idxs': idxs,
-            'backgrounds': tokenizer.clean_batch(texts.detach()),
-            'pred_backgrounds': tokenizer.clean_batch(pred_texts.detach()),
             'dataset_id': dataset_id,
         }
+        if use_text:
+            # Recover text
+            pred_texts = pred_text_logits.argmax(-1)
+            output['backgrounds'] = tokenizer.clean_batch(texts.detach())
+            output['pred_backgrounds'] = tokenizer.clean_batch(pred_texts.detach())
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-            output['background_loss'] = text_loss.detach()
+            if use_text:
+                output['background_loss'] = text_loss.detach()
         if classify_orientation:
             output['orientation'] = orientation.detach()
             output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()            
@@ -295,16 +302,21 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     
     return step_fn
 
-def get_engine(model, tokenizer, classify_orientation, classify_chexpert, classify_questions, device,
+def get_engine(model, classify_orientation, classify_chexpert, classify_questions, device,
                iters_to_accumulate=1,
                binary_loss_name='bce',
                use_amp=False,
                training=False,
+               use_text=True,
+               tokenizer=None,
                use_chexpert=False,
                use_cxr14=False,
                use_vinbig=False,
                optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None):
+
+    if use_text:
+        assert tokenizer is not None, 'tokenizer must be provided if use_text=True'
     
     # Criterion
     nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
@@ -348,6 +360,7 @@ def get_engine(model, tokenizer, classify_orientation, classify_chexpert, classi
                           training=training,
                           device=device, use_amp=use_amp,
                           iters_to_accumulate=iters_to_accumulate,
+                          use_text=use_text,
                           # orientation auxiliary task
                           classify_orientation=classify_orientation,
                           iuxray_orientation_criterion=iuxray_orientation_criterion,

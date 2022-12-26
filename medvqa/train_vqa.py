@@ -181,7 +181,7 @@ def parse_args(args=None):
                         help='Device to use (GPU or CPU)')    
     parser.add_argument('--img-aug-mode', type=str, default=None,
                         help='Mode of data augmentation used for images')
-    parser.add_argument('--image-size', nargs='+', type=int, default=(255,255))
+    parser.add_argument('--image-size', nargs='+', type=int, default=(256,256))
 
     parser.add_argument('--mimiccxr-weight', type=float, default=1,
                         help='Relative number of batches to sample from MIMIC-CXR dataset (for rebalancing purposes)')

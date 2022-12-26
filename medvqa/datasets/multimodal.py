@@ -11,15 +11,16 @@ from medvqa.datasets.dataloading_utils import (
 
 class MultimodalDataset(Dataset):
     
-    def __init__(self, report_ids, images, texts, indices, transform, shuffle_indices = True,
-                # aux task: image orientation
-                classify_orientation = False, orientations = None,
-                # aux task: chexpert labels
-                classify_chexpert = False, chexpert_labels = None,
-                # aux task: question labels
-                classify_questions = False, question_labels = None,
-                # infinite mode
-                infinite = False,
+    def __init__(self, report_ids, images, texts, indices, transform,
+                 shuffle_indices = True, use_text = True,
+                 # aux task: image orientation
+                 classify_orientation = False, orientations = None,
+                 # aux task: chexpert labels
+                 classify_chexpert = False, chexpert_labels = None,
+                 # aux task: question labels
+                 classify_questions = False, question_labels = None,
+                 # infinite mode
+                 infinite = False,
         ):
         self.report_ids = report_ids
         self.images = images
@@ -27,6 +28,7 @@ class MultimodalDataset(Dataset):
         self.indices = indices
         self.transform = transform        
         self.infinite = infinite
+        self.use_text = use_text
 
         if shuffle_indices:
             np.random.shuffle(self.indices)
@@ -52,12 +54,13 @@ class MultimodalDataset(Dataset):
         if self.infinite:
             i %= len(indices)
         idx = indices[i]
+        rid = self.report_ids[idx]
         output = dict(
             idx=idx,
             i=self.transform(Image.open(self.images[idx]).convert('RGB')),
-            t=self.texts[idx],
         )
-        rid = self.report_ids[idx]
+        if self.use_text:
+            output['t'] = self.texts[idx]
         if self.classify_orientation:
             output['orientation'] = self.orientations[idx]
         if self.classify_chexpert:
@@ -72,6 +75,7 @@ class MultiModal_Trainer():
                 preprocessed_data_path,
                 cache_dir,
                 num_workers,
+                use_text=True,
                 classify_orientation=False,
                 classify_chexpert=False,
                 chexpert_labels_filename=None,
@@ -91,18 +95,17 @@ class MultiModal_Trainer():
         self.classify_questions = classify_questions
         self.include_train = include_train
         self.include_test = include_test
+        self.use_text = use_text
 
         if (not self._load_cached_data(preprocessed_data_path)):
                 self._preprocess_data()
                 self._save_data(preprocessed_data_path)
-
-        if classify_chexpert:
-            assert chexpert_labels_filename is not None
-            self.chexpert_labels = load_pickle(os.path.join(cache_dir, chexpert_labels_filename))
+            
+        assert chexpert_labels_filename is not None
+        self.chexpert_labels = load_pickle(os.path.join(cache_dir, chexpert_labels_filename))
         
-        if classify_questions:
-            assert question_labels_filename is not None
-            self.question_labels = load_pickle(os.path.join(cache_dir, question_labels_filename))
+        assert question_labels_filename is not None
+        self.question_labels = load_pickle(os.path.join(cache_dir, question_labels_filename))
                 
         self._generate_datasets_and_dataloaders(batch_size, collate_batch_fn, num_workers)
 
@@ -113,7 +116,9 @@ class MultiModal_Trainer():
         print('generating datasets and dataloaders ...')
         print('num_workers =', num_workers)
         if self.include_train:
-            self._generate_train_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
+            self._generate_train_dataset_and_dataloader__question_balanced(batch_size, collate_batch_fn, num_workers)
+            print('_generate_train_dataset_and_dataloader__question_balanced()')
+            self._generate_train_dataset_and_dataloader__chexpert_balanced(batch_size, collate_batch_fn, num_workers)
         if self.include_test:
             self._generate_test_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
 
@@ -125,6 +130,7 @@ class MultiModal_Trainer():
             return False
         self.report_ids = data['report_ids']
         self.images = data['images']
+        print('_generate_train_dataset_and_dataloader__chexpert_balanced()')
         self.backgrounds = data['backgrounds']
         self.orientations = data['orientations']
         if self.include_train:
@@ -157,6 +163,7 @@ class MultiModal_Trainer():
             texts = self.backgrounds,
             indices = indices,
             transform = self.transform,
+            use_text = self.use_text,
             # aux task: orientation
             classify_orientation = self.classify_orientation,
             orientations = self.orientations if self.classify_orientation else None,
@@ -181,23 +188,24 @@ class MultiModal_Trainer():
                                          num_workers=num_workers,
                                          pin_memory=True)
 
-    def _generate_train_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
-        n_questions = self.question_labels.shape[1]
-        print(f'len(self.train_indices) = {len(self.train_indices)}, n_questions = {n_questions}')
+    def _generate_train_dataset_and_dataloader__label_balanced(
+            self, labels, batch_size, collate_batch_fn, num_workers, print_every=1, log_weighting=False):
+        n_labels = labels.shape[1]
+        print(f'len(self.train_indices) = {len(self.train_indices)}, n_labels = {n_labels}')
 
-        question_datasets = []
+        datasets = []
         pos_counts = []
-        for i in range(n_questions):
+        for i in range(n_labels):
             pos_indices = []
             neg_indices = []
             for j in self.train_indices:
-                if self.question_labels[self.report_ids[j]][i] == 1:
+                if labels[self.report_ids[j]][i] == 1:
                     pos_indices.append(j)
                 else:
                     neg_indices.append(j)
             
-            if i % 6 == 0:
-                print(f'qlabel = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+            if i % print_every == 0:
+                print(f'label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
             
             if len(pos_indices) >= 5 and len(neg_indices) >= 5:
                 
@@ -213,16 +221,47 @@ class MultiModal_Trainer():
 
                 # merged
                 comp_dataset = CompositeInfiniteDataset([pos_dataset, neg_dataset], [1, 1])
-                question_datasets.append(comp_dataset)
+                datasets.append(comp_dataset)
         
         # final dataset
-        weights = get_imbalance_reduced_weights(pos_counts, self.imbalance_reduction_coef)
-        self.train_dataset = CompositeInfiniteDataset(question_datasets, weights)
+        if log_weighting:
+            weights = get_imbalance_reduced_weights(pos_counts, self.imbalance_reduction_coef)
+        else: # uniform weights
+            weights = [1] * len(datasets)
+        dataset = CompositeInfiniteDataset(datasets, weights)
 
         # dataloader
-        self.train_dataloader = DataLoader(self.train_dataset,
-                                        batch_size=batch_size,
-                                        shuffle=False,
-                                        num_workers=num_workers,
-                                        collate_fn=collate_batch_fn,
-                                        pin_memory=True)
+        dataloader = DataLoader(dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                num_workers=num_workers,
+                                collate_fn=collate_batch_fn,
+                                pin_memory=True)
+
+        return dataset, dataloader
+
+    def _generate_train_dataset_and_dataloader__question_balanced(self, batch_size, collate_batch_fn, num_workers):
+        print('_generate_train_dataset_and_dataloader__question_balanced()')
+        dataset, dataloader = self._generate_train_dataset_and_dataloader__label_balanced(
+            labels = self.question_labels,
+            batch_size = batch_size,
+            collate_batch_fn = collate_batch_fn,
+            num_workers = num_workers,
+            print_every = 6,
+            log_weighting = True,
+        )
+        self.train_dataset__question_balanced = dataset
+        self.train_dataloader__question_balanced = dataloader
+
+    def _generate_train_dataset_and_dataloader__chexpert_balanced(self, batch_size, collate_batch_fn, num_workers):
+        print('_generate_train_dataset_and_dataloader__chexpert_balanced()')
+        dataset, dataloader = self._generate_train_dataset_and_dataloader__label_balanced(
+            labels = self.chexpert_labels,
+            batch_size = batch_size,
+            collate_batch_fn = collate_batch_fn,
+            num_workers = num_workers,
+            print_every = 1,
+            log_weighting = False,
+        )
+        self.train_dataset__chexpert_balanced = dataset
+        self.train_dataloader__chexpert_balanced = dataloader

@@ -213,7 +213,7 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
             infinite=infinite,
         )
 
-class VinBig_Visual_Trainer(VinBigTrainerBase):
+class VinBig_VisualModuleTrainer(VinBigTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
                 training_data = VinBigTrainingData.ALL,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,

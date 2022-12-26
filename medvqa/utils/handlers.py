@@ -1,9 +1,11 @@
 from ignite.handlers import Checkpoint, DiskSaver
 from ignite.engine import Events
 from torch import Tensor
-import operator
-from medvqa.losses.schedulers import LRSchedulerNames
 
+from termcolor import colored
+import operator
+
+from medvqa.losses.schedulers import LRSchedulerNames
 from medvqa.utils.constants import METRIC2SHORT, MetricNames
 from medvqa.utils.metrics import average_ignoring_nones
 from medvqa.utils.logging import MetricsLogger
@@ -13,7 +15,7 @@ def get_log_epoch_started_handler(model_wrapper):
     def handler(trainer):
         epoch = epoch_offset + trainer.state.epoch
         max_epochs = epoch_offset + trainer.state.max_epochs
-        print(f'---- Epoch {epoch}/{max_epochs}')
+        print(colored(f'---- Epoch {epoch}/{max_epochs}', attrs=['bold']))
         model_wrapper.set_epoch(epoch)
     return handler
 
