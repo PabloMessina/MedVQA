@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6)):
+def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
+                          use_min_with_these_metrics=None, use_max_with_these_metrics=None):
 
     assert len(metrics) == len(metric_names)
     assert len(metrics) > 0
@@ -18,6 +19,13 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
 
         metric = metrics[j]
         metric_name = metric_names[j]
+
+        if use_min_with_these_metrics is not None and metric in use_min_with_these_metrics:
+            _agg_fn = min
+        elif use_max_with_these_metrics is not None and metric in use_max_with_these_metrics:
+            _agg_fn = max
+        else:
+            _agg_fn = agg_fn
 
         metric_scores = logs[metric]
         train_scores = []
@@ -42,10 +50,10 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
         ax.set_xlabel('Epoch')
         ax.set_ylabel(metric_name)    
         ax.legend()
-        best_train_score, best_train_i = agg_fn((a,i) for i,a in enumerate(train_scores))
+        best_train_score, best_train_i = _agg_fn((a,i) for i,a in enumerate(train_scores))
         ax.hlines(best_train_score, epochs[0], epochs[-1], colors=('green',), linestyles='dashed',
                 label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i}')
-        best_val_score, best_val_i = agg_fn((a,i) for i,a in enumerate(val_scores))
+        best_val_score, best_val_i = _agg_fn((a,i) for i,a in enumerate(val_scores))
         ax.hlines(best_val_score, epochs[0], epochs[-1], colors=('red',), linestyles='dashed',
                 label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i}')
         ax.legend()

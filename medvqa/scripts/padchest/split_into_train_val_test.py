@@ -164,7 +164,13 @@ if __name__ == '__main__':
 
     # Write train, val, test study ids
     timestamp = get_timestamp()
-    save_to_txt(train_study_ids, os.path.join(PADCHEST_CACHE_DIR, f'train_study_ids_{timestamp}.txt'))
-    save_to_txt(val_study_ids, os.path.join(PADCHEST_CACHE_DIR, f'val_study_ids_{timestamp}.txt'))
-    save_to_txt(test_study_ids, os.path.join(PADCHEST_CACHE_DIR, f'test_study_ids_{timestamp}.txt'))
+    train_study_ids_path = os.path.join(PADCHEST_CACHE_DIR, f'train_study_ids_{timestamp}.txt')
+    val_study_ids_path = os.path.join(PADCHEST_CACHE_DIR, f'val_study_ids_{timestamp}.txt')
+    test_study_ids_path = os.path.join(PADCHEST_CACHE_DIR, f'test_study_ids_{timestamp}.txt')
+    save_to_txt(train_study_ids, train_study_ids_path)
+    save_to_txt(val_study_ids, val_study_ids_path)
+    save_to_txt(test_study_ids, test_study_ids_path)
     print(f'Wrote train, val, test study ids to {PADCHEST_CACHE_DIR}')
+    print(f'train_study_ids_path = {train_study_ids_path}')
+    print(f'val_study_ids_path = {val_study_ids_path}')
+    print(f'test_study_ids_path = {test_study_ids_path}')

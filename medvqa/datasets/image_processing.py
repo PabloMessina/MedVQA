@@ -7,6 +7,8 @@ import random
 import numpy as np
 import os
 
+from transformers import ViTFeatureExtractor
+
 from medvqa.models.vision import (
     ImageQuestionClassifier,
     ImageFeatureExtractor,
@@ -39,24 +41,43 @@ def get_image_transform(
     default_prob=0.3,
     use_clip_transform=False,
     clip_version=None,
+    use_huggingface_vitmodel_transform=False,
+    huggingface_vitmodel_name=None,
 ):
 
-    if type(image_size) is int:
-        use_center_crop = True
-    elif type(image_size) is list or type(image_size) is tuple:
-        use_center_crop = False
-        assert len(image_size) == 2
-    else: assert False    
-
     if use_clip_transform:
+        assert clip_version is not None
+        print(f'Using CLIP transform for version {clip_version}')
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
         mean, std = CLIP_VERSION_2_IMAGE_MEAN_STD.get(clip_version, CLIP_DEFAULT_IMAGE_MEAN_STD)
         tf_normalize = T.Normalize(mean, std)
+    elif use_huggingface_vitmodel_transform:
+        assert huggingface_vitmodel_name is not None
+        print(f'Using Huggingface ViT model transform for {huggingface_vitmodel_name}')
+        feature_extractor = ViTFeatureExtractor.from_pretrained(huggingface_vitmodel_name)
+        if type(feature_extractor.size) is int:
+            image_size = feature_extractor.size
+        elif "shortest_edge" in feature_extractor.size:
+            image_size = feature_extractor.size["shortest_edge"]
+        else:
+            image_size = (feature_extractor.size["height"], feature_extractor.size["width"])
+        if type(image_size) is int:
+            image_size = (image_size, image_size)
+        tf_resize = T.Resize(image_size, interpolation=BICUBIC)
+        tf_normalize = T.Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
     else:
+        print(f'Using default transform')
         tf_resize = T.Resize(image_size)
         tf_normalize = T.Normalize(mean, std)
 
-    print(f'mean = {mean}, std = {std}')
+    if type(image_size) is int:
+        use_center_crop = True
+    if type(image_size) is list or type(image_size) is tuple:
+        use_center_crop = False
+        assert len(image_size) == 2
+    else: assert False
+
+    print(f'mean = {mean}, std = {std}, image_size = {image_size}, use_center_crop = {use_center_crop}')
     
     tf_totensor = T.ToTensor()
     
@@ -67,7 +88,7 @@ def get_image_transform(
         default_transform = T.Compose([tf_resize, tf_totensor, tf_normalize])
 
     if augmentation_mode is None:
-        print('Returning default transform')
+        print('Returning transform without augmentation')
         return default_transform
     
     assert augmentation_mode in _AUGMENTATION_MODES, f'Unknown augmentation mode {augmentation_mode}'
@@ -123,8 +144,10 @@ def get_image_transform(
     return transform_fn
 
 def get_pretrain_vit_mae_image_transform(feature_extractor):
-    # source: https://github.com/huggingface/transformers/blob/main/examples/pytorch/image-pretraining/run_mae.py#L299
-    if "shortest_edge" in feature_extractor.size:
+    # Adapted from https://github.com/huggingface/transformers/blob/main/examples/pytorch/image-pretraining/run_mae.py#L299
+    if type(feature_extractor.size) is int:
+        size = feature_extractor.size
+    elif "shortest_edge" in feature_extractor.size:
         size = feature_extractor.size["shortest_edge"]
     else:
         size = (feature_extractor.size["height"], feature_extractor.size["width"])

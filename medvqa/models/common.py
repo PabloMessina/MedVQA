@@ -3,8 +3,11 @@ class AnswerDecoding:
     GREEDY_SEARCH = 'greedy-search'
     BEAM_SEARCH = 'beam-search'
     
-def freeze_parameters(model):
-    for param in model.parameters():
+def freeze_parameters(model, ignore_name_regex=None):
+    for name, param in model.named_parameters():
+        if ignore_name_regex is not None and ignore_name_regex.search(name):
+            print(f'Ignore freezing parameter: {name}')
+            continue
         param.requires_grad = False
 
 def load_model_state_dict(model, state_dict, ignore_size_mismatch=True):

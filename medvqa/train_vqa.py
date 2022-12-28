@@ -153,6 +153,7 @@ def parse_args(args=None):
     parser.add_argument('--chexpert-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--clip-version', type=str, default=None)
+    parser.add_argument('--huggingface-model-name', type=str, default=None)
     
     # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
@@ -1026,6 +1027,7 @@ def train_from_scratch(
     image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
     clip_version,
+    huggingface_model_name,
     # Optimizer args
     optimizer_name,
     lr,
@@ -1180,8 +1182,10 @@ def train_from_scratch(
                 RawImageEncoding.CLIP_VIT__HUGGINGFACE,
                 RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE,
                 RawImageEncoding.CLIP_RESNET__HUGGINGFACE)
-    if use_clip:
-        assert clip_version is not None
+    use_huggingface_vitmodel = raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE
+    if use_clip or use_huggingface_vitmodel:
+        if use_clip: assert clip_version is not None
+        if use_huggingface_vitmodel: assert huggingface_model_name is not None
         assert image_size == 224 or image_size == [224, 224]
         if type(image_size) is list: image_size = tuple(image_size)
         
@@ -1203,6 +1207,7 @@ def train_from_scratch(
         mlp_out_dim = visual_features_mlp_out_dim,
         mlp_hidden_dims = visual_features_mlp_hidden_dims,
         clip_version = clip_version,
+        huggingface_model_name = huggingface_model_name,
         # Question encoder
         question_encoding = question_encoding,
         question_vec_size = question_vec_size,
@@ -1288,6 +1293,8 @@ def train_from_scratch(
         augmentation_mode = img_aug_mode,
         use_clip_transform = use_clip,
         clip_version = clip_version,
+        use_huggingface_vitmodel_transform = use_huggingface_vitmodel,
+        huggingface_vitmodel_name = huggingface_model_name,
     )
     
     verbose_question = question_encoding != QuestionEncoding.ONE_HOT

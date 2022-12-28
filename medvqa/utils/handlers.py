@@ -19,7 +19,7 @@ def get_log_epoch_started_handler(model_wrapper):
         model_wrapper.set_epoch(epoch)
     return handler
 
-def get_log_iteration_handler(log_every=10):
+def get_log_iteration_handler(log_every=25):
 
     def handler(engine):
         i = engine.state.iteration

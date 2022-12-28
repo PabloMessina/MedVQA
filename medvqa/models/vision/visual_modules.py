@@ -4,9 +4,10 @@ import torchvision.models as models
 import clip
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
-from medvqa.models.common import freeze_parameters
+from medvqa.models.common import freeze_parameters, load_model_state_dict
 from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
-from transformers import AutoModel
+from transformers import AutoModel, ViTModel
+import re
 
 class ImageQuestionClassifier(nn.Module):
 
@@ -191,6 +192,9 @@ _HUGGINGFACE_CLIP_VIT_VERSIONS = [
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v3',
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v2',
 ]
+_HUGGINGFACE_VITMODEL_VERSIONS = [
+    'facebook/vit-mae-base',
+]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 CLIP_VERSION_2_IMAGE_MEAN_STD = {}
@@ -203,7 +207,7 @@ for _k in _HUGGINGFACE_CLIP_VIT_VERSIONS:
     if _k not in _tmp:
         CLIP_VERSION_2_IMAGE_MEAN_STD[_k] = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
-HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT = {
+HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT = {
     'CenIA/clip-vit-bio-clinical-bert-finetuned': 'CenIA/clip-vit-bcbf',
     'CenIA/clip-vit-bio-clinical-bert-finetuned-frozen-text': 'CenIA/clip-vit-bcbfft',
     'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned': 'CenIA/clip-vte-vit-lp16bcbf',
@@ -212,6 +216,10 @@ HUGGINGFACE_CLIP_VIT_VERSIONS_2_SHORT = {
     'CenIA/vte-vit-large-patch16-bio-clinical-bert-finetuned-v2': 'CenIA/clip-vte-vit-lp16bcbf-v2',
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v3': 'CenIA/clip-vte-vit-bp16bcbf-v3',
     'CenIA/vte-vit-base-patch16-bio-clinical-bert-finetuned-v2': 'CenIA/clip-vte-vit-bp16bcbf-v2',
+}
+
+HUGGINGFACE_VITMODEL_NAMES_2_SHORT = {
+    'facebook/vit-mae-base': 'facebook/vit-mae-base',
 }
 
 def _get_clip_vit_modified_forward(dtype):    
@@ -261,16 +269,21 @@ CLIP_VIT_LOCAL_FEAT_SIZE = 768
 CLIP_RESNET_GLOBAL_FEAT_SIZE = 1024
 HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE = 768
 HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE = 1024
+HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE = 768
 
-def _load_pretrained_clip_state_dict(model, pretrained_weights_path):
+HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX = re.compile(r'\bpooler\b')
+
+def _load_pretrained_model_state_dict(model, pretrained_weights_path):
     data = torch.load(pretrained_weights_path)
-    model.load_state_dict(data['state_dict'])
-    print('Pre-trained weights successfully loaded from', pretrained_weights_path)
+    if 'model' in data: data = data['model']
+    if 'state_dict' in data: data = data['state_dict']
+    load_model_state_dict(model, data)
+    print(f'Pre-trained weights successfully loaded from {pretrained_weights_path}')
 
 def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
     assert clip_vit_version in _CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
     model, _ = clip.load(clip_vit_version)
-    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     vit = model.visual.float()
     vit.forward = _get_clip_vit_modified_forward(model.dtype).__get__(vit) # HACK
     return vit
@@ -278,7 +291,7 @@ def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path)
 def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights_path):
     assert clip_resnet_version in _CLIP_RESNET_VERSIONS, f'Unknown CLIP ResNet version {clip_resnet_version}'
     model, _ = clip.load(clip_resnet_version)
-    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     resnet = model.visual.float()
     resnet.forward = _clip_resnet_modified_forward.__get__(resnet) # HACK
     return resnet
@@ -286,6 +299,12 @@ def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights
 def create_huggingface_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
     assert clip_vit_version in _HUGGINGFACE_CLIP_VIT_VERSIONS, f'Unknown Hugginface CLIP ViT version {clip_vit_version}'
     model = AutoModel.from_pretrained(clip_vit_version, use_auth_token=True)
-    if pretrained_weights_path: _load_pretrained_clip_state_dict(model, pretrained_weights_path)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     vit = model.vision_model.float()
     return vit
+
+def create_huggingface_vitmodel_feature_extractor(vitmodel_version, pretrained_weights_path):
+    assert vitmodel_version in _HUGGINGFACE_VITMODEL_VERSIONS, f'Unknown Hugginface ViTModel version {vitmodel_version}'
+    model = ViTModel.from_pretrained(vitmodel_version)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model

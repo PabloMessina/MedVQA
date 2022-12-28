@@ -88,7 +88,7 @@ def parse_args(args=None):
     return parser.parse_args(args=args)
 
 _METRIC_WEIGHTS = {
-    MetricNames.LOSS: 1.0,
+    MetricNames.LOSS: -1.0,
 }
 
 def _train_model(    
@@ -216,7 +216,7 @@ def _train_model(
 
     # Score function
     merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9)
-    score_fn = lambda _ : merge_metrics_fn(trainer.state.metrics, validator.state.metrics)
+    score_fn = lambda _ : 1. / (1. + merge_metrics_fn(trainer.state.metrics, validator.state.metrics)) # minimize loss
 
     # Learning rate scheduler
     if not update_lr_batchwise:

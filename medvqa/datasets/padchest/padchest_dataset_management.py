@@ -77,8 +77,9 @@ class PadChestTrainingDataMode:
     TRAIN_ONLY = 'train'
     ALL = 'all'
 
+_65535_to_255_COEF = 255. / 65535.
 def _65535_to_255(x):
-    return x * 255 / 65535
+    return x * _65535_to_255_COEF
 
 class PadChestVQADataset(Dataset):
     def __init__(self, image_paths, transform, labels, localizations,
@@ -414,12 +415,14 @@ class PadChest_VQA_Trainer(_PadChest_Base):
         if len(pos_indices_) > 0:
             pos_loc_answers_vqa_dataset = self._create_vqa_dataset(pos_indices_, q_id,
                 answers=self.localization_answers, shuffle=shuffle, infinite=infinite)
-            print(f'Example of positive localization answer: {self.localization_answers[random.choice(pos_indices_)]}')
+            ans = self.tokenizer.ids2string(self.localization_answers[random.choice(pos_indices_)])
+            print(f'Example of positive localization answer: {ans}')
             datasets_.append(pos_loc_answers_vqa_dataset)
         if len(neg_indices_) > 0:
             neg_loc_answers_vqa_dataset = self._create_vqa_dataset(neg_indices_, q_id,
                 answers=self.localization_answers, shuffle=shuffle, infinite=infinite)
-            print(f'Example of negative localization answer: {self.localization_answers[random.choice(neg_indices_)]}')
+            ans = self.tokenizer.ids2string(self.localization_answers[random.choice(neg_indices_)])
+            print(f'Example of negative localization answer: {ans}')
             datasets_.append(neg_loc_answers_vqa_dataset)
         assert len(datasets_) > 0
         if len(datasets_) == 1:
