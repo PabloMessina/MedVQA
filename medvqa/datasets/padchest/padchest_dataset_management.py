@@ -1,3 +1,4 @@
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.utils.files import read_lines_from_txt
 from medvqa.datasets.padchest import (
     PADCHEST_LABELS_CSV_PATH,
@@ -127,27 +128,11 @@ class PadChestVQADataset(Dataset):
 
         return output
 
-class PadChestImageDataset(Dataset):
+class PadChestImageDataset(BasicImageDataset):
     def __init__(self, image_paths, transform, indices, shuffle_indices=True, infinite=False):
-        self.image_paths = image_paths
-        self.transform = transform
-        self.indices = indices
-        self.infinite = infinite
-
-        if shuffle_indices: np.random.shuffle(self.indices)
-        self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
-
-    def __len__(self):
-        return self._len
-
-    def __getitem__(self, idx):
-        if self.infinite: idx %= len(self.indices)
-        idx = self.indices[idx]
-        output = dict(
-            idx=idx,
-            i = self.transform(Image.open(self.image_paths[idx]).point(_65535_to_255).convert('RGB')),
-        )
-        return output
+        super().__init__(image_paths, transform, indices, shuffle_indices, infinite)
+    def _get_image(self, idx): # Override BasicImageDataset._get_image
+        return self.transform(Image.open(self.image_paths[idx]).point(_65535_to_255).convert('RGB'))
 
 def _parse_and_clean_labels(labels):
     labels = eval(labels)
@@ -155,159 +140,160 @@ def _parse_and_clean_labels(labels):
     labels = [label for label in labels if label != '']
     return labels
 
-class _PadChest_Base:
+def _PadChest_common_init(self, transform, batch_size, collate_batch_fn, num_workers,
+    train_study_ids_path, val_study_ids_path, test_study_ids_path,
+    training_data_mode=PadChestTrainingDataMode.TRAIN_ONLY,
+    use_validation_set=True, include_image=True,
+    keep_one_projection_per_study=True):
 
-    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
-                 train_study_ids_path, val_study_ids_path, test_study_ids_path,
-                 training_data_mode=PadChestTrainingDataMode.ALL,
-                 use_validation_set=True, include_image=True,
-                 keep_one_projection_per_study=True):
+    assert train_study_ids_path is not None, 'Must provide train_study_ids_path'
+    assert val_study_ids_path is not None, 'Must provide val_study_ids_path'
+    assert test_study_ids_path is not None, 'Must provide test_study_ids_path'
+    if training_data_mode == PadChestTrainingDataMode.ALL:
+        # Prevent data leakage
+        assert not use_validation_set, 'Cannot use validation set if training_data_mode is ALL'
 
-        assert train_study_ids_path is not None, 'Must provide train_study_ids_path'
-        assert val_study_ids_path is not None, 'Must provide val_study_ids_path'
-        assert test_study_ids_path is not None, 'Must provide test_study_ids_path'
+    self.transform = transform
+    self.batch_size = batch_size
+    self.collate_batch_fn = collate_batch_fn
+    self.num_workers = num_workers
+    self.use_validation_set = use_validation_set
+    self.include_image = include_image
 
-        self.transform = transform
-        self.batch_size = batch_size
-        self.collate_batch_fn = collate_batch_fn
-        self.num_workers = num_workers
-        self.use_validation_set = use_validation_set
-        self.include_image = include_image
+    # Load study ids
+    train_study_ids = read_lines_from_txt(train_study_ids_path)
+    val_study_ids = read_lines_from_txt(val_study_ids_path)
+    test_study_ids = read_lines_from_txt(test_study_ids_path)
+    all_study_ids = train_study_ids + val_study_ids + test_study_ids
+    all_study_ids_set = set(all_study_ids)
+    train_study_ids_set = set(train_study_ids)
+    val_study_ids_set = set(val_study_ids)
+    test_study_ids_set = set(test_study_ids)
 
-        # Load study ids
-        train_study_ids = read_lines_from_txt(train_study_ids_path)
-        val_study_ids = read_lines_from_txt(val_study_ids_path)
-        test_study_ids = read_lines_from_txt(test_study_ids_path)
-        all_study_ids = train_study_ids + val_study_ids + test_study_ids
-        all_study_ids_set = set(all_study_ids)
-        train_study_ids_set = set(train_study_ids)
-        val_study_ids_set = set(val_study_ids)
-        test_study_ids_set = set(test_study_ids)
+    # Load the labels CSV file
+    labels_df = pd.read_csv(PADCHEST_LABELS_CSV_PATH)
+    print(f'Number of rows before filtering: {len(labels_df)}')
 
-        # Load the labels CSV file
-        labels_df = pd.read_csv(PADCHEST_LABELS_CSV_PATH)
-        print(f'Number of rows before filtering: {len(labels_df)}')
+    # Keep only the following columns: ImageID, StudyID, PatientSex_DICOM, Projection,
+    # Labels, Localizations, LabelsLocalizationsBySentence
+    labels_df = labels_df[['ImageID', 'StudyID', 'PatientSex_DICOM', 'Projection',
+                                'Labels', 'Localizations', 'LabelsLocalizationsBySentence']]
 
-        # Keep only the following columns: ImageID, StudyID, PatientSex_DICOM, Projection,
-        # Labels, Localizations, LabelsLocalizationsBySentence
-        labels_df = labels_df[['ImageID', 'StudyID', 'PatientSex_DICOM', 'Projection',
-                                 'Labels', 'Localizations', 'LabelsLocalizationsBySentence']]
+    # Drop nan rows
+    labels_df = labels_df.dropna()
+    print(f'Number of rows after filtering: {len(labels_df)} (dropped nan rows)')
 
-        # Drop nan rows
-        labels_df = labels_df.dropna()
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped nan rows)')
+    # Filter the labels to only include the study ids we want
+    labels_df = labels_df[labels_df['StudyID'].isin(all_study_ids_set)]
+    print(f'Number of rows after filtering: {len(labels_df)} (dropped study ids not in all_study_ids_set)')
 
-        # Filter the labels to only include the study ids we want
-        labels_df = labels_df[labels_df['StudyID'].isin(all_study_ids_set)]
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped study ids not in all_study_ids_set)')
+    # Filter the labels to only include the genders we want
+    labels_df = labels_df[labels_df['PatientSex_DICOM'].isin(PADCHEST_GENDERS)]
+    print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with unexpected PatientSex_DICOM)')
 
-        # Filter the labels to only include the genders we want
-        labels_df = labels_df[labels_df['PatientSex_DICOM'].isin(PADCHEST_GENDERS)]
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with unexpected PatientSex_DICOM)')
+    # Filter the labels to only include the projections we want
+    labels_df = labels_df[labels_df['Projection'].isin(PADCHEST_PROJECTIONS)]
+    print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with unexpected Projection)')
 
-        # Filter the labels to only include the projections we want
-        labels_df = labels_df[labels_df['Projection'].isin(PADCHEST_PROJECTIONS)]
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with unexpected Projection)')
+    # Load broken images
+    broken_images = read_lines_from_txt(PADCHEST_BROKEN_IMAGES_TXT_PATH)
+    broken_image_names = [os.path.basename(x) for x in broken_images]
+    broken_image_names_set = set(broken_image_names)
+    # Filter the labels to only include non-broken images
+    labels_df = labels_df[~labels_df['ImageID'].isin(broken_image_names_set)]
+    print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with broken images)')
 
-        # Load broken images
-        broken_images = read_lines_from_txt(PADCHEST_BROKEN_IMAGES_TXT_PATH)
-        broken_image_names = [os.path.basename(x) for x in broken_images]
-        broken_image_names_set = set(broken_image_names)
-        # Filter the labels to only include non-broken images
-        labels_df = labels_df[~labels_df['ImageID'].isin(broken_image_names_set)]
-        print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with broken images)')
+    # For each study, keep only one row according to their projection, as follows:
+    # PA > AP > AP_horizontal > L > COSTAL
+    if keep_one_projection_per_study:
+        labels_df['Projection_Rank'] = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x))
+        labels_df = labels_df.sort_values(by=['StudyID', 'Projection_Rank'], ascending=True)
+        labels_df = labels_df.drop_duplicates(subset=['StudyID'], keep='first')
+        labels_df = labels_df.drop(columns=['Projection_Rank'])        
+        print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with duplicate StudyID)')
 
-        # For each study, keep only one row according to their projection, as follows:
-        # PA > AP > AP_horizontal > L > COSTAL
-        if keep_one_projection_per_study:
-            labels_df['Projection_Rank'] = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x))
-            labels_df = labels_df.sort_values(by=['StudyID', 'Projection_Rank'], ascending=True)
-            labels_df = labels_df.drop_duplicates(subset=['StudyID'], keep='first')
-            labels_df = labels_df.drop(columns=['Projection_Rank'])        
-            print(f'Number of rows after filtering: {len(labels_df)} (dropped rows with duplicate StudyID)')
+    # Image paths
+    self.image_paths = [os.path.join(PADCHEST_IMAGES_SMALL_DIR, image_id) for image_id in labels_df['ImageID']]
 
-        # Image paths
-        self.image_paths = [os.path.join(PADCHEST_IMAGES_SMALL_DIR, image_id) for image_id in labels_df['ImageID']]
+    # Gender labels
+    self.genders = labels_df['PatientSex_DICOM'].apply(lambda x: PADCHEST_GENDERS.index(x)).values
 
-        # Gender labels
-        self.genders = labels_df['PatientSex_DICOM'].apply(lambda x: PADCHEST_GENDERS.index(x)).values
+    # Projection labels
+    self.projections = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x)).values
 
-        # Projection labels
-        self.projections = labels_df['Projection'].apply(lambda x: PADCHEST_PROJECTIONS.index(x)).values
+    # Labels
+    labels_set = set()
+    for labels in labels_df['Labels']:
+        labels = _parse_and_clean_labels(labels)
+        labels_set.update(labels)
+    labels_list = list(labels_set)
+    labels_list.sort()
+    label2idx = {label: idx for idx, label in enumerate(labels_list)}
+    print(f'Number of labels: {len(labels_list)}')        
+    labels_matrix = np.zeros((len(labels_df), len(labels_list)), dtype=np.int8)
+    for i, labels in enumerate(labels_df['Labels']):
+        labels = _parse_and_clean_labels(labels)
+        for label in labels:
+            labels_matrix[i, label2idx[label]] = 1
+    self.labels_list = labels_list
+    self.labels = labels_matrix
+    assert len(self.labels_list) == PADCHEST_NUM_LABELS
 
-        # Labels
-        labels_set = set()
-        for labels in labels_df['Labels']:
-            labels = _parse_and_clean_labels(labels)
-            labels_set.update(labels)
-        labels_list = list(labels_set)
-        labels_list.sort()
-        label2idx = {label: idx for idx, label in enumerate(labels_list)}
-        print(f'Number of labels: {len(labels_list)}')        
-        labels_matrix = np.zeros((len(labels_df), len(labels_list)), dtype=np.int8)
-        for i, labels in enumerate(labels_df['Labels']):
-            labels = _parse_and_clean_labels(labels)
-            for label in labels:
-                labels_matrix[i, label2idx[label]] = 1
-        self.labels_list = labels_list
-        self.labels = labels_matrix
-        assert len(self.labels_list) == PADCHEST_NUM_LABELS
+    # Localizations
+    localizations_set = set()
+    for localizations in labels_df['Localizations']:
+        localizations = eval(localizations)
+        for localization in localizations:
+            localization = localization.strip().lower()
+            localizations_set.add(localization)
+    localizations_list = list(localizations_set)
+    localizations_list.sort()
+    localization2idx = {localization: idx for idx, localization in enumerate(localizations_list)}
+    print(f'Number of localizations: {len(localizations_list)}')
+    localizations_matrix = np.zeros((len(labels_df), len(localizations_list)), dtype=np.int8)
+    for i, localizations in enumerate(labels_df['Localizations']):
+        localizations = eval(localizations)
+        for localization in localizations:
+            localization = localization.strip().lower()
+            localizations_matrix[i, localization2idx[localization]] = 1
+    self.localizations_list = localizations_list
+    self.localizations = localizations_matrix
+    assert len(self.localizations_list) == PADCHEST_NUM_LOCALIZATIONS
 
-        # Localizations
-        localizations_set = set()
-        for localizations in labels_df['Localizations']:
-            localizations = eval(localizations)
-            for localization in localizations:
-                localization = localization.strip().lower()
-                localizations_set.add(localization)
-        localizations_list = list(localizations_set)
-        localizations_list.sort()
-        localization2idx = {localization: idx for idx, localization in enumerate(localizations_list)}
-        print(f'Number of localizations: {len(localizations_list)}')
-        localizations_matrix = np.zeros((len(labels_df), len(localizations_list)), dtype=np.int8)
-        for i, localizations in enumerate(labels_df['Localizations']):
-            localizations = eval(localizations)
-            for localization in localizations:
-                localization = localization.strip().lower()
-                localizations_matrix[i, localization2idx[localization]] = 1
-        self.localizations_list = localizations_list
-        self.localizations = localizations_matrix
-        assert len(self.localizations_list) == PADCHEST_NUM_LOCALIZATIONS
-
-        # Train, val, test indices
-        train_indices = []
-        val_indices = []
-        test_indices = []
-        for i, study_id in enumerate(labels_df['StudyID']):
-            if study_id in train_study_ids_set:
-                train_indices.append(i)
-            elif study_id in val_study_ids_set:
-                val_indices.append(i)
-            elif study_id in test_study_ids_set:
-                test_indices.append(i)
-            else:
-                raise ValueError(f'Study ID {study_id} is not in train, val, or test study IDs.')
-        
-        if training_data_mode == PadChestTrainingDataMode.ALL:
-            self.train_indices = train_indices + val_indices + test_indices
-        elif training_data_mode == PadChestTrainingDataMode.TRAIN_ONLY:
-            self.train_indices = train_indices
+    # Train, val, test indices
+    train_indices = []
+    val_indices = []
+    test_indices = []
+    for i, study_id in enumerate(labels_df['StudyID']):
+        if study_id in train_study_ids_set:
+            train_indices.append(i)
+        elif study_id in val_study_ids_set:
+            val_indices.append(i)
+        elif study_id in test_study_ids_set:
+            test_indices.append(i)
         else:
-            raise ValueError(f'Invalid training data mode: {training_data_mode}')        
-        self.val_indices = val_indices
-        self.test_indices = test_indices
+            raise ValueError(f'Study ID {study_id} is not in train, val, or test study IDs.')
+    
+    if training_data_mode == PadChestTrainingDataMode.ALL:
+        self.train_indices = train_indices + val_indices + test_indices
+    elif training_data_mode == PadChestTrainingDataMode.TRAIN_ONLY:
+        self.train_indices = train_indices
+    else:
+        raise ValueError(f'Invalid training data mode: {training_data_mode}')        
+    self.val_indices = val_indices
+    self.test_indices = test_indices
 
-        self.labels_df = labels_df
+    self.labels_df = labels_df
 
 
-class PadChest_VQA_Trainer(_PadChest_Base):
+class PadChest_VQA_Trainer:
 
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
                  train_study_ids_path, val_study_ids_path, test_study_ids_path,
-                 training_data_mode=PadChestTrainingDataMode.ALL,
+                 training_data_mode=PadChestTrainingDataMode.TRAIN_ONLY,
                  use_validation_set=True, include_image=True):
 
-        super().__init__(transform, batch_size, collate_batch_fn, num_workers,
+        _PadChest_common_init(self, transform, batch_size, collate_batch_fn, num_workers,
                             train_study_ids_path, val_study_ids_path, test_study_ids_path,
                             training_data_mode, use_validation_set, include_image)
 
@@ -581,27 +567,24 @@ class PadChest_VQA_Trainer(_PadChest_Base):
         localizations_str = ', '.join(self.localizations_list[i] for i in range(len(localizations)) if localizations[i] == 1)
         print(f'Localizations: {localizations_str}')
 
-class PadChest_MAE_Trainer(_PadChest_Base):
+class PadChest_MAE_Trainer(MAETrainerBase):
 
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
                  train_study_ids_path, val_study_ids_path, test_study_ids_path,
-                 training_data_mode=PadChestTrainingDataMode.ALL,
+                 training_data_mode=PadChestTrainingDataMode.TRAIN_ONLY,
                  use_validation_set=True):
 
-        super().__init__(transform, batch_size, collate_batch_fn, num_workers,
+        _PadChest_common_init(self, transform, batch_size, collate_batch_fn, num_workers,
                             train_study_ids_path, val_study_ids_path, test_study_ids_path,
                             training_data_mode, use_validation_set, keep_one_projection_per_study=False)
 
-        # Create datasets and dataloaders
-        self.train_dataset, self.train_dataloader = \
-            self._create_train_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
-        print(f'Train dataset size: {len(self.train_dataset)}')
-        if use_validation_set:
-            self.val_dataset, self.val_dataloader = \
-                self._create_val_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
-            print(f'Val dataset size: {len(self.val_dataset)}')
+        labels_getter = lambda i: self.labels[i]
+        super().__init__(self.train_indices, self.val_indices, self.test_indices,
+                         list(range(len(self.labels_list))),
+                         labels_getter, batch_size, collate_batch_fn, num_workers,
+                         use_validation_set=use_validation_set)
 
-    def _create_image_dataset(self, indices, shuffle, infinite):
+    def _create_mae_dataset(self, indices, shuffle, infinite):
         return PadChestImageDataset(
             image_paths=self.image_paths,
             transform=self.transform,
@@ -609,65 +592,3 @@ class PadChest_MAE_Trainer(_PadChest_Base):
             shuffle_indices=shuffle,
             infinite=infinite,
         )
-    
-    def _create_train_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
-        print('Creating train dataset and dataloader ...')
-        datasets = []
-        counts = []
-        
-        # Label-specific datasets
-        for i in tqdm(range(len(self.labels_list))):
-            pos_indices = []
-            for j in self.train_indices:
-                if self.labels[j][i] == 1:
-                    pos_indices.append(j)
-            if len(pos_indices) > 0:                
-                counts.append(len(pos_indices))
-                pos_indices = np.array(pos_indices, dtype=np.int32)
-                pos_image_dataset = self._create_image_dataset(pos_indices, shuffle=True, infinite=True)
-                datasets.append(pos_image_dataset)
-        # Dataset with no labels
-        neg_indices = []
-        for j in self.train_indices:
-            if np.sum(self.labels[j]) == 0:
-                neg_indices.append(j)
-        if len(neg_indices) > 0:
-            counts.append(len(neg_indices))
-            neg_indices = np.array(neg_indices, dtype=np.int32)
-            neg_image_dataset = self._create_image_dataset(neg_indices, shuffle=True, infinite=True)
-            datasets.append(neg_image_dataset)
-
-        # Create dataset
-        if len(datasets) == 1:
-            train_dataset = datasets[0]
-        else:
-            weights = get_imbalance_reduced_weights(counts, 0.4)
-            train_dataset = CompositeInfiniteDataset(datasets, weights)
-
-        # Create dataloader
-        train_dataloader = DataLoader(train_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            collate_fn=collate_batch_fn,
-            pin_memory=True,
-        )
-
-        print('Done!')
-        # Return dataset and dataloader
-        return train_dataset, train_dataloader
-
-    def _create_val_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
-        print('Creating val dataset and dataloader ...')
-        val_dataset = self._create_image_dataset(self.val_indices, shuffle=False, infinite=False)
-        val_dataloader = DataLoader(val_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            collate_fn=collate_batch_fn,
-            pin_memory=True,
-        )
-        print('Done!')
-        return val_dataset, val_dataloader
-
-        

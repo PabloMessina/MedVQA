@@ -1,6 +1,9 @@
 import os
-from medvqa.datasets.visual_module import VM_Trainer
-from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
+from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import get_iuxray_image_path
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase, VM_Trainer
+from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR, IUXRAY_IMAGE_INFO_JSON_PATH, IUXRAY_REPORTS_MIN_JSON_PATH, get_invalid_images
+from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.files import get_cached_json_file, load_pickle
 
 class IUXRAY_VisualModuleTrainer(VM_Trainer):
 
@@ -36,3 +39,42 @@ class IUXRAY_VisualModuleTrainer(VM_Trainer):
                         validation_only = validation_only,
                         one_question_per_batch = one_question_per_batch,
                         question_balanced = question_balanced)
+
+class IUXRAY_MAE_Trainer(MAETrainerBase):
+    def __init__(self, qa_adapted_reports_filename, chexpert_labels_filename, transform, batch_size, collate_batch_fn, num_workers):
+
+        iuxray_qa_reports = get_cached_json_file(os.path.join(IUXRAY_CACHE_DIR, qa_adapted_reports_filename))
+        iuxray_metadata = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
+        chexpert_labels = load_pickle(os.path.join(IUXRAY_CACHE_DIR, chexpert_labels_filename))
+        
+        report_ids = []
+        image_paths = []
+
+        invalid_images = get_invalid_images()
+
+        for ri in range(len(iuxray_qa_reports['reports'])):
+            report = iuxray_qa_reports['reports'][ri]
+            metadata = iuxray_metadata[report['filename']]
+            images = metadata['images']
+
+            for elem in images:
+                image_name = f'{elem["id"]}.png'
+                if image_name not in invalid_images:
+                    image_path = get_iuxray_image_path(image_name)
+                    report_ids.append(ri)
+                    image_paths.append(image_path)
+
+        train_indices = list(range(len(report_ids)))
+
+        self.report_ids = report_ids
+        self.image_paths = image_paths
+        self.train_indices = train_indices
+        self.transform = transform
+
+        labels_getter = lambda i: chexpert_labels[report_ids[i]]
+        super().__init__(train_indices, None, None, list(range(1, len(CHEXPERT_LABELS))),
+                         labels_getter, batch_size, collate_batch_fn, num_workers,
+                         use_validation_set=False)
+
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)

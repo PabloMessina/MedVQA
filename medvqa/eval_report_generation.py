@@ -316,7 +316,8 @@ def _evaluate_model(
     tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path,
                                                     mimiccxr_qa_adapted_reports_path],
                           min_freq=vocab_min_freq,
-                          medical_terms_frequency_filename=medical_terms_frequency_filename)
+                          medical_terms_frequency_filename=medical_terms_frequency_filename,
+                          vocab_filepath=tokenizer_kwargs['vocab_filepath'])
     
     count_print('Estimating maximum answer length ...')
     max_answer_length = _estimate_maximum_answer_length([iuxray_qa_reports, mimiccxr_qa_reports], tokenizer)

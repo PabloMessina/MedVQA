@@ -23,189 +23,188 @@ from medvqa.datasets.dataloading_utils import (
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 
-def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
-    """Splits questions and answers into train and val splits.
+# def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
+#     """Splits questions and answers into train and val splits.
 
-    Question-answer pairs are sampled for validation in a stratified manner, by sorting answers
-    by length (for each question id), splitting answers into bins and then sampling randomly
-    from each bin.
+#     Question-answer pairs are sampled for validation in a stratified manner, by sorting answers
+#     by length (for each question id), splitting answers into bins and then sampling randomly
+#     from each bin.
 
-    Args:
-        question_ids (list of ints): list of question ids, each id can be mapped to the original question
-        answers (list of tokenized answers): each answer is a list of tokens
-        n_vals_per_question (int, optional): number of validation instances to sample per question. Defaults to 10.
-        min_question_count (int, optional): minimun number of examples for a question id to be considered for validation. Defaults to 100.
+#     Args:
+#         question_ids (list of ints): list of question ids, each id can be mapped to the original question
+#         answers (list of tokenized answers): each answer is a list of tokens
+#         n_vals_per_question (int, optional): number of validation instances to sample per question. Defaults to 10.
+#         min_question_count (int, optional): minimun number of examples for a question id to be considered for validation. Defaults to 100.
 
-    Returns:
-        pair of dicts: each dict maps question ids to list of indices. The actual questions
-        and answers can be recovered from these indices.
-    """
+#     Returns:
+#         pair of dicts: each dict maps question ids to list of indices. The actual questions
+#         and answers can be recovered from these indices.
+#     """
     
+#     tmp = dict()
+#     for i, (qi, a) in enumerate(zip(question_ids, answers)):
+#         try:
+#             list_ = tmp[qi]
+#         except KeyError:
+#             list_ = tmp[qi] = []
+#         list_.append((len(a), i))
+    
+#     val_rids = set()
+#     forbidden_rids = set()
+#     for list_ in tmp.values():
+#         list_.sort()
+#         if len(list_) >= min_question_count:
+#             chunk_size = len(list_) // n_vals_per_question
+#             offset = 0
+#             while offset < len(list_):
+#                 min_i = offset
+#                 max_i = min(offset + chunk_size, len(list_)) - 1
+#                 if max_i - min_i + 1 == chunk_size:
+#                     val_i = random.randint(min_i, max_i)
+#                     val_rids.add(report_ids[list_[val_i][1]])
+#                 offset += chunk_size
+#         else:
+#             forbidden_rids.update(report_ids[e[1]] for e in list_)
+    
+#     # split indices into train and validation
+#     train_indices = { qid:[] for qid in tmp.keys() }
+#     val_indices = []
+#     for qid, list_ in tmp.items():
+#         for _, i in list_:
+#             if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
+#                 val_indices.append(i)
+#             else:
+#                 train_indices[qid].append(i)
+
+#     # convert to numpy arrays
+#     for qid in train_indices.keys():
+#         train_indices[qid] = np.array(train_indices[qid], dtype=int)
+#     val_indices = np.array(val_indices, dtype=int)
+
+#     return train_indices, val_indices
+
+# def _get_diverse_samples(k, indices, class_getter, max_tries=200):
+#     samples = []
+#     classes = []
+#     tries = 0
+#     while len(samples) < k and tries < max_tries:
+#         tries += 1
+#         i = random.choice(indices)
+#         c = class_getter(i)
+#         if c in classes: continue
+#         samples.append(i)
+#         classes.append(c)
+#     assert len(samples) > 0
+#     return samples
+
+def _group_indices_by_question_id(indices, question_ids, convert_to_numpy=True):
+    # group by question id
     tmp = dict()
-    for i, (qi, a) in enumerate(zip(question_ids, answers)):
-        try:
-            list_ = tmp[qi]
-        except KeyError:
-            list_ = tmp[qi] = []
-        list_.append((len(a), i))
-    
-    val_rids = set()
-    forbidden_rids = set()
-    for list_ in tmp.values():
-        list_.sort()
-        if len(list_) >= min_question_count:
-            chunk_size = len(list_) // n_vals_per_question
-            offset = 0
-            while offset < len(list_):
-                min_i = offset
-                max_i = min(offset + chunk_size, len(list_)) - 1
-                if max_i - min_i + 1 == chunk_size:
-                    val_i = random.randint(min_i, max_i)
-                    val_rids.add(report_ids[list_[val_i][1]])
-                offset += chunk_size
-        else:
-            forbidden_rids.update(report_ids[e[1]] for e in list_)
-    
-    # split indices into train and validation
-    train_indices = { qid:[] for qid in tmp.keys() }
-    val_indices = []
-    for qid, list_ in tmp.items():
-        for _, i in list_:
-            if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
-                val_indices.append(i)
-            else:
-                train_indices[qid].append(i)
-
-    # convert to numpy arrays
-    for qid in train_indices.keys():
-        train_indices[qid] = np.array(train_indices[qid], dtype=int)
-    val_indices = np.array(val_indices, dtype=int)
-
-    return train_indices, val_indices
-
-def _get_diverse_samples(k, indices, class_getter, max_tries=200):
-    samples = []
-    classes = []
-    tries = 0
-    while len(samples) < k and tries < max_tries:
-        tries += 1
-        i = random.choice(indices)
-        c = class_getter(i)
-        if c in classes: continue
-        samples.append(i)
-        classes.append(c)
-    assert len(samples) > 0
-    return samples
-
-def _assign_all_data_to_train(report_ids, question_ids):
-    
-    # split indices by question
-    n = len(report_ids)
-    train_indices = dict()
-    for i in range(n):
+    for i in indices:
         qid = question_ids[i]
         try:
-            tmp = train_indices[qid]
+            tmp[qid].append(i)
         except KeyError:
-            tmp = train_indices[qid] = []
-        tmp.append(i)
-    
+            tmp[qid] = [i]
     # convert to numpy arrays
-    for qid in train_indices.keys():
-        train_indices[qid] = np.array(train_indices[qid], dtype=int)
+    if convert_to_numpy:
+        for qid in tmp.keys(): tmp[qid] = np.array(tmp[qid], dtype=int)
+    return tmp
 
+def _assign_all_data_to_train(question_ids):    
+    n = len(question_ids)
+    train_indices = _group_indices_by_question_id(range(n), question_ids)
     print(f'All data assigned to train: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
           f' len(val_indices) = 0')
-
     return train_indices
 
-def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
-        n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50,
-        chexpert_labels=None, n_positive_per_chexpert_label=7):
+# def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
+#         n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50,
+#         chexpert_labels=None, n_positive_per_chexpert_label=7):
 
-    assert n_healthy_per_question < min_question_count
-    assert n_unhealthy_per_question < min_question_count
+#     assert n_healthy_per_question < min_question_count
+#     assert n_unhealthy_per_question < min_question_count
 
-    health_metadata = balanced_metadata['healthy']
-    tags_based_class_metadata = balanced_metadata['tags_based_class']
+#     health_metadata = balanced_metadata['healthy']
+#     tags_based_class_metadata = balanced_metadata['tags_based_class']
     
-    # split indices by question
-    n = len(report_ids)
-    qid2indices = dict()
-    for i in range(n):
-        qid = question_ids[i]
-        try:
-            tmp = qid2indices[qid]
-        except KeyError:
-            tmp = qid2indices[qid] = []
-        tmp.append(i)
+#     # split indices by question
+#     n = len(report_ids)
+#     qid2indices = dict()
+#     for i in range(n):
+#         qid = question_ids[i]
+#         try:
+#             tmp = qid2indices[qid]
+#         except KeyError:
+#             tmp = qid2indices[qid] = []
+#         tmp.append(i)
     
-    # choose report ids for validation
-    val_rids = set()
-    forbidden_rids = set()
-    for qid, indices in qid2indices.items():
-        # split indices into healthy and unhealthy
-        h_indices = []
-        unh_indices = []
-        for i in indices:
-            healthy = health_metadata[report_ids[i]][str(qid)]
-            if healthy: h_indices.append(i)
-            else: unh_indices.append(i)
+#     # choose report ids for validation
+#     val_rids = set()
+#     forbidden_rids = set()
+#     for qid, indices in qid2indices.items():
+#         # split indices into healthy and unhealthy
+#         h_indices = []
+#         unh_indices = []
+#         for i in indices:
+#             healthy = health_metadata[report_ids[i]][str(qid)]
+#             if healthy: h_indices.append(i)
+#             else: unh_indices.append(i)
         
-        # get diverse samples from each category         
-        class_getter = lambda i : tags_based_class_metadata[report_ids[i]][str(qid)]
+#         # get diverse samples from each category         
+#         class_getter = lambda i : tags_based_class_metadata[report_ids[i]][str(qid)]
         
-        if len(h_indices) >= min_question_count:
-            h_samples = _get_diverse_samples(n_healthy_per_question, h_indices, class_getter)
-            val_rids.update(report_ids[i] for i in h_samples)
-        else:
-            forbidden_rids.update(report_ids[i] for i in h_indices)
+#         if len(h_indices) >= min_question_count:
+#             h_samples = _get_diverse_samples(n_healthy_per_question, h_indices, class_getter)
+#             val_rids.update(report_ids[i] for i in h_samples)
+#         else:
+#             forbidden_rids.update(report_ids[i] for i in h_indices)
 
-        if len(unh_indices) >= min_question_count:
-            unh_samples = _get_diverse_samples(n_unhealthy_per_question, unh_indices, class_getter)
-            val_rids.update(report_ids[i] for i in unh_samples)
-        else:
-            forbidden_rids.update(report_ids[i] for i in unh_indices)
+#         if len(unh_indices) >= min_question_count:
+#             unh_samples = _get_diverse_samples(n_unhealthy_per_question, unh_indices, class_getter)
+#             val_rids.update(report_ids[i] for i in unh_samples)
+#         else:
+#             forbidden_rids.update(report_ids[i] for i in unh_indices)
     
-    # bin report ids by chexpert label
-    if chexpert_labels is not None:
-        print('_split_data_train_val__balanced(): sampling from chexpert labels')
-        binned_report_ids = [[] for _ in range(len(CHEXPERT_LABELS))]
-        for rid in report_ids:
-            if rid in forbidden_rids: continue
-            labels = chexpert_labels[rid]
-            for i, label in enumerate(labels):
-                if label == 1:
-                    binned_report_ids[i].append(rid)
-        # add examples from each label to validation set
-        for bin in binned_report_ids:
-            bin = list(set(bin))
-            if len(bin) > 0:
-                print('len(bin)=', len(bin), ', label=', chexpert_labels[bin[0]])
-            else:
-                print('len(bin)=', len(bin))
-            if len(bin) > n_positive_per_chexpert_label:
-                val_rids.update(random.sample(bin, n_positive_per_chexpert_label))
+#     # bin report ids by chexpert label
+#     if chexpert_labels is not None:
+#         print('_split_data_train_val__balanced(): sampling from chexpert labels')
+#         binned_report_ids = [[] for _ in range(len(CHEXPERT_LABELS))]
+#         for rid in report_ids:
+#             if rid in forbidden_rids: continue
+#             labels = chexpert_labels[rid]
+#             for i, label in enumerate(labels):
+#                 if label == 1:
+#                     binned_report_ids[i].append(rid)
+#         # add examples from each label to validation set
+#         for bin in binned_report_ids:
+#             bin = list(set(bin))
+#             if len(bin) > 0:
+#                 print('len(bin)=', len(bin), ', label=', chexpert_labels[bin[0]])
+#             else:
+#                 print('len(bin)=', len(bin))
+#             if len(bin) > n_positive_per_chexpert_label:
+#                 val_rids.update(random.sample(bin, n_positive_per_chexpert_label))
     
-    # split indices into train and validation
-    train_indices = { qid:[] for qid in qid2indices.keys() }
-    val_indices = []
-    for qid, indices in qid2indices.items():    
-        for i in indices:
-            if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
-                val_indices.append(i)
-            else:
-                train_indices[qid].append(i)
+#     # split indices into train and validation
+#     train_indices = { qid:[] for qid in qid2indices.keys() }
+#     val_indices = []
+#     for qid, indices in qid2indices.items():    
+#         for i in indices:
+#             if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
+#                 val_indices.append(i)
+#             else:
+#                 train_indices[qid].append(i)
     
-    # convert to numpy arrays
-    for qid in train_indices.keys():
-        train_indices[qid] = np.array(train_indices[qid], dtype=int)
-    val_indices = np.array(val_indices, dtype=int)
+#     # convert to numpy arrays
+#     for qid in train_indices.keys():
+#         train_indices[qid] = np.array(train_indices[qid], dtype=int)
+#     val_indices = np.array(val_indices, dtype=int)
 
-    print(f'balanced splitting: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
-          f' len(val_indices) = {len(val_indices)}')
+#     print(f'balanced splitting: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
+#           f' len(val_indices) = {len(val_indices)}')
 
-    return train_indices, val_indices
+#     return train_indices, val_indices
 
 def load_precomputed_visual_features(precomputed_visual_features_path, images):
     print(f'Loading precomputed visual features from {precomputed_visual_features_path} ...')
@@ -229,7 +228,7 @@ def load_precomputed_visual_features(precomputed_visual_features_path, images):
 
 class VQADataset(Dataset):
     
-    def __init__(self, report_ids, indices, source_dataset_name,
+    def __init__(self, report_ids, indices,
                 images=None, transform=None,
                 questions=None, answers=None,
                 question=None, answer=None,
@@ -259,7 +258,6 @@ class VQADataset(Dataset):
         self.answers = answers
         self.indices = indices
         self.transform = transform
-        self.source_dataset_name = source_dataset_name
         self.infinite = infinite
         self.include_answer = include_answer
         self.include_image = include_image
@@ -465,10 +463,7 @@ class VQA_Base(LabelBasedVQAClass):
                 classify_questions = False,
                 chexpert_labels_path = None,
                 question_labels_path = None,
-                dataset_name = None,
-                split_kwargs = None,
-                load_split_from_path = None,
-                balanced_split = False,
+                balanced_dataloading = False,
                 balanced_metadata_path = None,
                 train_with_all = False,
                 use_report_eval_mode = False,
@@ -491,8 +486,7 @@ class VQA_Base(LabelBasedVQAClass):
         self.classify_orientation = classify_orientation
         self.classify_chexpert = classify_chexpert
         self.classify_questions = classify_questions
-        self.balanced_split = balanced_split
-        self.dataset_name = dataset_name
+        self.balanced_dataloading = balanced_dataloading
         self.use_report_eval_mode = use_report_eval_mode
         self.verbose_question = verbose_question
         self.include_image = include_image
@@ -516,7 +510,7 @@ class VQA_Base(LabelBasedVQAClass):
             assert question_labels_path is not None
             self.question_labels = load_pickle(question_labels_path)
         
-        if balanced_split:
+        if balanced_dataloading:
             assert balanced_metadata_path is not None
             self.balanced_metadata = load_pickle(balanced_metadata_path)
             self.chexpert_labels = get_cached_pickle_file(chexpert_labels_path) \
@@ -526,31 +520,22 @@ class VQA_Base(LabelBasedVQAClass):
             self.chexpert_labels = np.array(self.chexpert_labels)
 
         if use_report_eval_mode:
-            assert load_split_from_path is not None
-            self._load_split_from_path(load_split_from_path)
             if (not self._load_cached_data(preprocessing_save_path)):
                 self._preprocess_data()
                 self._save_data(preprocessing_save_path)
-            self.val_indices = np.array(list(range(len(self.report_ids))), dtype=int)
-        else:        
-            if not debug:
-                first_time = not self._load_cached_data(preprocessing_save_path)
-                if not first_time and load_split_from_path is not None:
-                    self._load_split_from_path(load_split_from_path)
-
-            if debug or first_time:                
+                # self.train_report_ids = list(set(report_ids[i] for i in data['train_indices']))
+                # self.val_report_ids = list(set(report_ids[i] for i in data['val_indices']))
+            # self.val_indices = np.array(list(range(len(self.report_ids))), dtype=int)
+        else:
+            first_time = not self._load_cached_data(preprocessing_save_path)
+            if debug or first_time:
                 self._preprocess_data()
-                if training:
-                    if train_with_all:
-                        self._assign_all_data_to_train()
-                    elif load_split_from_path is not None:
-                        self._load_split_from_path(load_split_from_path)
-                    elif balanced_split:
-                        self._split_data_train_val__balanced(**split_kwargs)
-                    else:
-                        self._split_data_train_val(**split_kwargs)                
-                if not debug:
-                    self._save_data(preprocessing_save_path)
+                if not debug: self._save_data(preprocessing_save_path)
+            if training:
+                if train_with_all: self._assign_all_data_to_train()
+                else: self.train_indices = _group_indices_by_question_id(self.train_indices, self.question_ids)
+
+        self._sanity_check_train_val_split()
 
         self._preprocess_noncachable_data()
 
@@ -574,6 +559,15 @@ class VQA_Base(LabelBasedVQAClass):
     
     def _preprocess_data(self):
         raise NotImplementedError('Make sure your specialized class implements this function')
+
+    def _sanity_check_train_val_split(self):
+        if hasattr(self, 'train_indices') and hasattr(self, 'val_indices'):
+            assert type(self.train_indices) == dict
+            val_indices_set = set(self.val_indices)
+            for indices in self.train_indices.values():
+                assert len(set(indices).intersection(val_indices_set)) == 0
+            assert sum(len(indices) for indices in self.train_indices.values()) +\
+                     len(self.val_indices) == len(self.report_ids)
     
     def _preprocess_noncachable_data(self):
         if self.use_precomputed_visual_features:
@@ -598,10 +592,8 @@ class VQA_Base(LabelBasedVQAClass):
         kwargs = dict(
             report_ids=self.report_ids,
             images=self.images,
-            answers=self.answers,
             indices=indices,
             transform=self.transform,
-            source_dataset_name=self.dataset_name,
             include_answer=include_answer,
             include_image=self.include_image,
             shuffle_indices=shuffle_indices,
@@ -621,6 +613,9 @@ class VQA_Base(LabelBasedVQAClass):
             # infinite mode
             infinite=infinite,
         )
+
+        if include_answer:            
+            kwargs['answers']=self.answers
         
         if fixed_qa_pair:
             kwargs['fixed_qa_pair'] = True
@@ -636,32 +631,33 @@ class VQA_Base(LabelBasedVQAClass):
         
         return VQADataset(**kwargs)
 
-    def _load_split_from_path(self, preprocessing_save_path):
-        data = load_pickle(preprocessing_save_path)
-        if self.use_report_eval_mode:
-            report_ids = data['report_ids']
-            self.train_report_ids = list(set(report_ids[i] for i in data['train_indices']))
-            self.val_report_ids = list(set(report_ids[i] for i in data['val_indices']))
-        else:
-            self.train_indices = data['train_indices']
-            self.val_indices = data['val_indices']
-        print(f'Train-val split indices successfully loaded from {preprocessing_save_path}')
+    # def _load_split_from_path(self, preprocessing_save_path):
+    #     data = load_pickle(preprocessing_save_path)
+    #     if self.use_report_eval_mode:
+    #         report_ids = data['report_ids']
+    #         self.train_report_ids = list(set(report_ids[i] for i in data['train_indices']))
+    #         self.val_report_ids = list(set(report_ids[i] for i in data['val_indices']))
+    #     else:
+    #         self.train_indices = data['train_indices']
+    #         self.val_indices = data['val_indices']
+    #     print(f'Train-val split indices successfully loaded from {preprocessing_save_path}')
     
     def _load_cached_data(self, preprocessing_save_path):
         print(f'Checking if data is already cached in path {preprocessing_save_path} ...')
         data = load_pickle(preprocessing_save_path)
         if data is None:
             print('\tNo, it isn\'t :(')
-            return False        
-        self.dataset_name = data['dataset_name']
+            return False
         self.report_ids = data['report_ids']
         self.images = data['images']
         self.questions = data['questions']
         if 'question_ids' in data: # backward compatible hack
             self.question_ids = data['question_ids']
-        self.answers = data['answers']
+        if 'answers' in data:
+            self.answers = data['answers']
         if self.training:
-            self.train_indices = data['train_indices']
+            if 'train_indices' in data:
+                self.train_indices = data['train_indices']
             if not self.train_with_all:
                 self.val_indices = data['val_indices']
         if self.classify_orientation:
@@ -672,17 +668,17 @@ class VQA_Base(LabelBasedVQAClass):
     def _save_data(self, preprocessing_save_path):
         print('saving data to', preprocessing_save_path)
         data = dict(
-            dataset_name = self.dataset_name,
             report_ids = self.report_ids,
             images = self.images,
             questions = self.questions,
             question_ids = self.question_ids,
-            answers = self.answers,
         )
-        if self.training:
+        if hasattr(self, 'answers'):
+            data['answers'] = self.answers
+        if hasattr(self, 'train_indices'):
             data['train_indices'] = self.train_indices
-            if not self.train_with_all:
-                data['val_indices'] = self.val_indices
+        if hasattr(self, 'val_indices'):
+            data['val_indices'] = self.val_indices
         if self.classify_orientation:
             data['orientations'] = self.orientations
         save_to_pickle(data, preprocessing_save_path)
@@ -692,39 +688,39 @@ class VQA_Base(LabelBasedVQAClass):
     def _assign_all_data_to_train(self):
 
         print('Assigning all data to training ...')        
-        self.train_indices = _assign_all_data_to_train(self.report_ids, self.question_ids)
+        self.train_indices = _assign_all_data_to_train(self.question_ids)
     
-    def _split_data_train_val(self,
-                              n_val_examples_per_question=10,
-                              min_train_examples_per_question=100):
+    # def _split_data_train_val(self,
+    #                           n_val_examples_per_question=10,
+    #                           min_train_examples_per_question=100):
         
-        print('Splitting data into training and validation ...')
+    #     print('Splitting data into training and validation ...')
         
-        train_indices, val_indices = _split_data_train_val(self.question_ids,
-                                                          self.answers,
-                                                          n_val_examples_per_question,
-                                                          min_train_examples_per_question)                
-        self.train_indices = train_indices
-        self.val_indices = val_indices
+    #     train_indices, val_indices = _split_data_train_val(self.question_ids,
+    #                                                       self.answers,
+    #                                                       n_val_examples_per_question,
+    #                                                       min_train_examples_per_question)                
+    #     self.train_indices = train_indices
+    #     self.val_indices = val_indices
     
-    def _split_data_train_val__balanced(self,
-                                        n_healthy_per_question=2,
-                                        n_unhealthy_per_question=3,
-                                        min_question_count=100,
-                                        n_positive_per_chexpert_label=7):
+    # def _split_data_train_val__balanced(self,
+    #                                     n_healthy_per_question=2,
+    #                                     n_unhealthy_per_question=3,
+    #                                     min_question_count=100,
+    #                                     n_positive_per_chexpert_label=7):
 
-        print('Splitting data into training and validation in balanced mode ...')
+    #     print('Splitting data into training and validation in balanced mode ...')
 
-        train_indices, val_indices = _split_data_train_val__balanced(self.report_ids,
-                                                                     self.question_ids,
-                                                                     self.balanced_metadata,
-                                                                     n_healthy_per_question,
-                                                                     n_unhealthy_per_question,
-                                                                     min_question_count,
-                                                                     self.chexpert_labels,
-                                                                     n_positive_per_chexpert_label)
-        self.train_indices = train_indices
-        self.val_indices = val_indices
+    #     train_indices, val_indices = _split_data_train_val__balanced(self.report_ids,
+    #                                                                  self.question_ids,
+    #                                                                  self.balanced_metadata,
+    #                                                                  n_healthy_per_question,
+    #                                                                  n_unhealthy_per_question,
+    #                                                                  min_question_count,
+    #                                                                  self.chexpert_labels,
+    #                                                                  n_positive_per_chexpert_label)
+    #     self.train_indices = train_indices
+    #     self.val_indices = val_indices
 
 class BalancedTreeNode:
     
@@ -770,17 +766,12 @@ class VQA_Trainer(VQA_Base):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
-                dataset_name = None,
-                split_kwargs = None,
-                load_split_from_path = None,
-                balanced_split = False,
                 balanced_dataloading = False,
                 balanced_metadata_filename = None,
                 imbalance_reduction_coef = 1,
                 validation_only = False,
                 train_with_all = False,
                 include_answer = True,
-                use_report_eval_mode = False,
                 allowed_questions = None,
                 qa_adapted_reports_filename = None,
                 one_question_per_batch = False,
@@ -799,14 +790,15 @@ class VQA_Trainer(VQA_Base):
         rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if classify_tags else None
         chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) \
             if chexpert_labels_filename is not None else None
-        balanced_metadata_path = os.path.join(cache_dir, balanced_metadata_filename) if balanced_split else None        
+        balanced_metadata_path = os.path.join(cache_dir, balanced_metadata_filename) if balanced_dataloading else None        
         question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
 
         if balanced_dataloading:
-            assert balanced_split
             assert balanced_metadata_path is not None
         
         self.balanced_dataloading = balanced_dataloading
+        print(f'self.balanced_dataloading = {self.balanced_dataloading}')
+
         self.validation_only = validation_only
         self.train_with_all = train_with_all
         self.cache_dir = cache_dir
@@ -841,16 +833,12 @@ class VQA_Trainer(VQA_Base):
                 classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
                 question_labels_path = question_labels_path,
-                dataset_name = dataset_name,
-                split_kwargs = split_kwargs,
-                load_split_from_path = load_split_from_path,
-                balanced_split = balanced_split,
+                balanced_dataloading = balanced_dataloading,
                 balanced_metadata_path = balanced_metadata_path,
                 train_with_all = train_with_all,
                 verbose_question = verbose_question,
                 include_image = include_image,
                 chexpert_one_hot_offset = chexpert_one_hot_offset,
-                use_report_eval_mode = use_report_eval_mode,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
                 use_merged_findings = use_merged_findings,
@@ -859,8 +847,10 @@ class VQA_Trainer(VQA_Base):
                 debug = debug)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers, collate_batch_fn_chexpert_mode=None):
+        print('_generate_datasets_and_dataloaders()')
         if not self.use_chexpert_mode_only:
             if not self.validation_only:
+                print(f'self.balanced_dataloading = {self.balanced_dataloading}')
                 if self.balanced_dataloading:
                     self._generate_train_dataset__balanced(batch_size)
                 else:
@@ -883,6 +873,8 @@ class VQA_Trainer(VQA_Base):
         return CompositeInfiniteDataset(datasets, weights)
     
     def _generate_train_dataset(self, batch_size):
+
+        print('_generate_train_dataset()')
 
         question_datasets = []
         if self.allowed_question_ids is not None:
@@ -914,6 +906,8 @@ class VQA_Trainer(VQA_Base):
         print(f'\tlen(question_datasets) = {len(question_datasets)}')
     
     def _generate_train_dataset__balanced(self, batch_size):
+
+        print('_generate_train_dataset__balanced()')
 
         cached_balanced_train_datasets_path = _get_cached_balanced_train_datasets_path(
             self.preprocessing_save_path, batch_size, self.imbalance_reduction_coef, self.allowed_question_ids)
@@ -1059,13 +1053,19 @@ class VQA_Trainer(VQA_Base):
         self.val_dataloader__chexpert_mode = dataloader
         print('len(self.val_dataset__chexpert_mode) =', len(self.val_dataset__chexpert_mode))
 
-    def _generate_val_dataset(self):
+    def _generate_val_dataset(self, max_num_examples_per_question=60):
         if self.allowed_question_ids is not None:
-            val_indices = np.array([i for i in self.val_indices if self.question_ids[i] in self.allowed_question_ids], dtype=int)
+            val_indices = [i for i in self.val_indices if self.question_ids[i] in self.allowed_question_ids]
         else:
             val_indices = self.val_indices
+        grouped_val_indices = _group_indices_by_question_id(val_indices, self.question_ids, convert_to_numpy=False)
+        val_indices = []
+        for indices in grouped_val_indices.values():
+            if len(indices) > max_num_examples_per_question:
+                indices = random.sample(indices, max_num_examples_per_question)
+            val_indices.extend(indices)
         print('len(self.val_indices) =', len(self.val_indices))
-        print('len(val_indices) =', len(val_indices))        
+        print('len(val_indices) =', len(val_indices))
         self.val_dataset = self._create_vqa_dataset(val_indices, shuffle_indices=False,
                                                     include_answer=self.include_answer, infinite=False)
             
@@ -1102,7 +1102,6 @@ class VQA_Evaluator(VQA_Base):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
-                dataset_name = None,
                 include_image = True,
                 use_random_image = False,
                 use_precomputed_visual_features = False,
@@ -1127,7 +1126,6 @@ class VQA_Evaluator(VQA_Base):
                 classify_questions = classify_questions,
                 chexpert_labels_path = chexpert_labels_path,
                 question_labels_path = question_labels_path,
-                dataset_name = dataset_name,
                 verbose_question = verbose_question,
                 include_image = include_image,
                 use_random_image = use_random_image,

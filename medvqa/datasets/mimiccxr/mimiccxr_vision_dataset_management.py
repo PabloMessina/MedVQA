@@ -1,6 +1,16 @@
 import os
-from medvqa.datasets.visual_module import VM_Trainer, VM_Evaluator
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+import numpy as np
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase, VM_Trainer, VM_Evaluator
+from medvqa.datasets.mimiccxr import (
+    MIMICCXR_CACHE_DIR,
+    MIMICCXR_STUDY_REGEX,
+    get_broken_images,
+    get_image_views_dict,
+    get_mimiccxr_image_path,
+    get_split_dict,
+)
+from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.files import get_cached_json_file, load_pickle
 
 class MIMICCXR_VisualModuleTrainer(VM_Trainer):
 
@@ -62,3 +72,69 @@ class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
                         chexpert_labels_filename = chexpert_labels_filename,
                         classify_questions = classify_questions,
                         question_labels_filename = question_labels_filename)
+
+
+# MAE: Masked AutoEncoder
+class MIMICCXR_MAE_Trainer(MAETrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers,
+                qa_adapted_reports_filename, chexpert_labels_filename,
+        ):
+        self.transform = transform
+        self.batch_size = batch_size
+        self.collate_batch_fn = collate_batch_fn
+        self.num_workers = num_workers
+        
+        chexpert_labels = load_pickle(os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename))
+        qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
+        assert len(chexpert_labels) == len(qa_adapted_reports['reports'])
+
+        image_views_dict = get_image_views_dict()
+        broken_images = get_broken_images()
+        split_dict = get_split_dict()
+
+        report_ids = []
+        image_paths = []
+        train_indices = []
+        val_indices = []
+        test_indices = []
+        idx = 0
+        for rid, report in enumerate(qa_adapted_reports['reports']):
+            part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])
+            views = image_views_dict[(subject_id, study_id)]
+            report_split = None
+            for dicom_id, _ in views:
+                if (subject_id, study_id, dicom_id) not in broken_images:
+                    report_ids.append(rid)
+                    image_path = get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
+                    image_paths.append(image_path)
+                    split = split_dict[(subject_id, study_id, dicom_id)]
+                    if report_split is None:
+                        report_split = split
+                    else:
+                        assert report_split == split
+                    if split == 'train':
+                        train_indices.append(idx)
+                    elif split == 'validate':
+                        val_indices.append(idx)
+                    elif split == 'test':
+                        test_indices.append(idx)
+                    else:
+                        raise ValueError(f'Unknown split {split}')
+                    idx += 1
+
+        self.report_ids = np.array(report_ids, dtype=np.int32)
+        self.image_paths = image_paths
+        self.train_indices = np.array(train_indices, dtype=np.int32)
+        self.val_indices = np.array(val_indices, dtype=np.int32)
+        self.test_indices = np.array(test_indices, dtype=np.int32)
+
+        labels_getter = lambda i: chexpert_labels[self.report_ids[i]]
+        super().__init__(train_indices, val_indices, test_indices,
+                        list(range(1, len(CHEXPERT_LABELS))), labels_getter,
+                        batch_size, collate_batch_fn, num_workers)
+
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
+
+
+

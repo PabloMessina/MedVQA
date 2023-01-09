@@ -10,6 +10,7 @@ from medvqa.models.vision.visual_modules import (
     HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE,
     HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT,
     HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE,
+    HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE,
     HUGGINGFACE_VITMODEL_NAMES_2_SHORT,
     HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX,
     create_clip_vit_feature_extractor,
@@ -51,6 +52,7 @@ class RawImageEncoding:
     CLIP_VIT_LARGE__HUGGINGFACE = 'clip-vit-large-huggingface'
     CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
     VITMODEL__HUGGINGFACE = 'vitmodel-huggingface'
+    VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -198,7 +200,9 @@ class OpenEndedVQA(nn.Module):
             return CLIP_RESNET_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
             return HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE
-        else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
+        if self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
+            return HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE
+        raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
     def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
                                 imagenet_pretrained, model_name, freeze_image_encoder):
@@ -211,9 +215,10 @@ class OpenEndedVQA(nn.Module):
         elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
             self.raw_image_encoder = create_clip_vit_feature_extractor(model_name, pretrained_weights_path)
         elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-             raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
+                raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
+        elif raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
+                raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
             ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
         else: raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
@@ -354,11 +359,12 @@ class OpenEndedVQA(nn.Module):
                                          RawImageEncoding.CLIP_RESNET):
             img_str = f'clip-{self.clip_version}'
         elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-             self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
+                self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             img_str = HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT[self.clip_version]
-        elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
+        elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
+                self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             img_str = HUGGINGFACE_VITMODEL_NAMES_2_SHORT[self.huggingface_model_name]
-        else: assert False
+        else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
             vm_str = f'{img_str}+{vf_str}'
@@ -423,13 +429,14 @@ class OpenEndedVQA(nn.Module):
                 global_list.append(global_feat)
             
             elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-                 self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE or \
-                 self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
+                    self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE or \
+                    self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
+                    self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
                 tmp = self.raw_image_encoder(raw_images)
                 global_feat, local_feat = tmp.pooler_output, tmp.last_hidden_state
                 global_list.append(global_feat)
             
-            else: assert False
+            else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
 
         if visual_features is not None:
             global_vf  = self.mlp_vf_encoder(visual_features)

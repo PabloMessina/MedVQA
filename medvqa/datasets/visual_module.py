@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.utils import deduplicate_indices
 from medvqa.utils.files import load_pickle
@@ -369,3 +370,109 @@ class VM_Evaluator(VM_Base):
                                          num_workers=num_workers,
                                          collate_fn=collate_batch_fn,
                                          pin_memory=True)
+
+class BasicImageDataset(Dataset):
+    def __init__(self, image_paths, transform, indices, shuffle_indices=True, infinite=False):
+        self.image_paths = image_paths
+        self.transform = transform
+        self.indices = indices
+        self.infinite = infinite
+
+        if shuffle_indices: np.random.shuffle(self.indices)
+        self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
+
+    def __len__(self):
+        return self._len
+
+    def _get_image(self, idx):
+        return self.transform(Image.open(self.image_paths[idx]).convert('RGB'))
+
+    def __getitem__(self, idx):
+        if self.infinite: idx %= len(self.indices)
+        idx = self.indices[idx]
+        output = dict(
+            idx=idx,
+            i = self._get_image(idx),
+        )
+        return output
+
+
+class MAETrainerBase:
+
+    def __init__(self, train_indices, val_indices, test_indices, label_list, labels_getter,
+                batch_size, collate_batch_fn, num_workers, use_validation_set=True):
+        self.train_indices = train_indices
+        self.val_indices = val_indices
+        self.test_indices = test_indices
+        self.use_validation_set = use_validation_set
+
+        self.train_dataset, self.train_dataloader = \
+            self._create_train_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers, label_list, labels_getter)
+        print(f'len(train_indices) = {len(train_indices)}')
+        if use_validation_set:
+            self.val_dataset, self.val_dataloader = \
+                self._create_val_dataset_and_dataloader(batch_size, collate_batch_fn, num_workers)
+            print(f'len(val_indices) = {len(val_indices)}')
+
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        raise NotImplementedError('This method must be implemented by the subclass.')
+
+    def _create_train_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers, label_list, labels_getter):
+        print('Creating train dataset and dataloader ...')
+        datasets = []
+        counts = []
+        
+        # Label-specific datasets
+        for i in tqdm(label_list):
+            pos_indices = []
+            for j in self.train_indices:
+                if labels_getter(j)[i] == 1:
+                    pos_indices.append(j)
+            if len(pos_indices) > 0:                
+                counts.append(len(pos_indices))
+                pos_indices = np.array(pos_indices, dtype=np.int32)
+                pos_image_dataset = self._create_mae_dataset(pos_indices, shuffle=True, infinite=True)
+                datasets.append(pos_image_dataset)
+        # Dataset with no labels
+        neg_indices = []
+        for j in self.train_indices:
+            if all(labels_getter(j)[i] == 0 for i in label_list):
+                neg_indices.append(j)
+        if len(neg_indices) > 0:
+            counts.append(len(neg_indices))
+            neg_indices = np.array(neg_indices, dtype=np.int32)
+            neg_image_dataset = self._create_mae_dataset(neg_indices, shuffle=True, infinite=True)
+            datasets.append(neg_image_dataset)
+
+        # Create dataset
+        if len(datasets) == 1:
+            train_dataset = datasets[0]
+        else:
+            weights = get_imbalance_reduced_weights(counts, 0.4)
+            train_dataset = CompositeInfiniteDataset(datasets, weights)
+
+        # Create dataloader
+        train_dataloader = DataLoader(train_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_batch_fn,
+            pin_memory=True,
+        )
+
+        print('Done!')
+        # Return dataset and dataloader
+        return train_dataset, train_dataloader
+
+    def _create_val_dataset_and_dataloader(self, batch_size, collate_batch_fn, num_workers):
+        print('Creating val dataset and dataloader ...')
+        val_dataset = self._create_mae_dataset(self.val_indices, shuffle=False, infinite=False)
+        val_dataloader = DataLoader(val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_batch_fn,
+            pin_memory=True,
+        )
+        print('Done!')
+        return val_dataset, val_dataloader

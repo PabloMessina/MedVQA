@@ -177,10 +177,6 @@ def parse_args(args=None):
     parser.add_argument('--warmup-and-decay-args', type=str, default=None)
     parser.add_argument('--warmup-and-cosine-args', type=str, default=None)
     
-    parser.add_argument('--n-val-examples-per-question', type=int, default=10,
-                        help='Number of validation examples per question')
-    parser.add_argument('--min-train-examples-per-question', type=int, default=100,
-                        help='Minimum number of train examples per question to include validation examples')
     parser.add_argument('--batch-size', type=int, default=45,
                         help='Batch size')
     parser.add_argument('--iters-to-accumulate', type=int, default=1, help='For gradient accumulation')
@@ -192,22 +188,15 @@ def parse_args(args=None):
                         help='Mode of data augmentation used for images')
     parser.add_argument('--image-size', nargs='+', type=int, default=(256,256))
 
-    parser.add_argument('--mimiccxr-weight', type=float, default=1,
-                        help='Relative number of batches to sample from MIMIC-CXR dataset (for rebalancing purposes)')
-    parser.add_argument('--chexpert-weight', type=float, default=0.3,
-                        help='Relative number of batches to sample from CheXpert dataset (for rebalancing purposes)')
-    parser.add_argument('--cxr14-weight', type=float, default=0.3,
-                        help='Relative number of batches to sample from CXR14 dataset (for rebalancing purposes)')
-    parser.add_argument('--vinbig-weight', type=float, default=0.3,
-                        help='Relative number of batches to sample from VinBig dataset (for rebalancing purposes)')
-    parser.add_argument('--iuxray-weight', type=float, default=0.05,
-                        help='Relative number of batches to sample from IU X-ray dataset (for rebalancing purposes)')
-    parser.add_argument('--mimiccxr-weight-chexpert-mode', type=float, default=0.2,
-                        help='Relative number of batches to sample from MIMIC-CXR dataset in chexpert mode (for rebalancing purposes)')
-    parser.add_argument('--iuxray-weight-chexpert-mode', type=float, default=0.05,
-                        help='Relative number of batches to sample from IU X-ray dataset in chexpert mode (for rebalancing purposes)')
-    parser.add_argument('--padchest-weight', type=float, default=0.4,
-                        help='Relative number of batches to sample from PadChest dataset (for rebalancing purposes)')
+    # Weights for the different datasets. Used for training with multiple datasets
+    parser.add_argument('--mimiccxr-weight', type=float, default=1)
+    parser.add_argument('--chexpert-weight', type=float, default=0.3)
+    parser.add_argument('--cxr14-weight', type=float, default=0.3)
+    parser.add_argument('--vinbig-weight', type=float, default=0.3)
+    parser.add_argument('--iuxray-weight', type=float, default=0.05)
+    parser.add_argument('--mimiccxr-weight-chexpert-mode', type=float, default=0.2)
+    parser.add_argument('--iuxray-weight-chexpert-mode', type=float, default=0.05)
+    parser.add_argument('--padchest-weight', type=float, default=0.4)
 
     parser.add_argument('--mimiccxr-include-chexpert-mode', dest='mimiccxr_include_chexpert_mode', action='store_true')
     parser.set_defaults(mimiccxr_include_chexpert_mode=False)
@@ -234,15 +223,9 @@ def parse_args(args=None):
     parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
 
     # balanced dataset arguments
-    parser.add_argument('--balanced-split', dest='balanced_split', action='store_true')
-    parser.set_defaults(balanced_split=False)
     parser.add_argument('--balanced-dataloading', dest='balanced_dataloading', action='store_true')
     parser.set_defaults(balanced_dataloading=False)
     parser.add_argument('--imbalance-reduction-coef', type=float, default=0.5)
-    parser.add_argument('--n-healthy-per-question', type=int, default=2)
-    parser.add_argument('--n-unhealthy-per-question', type=int, default=3)
-    parser.add_argument('--n-positive-per-chexpert-label', type=int, default=7)
-    parser.add_argument('--min-question-count', type=int, default=100)
     parser.add_argument('--iuxray-balanced-metadata-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-balanced-metadata-filename', type=str, default=None)
 
@@ -261,8 +244,6 @@ def parse_args(args=None):
 
     parser.add_argument('--use-iuxray', dest='train_iuxray', action='store_true')
     parser.set_defaults(train_iuxray=False)
-    parser.add_argument('--iuxray-train-with-all', dest='iuxray_train_with_all', action='store_true')
-    parser.set_defaults(iuxray_train_with_all=False)
 
     parser.add_argument('--use-chexpert', dest='train_chexpert', action='store_true')
     parser.set_defaults(train_chexpert=False)
@@ -279,7 +260,7 @@ def parse_args(args=None):
 
     parser.add_argument('--use-padchest', dest='train_padchest', action='store_true')
     parser.set_defaults(train_padchest=False)
-    parser.add_argument('--padchest-training-data-mode', type=str, default='all')
+    parser.add_argument('--padchest-training-data-mode', type=str, default='train')
     parser.add_argument('--padchest-use-validation', dest='padchest_use_validation', action='store_true')
     parser.set_defaults(padchest_use_validation=False)
     parser.add_argument('--padchest-train-study-ids-path', type=str, default=None)
@@ -476,6 +457,8 @@ def train_model(
                         medical_terms_frequency_filename=medical_terms_frequency_filename,
                         other_vocab_generators=other_vocab_generators,
                         other_vocab_generators_names=other_vocab_generators_names)
+    # Rememeber vocab filepath in case we need to reload tokenizer
+    tokenizer_kwargs['vocab_filepath'] = tokenizer.vocab_filepath
                         
     # Create model
     count_print('Creating instance of OpenEndedVQA model ...')
@@ -676,15 +659,11 @@ def train_model(
         if not use_chexpert_mode_only:
             _dataset_names.append('iu')
             _train_weights.append(dataloading_kwargs['iuxray_weight'])
-            _train_dataloaders.append(iuxray_vqa_trainer.train_dataloader)
-            if not iuxray_vqa_trainer.train_with_all:
-                _val_dataloaders.append(iuxray_vqa_trainer.val_dataloader)
+            _train_dataloaders.append(iuxray_vqa_trainer.train_dataloader)            
         if iuxray_vqa_trainer.include_chexpert_mode:
             _dataset_names.append('iu(chex)')
             _train_weights.append(dataloading_kwargs['iuxray_weight_chexpert_mode'])
-            _train_dataloaders.append(iuxray_vqa_trainer.train_dataloader__chexpert_mode)
-            if not iuxray_vqa_trainer.train_with_all:
-                _val_dataloaders.append(iuxray_vqa_trainer.val_dataloader__chexpert_mode)
+            _train_dataloaders.append(iuxray_vqa_trainer.train_dataloader__chexpert_mode)            
     if train_chexpert:
         _train_weights.append(dataloading_kwargs['chexpert_weight'])
         _train_dataloaders.append(chexpert_trainer.dataloader)
@@ -949,8 +928,8 @@ def train_model(
                         auxiliary_tasks_kwargs = auxiliary_tasks_kwargs)
 
         if pretrained_checkpoint_folder_path is not None:
-            pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
             count_print(f'Loading pretrained weights ...')
+            pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
             print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
             checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
             load_model_state_dict(model_wrapper.model, checkpoint['model'])
@@ -1040,17 +1019,10 @@ def train_from_scratch(
     # Image transform args
     image_size,
     # Dataset args
-    n_val_examples_per_question,
-    min_train_examples_per_question,
     iuxray_qa_adapted_reports_filename,
-    mimiccxr_qa_adapted_reports_filename,
-    balanced_split,
-    n_healthy_per_question,
-    n_unhealthy_per_question,
-    min_question_count,
+    mimiccxr_qa_adapted_reports_filename,    
     iuxray_balanced_metadata_filename,
-    mimiccxr_balanced_metadata_filename,
-    n_positive_per_chexpert_label,
+    mimiccxr_balanced_metadata_filename,    
     iuxray_precomputed_visual_features_path,
     mimiccxr_precomputed_visual_features_path,
     chexpert_precomputed_visual_features_path,
@@ -1082,7 +1054,6 @@ def train_from_scratch(
     train_padchest,
     mimiccxr_include_chexpert_mode,
     iuxray_include_chexpert_mode,
-    iuxray_train_with_all,
     chexpert_mode,
     use_chexpert_mode_only,
     vinbig_training_data,
@@ -1245,28 +1216,6 @@ def train_from_scratch(
         warmup_and_cosine_args = warmup_and_cosine_args,
         n_batches_per_epoch = batches_per_epoch,
     )
-
-    if balanced_dataloading:
-        assert balanced_split
-
-    if balanced_split:
-        split_kwargs = dict(
-            n_healthy_per_question = n_healthy_per_question,
-            n_unhealthy_per_question = n_unhealthy_per_question,
-            min_question_count = min_question_count,
-            n_positive_per_chexpert_label = n_positive_per_chexpert_label,
-        )
-        if train_mimiccxr:
-            assert mimiccxr_balanced_metadata_filename is not None
-            assert mimiccxr_chexpert_labels_filename is not None
-        if train_iuxray:
-            assert iuxray_balanced_metadata_filename is not None
-            assert iuxray_chexpert_labels_filename is not None
-    else:
-        split_kwargs = dict(
-            n_val_examples_per_question = n_val_examples_per_question,
-            min_train_examples_per_question = min_train_examples_per_question,
-        )    
     
     dataloading_kwargs = dict(
         batch_size = batch_size,
@@ -1308,10 +1257,9 @@ def train_from_scratch(
         if train_vinbig: assert vinbig_precomputed_visual_features_path is not None
     
     if train_mimiccxr:
+        print(f'Debug: balanced_dataloading = {balanced_dataloading}')
         mimiccxr_vqa_trainer_kwargs = dict(
-            split_kwargs = split_kwargs,
             qa_adapted_reports_filename = mimiccxr_qa_adapted_reports_filename,
-            balanced_split = balanced_split,
             balanced_dataloading = balanced_dataloading,
             balanced_metadata_filename = mimiccxr_balanced_metadata_filename,
             imbalance_reduction_coef = imbalance_reduction_coef,
@@ -1338,9 +1286,7 @@ def train_from_scratch(
 
     if train_iuxray:
         iuxray_vqa_trainer_kwargs = dict(
-            split_kwargs = split_kwargs,
             qa_adapted_reports_filename = iuxray_qa_adapted_reports_filename,
-            balanced_split = balanced_split,
             balanced_dataloading = balanced_dataloading,
             balanced_metadata_filename = iuxray_balanced_metadata_filename,
             imbalance_reduction_coef = imbalance_reduction_coef,
@@ -1359,7 +1305,6 @@ def train_from_scratch(
             question_labels_filename = iuxray_question_labels_filename,
             allowed_questions = allowed_questions,
             verbose_question = verbose_question,
-            train_with_all = iuxray_train_with_all,
         )
         if merge_findings:
             iuxray_vqa_trainer_kwargs.update(_merged_findings_kwargs)

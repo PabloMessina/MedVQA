@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 
 from medvqa.datasets.cxr14 import CXR14_IMAGES_DIR_PATH, CXR14_METADATA_CSV_PATH
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass
 from medvqa.models.report_generation.templates.cxr14_v1 import TEMPLATES_CXR14_v1
 from medvqa.utils.constants import CXR14_DATASET_ID, CXR14_GENDER2ID, CXR14_LABELS, CXR14_ORIENTATION2ID
@@ -41,8 +42,8 @@ class CXR14TrainerBase(LabelBasedVQAClass):
             genders[i] = CXR14_GENDER2ID[x]
         self.genders = genders
 
-        # chexpert labels
-        print('Loading chexpert labels')
+        # cxr14 labels
+        print('Loading CXR14 labels')
         labels = np.zeros((n, len(CXR14_LABELS)), dtype=np.int8)
         for i, x in enumerate(df_labels):
             for label in x.split('|'):
@@ -183,3 +184,35 @@ class CXR14VisualDataset(Dataset):
             i=self.transform(Image.open(self.images[idx]).convert('RGB')),
         )
         return output
+
+class CXR14_MAE_Trainer(MAETrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers):
+
+        self.transform = transform
+
+        print(f'Loading dataframe from {CXR14_METADATA_CSV_PATH}')
+        df = pd.read_csv(CXR14_METADATA_CSV_PATH)
+        n = len(df)
+        df_labels = df['Finding Labels']
+        df_images = df['Image Index']
+
+        # images
+        print('Loading images')
+        image_paths = (CXR14_IMAGES_DIR_PATH + os.path.sep + df_images).to_numpy()
+        self.image_paths = image_paths
+
+        # CXR14 labels
+        print('Loading cxr14 labels')
+        labels = np.zeros((n, len(CXR14_LABELS)), dtype=np.int8)
+        for i, x in enumerate(df_labels):
+            for label in x.split('|'):
+                labels[i][CXR14_LABELS.index(label)] = 1
+        self.labels = labels
+
+        train_indices = list(range(len(labels)))
+        labels_getter = lambda i: labels[i]
+        super().__init__(train_indices, None, None, list(range(len(CXR14_LABELS))),
+                         labels_getter, batch_size, collate_batch_fn, num_workers, use_validation_set=False)
+    
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)

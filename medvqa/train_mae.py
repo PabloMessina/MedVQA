@@ -13,6 +13,11 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.image_processing import get_pretrain_vit_mae_image_transform
 from medvqa.datasets.padchest.padchest_dataset_management import PadChest_MAE_Trainer
+from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_MAE_Trainer
+from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_MAE_Trainer
+from medvqa.datasets.chexpert.chexpert_dataset_management import Chexpert_MAE_Trainer
+from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_MAE_Trainer
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_MAE_Trainer
 
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.losses.optimizers import create_optimizer
@@ -24,9 +29,15 @@ from medvqa.models.common import load_model_state_dict
 from medvqa.training.utils import append_metric_name
 
 from medvqa.utils.common import WORKSPACE_DIR, parsed_args_to_dict
-from medvqa.utils.constants import PADCHEST_DATASET_ID, MetricNames
+from medvqa.utils.constants import CHEXPERT_DATASET_ID, CXR14_DATASET_ID, IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID, PADCHEST_DATASET_ID, VINBIG_DATASET_ID, MetricNames
 from medvqa.utils.files import get_checkpoint_folder_path
-from medvqa.utils.handlers import get_checkpoint_handler, get_log_epoch_started_handler, get_log_iteration_handler, get_log_metrics_handlers, get_lr_sch_handler
+from medvqa.utils.handlers import (
+    get_checkpoint_handler,
+    get_log_epoch_started_handler,
+    get_log_iteration_handler,
+    get_log_metrics_handlers,
+    get_lr_sch_handler,
+)
 from medvqa.utils.logging import CountPrinter, print_blue, print_red
 from medvqa.training.mae import get_engine
 
@@ -66,13 +77,40 @@ def parse_args(args=None):
     parser.add_argument('--num-workers', type=int, default=0)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--device', type=str, default='GPU')
-    parser.add_argument('--padchest-weight', type=float, default=1.0)
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
-
-    # PadChest args
+    
+    # Flags to use different datasets    
+    parser.add_argument('--use-mimiccxr', dest='use_mimiccxr', action='store_true')
+    parser.set_defaults(use_mimiccxr=False)
+    parser.add_argument('--use-iuxray', dest='use_iuxray', action='store_true')
+    parser.set_defaults(use_iuxray=False)
+    parser.add_argument('--use-chexpert', dest='use_chexpert', action='store_true')
+    parser.set_defaults(use_chexpert=False)
+    parser.add_argument('--use-cxr14', dest='use_cxr14', action='store_true')
+    parser.set_defaults(use_cxr14=False)
+    parser.add_argument('--use-vinbig', dest='use_vinbig', action='store_true')
+    parser.set_defaults(use_vinbig=False)
     parser.add_argument('--use-padchest', dest='use_padchest', action='store_true')
     parser.set_defaults(use_padchest=False)
+
+    # Weights for the different datasets. Used for training with multiple datasets
+    parser.add_argument('--mimiccxr-weight', type=float, default=1.0)
+    parser.add_argument('--iuxray-weight', type=float, default=0.05)
+    parser.add_argument('--chexpert-weight', type=float, default=0.6)
+    parser.add_argument('--cxr14-weight', type=float, default=0.4)
+    parser.add_argument('--vinbig-weight', type=float, default=0.4)
+    parser.add_argument('--padchest-weight', type=float, default=0.5)
+
+    # MIMICCXR args
+    parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
+    parser.add_argument('--mimiccxr-chexpert-labels-filename', type=str, default=None)
+
+    # IUXRAY args
+    parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str, default=None)
+    parser.add_argument('--iuxray-chexpert-labels-filename', type=str, default=None)
+    
+    # PadChest args
     parser.add_argument('--padchest-training-data-mode', type=str, default='all')
     parser.add_argument('--padchest-use-validation', dest='padchest_use_validation', action='store_true')
     parser.set_defaults(padchest_use_validation=False)
@@ -99,6 +137,11 @@ def _train_model(
     validator_engine_kwargs,
     training_kwargs,
     dataloading_kwargs,
+    mimiccxr_trainer_kwargs,
+    iuxray_trainer_kwargs,
+    chexpert_trainer_kwargs,
+    cxr14_trainer_kwargs,
+    vinbig_trainer_kwargs,
     padchest_trainer_kwargs,
     epochs,
     batches_per_epoch,
@@ -113,6 +156,11 @@ def _train_model(
 
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
+    use_mimiccxr = training_kwargs['use_mimiccxr']
+    use_iuxray = training_kwargs['use_iuxray']
+    use_chexpert = training_kwargs['use_chexpert']
+    use_cxr14 = training_kwargs['use_cxr14']
+    use_vinbig = training_kwargs['use_vinbig']
     use_padchest = training_kwargs['use_padchest']
 
     # Device
@@ -147,6 +195,61 @@ def _train_model(
     count_print('Creating image transform ...')
     image_transform = get_pretrain_vit_mae_image_transform(feature_extractor)
 
+    # Create MIMIC-CXR MAE trainer
+    if use_mimiccxr:
+        count_print('Creating MIMIC-CXR MAE trainer ...')
+        mimiccxr_mae_trainer = MIMICCXR_MAE_Trainer(
+            transform=image_transform,
+            batch_size=batch_size,
+            collate_batch_fn=get_mae_collate_batch_fn(MIMICCXR_DATASET_ID),
+            num_workers=num_workers,
+            **mimiccxr_trainer_kwargs,
+        )
+
+    # Create IU-XRAY MAE trainer
+    if use_iuxray:
+        count_print('Creating IU-XRAY MAE trainer ...')
+        iuxray_mae_trainer = IUXRAY_MAE_Trainer(
+            transform=image_transform,
+            batch_size=batch_size,
+            collate_batch_fn=get_mae_collate_batch_fn(IUXRAY_DATASET_ID),
+            num_workers=num_workers,
+            **iuxray_trainer_kwargs,
+        )
+
+    # Create CheXpert MAE trainer
+    if use_chexpert:
+        count_print('Creating CheXpert MAE trainer ...')
+        chexpert_mae_trainer = Chexpert_MAE_Trainer(
+            transform=image_transform,
+            batch_size=batch_size,
+            collate_batch_fn=get_mae_collate_batch_fn(CHEXPERT_DATASET_ID),
+            num_workers=num_workers,
+            **chexpert_trainer_kwargs,
+        )
+
+    # Create CXR14 MAE trainer
+    if use_cxr14:
+        count_print('Creating CXR14 MAE trainer ...')
+        cxr14_mae_trainer = CXR14_MAE_Trainer(
+            transform=image_transform,
+            batch_size=batch_size,
+            collate_batch_fn=get_mae_collate_batch_fn(CXR14_DATASET_ID),
+            num_workers=num_workers,
+            **cxr14_trainer_kwargs,
+        )
+
+    # Create VinBigData MAE trainer
+    if use_vinbig:
+        count_print('Creating VinBig MAE trainer ...')
+        vinbig_mae_trainer = VinBig_MAE_Trainer(
+            transform=image_transform,
+            batch_size=batch_size,
+            collate_batch_fn=get_mae_collate_batch_fn(VINBIG_DATASET_ID),
+            num_workers=num_workers,
+            **vinbig_trainer_kwargs,
+        )
+    
     # Create PadChest MAE trainer
     if use_padchest:
         count_print('Creating PadChest MAE trainer ...')
@@ -170,6 +273,41 @@ def _train_model(
     _train_dataloaders = []
     _val_dataloaders = []
     _dataset_names = []
+
+    if use_mimiccxr:
+        _dataset_names.append('mim')
+        _train_weights.append(dataloading_kwargs['mimiccxr_weight'])
+        _train_dataloaders.append(mimiccxr_mae_trainer.train_dataloader)
+        if mimiccxr_mae_trainer.use_validation_set:
+            _val_dataloaders.append(mimiccxr_mae_trainer.val_dataloader)
+
+    if use_iuxray:
+        _dataset_names.append('iux')
+        _train_weights.append(dataloading_kwargs['iuxray_weight'])
+        _train_dataloaders.append(iuxray_mae_trainer.train_dataloader)
+        if iuxray_mae_trainer.use_validation_set:
+            _val_dataloaders.append(iuxray_mae_trainer.val_dataloader)
+
+    if use_chexpert:
+        _dataset_names.append('chx')
+        _train_weights.append(dataloading_kwargs['chexpert_weight'])
+        _train_dataloaders.append(chexpert_mae_trainer.train_dataloader)
+        if chexpert_mae_trainer.use_validation_set:
+            _val_dataloaders.append(chexpert_mae_trainer.val_dataloader)
+    
+    if use_cxr14:
+        _dataset_names.append('cxr14')
+        _train_weights.append(dataloading_kwargs['cxr14_weight'])
+        _train_dataloaders.append(cxr14_mae_trainer.train_dataloader)
+        if cxr14_mae_trainer.use_validation_set:
+            _val_dataloaders.append(cxr14_mae_trainer.val_dataloader)
+
+    if use_vinbig:
+        _dataset_names.append('vinbig')
+        _train_weights.append(dataloading_kwargs['vinbig_weight'])
+        _train_dataloaders.append(vinbig_mae_trainer.train_dataloader)
+        if vinbig_mae_trainer.use_validation_set:
+            _val_dataloaders.append(vinbig_mae_trainer.val_dataloader)
 
     if use_padchest:
         _dataset_names.append('padchest')
@@ -239,7 +377,12 @@ def _train_model(
             save_metadata(checkpoint_folder_path,
                         model_kwargs = model_kwargs,
                         optimizer_kwargs = optimizer_kwargs,
-                        lr_scheduler_kwargs = lr_scheduler_kwargs,                        
+                        lr_scheduler_kwargs = lr_scheduler_kwargs,
+                        mimiccxr_trainer_kwargs = mimiccxr_trainer_kwargs,
+                        iuxray_trainer_kwargs = iuxray_trainer_kwargs,
+                        chexpert_trainer_kwargs = chexpert_trainer_kwargs,
+                        cxr14_trainer_kwargs = cxr14_trainer_kwargs,
+                        vinbig_trainer_kwargs = vinbig_trainer_kwargs,
                         padchest_trainer_kwargs = padchest_trainer_kwargs,
                         dataloading_kwargs = dataloading_kwargs,
                         training_kwargs = training_kwargs,
@@ -308,6 +451,20 @@ def train_from_scratch(
     lr_decay_patience,
     warmup_and_decay_args,
     warmup_and_cosine_args,
+    # MIMIC-CXR args
+    use_mimiccxr,
+    mimiccxr_qa_adapted_reports_filename,
+    mimiccxr_chexpert_labels_filename,
+    # IU-Xray args
+    use_iuxray,
+    iuxray_qa_adapted_reports_filename,
+    iuxray_chexpert_labels_filename,
+    # CheXpert args
+    use_chexpert,
+    # CXR-14 args
+    use_cxr14,
+    # VinBigData args
+    use_vinbig,
     # PadChest args
     use_padchest,
     padchest_training_data_mode,
@@ -320,6 +477,11 @@ def train_from_scratch(
     # Fixed training args
     use_amp,
     num_accumulation_steps,
+    mimiccxr_weight,
+    iuxray_weight,
+    chexpert_weight,
+    cxr14_weight,
+    vinbig_weight,
     padchest_weight,
     # Variable training args
     epochs,
@@ -357,12 +519,33 @@ def train_from_scratch(
         use_amp=use_amp,
     )
     training_kwargs = dict(
+        use_iuxray=use_iuxray,
+        use_mimiccxr=use_mimiccxr,
+        use_chexpert=use_chexpert,
+        use_cxr14=use_cxr14,
+        use_vinbig=use_vinbig,
         use_padchest=use_padchest,
     )
     dataloading_kwargs = dict(
         batch_size=batch_size,
+        mimiccxr_weight=mimiccxr_weight,
+        iuxray_weight=iuxray_weight,
+        chexpert_weight=chexpert_weight,
+        cxr14_weight=cxr14_weight,
+        vinbig_weight=vinbig_weight,
         padchest_weight=padchest_weight,
     )
+    mimiccxr_trainer_kwargs = dict(
+        qa_adapted_reports_filename = mimiccxr_qa_adapted_reports_filename,
+        chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+    )
+    iuxray_trainer_kwargs = dict(
+        qa_adapted_reports_filename = iuxray_qa_adapted_reports_filename,
+        chexpert_labels_filename = iuxray_chexpert_labels_filename,
+    )
+    chexpert_trainer_kwargs = dict()
+    cxr14_trainer_kwargs = dict()
+    vinbig_trainer_kwargs = dict()
     padchest_trainer_kwargs = dict(
         train_study_ids_path=padchest_train_study_ids_path,
         val_study_ids_path=padchest_val_study_ids_path,
@@ -378,6 +561,11 @@ def train_from_scratch(
         validator_engine_kwargs=validator_engine_kwargs,
         training_kwargs=training_kwargs,
         dataloading_kwargs=dataloading_kwargs,
+        mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
+        iuxray_trainer_kwargs=iuxray_trainer_kwargs,
+        chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+        cxr14_trainer_kwargs=cxr14_trainer_kwargs,
+        vinbig_trainer_kwargs=vinbig_trainer_kwargs,
         padchest_trainer_kwargs=padchest_trainer_kwargs,
         epochs=epochs,
         batches_per_epoch=batches_per_epoch,
@@ -413,6 +601,11 @@ def resume_training(
     model_kwargs = metadata['model_kwargs']
     optimizer_kwargs = metadata['optimizer_kwargs']
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']    
+    mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
+    iuxray_trainer_kwargs = metadata['iuxray_trainer_kwargs']
+    chexpert_trainer_kwargs = metadata['chexpert_trainer_kwargs']
+    cxr14_trainer_kwargs = metadata['cxr14_trainer_kwargs']
+    vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
     padchest_trainer_kwargs = metadata['padchest_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']    
     training_kwargs = metadata['training_kwargs']
@@ -440,6 +633,11 @@ def resume_training(
         validator_engine_kwargs=validator_engine_kwargs,
         training_kwargs=training_kwargs,
         dataloading_kwargs=dataloading_kwargs,
+        mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
+        iuxray_trainer_kwargs=iuxray_trainer_kwargs,
+        chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+        cxr14_trainer_kwargs=cxr14_trainer_kwargs,
+        vinbig_trainer_kwargs=vinbig_trainer_kwargs,
         padchest_trainer_kwargs=padchest_trainer_kwargs,
         epochs=epochs,
         batches_per_epoch=batches_per_epoch,

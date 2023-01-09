@@ -5,6 +5,7 @@ from medvqa.utils.common import CACHE_DIR
 
 import os
 import re
+import pandas as pd
 
 MIMICCXR_DATASET_DIR = os.environ['MIMICCXR_DATASET_DIR']
 MIMICCXR_DATASET_AUX_DIR = os.environ['MIMICCXR_DATASET_AUX_DIR']
@@ -51,3 +52,33 @@ def choose_dicom_id_and_orientation(views):
         dicom_id = views[0][0]
         orientation = views[0][1]
     return dicom_id, orientation
+
+def get_image_views_dict():
+    mimiccxr_metadata = pd.read_csv(MIMICCXR_METADATA_CSV_PATH)
+    image_views_dict = dict()
+    for subject_id, study_id, dicom_id, view_pos in zip(mimiccxr_metadata['subject_id'],
+                                                        mimiccxr_metadata['study_id'],
+                                                        mimiccxr_metadata['dicom_id'],
+                                                        mimiccxr_metadata['ViewPosition']):
+        key = (subject_id, study_id)
+        try:
+            views = image_views_dict[key]
+        except KeyError:
+            views = image_views_dict[key] = []
+        views.append((dicom_id, view_pos))
+    return image_views_dict
+
+def get_broken_images():
+    broken_images = set()
+    for path in MIMICCXR_BROKEN_IMAGES:
+        _, a, b, c = MIMICCXR_IMAGE_REGEX.findall(path)[0]
+        broken_images.add((int(a), int(b), c))
+    return broken_images
+
+def get_split_dict():
+    mimiccxr_split = pd.read_csv(MIMICCXR_SPLIT_CSV_PATH)        
+    split_dict = { (sub_id, stud_id, dicom_id) : split for sub_id, stud_id, dicom_id, split in zip(mimiccxr_split['subject_id'],
+                                                                                                    mimiccxr_split['study_id'],
+                                                                                                    mimiccxr_split['dicom_id'],
+                                                                                                    mimiccxr_split['split']) }
+    return split_dict

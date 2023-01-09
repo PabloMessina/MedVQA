@@ -1,10 +1,10 @@
 import os
 import re
+import pandas as pd
 from medvqa.models.checkpoint import get_checkpoint_filepath
 from medvqa.utils.common import RESULTS_DIR, WORKSPACE_DIR
 from medvqa.utils.files import get_cached_json_file
-from medvqa.evaluation.report_generation import get_chexpert_based_outputs_dataframe, get_report_level_metrics_dataframe
-from medvqa.evaluation.visual_module import get_visual_module_metrics_dataframe
+from medvqa.evaluation import report_generation, visual_module
 
 def collect_report_level_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
@@ -170,6 +170,13 @@ def _append_pretrained_column(df, results):
         column.append(p)
     df['pretrained'] = column
 
+def _append_pretrained_image_encoder_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        p = metadata['model_kwargs'].get('image_encoder_pretrained_weights_path', None) is not None
+        column.append(p)
+    df['pretr_imgenc'] = column
+
 def _append_data_augmentation_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
@@ -205,6 +212,7 @@ def _append_method_columns__report_level(df, results):
     _append_batch_size_column(df, results)
     _append_checkpoint_epoch_column(df, results)
     _append_pretrained_column(df, results)
+    _append_pretrained_image_encoder_column(df, results)
     _append_frozen_image_encoder_column(df, results)
     _append_merge_findings_column(df, results)
     _append_medical_tokenization_column(df, results)
@@ -227,23 +235,51 @@ def _append_method_columns__visual_module(df, results):
     _append_gradient_accumulation_column(df, results)
     _append_checkpoint_epoch_column(df, results)
 
-def plot_report_level_metrics(dataset_name):
+def get_report_level_metrics_dataframe(dataset_name):
     results = collect_report_level_results(dataset_name)
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]    
-    df = get_report_level_metrics_dataframe(metrics_paths)
+    df = report_generation.get_report_level_metrics_dataframe(metrics_paths)
     _append_method_columns__report_level(df, results)
     return df
 
-def plot_visual_module_metrics(dataset_name):
+def get_visual_module_metrics_dataframe(dataset_name):
     results = collect_visual_module_results(dataset_name)
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]    
-    df = get_visual_module_metrics_dataframe(metrics_paths)
+    df = visual_module.get_visual_module_metrics_dataframe(metrics_paths)
     _append_method_columns__visual_module(df, results)
     return df
 
-def plot_chexpert_based_output_metrics():
+def get_chexpert_based_output_metrics_dataframe():
     results = collect_chexpert_based_output_results()
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
-    df = get_chexpert_based_outputs_dataframe(metrics_paths)
+    df = report_generation.get_chexpert_based_outputs_dataframe(metrics_paths)
     _append_method_columns__report_level(df, results)
     return df
+
+def get_validation_metrics_dataframe(metrics_logs_paths,
+             columns2maximize=None, columns2minimize=None):
+    assert type(metrics_logs_paths) == list
+    assert len(metrics_logs_paths) > 0
+    columns = None
+    rows_list = []
+    for path in metrics_logs_paths:
+        df = pd.read_csv(path)
+        if columns is None:
+            columns = df.columns
+        else:
+            assert (columns == df.columns).all()
+        # keep only even rows in df starting from 1
+        df = df.iloc[1::2, :]
+        # obtain best result for each column in df
+        row = [path]
+        for column in df.columns:
+            if columns2minimize is not None and column in columns2minimize:
+                row.append(df[column].min())
+            elif columns2maximize is not None and column in columns2maximize:
+                row.append(df[column].max())
+            else:
+                row.append(df[column].max())
+        rows_list.append(row)
+    columns = ['path'] + columns.tolist()
+    main_df = pd.DataFrame(rows_list, columns=columns)
+    return main_df

@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 
 from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CSV_PATH
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_GENDER2ID, CHEXPERT_LABELS, CHEXPERT_ORIENTATION2ID
@@ -225,3 +226,32 @@ class ChexpertVQADataset(Dataset):
         if self.use_precomputed_visual_features:
             output['vf'] = self.precomputed_visual_features[self.idx2visfeatidx[idx]]
         return output
+
+class Chexpert_MAE_Trainer(MAETrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers):
+
+        self.transform = transform
+
+        print(f'Loading dataframe from {CHEXPERT_TRAIN_VAL_CSV_PATH}')
+        df = pd.read_csv(CHEXPERT_TRAIN_VAL_CSV_PATH)
+        df_labels = df[CHEXPERT_LABELS]
+        df_paths = df['Path']
+
+        # images
+        print('Loading images')
+        image_paths = (CHEXPERT_DATASET_DIR + os.path.sep + df_paths).to_numpy()
+        self.image_paths = image_paths
+
+        # chexpert labels
+        print('Loading chexpert labels')
+        labels = df_labels.fillna(0).to_numpy().astype(np.int8)
+        labels = np.where(labels == -1, 1, labels)
+        self.labels = labels
+
+        train_indices = list(range(len(labels)))
+        labels_getter = lambda i: labels[i]
+        super().__init__(train_indices, None, None, list(range(1, len(CHEXPERT_LABELS))),
+                         labels_getter, batch_size, collate_batch_fn, num_workers, use_validation_set=False)
+    
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)

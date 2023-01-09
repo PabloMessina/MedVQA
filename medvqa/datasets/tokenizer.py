@@ -44,18 +44,20 @@ class Tokenizer:
     
     def __init__(self, qa_adapted_dataset_paths=None, min_freq=5, overwrite=False,
                 mode='report', medical_terms_frequency_filename = None,
-                other_vocab_generators = None, other_vocab_generators_names = None):
+                other_vocab_generators = None, other_vocab_generators_names = None,
+                vocab_filepath = None):
 
-        if qa_adapted_dataset_paths is not None:
-            assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
-            assert len(qa_adapted_dataset_paths) > 0, len(qa_adapted_dataset_paths)
-            assert mode in ('report', 'background'), mode
-            qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
-        else:
-            qa_adapted_filenames = None
-
-        vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq, mode,
+        if vocab_filepath is None:
+            if qa_adapted_dataset_paths is not None:
+                assert type(qa_adapted_dataset_paths) is list, type(qa_adapted_dataset_paths)
+                assert len(qa_adapted_dataset_paths) > 0, len(qa_adapted_dataset_paths)
+                assert mode in ('report', 'background'), mode
+                qa_adapted_filenames = [os.path.basename(x) for x in qa_adapted_dataset_paths]
+            else:
+                qa_adapted_filenames = None
+            vocab_filepath = _get_vocab_filepath(qa_adapted_filenames, min_freq, mode,
                                             other_vocab_generators_names)
+        self.vocab_filepath = vocab_filepath
         
         if medical_terms_frequency_filename is not None:
             self.med_tags_extractor = MedicalTagsExtractor(medical_terms_frequency_filename)

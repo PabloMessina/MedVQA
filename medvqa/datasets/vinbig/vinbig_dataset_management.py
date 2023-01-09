@@ -12,6 +12,7 @@ from medvqa.datasets.vinbig import (
     N_IMAGES_TRAIN,
     N_IMAGES_TEST,
 )
+from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.utils.constants import VINBIG_DATASET_ID, VINBIG_DISEASES
 
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
@@ -335,3 +336,58 @@ class VinBigVisualDataset(Dataset):
             i=self.transform(Image.open(self.images[idx]).convert('RGB')),
             l=self.labels[idx],
         )
+
+class VinBig_MAE_Trainer(MAETrainerBase):
+    def __init__(self, transform, batch_size, collate_batch_fn, num_workers):
+
+        self.transform = transform
+        
+        df_labels_train = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)
+        df_labels_test = pd.read_csv(VINBIG_IMAGE_LABELS_TEST_CSV_PATH)
+
+        assert len(df_labels_train) == N_IMAGES_TRAIN * 3
+        assert len(df_labels_test) == N_IMAGES_TEST
+
+        # Images ids        
+        image_ids = [None] * (N_IMAGES_TRAIN + N_IMAGES_TEST)
+
+        # train image ids
+        train_image_ids = df_labels_train['image_id']
+        for i in range(N_IMAGES_TRAIN):
+            image_ids[i] = train_image_ids[i * 3]
+            for j in range(1, 3):
+                assert train_image_ids[i * 3 + j] == image_ids[i]
+            assert image_ids[i] != image_ids[i-1]
+        
+        # test image ids
+        test_images_ids = df_labels_test['image_id']
+        for i in range(N_IMAGES_TEST):
+            image_ids[N_IMAGES_TRAIN + i] = test_images_ids[i]
+
+        # Image paths
+        self.image_paths = [os.path.join(VINBIG_ORIGINAL_IMAGES_FOLDER, f'{img_id}.png') for img_id in image_ids]
+
+        # Labels
+        labels = np.empty((N_IMAGES_TRAIN + N_IMAGES_TEST, len(VINBIG_DISEASES)), dtype=np.int8)
+        
+        # train labels
+        tmp = VINBIG_DISEASES[:]
+        tmp[tmp.index('Other disease')] = 'Other diseases' # HACK
+        train_labels = df_labels_train[tmp].values
+        for i in range(N_IMAGES_TRAIN):
+            labels[i] = merge_labels(
+                train_labels[3 * i],
+                train_labels[3 * i + 1],
+                train_labels[3 * i + 2]
+            )
+        
+        # test labels
+        labels[N_IMAGES_TRAIN:] = df_labels_test[VINBIG_DISEASES].values
+
+        train_indices = list(range(len(labels)))
+        labels_getter = lambda i: labels[i]
+        super().__init__(train_indices, None, None, list(range(len(VINBIG_DISEASES))),
+                         labels_getter, batch_size, collate_batch_fn, num_workers, use_validation_set=False)
+    
+    def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
+        return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
