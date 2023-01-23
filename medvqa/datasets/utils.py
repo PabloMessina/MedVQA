@@ -12,6 +12,7 @@ from medvqa.utils.constants import (
     VINBIG_DISEASES,
 )
 from medvqa.utils.data_structures import UnionFind
+from medvqa.utils.files import get_cached_json_file
 
 def deduplicate_indices(indices, report_ids):
     seen = set()
@@ -94,4 +95,37 @@ def adapt_label_matrix_as_merged_findings(label_matrix, n_findings, new_labels):
     return new_matrix
         
 
-    
+def get_tfidf_matrix_from_qa_pairs(qa_adapted_reports_path, max_features=1000):
+
+    from tqdm import tqdm
+    qa_adapted_reports = get_cached_json_file(qa_adapted_reports_path)
+    texts = [[] for _ in range(len(qa_adapted_reports['questions']))]
+    for r in tqdm(qa_adapted_reports['reports']):
+        s = r['sentences']
+        for k, v in r['qa'].items():
+            qid = int(k)
+            for i in v:
+                texts[qid].append(s[i])
+    for i in tqdm(range(len(texts))):
+        texts[i] = ' '.join(texts[i])
+
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    vectorizer = TfidfVectorizer(max_features=max_features)
+    return {
+        'questions': qa_adapted_reports['questions'],
+        'tfidf_matrix': vectorizer.fit_transform(texts).toarray(),
+    }
+
+# Plot a hierarchical clustering dendrogram of questions and corresponding tfidf vectors
+def plot_tfidf_dendrogram(tfidf_matrix, questions, figsize=(10, 20)):
+    import matplotlib.pyplot as plt
+    from scipy.cluster.hierarchy import linkage, dendrogram
+    from sklearn.metrics.pairwise import cosine_similarity    
+
+    dist = 1 - cosine_similarity(tfidf_matrix)
+    linkage_matrix = linkage(dist, 'ward')
+    fig, ax = plt.subplots(figsize=figsize)
+    ax = dendrogram(linkage_matrix, orientation="right", labels=questions, leaf_font_size=12)
+    plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+    plt.tight_layout()
+    plt.show()
