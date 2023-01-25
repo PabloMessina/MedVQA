@@ -54,7 +54,7 @@ def get_image_transform(
     elif use_huggingface_vitmodel_transform:
         assert huggingface_vitmodel_name is not None
         print(f'Using Huggingface ViT model transform for {huggingface_vitmodel_name}')
-        feature_extractor = ViTFeatureExtractor.from_pretrained(huggingface_vitmodel_name)
+        feature_extractor = ViTFeatureExtractor.from_pretrained(huggingface_vitmodel_name, use_auth_token=True)
         if type(feature_extractor.size) is int:
             image_size = feature_extractor.size
         elif "shortest_edge" in feature_extractor.size:

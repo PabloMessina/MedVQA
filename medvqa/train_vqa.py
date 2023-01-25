@@ -468,6 +468,10 @@ def train_model(
     model = model.to(device)
 
     # Check dataset weights
+    if dataloading_kwargs['iuxray_weight'] == 0:
+        train_iuxray = False
+    if dataloading_kwargs['mimiccxr_weight'] == 0:
+        train_mimiccxr = False
     if dataloading_kwargs['chexpert_weight'] == 0:
         train_chexpert = False
     if dataloading_kwargs['cxr14_weight'] == 0:

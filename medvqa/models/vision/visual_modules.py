@@ -195,6 +195,8 @@ _HUGGINGFACE_CLIP_VIT_VERSIONS = [
 _HUGGINGFACE_VITMODEL_VERSIONS = [
     'facebook/vit-mae-base',
     'facebook/vit-mae-large',
+    'CenIA/vit-mae-base-finetuned-mimic',
+    'CenIA/vit-mae-large-finetuned-mimic',
 ]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
@@ -222,6 +224,8 @@ HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT = {
 HUGGINGFACE_VITMODEL_NAMES_2_SHORT = {
     'facebook/vit-mae-base': 'facebook/vit-mae-base',
     'facebook/vit-mae-large': 'facebook/vit-mae-large',
+    'CenIA/vit-mae-base-finetuned-mimic': 'CenIA/vit-mae-base-ft-mimic',
+    'CenIA/vit-mae-large-finetuned-mimic': 'CenIA/vit-mae-large-ft-mimic',
 }
 
 def _get_clip_vit_modified_forward(dtype):    
@@ -308,6 +312,6 @@ def create_huggingface_clip_vit_feature_extractor(clip_vit_version, pretrained_w
 
 def create_huggingface_vitmodel_feature_extractor(vitmodel_version, pretrained_weights_path):
     assert vitmodel_version in _HUGGINGFACE_VITMODEL_VERSIONS, f'Unknown Hugginface ViTModel version {vitmodel_version}'
-    model = ViTModel.from_pretrained(vitmodel_version)
+    model = ViTModel.from_pretrained(vitmodel_version, use_auth_token=True)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
