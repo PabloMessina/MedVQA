@@ -10,6 +10,7 @@ import pandas as pd
 MIMICCXR_DATASET_DIR = os.environ['MIMICCXR_DATASET_DIR']
 MIMICCXR_DATASET_AUX_DIR = os.environ['MIMICCXR_DATASET_AUX_DIR']
 MIMICCXR_JPG_IMAGES_SMALL_DIR = os.environ['MIMICCXR_JPG_IMAGES_SMALL_DIR']
+MIMICCXR_JPG_IMAGES_LARGE_DIR = os.environ['MIMICCXR_JPG_IMAGES_LARGE_DIR']
 MIMICCXR_JPG_DIR = os.environ['MIMICCXR_JPG_DIR']
 MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-metadata.csv')
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
@@ -17,7 +18,8 @@ MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP']
 
-MIMICCXR_IMAGE_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
+MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
+MIMICCXR_IMAGE_LARGE_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_LARGE_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
 MIMICCXR_STUDY_REGEX = re.compile(r'/p(\d+)/p(\d+)/s(\d+)\.txt')
 MIMICCXR_IMAGE_REGEX = re.compile(r'p(\d+)/p(\d+)/s(\d+)/(.*)\.jpg$')
 MIMICCXR_BROKEN_IMAGES = set([
@@ -32,8 +34,14 @@ MIMICCXR_BROKEN_IMAGES = set([
     'p19/p19839145/s54889255/f674e474-817bb713-8f16c90c-608cf869-2829cae7.jpg',
 ])
 
-def get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id):
-    return MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
+def get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id):
+    return MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
+
+def get_mimiccxr_large_image_path(part_id, subject_id, study_id, dicom_id):
+    return MIMICCXR_IMAGE_LARGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
+
+def get_mimiccxr_report_path(part_id, subject_id, study_id):    
+    return os.path.join(MIMICCXR_DATASET_DIR, 'files', 'p{}'.format(part_id), 'p{}'.format(subject_id), 's{}.txt'.format(study_id))
 
 def choose_dicom_id_and_orientation(views):
     dicom_id = None

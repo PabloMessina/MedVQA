@@ -5,7 +5,7 @@ from tqdm import tqdm
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
-    MIMICCXR_IMAGE_PATH_TEMPLATE,
+    MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
     choose_dicom_id_and_orientation,
@@ -35,7 +35,7 @@ from medvqa.utils.logging import print_red
 def get_mimiccxr_image_paths(report):
     filepath = report['filepath']
     part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
-    images = glob.glob(MIMICCXR_IMAGE_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
+    images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
     return images
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):    

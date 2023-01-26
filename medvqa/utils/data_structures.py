@@ -19,6 +19,6 @@ class UnionFind:
                 self.p[y] = x
                 self.setSize[x] += self.setSize[y]
             else:
-                self.p[x] = y;
+                self.p[x] = y
                 self.setSize[y] += self.setSize[x]
                 if self.rank[x] == self.rank[y]: self.rank[y] += 1
