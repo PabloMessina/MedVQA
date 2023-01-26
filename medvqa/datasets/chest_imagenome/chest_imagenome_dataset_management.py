@@ -15,15 +15,12 @@ from medvqa.datasets.mimiccxr import (
 )
 from medvqa.datasets.mimiccxr.preprocessing import image_paths_generator
 
-# import reload # Python 3
-
-
 # Load scene graphs
 def _load_scene_graphs(scene_graphs_dir, k=None, offset=0):    
-    filepaths = os.listdir(scene_graphs_dir)
-    scene_graphs = [None] * len(filepaths)
-    for i in tqdm(range(offset, len(filepaths)), desc='Loading scene graphs'):
-        f = filepaths[i]
+    filenames = os.listdir(scene_graphs_dir)
+    scene_graphs = [None] * len(filenames)
+    for i in tqdm(range(offset, len(filenames)), desc='Loading scene graphs'):
+        f = filenames[i]
         if i == offset + k:
             i -= 1
             break
@@ -50,21 +47,6 @@ def get_gold_scene_graphs_paths():
             output.append(scene_graph_path)
     return output
         
-# # Load scene graphs in parallel using multiprocessing
-# def _load_scene_graphs_parallel(scene_graphs_dir, n_workers=4), k=None:
-#     import multiprocessing as mp
-#     from functools import partial
-
-#     # Load scene graphs
-#     pool = mp.Pool(mp.cpu_count())
-#     scene_graphs = pool.map(partial(_load_scene_graphs, scene_graphs_dir, k=k), range(mp.cpu_count()))
-#     pool.close()
-#     pool.join()
-
-#     # Merge scene graphs
-#     scene_graphs = [scene_graph for scene_graphs_ in scene_graphs for scene_graph in scene_graphs_]
-#     return scene_graphs
-
 # Extract labels from a scene graph
 def extract_labels_from_scene_graph(scene_graph):
     labels = []

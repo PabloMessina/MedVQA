@@ -2,9 +2,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+from medvqa.utils.common import CACHE_DIR
 
 CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR']
 CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH = os.environ['CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH']
+CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
 
 CHEST_IMAGENOME_ATTRIBUTES_DICT = {
     'anatomicalfinding': [
