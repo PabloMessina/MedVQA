@@ -14,7 +14,7 @@ from medvqa.datasets.dataloading_utils import (
 
 class VisualModuleDataset(Dataset):
     
-    def __init__(self, report_ids, images, indices, transform, source_dataset_name,
+    def __init__(self, report_ids, images, indices, transform,
                 shuffle_indices = True,
                 # aux task: medical tags
                 classify_tags = False, rid2tags = None,
@@ -24,6 +24,8 @@ class VisualModuleDataset(Dataset):
                 classify_chexpert = False, chexpert_labels = None,
                 # aux task: question labels
                 classify_questions = False, question_labels = None,
+                # other tasks
+                other_tasks = None,
                 # infinite mode
                 infinite = False,
         ):
@@ -31,8 +33,8 @@ class VisualModuleDataset(Dataset):
         self.images = images
         self.indices = indices
         self.transform = transform
-        self.source_dataset_name = source_dataset_name
         self.infinite = infinite
+        self.other_tasks = other_tasks
 
         if shuffle_indices:
             np.random.shuffle(self.indices)
@@ -73,6 +75,10 @@ class VisualModuleDataset(Dataset):
             output['chexpert'] = self.chexpert_labels[rid]
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
+        # other tasks
+        if self.other_tasks is not None:
+            for task in self.other_tasks:
+                output[task[0]] = task[1](i, rid)
         return output
 
 class VM_Base:
@@ -121,15 +127,16 @@ class VM_Base:
     
     def _load_cached_data(self, preprocessed_data_path):
         print (f'Loading data from path {preprocessed_data_path} ...')
-        data = load_pickle(preprocessed_data_path)        
-        self.dataset_name = data['dataset_name']
+        data = load_pickle(preprocessed_data_path)
+        print(f'data.keys() = {data.keys()}')
         self.report_ids = data['report_ids']
         self.images = data['images']
         self.question_ids = data['question_ids']
-        if self.training:
-            self.train_indices = data['train_indices']
+        if 'train_indices' in data:
+            self.train_indices = data['train_indices']        
+        if 'val_indices' in data:
             self.val_indices = deduplicate_indices(data['val_indices'], self.report_ids)
-        if self.classify_orientation:
+        if 'orientations' in data:
             self.orientations = data['orientations']
         print('\tDone!')
 
@@ -228,7 +235,7 @@ class VM_Trainer(VM_Base):
     def _get_visual_module_dataset(self, indices, infinite=True, shuffle=True):
         return VisualModuleDataset(
             self.report_ids, self.images, 
-            indices, self.transform, self.dataset_name,
+            indices, self.transform, 
             # aux task: medical tags
             classify_tags = self.classify_tags,
             rid2tags = self.rid2tags if self.classify_tags else None,
@@ -315,11 +322,15 @@ class VM_Evaluator(VM_Base):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
+                use_validation_indices = False,
+                other_tasks = None,
         ):
 
         rid2tags_path = os.path.join(cache_dir, rid2tags_filename) if classify_tags else None
         chexpert_labels_path = os.path.join(cache_dir, chexpert_labels_filename) if classify_chexpert else None        
         question_labels_path = os.path.join(cache_dir, question_labels_filename) if classify_questions else None
+        self.other_tasks = other_tasks
+        self.use_validation_indices = use_validation_indices
     
         super().__init__(False, transform, batch_size, collate_batch_fn,
                 preprocessed_data_path,
@@ -333,8 +344,11 @@ class VM_Evaluator(VM_Base):
                 question_labels_path = question_labels_path)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers):
-        self.test_indices = list(range(len(self.report_ids)))
-        self.test_indices = deduplicate_indices(self.test_indices, self.report_ids)
+        if self.use_validation_indices:
+            self.test_indices = self.val_indices
+        else:
+            self.test_indices = list(range(len(self.report_ids)))
+            self.test_indices = deduplicate_indices(self.test_indices, self.report_ids)
         self._generate_test_dataset()
         self._generate_test_dataloader(batch_size, collate_batch_fn, num_workers)
 
@@ -344,7 +358,7 @@ class VM_Evaluator(VM_Base):
         
         self.test_dataset = VisualModuleDataset(
             self.report_ids, self.images, self.test_indices,
-            self.transform, self.dataset_name,
+            self.transform,
             # aux task: medical tags prediction
             classify_tags = self.classify_tags,
             rid2tags = self.rid2tags if self.classify_tags else None,
@@ -357,6 +371,8 @@ class VM_Evaluator(VM_Base):
             # aux task: question labels
             classify_questions = self.classify_questions,
             question_labels = self.question_labels if self.classify_questions else None,
+            # other tasks
+            other_tasks = self.other_tasks,
         )
         
             

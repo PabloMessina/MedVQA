@@ -1,34 +1,32 @@
 class SimpleTemplateRGModel:
-    def __init__(self, diseases, templates, order):       
+    def __init__(self, labels, templates, thresholds, label_order):
 
         # sanity checks
-        if not set(order).issubset(set(diseases)):
-            raise Exception(f'Order contains invalid diseases: {order} vs {self.diseases}')
-
-        for disease in order:
-            if not set([0, 1]).issubset(set(templates[disease].keys())):
-                raise Exception(f'Values missing for {disease}: {templates[disease].keys()}')        
+        assert len(thresholds) == len(labels)
+        assert len(templates) == len(labels)
+        # check that label_order is a subset of labels
+        assert set(label_order).issubset(set(labels))
+        # check that templates have values for 0 and 1
+        for label in labels:
+            if not set([0, 1]) == set(templates[label].keys()):
+                raise Exception(f'Values missing for {label}: {templates[label].keys()}')
         
+        self.labels = labels
         self.templates = templates
-        self.diseases = diseases
-        self.disease_order = [self.diseases.index(d) for d in order]
+        self.thresholds = thresholds
+        self.label_order = [labels.index(l) for l in label_order]
 
-    def __call__(self, labels):
+    def __call__(self, pred_probs):
         """Transforms classification scores into fixed templates."""
-        # labels shape: batch_size, n_diseases (binary)
-
+        # pred_probs shape: batch_size, n_labels (e.g. 100x14). Values in [0, 1]
         reports = []
-        for i in range(len(labels)):
-            sample_predictions = labels[i]
-            # shape: n_diseases
-
+        for i in range(len(pred_probs)):
+            sample_probs = pred_probs[i] # shape: n_labels (e.g. 14)            
+            sample_binary = (sample_probs.numpy() >= self.thresholds).astype(int) # binary vector
             report = []
-            for disease_index in self.disease_order:
-                pred_value = sample_predictions[disease_index].item()
-                disease_name = self.diseases[disease_index]
-                sentence = self.templates[disease_name][pred_value]
+            for idx in self.label_order:
+                label_name = self.labels[idx]
+                sentence = self.templates[label_name][sample_binary[idx].item()]
                 report.append(sentence)
-
             reports.append(report)
-
         return reports

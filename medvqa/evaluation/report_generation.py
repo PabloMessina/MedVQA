@@ -68,7 +68,7 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
                 return qa_adapted_dataset['questions'][q_id]
             q_id -= len(qa_adapted_dataset['questions'])
             return CHEXPERT_LABELS[q_id]
-    else: assert False
+    else: assert False, f'Unknown report_eval_mode: {report_eval_mode}'
         
     gen_reports = []
     gt_reports = []
@@ -93,28 +93,50 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
         'gen_reports': gen_reports,
     }
 
-def recover_reports__template_based(metrics_dict, dataset, qa_adapted_dataset, chexpert_order):
+class TemplateBasedModes:
+    CHEXPERT_LABELS = 'chexpert_labels'
+    CHEST_IMAGENOME_LABELS = 'chest_imagenome_labels'
+
+def recover_reports__template_based(
+        mode, metrics_dict, dataset, qa_adapted_dataset, label_names, label_templates,
+        label_thresholds, label_order=None):
+    '''
+    mode: TemplateBasedModes
+    label_names: list of str
+    label_templates: dict of str -> dict of int -> str
+    label_thresholds: list of float
+    label_order: list of str
+    '''
     idxs = metrics_dict['idxs']
     report_ids = [dataset.report_ids[i] for i in idxs]
-    pred_chexpert_labels = metrics_dict['pred_chexpert']
+
+    if mode == TemplateBasedModes.CHEXPERT_LABELS:
+        pred_probs = metrics_dict['pred_chexpert_probs']
+    elif mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS:
+        pred_probs = metrics_dict['pred_chest_imagenome_probs']
+    else: assert False, f'Unknown mode: {mode}'
     
     n = len(report_ids)
-    assert len(pred_chexpert_labels) == n
+    assert len(pred_probs) == n
 
-    template_rg_model = SimpleTemplateRGModel(CHEXPERT_LABELS, TEMPLATES_CHEXPERT_v1, chexpert_order)
-    template_based_reports = template_rg_model(pred_chexpert_labels)
+    if label_order is None:
+        label_order = label_names
+
+    template_rg_model = SimpleTemplateRGModel(label_names, label_templates, label_thresholds, label_order)
+    template_based_reports = template_rg_model(pred_probs)
     
     gen_reports = []
     gt_reports = []
-    for i in range(n):
-        rid = report_ids[i]        
+    for i in range(n):        
+        # Ground truth report
+        rid = report_ids[i]
         report = qa_adapted_dataset['reports'][rid]
         gt_report = '.\n '.join(report['sentences'][i].lower() for i in report['matched'])        
-        gt_reports.append({'rid': rid, 'text': gt_report})
-
+        gt_reports.append({'rid': rid, 'text': gt_report})        
+        # Generated report
         gen_report = {'q':[], 'a': []}
-        for j in range(len(chexpert_order)):
-            gen_report['q'].append(chexpert_order[j])
+        for j in range(len(label_order)):
+            gen_report['q'].append(label_order[j])
             gen_report['a'].append(template_based_reports[i][j])
         gen_reports.append(gen_report)
 

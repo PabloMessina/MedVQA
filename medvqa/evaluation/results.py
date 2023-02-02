@@ -188,7 +188,12 @@ def _append_data_augmentation_column(df, results):
             aug2 = metadata['dataloading_kwargs']['img_aug_mode']
         except KeyError:
             aug2 = None
-        aug = aug1 or aug2
+        try:
+            aug3 = metadata['train_image_transform_kwargs']['augmentation_mode']
+        except KeyError:
+            aug3 = None
+        # make aug the first one that is not None
+        aug = aug1 or aug2 or aug3
         column.append(aug)
     df['aug'] = column
 

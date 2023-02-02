@@ -63,16 +63,26 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
                 metric_names.append(MetricNames.CHXLABELMACROAVGF1)
                 scores.append(score['f1_micro_avg'])
                 metric_names.append(MetricNames.CHXLABELMICROAVGF1)
+            elif m == MetricNames.CHESTIMAGENOMELABEL_PRF1:
+                scores.append(score['f1_macro_avg'])
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
+                scores.append(score['f1_micro_avg'])
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
             elif m == MetricNames.QLABELS_PRF1:
                 scores.append(score['f1_macro_avg'])
                 metric_names.append(MetricNames.QLABELS_MACROAVGF1)
                 scores.append(score['f1_micro_avg'])
-                metric_names.append(MetricNames.QLABELS_MICROAVGF1)
+                metric_names.append(MetricNames.QLABELS_MICROAVGF1)            
             elif m == MetricNames.CHXLABEL_ROCAUC:
                 scores.append(score['micro_avg'])
                 metric_names.append(MetricNames.CHXLABEL_ROCAUC_MICRO)
                 scores.append(score['macro_avg'])
                 metric_names.append(MetricNames.CHXLABEL_ROCAUC_MACRO)
+            elif m == MetricNames.CHESTIMAGENOMELABELROCAUC:
+                scores.append(score['micro_avg'])
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MICRO)
+                scores.append(score['macro_avg'])
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MACRO)
             else:
                 if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
                     try:

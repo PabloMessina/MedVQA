@@ -101,9 +101,11 @@ class OpenEndedVQA(nn.Module):
                  classify_orientation=False,
                  classify_chexpert=False,
                  classify_questions=False,
+                 classify_chest_imagenome=False,
                  n_medical_tags=None,
                  n_questions=None,
                  n_questions_aux_task=None,
+                 n_chest_imagenome_labels=None,
                  use_cxr14=False,
                  use_vinbig=False,
                  use_padchest=False,
@@ -158,8 +160,9 @@ class OpenEndedVQA(nn.Module):
             
         # Init auxiliary tasks
         self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_cxr14, use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task,
-                              merge_findings=merge_findings, n_findings=n_findings)
+                                classify_chest_imagenome, chexpert_mode, use_cxr14, use_vinbig, use_padchest,
+                                n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
+                                merge_findings=merge_findings, n_findings=n_findings)
 
         # Logging
         print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
@@ -289,7 +292,8 @@ class OpenEndedVQA(nn.Module):
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
     def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              chexpert_mode, use_cxr14, use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task,
+                              classify_chest_imagenome, chexpert_mode, use_cxr14, use_vinbig, use_padchest,
+                              n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
                               merge_findings=False, n_findings=None):
         
         # Optional auxiliary tasks
@@ -350,6 +354,14 @@ class OpenEndedVQA(nn.Module):
                 self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
                 self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
                 self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
+
+            # 10) Chest ImaGenome specific tasks
+            if classify_chest_imagenome:
+                assert n_chest_imagenome_labels is not None
+                self.chst_imgn_label_aux_task = True
+                self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
+            else:
+                self.chst_imgn_label_aux_task = False
 
     @property
     def name(self):        
@@ -511,6 +523,11 @@ class OpenEndedVQA(nn.Module):
             if not self.merge_findings and self.chx_aux_task:
                 output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+
+            if mimiccxr_foward:
+                if self.chst_imgn_label_aux_task:
+                    output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
 
         # predict answers (if required)
         if question_vectors is not None:

@@ -59,8 +59,10 @@ class DensenetVisualModule(nn.Module):
                 classify_orientation=False,
                 classify_chexpert=False,
                 classify_questions=False,
+                classify_chest_imagenome=False,
                 n_medical_tags=None,
                 n_questions_aux_task=None,
+                n_chest_imagenome_labels=None,
                 use_chexpert_forward=False,
                 merge_findings=False,
                 n_findings=False,
@@ -115,6 +117,13 @@ class DensenetVisualModule(nn.Module):
                 self.chx_aux_task = True
             else:
                 self.chx_aux_task = False
+            
+            # 6) chest imagenome classifiction
+            if classify_chest_imagenome:
+                self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
+                self.chst_imgn_label_aux_task = True
+            else:
+                self.chst_imgn_label_aux_task = False
 
         if use_chexpert_forward:
             self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
@@ -157,6 +166,9 @@ class DensenetVisualModule(nn.Module):
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
             if self.q_aux_task:
                 output['pred_qlabels'] = self.W_q(global_feat)
+            if self.chst_imgn_label_aux_task:
+                output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
         
         return output
 

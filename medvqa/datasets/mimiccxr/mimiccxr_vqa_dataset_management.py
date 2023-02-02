@@ -1,17 +1,26 @@
+from collections import Counter
 import os
 import glob
 import numpy as np
 from tqdm import tqdm
+from medvqa.datasets.chest_imagenome import load_gold_standard_dicom_ids
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_chest_imagenome_label_names_and_templates,
+    load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
+)
+from medvqa.datasets.utils import deduplicate_indices
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
-    choose_dicom_id_and_orientation,
+    MIMICCXR_EvalViewModes,
+    MIMICCXR_ViewModes,
+    get_dicom_id_and_orientation_list,
     get_broken_images,
     get_image_views_dict,
-    get_mimiccxr_image_path,
+    get_mimiccxr_small_image_path,
     get_split_dict,
 )
 from medvqa.datasets.image_processing import (
@@ -38,23 +47,27 @@ def get_mimiccxr_image_paths(report):
     images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
     return images
 
-def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer):    
+def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, include_chest_imagenome_mode):
     tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
     if tokenizer.medical_tokenization:
         tokenizer_string += f',{tokenizer.medical_terms_frequency_filename}'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer_string}',
+        f'include_chest_imagenome_mode={include_chest_imagenome_mode}',
     ]
     return get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_train_data__', strings, 'pkl')
 
 def get_test_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, report_eval_mode=None,
                                     pretrained_checkpoint_path=None, precomputed_question_probs_path=None,
                                     precomputed_question_thresholds_path=None,
-                                    n_questions_per_report=None, qclass_threshold=None, use_random_image=False):
+                                    n_questions_per_report=None, qclass_threshold=None, use_random_image=False,
+                                    eval_view_mode=None):
+    assert eval_view_mode is not None
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}',
+        f'eval_view_mode={eval_view_mode}',
     ]    
     if report_eval_mode is not None:        
         strings.append(f'report_eval_mode={report_eval_mode}')
@@ -142,7 +155,7 @@ def _precompute_questions_per_report(basic_data, report_eval_mode,
         qa_adapted_reports_filename=None, image_transform=None,
         image_local_feat_size=None, n_questions_aux_task=None, pretrained_weights=None,
         pretrained_checkpoint_path=None, precomputed_question_probs_path=None,
-        precomputed_question_thresholds_path=None, chexpert_one_hot_offset=None, batch_size=None):
+        precomputed_question_thresholds_path=None, batch_size=None):
 
     print('_precompute_questions_per_report():')
 
@@ -188,8 +201,7 @@ def _precompute_questions_per_report(basic_data, report_eval_mode,
     elif report_eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
          report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
         assert n_questions_per_report is not None
-        assert qclass_threshold is not None or precomputed_question_thresholds_path is not None
-        assert chexpert_one_hot_offset is not None
+        assert qclass_threshold is not None or precomputed_question_thresholds_path is not None        
         train_report_ids = [rid for rid, split in zip(basic_data['report_ids'], basic_data['splits']) if split == 'train']
         assert len(train_report_ids) > 0
         question_scores = get_average_question_positions(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename, train_report_ids)
@@ -220,7 +232,7 @@ def _precompute_questions_per_report(basic_data, report_eval_mode,
                 classified_question_ids = sorted(questions[i], key=question_scorer)
                 data[ri] = classified_question_ids
         else: # hybrid method
-            chexpert_question_ids = [chexpert_one_hot_offset + x for x in range(len(CHEXPERT_LABELS))]
+            chexpert_question_ids = [x for x in range(len(CHEXPERT_LABELS))]
             for i, ri in enumerate(test_report_ids):
                 classified_question_ids = sorted(questions[i], key=question_scorer)
                 assert all(x not in chexpert_question_ids for x in classified_question_ids)
@@ -273,11 +285,19 @@ def _precompute_questions_per_report(basic_data, report_eval_mode,
     
     return data
 
-def _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict):
+def _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict,
+                    view_mode=MIMICCXR_ViewModes.ANY_SINGLE,
+                    include_chest_imagenome_mode=False, chest_imagenome_dicom_ids=None):
+
+    if include_chest_imagenome_mode:
+        assert chest_imagenome_dicom_ids is not None
+        assert type(chest_imagenome_dicom_ids) == set
+        assert view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME
 
     print(f'Obtaining basic data ...')
 
-    file_path = os.path.join(MIMICCXR_CACHE_DIR, f'mimiccxr_basic_data(dataset={qa_adapted_reports_filename}).pkl')    
+    file_path = os.path.join(MIMICCXR_CACHE_DIR,
+        f'mimiccxr_basic_data(dataset={qa_adapted_reports_filename},view_mode={view_mode}).pkl')
     data = load_pickle(file_path)
     if data is not None:
         print(f'   basic data loaded from {file_path}')
@@ -289,6 +309,7 @@ def _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict):
 
     data = dict(
         report_ids = [],
+        dicom_ids = [],
         image_paths = [],
         orientation_ids = [],
         splits = [],
@@ -301,24 +322,81 @@ def _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict):
         # images = glob.glob(f'/mnt/workspace/mimic-cxr-jpg/images-small/p{part_id}/p{subject_id}/s{study_id}/*.jpg')
         # assert len(views) == len(images)
 
-        dicom_id, orientation = choose_dicom_id_and_orientation(views)
-            
-        if (dicom_id is not None and (subject_id, study_id, dicom_id) not in broken_images):
-            image_path = get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
-            orientation_id = _get_orientation_id(orientation)
-            data['report_ids'].append(ri)
-            data['image_paths'].append(image_path)
-            data['orientation_ids'].append(orientation_id)
-            data['splits'].append(split_dict[(subject_id, study_id, dicom_id)])
+        dicom_id_orientation_pairs = get_dicom_id_and_orientation_list(views, view_mode, chest_imagenome_dicom_ids)
+
+        for dicom_id, orientation in dicom_id_orientation_pairs:
+            assert dicom_id is not None
+
+            if (subject_id, study_id, dicom_id) not in broken_images:
+                image_path = get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id)
+                orientation_id = _get_orientation_id(orientation)
+                data['report_ids'].append(ri)
+                data['dicom_ids'].append(dicom_id)
+                data['image_paths'].append(image_path)
+                data['orientation_ids'].append(orientation_id)
+                data['splits'].append(split_dict[(subject_id, study_id, dicom_id)])
 
     save_to_pickle(data, file_path)
     print(f'   len(report_ids) =', len(data['report_ids']))
     print(f'   len(set(report_ids)) =', len(set(data['report_ids'])))
+    # Print the distribution of orientations
+    counter = Counter(data["orientation_ids"])
+    for oid, c in counter.items():
+        print(f'   {MIMICCXR_IMAGE_ORIENTATIONS[oid]}, count = {c}')
     print(f'   basic data saved to {file_path}')
     
-    return data    
+    return data
 
-def _preprocess_data(self, qa_adapted_reports_filename, split_name):
+def _filter_report_orientation_pairs_for_test(report_ids, orientation_ids, view_mode):
+
+    print(f'Filtering report orientation pairs for test ...')
+
+    if view_mode == MIMICCXR_EvalViewModes.ALL:
+        output = list(range(len(report_ids)))
+    elif view_mode == MIMICCXR_EvalViewModes.FRONT_ALL:
+        idxs = []
+        PA_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('PA')
+        AP_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('AP')
+        valid_oids = [PA_ID, AP_ID]
+        for i, (ri, oid) in enumerate(zip(report_ids, orientation_ids)):
+            if oid in valid_oids:
+                idxs.append(i)
+        output = idxs
+    elif view_mode == MIMICCXR_EvalViewModes.FRONT_SINGLE:
+        rid2idx = {}
+        PA_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('PA')
+        AP_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('AP')
+        valid_oids = [PA_ID, AP_ID]
+        for i, (ri, oid) in enumerate(zip(report_ids, orientation_ids)):
+            if oid in valid_oids:
+                if ri not in rid2idx:
+                    rid2idx[ri] = i
+                else:
+                    if oid == PA_ID:
+                        rid2idx[ri] = i
+        output = list(rid2idx.values())
+    elif view_mode == MIMICCXR_EvalViewModes.ANY_SINGLE:
+        rid2idx = {}
+        PA_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('PA')
+        AP_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('AP')
+        for i, (ri, oid) in enumerate(zip(report_ids, orientation_ids)):
+            if ri not in rid2idx:
+                rid2idx[ri] = i
+            else:
+                if oid == PA_ID:
+                    rid2idx[ri] = i
+                elif oid == AP_ID:
+                    if rid2idx[ri] != PA_ID:
+                        rid2idx[ri] = i
+        output = list(rid2idx.values())
+    else:
+        raise ValueError(f'Unknown view_mode = {view_mode}')
+
+    print(f'   len(report_ids) = {len(report_ids)}')
+    print(f'   len(output) = {len(output)}')
+    return output
+
+def _preprocess_data(self, split_name):
 
     assert split_name in ('train_val', 'test'), f'Unknown split_name = {split_name}'
 
@@ -333,17 +411,19 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_name):
         answer_string2ids_func = tokenizer.string2ids
 
     if mimiccxr_qa_reports is None:
-        file_path = os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename)
+        file_path = os.path.join(MIMICCXR_CACHE_DIR, self.qa_adapted_reports_filename)
         print(f'Loading {file_path}')
         mimiccxr_qa_reports = get_cached_json_file(file_path)
 
-    split_dict = get_split_dict()    
+    split_dict = get_split_dict()
     image_views_dict = get_image_views_dict()    
-    basic_data = _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict)
+    basic_data = _get_basic_data(self.qa_adapted_reports_filename, image_views_dict, split_dict,
+                                 view_mode=self.view_mode, include_chest_imagenome_mode=self.include_chest_imagenome_mode,
+                                 chest_imagenome_dicom_ids=self.chest_imagenome_dicom_ids)
 
     if split_name == 'test' and self.report_eval_mode is not None:
         questions_per_report = _precompute_questions_per_report(basic_data, self.report_eval_mode,
-                        qa_adapted_reports_filename=qa_adapted_reports_filename,
+                        qa_adapted_reports_filename=self.qa_adapted_reports_filename,
                         image_transform=self.transform,
                         image_local_feat_size=self.image_local_feat_size,
                         n_questions_aux_task=self.n_questions_aux_task,
@@ -353,8 +433,7 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_name):
                         qclass_threshold=self.qclass_threshold,
                         pretrained_checkpoint_path=self.pretrained_checkpoint_path,
                         precomputed_question_probs_path=self.precomputed_question_probs_path,
-                        precomputed_question_thresholds_path=self.precomputed_question_thresholds_path,
-                        chexpert_one_hot_offset=self.chexpert_one_hot_offset)
+                        precomputed_question_thresholds_path=self.precomputed_question_thresholds_path)
     else:
         questions_per_report = None
     
@@ -370,16 +449,27 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_name):
                                 
     # Collect report_ids, image_paths and orientation_ids for the split
     if is_train_val:
-        report_ids = [rid for rid, s in zip(basic_data['report_ids'], basic_data['splits']) if s != 'test']
-        image_paths = [ip for ip, s in zip(basic_data['image_paths'], basic_data['splits']) if s != 'test']
-        orientation_ids = [oid for oid, s in zip(basic_data['orientation_ids'], basic_data['splits']) if s != 'test']
-        splits = [s for s in basic_data['splits'] if s != 'test']
+        if self.include_chest_imagenome_mode:
+            # Use only instances whose dicom_id is not in Chest-Imagenome gold standard
+            gold_dicom_ids = self.chest_imagenome_gold_dicom_ids
+            assert type(gold_dicom_ids) is set
+            report_ids = [rid for rid, s, did in zip(basic_data['report_ids'], basic_data['splits'], basic_data['dicom_ids'])\
+                 if s != 'test' and did not in gold_dicom_ids]
+            image_paths = [ip for ip, s, did in zip(basic_data['image_paths'], basic_data['splits'], basic_data['dicom_ids'])\
+                    if s != 'test' and did not in gold_dicom_ids]
+            orientation_ids = [oid for oid, s, did in zip(basic_data['orientation_ids'], basic_data['splits'], basic_data['dicom_ids'])\
+                    if s != 'test' and did not in gold_dicom_ids]
+            splits = [s for s, did in zip(basic_data['splits'], basic_data['dicom_ids']) if s != 'test' and did not in gold_dicom_ids]
+        else:
+            report_ids = [rid for rid, s in zip(basic_data['report_ids'], basic_data['splits']) if s != 'test']
+            image_paths = [ip for ip, s in zip(basic_data['image_paths'], basic_data['splits']) if s != 'test']
+            orientation_ids = [oid for oid, s in zip(basic_data['orientation_ids'], basic_data['splits']) if s != 'test']
+            splits = [s for s in basic_data['splits'] if s != 'test']
     else:
         report_ids = [rid for rid, s in zip(basic_data['report_ids'], basic_data['splits']) if s == 'test']
         image_paths = [ip for ip, s in zip(basic_data['image_paths'], basic_data['splits']) if s == 'test']
         orientation_ids = [oid for oid, s in zip(basic_data['orientation_ids'], basic_data['splits']) if s == 'test']
     assert len(report_ids) == len(image_paths) == len(orientation_ids)
-    assert len(report_ids) == len(set(report_ids))
     assert len(report_ids) > 0
 
     # Collect data in VQA format (multiple questions per report)
@@ -426,8 +516,9 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_name):
 
     else: # Report evaluation method -> we ignore the answers
 
-        for i in tqdm(range(len(report_ids))):
+        filtered_idxs = _filter_report_orientation_pairs_for_test(report_ids, orientation_ids, self.eval_view_mode)
 
+        for i in tqdm(filtered_idxs):
             ri = report_ids[i]
             image_path = image_paths[i]
             orientation_id = orientation_ids[i]
@@ -456,10 +547,12 @@ def _preprocess_data(self, qa_adapted_reports_filename, split_name):
 
 class MIMICCXR_VQA_Trainer(VQA_Trainer):
 
-    def __init__(self, transform, batch_size, collate_batch_fn,
+    def __init__(self, train_image_transform, val_image_transform, 
+                batch_size, collate_batch_fn,
                 num_workers,
                 qa_adapted_reports_filename,
                 tokenizer,
+                view_mode = MIMICCXR_ViewModes.ANY_SINGLE,
                 collate_batch_fn_chexpert_mode = None,
                 verbose_question = True,
                 classify_tags = False,
@@ -468,6 +561,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 classify_chexpert = False,
                 chexpert_labels_filename = None,
                 classify_questions = False,
+                classify_chest_imagenome = False,
                 question_labels_filename = None,
                 mimiccxr_qa_reports = None,
                 balanced_dataloading = False,
@@ -475,26 +569,54 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 imbalance_reduction_coef = 1,
                 allowed_questions = None,
                 one_question_per_batch = False,
+                include_mined_questions_mode = False,
                 include_chexpert_mode = False,
-                use_chexpert_mode_only = False,
-                chexpert_one_hot_offset = None,
                 include_image = True,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
                 use_merged_findings = False,
                 findings_remapper = None,
                 n_findings = None,
+                include_chest_imagenome_mode = False,
+                chest_imagenome_labels_filename = None,
+                chest_imagenome_label_names_filename = None,
+                collate_batch_fn_chest_imagenome_mode = None,
                 debug = False):
         
         self.tokenizer = tokenizer
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
-        self.qa_adapted_reports_filename = qa_adapted_reports_filename
+        self.qa_adapted_reports_filename = qa_adapted_reports_filename        
+        self.view_mode = view_mode        
+        self.include_chest_imagenome_mode = include_chest_imagenome_mode
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.classify_chest_imagenome = classify_chest_imagenome
         
-        preprocessing_save_path = _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer)
+        if include_chest_imagenome_mode: # Chest-Imagenome specific logic
+            assert chest_imagenome_labels_filename is not None
+            assert chest_imagenome_label_names_filename is not None
+            assert collate_batch_fn_chest_imagenome_mode is not None            
+            self.collate_batch_fn_chest_imagenome_mode = collate_batch_fn_chest_imagenome_mode
+            # Load Chest-Imagenome dicom_ids and labels
+            self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
+                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)
+            # Load Chest-Imagenome label names and templates
+            self.chest_imagenome_label_names, self.chest_imagenome_templates = \
+                load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
+            # Load Chest-Imagenome gold standard dicom_ids (they must be removed from training and validation sets)
+            self.chest_imagenome_gold_dicom_ids = set(load_gold_standard_dicom_ids())
+            # Necessary hack so that parent classes can access chest_imagenome_labels
+            if classify_chest_imagenome:
+                other_tasks = [('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid])]
+            else:
+                other_tasks = None
+        
+        preprocessing_save_path = _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, include_chest_imagenome_mode)
 
         print(f'MIMICCXR_VQA_Trainer: balanced_dataloading = {balanced_dataloading}')
 
-        super().__init__(transform, batch_size, collate_batch_fn,
+        super().__init__(train_image_transform, val_image_transform,
+                        batch_size, collate_batch_fn,
                         preprocessing_save_path,
                         MIMICCXR_CACHE_DIR,
                         num_workers,
@@ -513,19 +635,74 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         allowed_questions = allowed_questions,
                         qa_adapted_reports_filename = qa_adapted_reports_filename,
                         one_question_per_batch = one_question_per_batch,
+                        include_mined_questions_mode = include_mined_questions_mode,
                         include_chexpert_mode = include_chexpert_mode,
-                        use_chexpert_mode_only = use_chexpert_mode_only,
-                        chexpert_one_hot_offset = chexpert_one_hot_offset,
                         include_image = include_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
                         use_merged_findings = use_merged_findings,
                         findings_remapper = findings_remapper,
                         n_findings = n_findings,
+                        other_tasks=other_tasks,
                         debug = debug)
 
     def _preprocess_data(self):
-        _preprocess_data(self, self.qa_adapted_reports_filename, 'train_val')
+        _preprocess_data(self, 'train_val')
+
+    def _generate_dataset_and_dataloader__chest_imagenome_mode(
+            self, indices, batch_size, collate_batch_fn, num_workers,
+            infinite=True, n_pos_samples=None, n_neg_samples=None, min_pos_to_include=0):
+
+        return self._create_label_based_dataset_and_dataloader(
+            indices=indices,
+            labels=self.chest_imagenome_labels,
+            label_names=self.chest_imagenome_label_names,
+            templates=self.chest_imagenome_templates,
+            tokenizer=self.tokenizer,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_batch_fn=collate_batch_fn,
+            infinite=infinite,
+            n_pos_samples=n_pos_samples,
+            n_neg_samples=n_neg_samples,
+            min_pos_to_include=min_pos_to_include,
+            report_ids=self.report_ids,
+            print_every=30,
+            # break_loop_at_i=40, # for debugging
+            create_dataset_kwargs=dict(
+                fixed_qa_pair=True,
+            ))
+
+    def _generate_train_dataset_and_dataloader__chest_imagenome_mode(self, batch_size, collate_batch_fn, num_workers):                
+        print('Generating balanced train dataset in chest imagenome mode ...')        
+        flattened_indices = []
+        for _indices in self.train_indices.values():
+            flattened_indices.extend(_indices)
+        dedup_indices = deduplicate_indices(flattened_indices, self.report_ids)
+        dataset, dataloader = self._generate_dataset_and_dataloader__chest_imagenome_mode(
+            dedup_indices, batch_size, collate_batch_fn, num_workers, min_pos_to_include=20)
+        self.train_dataset__chest_imagenome_mode = dataset
+        self.train_dataloader__chest_imagenome_mode = dataloader
+        print('len(self.train_dataset__chest_imagenome_mode) =', len(self.train_dataset__chest_imagenome_mode))
+
+    def _generate_val_dataset_and_dataloader__chest_imagenome_mode(self, batch_size, collate_batch_fn, num_workers):
+        print('Generating balanced validation dataset in chest imagenome mode ...')
+        dedup_indices = deduplicate_indices(self.val_indices, self.report_ids)
+        dataset, dataloader = self._generate_dataset_and_dataloader__chest_imagenome_mode(
+            dedup_indices, batch_size, collate_batch_fn, num_workers, infinite=False,
+            n_pos_samples=5, n_neg_samples=5)
+        self.val_dataset__chest_imagenome_mode = dataset
+        self.val_dataloader__chest_imagenome_mode = dataloader
+        print('len(self.val_dataset__chest_imagenome_mode) =', len(self.val_dataset__chest_imagenome_mode))
+
+    def _load_optional_datasets_and_dataloaders(self):
+        if self.include_chest_imagenome_mode:
+            if not self.validation_only:
+                self._generate_train_dataset_and_dataloader__chest_imagenome_mode(
+                    self.batch_size, self.collate_batch_fn_chest_imagenome_mode, self.num_workers)
+            if not self.train_with_all:
+                self._generate_val_dataset_and_dataloader__chest_imagenome_mode(
+                    self.batch_size, self.collate_batch_fn_chest_imagenome_mode, self.num_workers)
 
 class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
 
@@ -551,11 +728,15 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                 n_questions_aux_task = None,
                 n_questions_per_report = None,
                 qclass_threshold = None,
-                chexpert_one_hot_offset = None,
                 include_image = True,
                 use_random_image = False,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
+                view_mode = None,
+                eval_view_mode = None,
+                include_chest_imagenome_mode = False,
+                classify_chest_imagenome = False,
+                chest_imagenome_labels_filename = None,
                 **unused_kwargs):
 
         print('report_eval_mode =', report_eval_mode)
@@ -563,6 +744,8 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.tokenizer = tokenizer
         self.mimiccxr_qa_reports = mimiccxr_qa_reports
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
+        self.view_mode = view_mode
+        self.include_chest_imagenome_mode = include_chest_imagenome_mode
         
         # Args used in report_eval_mode
         self.report_eval_mode = report_eval_mode
@@ -576,16 +759,27 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
         self.pretrained_checkpoint_path = pretrained_checkpoint_path
         self.precomputed_question_probs_path = precomputed_question_probs_path
         self.precomputed_question_thresholds_path = precomputed_question_thresholds_path
-        self.chexpert_one_hot_offset = chexpert_one_hot_offset
+        self.eval_view_mode = eval_view_mode
 
         if pretrained_weights is not None:
             assert pretrained_checkpoint_path is not None
+
+        if classify_chest_imagenome: # Chest-Imagenome specific logic
+            assert chest_imagenome_labels_filename is not None
+            # Load Chest-Imagenome dicom_ids and labels
+            self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
+                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)            
+            # Necessary hack so that parent classes can access chest_imagenome_labels
+            other_tasks = [('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid])]
+        else:
+            other_tasks = None
         
         preprocessing_save_path = get_test_preprocessing_save_path(
                         qa_adapted_reports_filename, tokenizer, report_eval_mode,
                         pretrained_checkpoint_path, precomputed_question_probs_path,
                         precomputed_question_thresholds_path,
-                        n_questions_per_report, qclass_threshold, use_random_image)
+                        n_questions_per_report, qclass_threshold, use_random_image,
+                        eval_view_mode)
 
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessing_save_path,
@@ -604,8 +798,8 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
                         use_random_image = use_random_image,
                         use_precomputed_visual_features = use_precomputed_visual_features,
                         precomputed_visual_features_path = precomputed_visual_features_path,
-                        chexpert_one_hot_offset = chexpert_one_hot_offset)
+                        other_tasks = other_tasks)
 
     def _preprocess_data(self):
-        _preprocess_data(self, self.qa_adapted_reports_filename, 'test')
+        _preprocess_data(self, 'test')
 

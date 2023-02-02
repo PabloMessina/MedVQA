@@ -251,6 +251,8 @@ class VQADataset(Dataset):
                 idx2visfeatidx=None,
                 # infinite mode
                 infinite=False,
+                # other tasks
+                other_tasks=None,
         ):
         self.report_ids = report_ids
         self.images = images
@@ -264,6 +266,7 @@ class VQADataset(Dataset):
         self.fixed_qa_pair = fixed_qa_pair
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.use_random_image = use_random_image
+        self.other_tasks = other_tasks
 
         if include_image:
             assert images is not None
@@ -304,7 +307,7 @@ class VQADataset(Dataset):
     def __getitem__(self, i):
         indices = self.indices
         if self.infinite:
-            i %= len(indices)        
+            i %= len(indices)
         idx = indices[i]
         rid = self.report_ids[idx]        
         output = dict(
@@ -329,17 +332,19 @@ class VQADataset(Dataset):
             output['chexpert'] = self.chexpert_labels[rid]
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
+        # other tasks
+        if self.other_tasks is not None:
+            for task in self.other_tasks:
+                output[task[0]] = task[1](i, rid)
         return output
 
 class LabelBasedVQAClass:
 
-    def __init__(self, label_names, templates, labels_offset=None, use_merged_findings=False,
-                labels2mergedfindings=None, n_findings=None, labels=None):
-        assert labels_offset is not None
+    def __init__(self, label_names, templates, use_merged_findings=False,
+                labels2mergedfindings=None, n_findings=None, labels=None):        
         self.label_names = label_names
         self.templates = templates
-        self.use_merged_findings = use_merged_findings
-        self.labels_offset = labels_offset
+        self.use_merged_findings = use_merged_findings        
         if use_merged_findings:
             assert labels2mergedfindings is not None
             assert n_findings is not None
@@ -348,41 +353,57 @@ class LabelBasedVQAClass:
             self.finding_labels = adapt_label_matrix_as_merged_findings(
                 labels, n_findings, self.labels2mergedfindings)
 
-    def _create_label_based_dataset_and_dataloader(self, indices, labels, batch_size, num_workers, collate_batch_fn,
-                                tokenizer=None, report_ids=None, infinite=True, n_samples=None, min_pos_to_include=0,
-                                log_weighting=False, create_dataset_kwargs={}, include_qa=True):
+    def _create_label_based_dataset_and_dataloader(self, indices, labels, label_names, templates,
+            batch_size, num_workers, collate_batch_fn, tokenizer=None, report_ids=None, infinite=True,
+            n_pos_samples=None, n_neg_samples=None, min_pos_to_include=0, log_weighting=False, create_dataset_kwargs={}, include_qa=True,
+            print_every=1, break_loop_at_i=None):
+        
         disease_datasets = []
         if log_weighting:
             pos_counts = []
 
-        for i in range(len(self.label_names)):
-            pos_indices = []
-            neg_indices = []
+        for i in range(len(label_names)):
+            
+            if i == break_loop_at_i:
+                break
+
+            should_print = i % print_every == 0
+            pos_indices = [None] * len(indices)
+            neg_indices = [None] * len(indices)
+            i_pos = 0
+            i_neg = 0
             for j in indices:
                 jj = j if report_ids is None else report_ids[j]
                 if labels[jj][i] == 1:
-                    pos_indices.append(j)
+                    pos_indices[i_pos] = j
+                    i_pos += 1
                 else:
-                    neg_indices.append(j)
+                    neg_indices[i_neg] = j
+                    i_neg += 1
+            pos_indices = pos_indices[:i_pos]
+            neg_indices = neg_indices[:i_neg]
 
-            if n_samples is not None:
-                if len(pos_indices) > n_samples:
-                    pos_indices = random.sample(pos_indices, n_samples)
-                if len(neg_indices) > n_samples:
-                    neg_indices = random.sample(neg_indices, n_samples)
+            if n_pos_samples is not None:
+                if len(pos_indices) > n_pos_samples:
+                    pos_indices = random.sample(pos_indices, n_pos_samples)
+            if n_neg_samples is not None:
+                if len(neg_indices) > n_neg_samples:
+                    neg_indices = random.sample(neg_indices, n_neg_samples)                
 
             if len(pos_indices) < min_pos_to_include:
-                print(f'ignoring label = {self.label_names[i]}, reason: too few positive examples ({len(pos_indices)})')
+                print(f'    ignoring label = {label_names[i]}, reason: too few positive examples ({len(pos_indices)})')
                 continue
 
             if include_qa:
                 if self.use_merged_findings:
-                    q_id = self.labels_offset + self.labels2mergedfindings[i]
+                    q_id = self.labels2mergedfindings[i]
                 else:
-                    q_id = self.labels_offset + i            
-                print(f'label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+                    q_id = i
+                if should_print:
+                    print(f'    label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
             else:
-                print(f'label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+                if should_print:
+                    print(f'    label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
 
             if log_weighting:
                 pos_counts.append(len(pos_indices))
@@ -391,7 +412,7 @@ class LabelBasedVQAClass:
             if len(pos_indices) > 0:
                 pos_indices = np.array(pos_indices, dtype=int)
                 if include_qa:
-                    pos_answer = tokenizer.string2ids(self.templates[self.label_names[i]][1].lower())
+                    pos_answer = tokenizer.string2ids(templates[label_names[i]][1].lower())
                     pos_dataset = self._create_vqa_dataset(q=q_id, a=pos_answer, indices=pos_indices,
                                                         infinite=infinite, **create_dataset_kwargs)
                 else:
@@ -403,7 +424,7 @@ class LabelBasedVQAClass:
             if len(neg_indices) > 0:
                 neg_indices = np.array(neg_indices, dtype=int)
                 if include_qa:
-                    neg_answer = tokenizer.string2ids(self.templates[self.label_names[i]][0].lower())
+                    neg_answer = tokenizer.string2ids(templates[label_names[i]][0].lower())
                     neg_dataset = self._create_vqa_dataset(q=q_id, a=neg_answer, indices=neg_indices,
                                                         infinite=infinite, **create_dataset_kwargs)
                 else:
@@ -452,7 +473,8 @@ class LabelBasedVQAClass:
 
 class VQA_Base(LabelBasedVQAClass):
 
-    def __init__(self, training, transform, batch_size, collate_batch_fn,
+    def __init__(self, training, train_image_transform, val_image_transform,
+                batch_size, collate_batch_fn,
                 preprocessing_save_path,                
                 num_workers,
                 collate_batch_fn_chexpert_mode = None,
@@ -470,18 +492,22 @@ class VQA_Base(LabelBasedVQAClass):
                 verbose_question = True,
                 include_image = True,
                 use_random_image = False,
-                chexpert_one_hot_offset = None,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
                 use_merged_findings=False,
                 findings_remapper=None,
                 n_findings=None,
+                other_tasks = None,
                 debug = False,
         ):
         
         self.preprocessing_save_path = preprocessing_save_path
         self.training = training
-        self.transform = transform
+        if self.training:
+            self.image_transform = train_image_transform
+        else:
+            self.image_transform = val_image_transform
+        self.val_image_transform = val_image_transform
         self.classify_tags = classify_tags
         self.classify_orientation = classify_orientation
         self.classify_chexpert = classify_chexpert
@@ -495,6 +521,7 @@ class VQA_Base(LabelBasedVQAClass):
         self.precomputed_visual_features_path = precomputed_visual_features_path
         self.train_with_all = train_with_all
         self.use_merged_findings = use_merged_findings
+        self.other_tasks = other_tasks
 
         self.chexpert_labels = None
         
@@ -542,7 +569,6 @@ class VQA_Base(LabelBasedVQAClass):
         super().__init__(
             label_names=CHEXPERT_LABELS,
             templates=TEMPLATES_CHEXPERT_v1,
-            labels_offset=chexpert_one_hot_offset,
             use_merged_findings=use_merged_findings,
             labels2mergedfindings=findings_remapper[CHEXPERT_DATASET_ID] if use_merged_findings else None,
             n_findings=n_findings,
@@ -593,7 +619,7 @@ class VQA_Base(LabelBasedVQAClass):
             report_ids=self.report_ids,
             images=self.images,
             indices=indices,
-            transform=self.transform,
+            transform=self.image_transform,
             include_answer=include_answer,
             include_image=self.include_image,
             shuffle_indices=shuffle_indices,
@@ -612,6 +638,8 @@ class VQA_Base(LabelBasedVQAClass):
             question_labels = self.question_labels if self.classify_questions else None,
             # infinite mode
             infinite=infinite,
+            # other tasks
+            other_tasks = self.other_tasks,
         )
 
         if include_answer:            
@@ -679,7 +707,7 @@ class VQA_Base(LabelBasedVQAClass):
             data['train_indices'] = self.train_indices
         if hasattr(self, 'val_indices'):
             data['val_indices'] = self.val_indices
-        if self.classify_orientation:
+        if hasattr(self, 'orientations'):
             data['orientations'] = self.orientations
         save_to_pickle(data, preprocessing_save_path)
         print('\tdone!')
@@ -753,7 +781,8 @@ def _get_cached_balanced_train_datasets_path(preprocessing_save_path, batch_size
 
 class VQA_Trainer(VQA_Base):
     
-    def __init__(self, transform, batch_size, collate_batch_fn,
+    def __init__(self, train_image_transform, val_image_transform,
+                batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 cache_dir,
                 num_workers,
@@ -775,15 +804,15 @@ class VQA_Trainer(VQA_Base):
                 allowed_questions = None,
                 qa_adapted_reports_filename = None,
                 one_question_per_batch = False,
-                include_chexpert_mode = False,
-                use_chexpert_mode_only = False,
-                chexpert_one_hot_offset = None,
+                include_mined_questions_mode = True,
+                include_chexpert_mode = False,                
                 include_image = True,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
                 use_merged_findings=False,
                 findings_remapper=None,
                 n_findings=None,
+                other_tasks=None,
                 debug = False,
         ):
 
@@ -806,10 +835,7 @@ class VQA_Trainer(VQA_Base):
         self.one_question_per_batch = one_question_per_batch
         self.include_answer = include_answer
         self.include_chexpert_mode = include_chexpert_mode
-        if include_chexpert_mode:
-            assert chexpert_one_hot_offset is not None
-            self.chexpert_one_hot_offset = chexpert_one_hot_offset
-        self.use_chexpert_mode_only = use_chexpert_mode_only
+        self.include_mined_questions_mode = include_mined_questions_mode
         
         if allowed_questions is not None:
             assert qa_adapted_reports_filename is not None
@@ -822,7 +848,8 @@ class VQA_Trainer(VQA_Base):
         else:
             self.allowed_question_ids = None
     
-        super().__init__(True, transform, batch_size, collate_batch_fn,
+        super().__init__(True, train_image_transform, val_image_transform,
+                batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 num_workers,
                 collate_batch_fn_chexpert_mode = collate_batch_fn_chexpert_mode,
@@ -838,17 +865,21 @@ class VQA_Trainer(VQA_Base):
                 train_with_all = train_with_all,
                 verbose_question = verbose_question,
                 include_image = include_image,
-                chexpert_one_hot_offset = chexpert_one_hot_offset,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
                 use_merged_findings = use_merged_findings,
                 findings_remapper = findings_remapper,
                 n_findings = n_findings,
+                other_tasks = other_tasks,
                 debug = debug)
 
+    def _load_optional_datasets_and_dataloaders(self):
+        raise NotImplementedError('This method should be implemented in the child class')
+    
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers, collate_batch_fn_chexpert_mode=None):
         print('_generate_datasets_and_dataloaders()')
-        if not self.use_chexpert_mode_only:
+        
+        if self.include_mined_questions_mode:
             if not self.validation_only:
                 print(f'self.balanced_dataloading = {self.balanced_dataloading}')
                 if self.balanced_dataloading:
@@ -864,6 +895,8 @@ class VQA_Trainer(VQA_Base):
                 self._generate_train_dataset_and_dataloader__chexpert_mode(batch_size, collate_batch_fn_chexpert_mode, num_workers)
             if not self.train_with_all:
                 self._generate_val_dataset_and_dataloader__chexpert_mode(batch_size, collate_batch_fn_chexpert_mode, num_workers)
+
+        self._load_optional_datasets_and_dataloaders()
 
 
     def _get_composite_dataset(self, datasets, weights, batch_size):
@@ -1021,12 +1054,15 @@ class VQA_Trainer(VQA_Base):
         return self._create_label_based_dataset_and_dataloader(
             indices=indices,
             labels=self.chexpert_labels,
+            label_names=CHEXPERT_LABELS,
+            templates=TEMPLATES_CHEXPERT_v1,
             tokenizer=self.tokenizer,
             batch_size=batch_size,
             num_workers=num_workers,
             collate_batch_fn=collate_batch_fn,
             infinite=infinite,
-            n_samples=n_samples,
+            n_pos_samples=n_samples,
+            n_neg_samples=n_samples,
             report_ids=self.report_ids,
             create_dataset_kwargs=dict(
                 fixed_qa_pair=True,
@@ -1106,7 +1142,7 @@ class VQA_Evaluator(VQA_Base):
                 use_random_image = False,
                 use_precomputed_visual_features = False,
                 precomputed_visual_features_path = None,
-                chexpert_one_hot_offset = None,
+                other_tasks = None,
                 debug = False,
         ):
 
@@ -1116,7 +1152,7 @@ class VQA_Evaluator(VQA_Base):
         
         self.include_answer = include_answer
     
-        super().__init__(False, transform, batch_size, collate_batch_fn,
+        super().__init__(False, None, transform, batch_size, collate_batch_fn,
                 preprocessing_save_path,
                 num_workers,
                 classify_tags = classify_tags,
@@ -1131,7 +1167,7 @@ class VQA_Evaluator(VQA_Base):
                 use_random_image = use_random_image,
                 use_precomputed_visual_features = use_precomputed_visual_features,
                 precomputed_visual_features_path = precomputed_visual_features_path,
-                chexpert_one_hot_offset = chexpert_one_hot_offset,
+                other_tasks = other_tasks,
                 debug = debug)
 
     def _generate_datasets_and_dataloaders(self, batch_size, collate_batch_fn, num_workers, *unused_args):

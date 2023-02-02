@@ -43,23 +43,69 @@ def get_mimiccxr_large_image_path(part_id, subject_id, study_id, dicom_id):
 def get_mimiccxr_report_path(part_id, subject_id, study_id):    
     return os.path.join(MIMICCXR_DATASET_DIR, 'files', 'p{}'.format(part_id), 'p{}'.format(subject_id), 's{}.txt'.format(study_id))
 
-def choose_dicom_id_and_orientation(views):
-    dicom_id = None
-    for view in views:
-        if view[1] == 'PA':
-            dicom_id = view[0]
-            orientation = view[1]
-            break
-    if dicom_id is None:
+class MIMICCXR_ViewModes:
+    ALL = 'all'
+    FRONT_ALL = 'front_all'
+    FRONT_SINGLE = 'front_single'
+    ANY_SINGLE = 'any_single'
+    CHEST_IMAGENOME = 'chest_imagenome'
+
+class MIMICCXR_EvalViewModes:
+    ALL = 'all'
+    FRONT_ALL = 'front_all'
+    FRONT_SINGLE = 'front_single'
+    ANY_SINGLE = 'any_single'
+
+def get_dicom_id_and_orientation_list(views, view_mode=MIMICCXR_ViewModes.ANY_SINGLE, chest_imagenome_dicom_ids=None):
+    output = []
+    if view_mode == MIMICCXR_ViewModes.ALL:
         for view in views:
-            if view[1] == 'AP':
+            output.append((view[0], view[1]))
+    elif view_mode == MIMICCXR_ViewModes.FRONT_ALL:
+        for view in views:
+            if view[1] == 'PA' or view[1] == 'AP':
+                output.append((view[0], view[1]))
+    elif view_mode == MIMICCXR_ViewModes.FRONT_SINGLE:
+        dicom_id = None
+        for view in views:
+            if view[1] == 'PA':
                 dicom_id = view[0]
                 orientation = view[1]
                 break
-    if dicom_id is None and len(views) > 0:
-        dicom_id = views[0][0]
-        orientation = views[0][1]
-    return dicom_id, orientation
+        if dicom_id is None:
+            for view in views:
+                if view[1] == 'AP':
+                    dicom_id = view[0]
+                    orientation = view[1]
+                    break
+        if dicom_id is not None:
+            output.append((dicom_id, orientation))
+    elif view_mode == MIMICCXR_ViewModes.ANY_SINGLE:
+        dicom_id = None
+        for view in views:
+            if view[1] == 'PA':
+                dicom_id = view[0]
+                orientation = view[1]
+                break
+        if dicom_id is None:
+            for view in views:
+                if view[1] == 'AP':
+                    dicom_id = view[0]
+                    orientation = view[1]
+                    break
+        if dicom_id is None and len(views) > 0:
+            dicom_id = views[0][0]
+            orientation = views[0][1]
+        if dicom_id is not None:
+            output.append((dicom_id, orientation))
+    elif view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+        assert chest_imagenome_dicom_ids is not None
+        for view in views:
+            if view[0] in chest_imagenome_dicom_ids:
+                output.append((view[0], view[1]))
+    else:
+        raise ValueError('Unknown view mode: {}'.format(view_mode))
+    return output
 
 def get_image_views_dict():
     mimiccxr_metadata = pd.read_csv(MIMICCXR_METADATA_CSV_PATH)

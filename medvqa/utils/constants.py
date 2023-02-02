@@ -210,6 +210,13 @@ class MetricNames:
     PADCHEST_LABEL_MICROAVGF1 = 'padchest_label_microavgf1'
     PADCHEST_LOC_MACROAVGF1 = 'padchest_loc_macroavgf1'
     PADCHEST_LOC_MICROAVGF1 = 'padchest_loc_microavgf1'
+    CHESTIMAGENOMELABELACC = 'chestimagenome_label_acc'
+    CHESTIMAGENOMELABELMACROAVGF1 = 'chestimagenome_label_macroavgf1'
+    CHESTIMAGENOMELABELMICROAVGF1 = 'chestimagenome_label_microavgf1'
+    CHESTIMAGENOMELABELROCAUC = 'chestimagenome_label_rocauc'
+    CHESTIMAGENOMELABELROCAUC_MICRO = 'chestimagenome_label_rocauc_micro'
+    CHESTIMAGENOMELABELROCAUC_MACRO = 'chestimagenome_label_rocauc_macro'
+    CHESTIMAGENOMELABEL_PRF1 = 'chestimagenome_label_prf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
     BACKGROUND_LOSS = 'background_loss'
@@ -219,10 +226,11 @@ class MetricNames:
     CXR14_LOSS = 'cxr14_loss'
     PADCHEST_LABEL_LOSS = 'padchest_label_loss'
     PADCHEST_LOCALIZATION_LOSS = 'padchest_loc_loss'
+    CHEST_IMAGENOME_LABEL_LOSS = 'chestimagenome_label_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
-    GENDER_ACC = 'gender_acc'
+    GENDER_ACC = 'gender_acc'    
 
 METRIC2SHORT = {
     'loss': 'loss',
@@ -266,6 +274,14 @@ METRIC2SHORT = {
     'padchest_loc_microavgf1': 'padchxlzmicf1',
     'padchest_label_loss': 'padchxl_loss',
     'padchest_loc_loss': 'padchxlz_loss',
+    'chestimagenome_label_loss': 'chestimgl_loss',
+    'chestimagenome_label_acc': 'chestimgl_acc',
+    'chestimagenome_label_macroavgf1': 'chestimglmacf1',
+    'chestimagenome_label_microavgf1': 'chestimglmicf1',
+    'chestimagenome_label_rocauc': 'chestimglrocauc',
+    'chestimagenome_label_rocauc_micro': 'chestimglrocaucmic',
+    'chestimagenome_label_rocauc_macro': 'chestimglrocaucmac',
+    'chestimagenome_label_prf1': 'chestimglprf1',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'background_loss': 'bg_loss',
@@ -286,6 +302,7 @@ MIMICCXR_DATASET_ID__CHEXPERT_MODE = 4
 VINBIG_DATASET_ID = 5
 CXR14_DATASET_ID = 6
 PADCHEST_DATASET_ID = 7
+MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE = 8
 
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'

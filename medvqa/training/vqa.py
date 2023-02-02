@@ -14,9 +14,11 @@ from medvqa.utils.constants import (
     IUXRAY_DATASET_ID__CHEXPERT_MODE,
     MIMICCXR_DATASET_ID,
     CHEXPERT_DATASET_ID,
+    MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
     PADCHEST_DATASET_ID,
+    MetricNames,
 )
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,        
@@ -55,6 +57,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # padchest dataset
         padchest_multilabel_criterion=None,
         padchest_singlelabel_criterion=None,
+        # chest imagenome dataset
+        classify_chest_imagenome=False,
+        chest_imagenome_multilabel_criterion=None,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -80,6 +85,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
+
+    
+    _mimiccxr_dataset_ids = [MIMICCXR_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
+                             MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
     
     def step_fn__mimiccxr_iuxray(batch):
 
@@ -99,7 +108,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 answers_start = answers[:, :-1]
                 answers_end = answers[:, 1:]
 
-        is_mimiccxr = (dataset_id == MIMICCXR_DATASET_ID or dataset_id == MIMICCXR_DATASET_ID__CHEXPERT_MODE)
+        is_mimiccxr = dataset_id in _mimiccxr_dataset_ids
 
         findings_name = 'findings' if use_merged_findings else 'chexpert'
         
@@ -111,6 +120,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             chexpert = batch['chexpert'].to(device)
         if classify_questions:
             question_labels = batch['qlabels'].to(device)
+        if classify_chest_imagenome:
+            chest_imagenome = batch['chest_imagenome'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -144,12 +155,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     model_kwargs['max_answer_length'] = answers.size(1)
                 else:                    
                     model_kwargs['max_answer_length'] = max_answer_length
-
-            if classify_orientation:
-                if is_mimiccxr:
-                    model_kwargs['mimiccxr_foward'] = True
-                else:
-                    model_kwargs['iuxray_foward'] = True
+            
+            if is_mimiccxr:
+                model_kwargs['mimiccxr_foward'] = True
+            else:
+                model_kwargs['iuxray_foward'] = True
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -176,6 +186,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     pred_chexpert_probs = model_output[f'pred_{findings_name}_probs']
                 if classify_questions:
                     pred_qlabels_logits = model_output['pred_qlabels']
+                if classify_chest_imagenome:
+                    pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
+                    pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
 
                 if training:                    
                     # Compute losses
@@ -207,6 +220,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     if classify_questions:
                         qlabels_loss = question_criterion(pred_qlabels_logits, question_labels.float())
                         losses.append(qlabels_loss)
+                    if classify_chest_imagenome:
+                        chest_imagenome_loss = chest_imagenome_multilabel_criterion(pred_chest_imagenome_logits, chest_imagenome.float())
+                        losses.append(chest_imagenome_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -261,6 +277,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['pred_qlabels'] = (pred_qlabels_logits.detach() > 0).cpu()
             if training:
                 output['qlabels_loss'] = qlabels_loss.detach()
+        if classify_chest_imagenome:
+            output['chest_imagenome'] = chest_imagenome.detach().cpu()
+            output[f'pred_chest_imagenome'] = (pred_chest_imagenome_logits.detach() > 0).cpu()
+            output[f'pred_chest_imagenome_probs'] = pred_chest_imagenome_probs.detach().cpu()
+            if training:
+                output[MetricNames.CHEST_IMAGENOME_LABEL_LOSS] = chest_imagenome_loss.detach()
 
         return output
     
@@ -601,7 +623,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         return output
 
     _mim_iu_datasets = [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID,
-             MIMICCXR_DATASET_ID__CHEXPERT_MODE, IUXRAY_DATASET_ID__CHEXPERT_MODE]
+             MIMICCXR_DATASET_ID__CHEXPERT_MODE, IUXRAY_DATASET_ID__CHEXPERT_MODE,
+             MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
 
     _chexpert_cxr14_datsets = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]
     
@@ -633,7 +656,7 @@ def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
     return mask
 
 def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-               question_encoding, answer_decoding, device,
+               classify_chest_imagenome, question_encoding, answer_decoding, device,
                iters_to_accumulate=1,
                binary_loss_name='bce',
                include_image=True, include_visual_features=False,
@@ -718,6 +741,11 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
         padchest_multilabel_criterion = None
         padchest_singlelabel_criterion = None
 
+    if training and classify_chest_imagenome:
+        chest_imagenome_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name)
+    else:
+        chest_imagenome_multilabel_criterion = None
+
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
                           include_visual_features=include_visual_features,
@@ -754,6 +782,9 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                           # padchest dataset
                           padchest_multilabel_criterion=padchest_multilabel_criterion,
                           padchest_singlelabel_criterion=padchest_singlelabel_criterion,
+                          # chest imagenome dataset
+                          classify_chest_imagenome=classify_chest_imagenome,
+                          chest_imagenome_multilabel_criterion=chest_imagenome_multilabel_criterion,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,
                           lr_scheduler=lr_scheduler,

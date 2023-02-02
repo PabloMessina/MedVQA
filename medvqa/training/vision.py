@@ -4,7 +4,7 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
 from medvqa.losses import get_binary_multilabel_loss
-from medvqa.utils.constants import IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID
+from medvqa.utils.constants import IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID, CHEXPERT_DATASET_ID, MetricNames
 
 def get_step_fn(model, optimizer, training, device,
         # automatic mixed precision
@@ -24,6 +24,9 @@ def get_step_fn(model, optimizer, training, device,
         question_criterion=None,
         # chexpert dataset
         chexpert_aux_criterion=None,
+        # chest imagenome dataset
+        classify_chest_imagenome=False,
+        chest_imagenome_multilabel_criterion=None,        
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -43,6 +46,8 @@ def get_step_fn(model, optimizer, training, device,
             chexpert = batch['chexpert'].to(device)
         if classify_questions:
             question_labels = batch['qlabels'].to(device)
+        if classify_chest_imagenome:
+            chest_imagenome = batch['chest_imagenome'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -52,11 +57,10 @@ def get_step_fn(model, optimizer, training, device,
             model_kwargs = {
                 'images': images,
             }
-            if classify_orientation:
-                if dataset_id == MIMICCXR_DATASET_ID:
-                    model_kwargs['mimiccxr_foward'] = True
-                else:
-                    model_kwargs['iuxray_foward'] = True
+            if dataset_id == MIMICCXR_DATASET_ID:
+                model_kwargs['mimiccxr_foward'] = True
+            else:
+                model_kwargs['iuxray_foward'] = True
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -75,6 +79,9 @@ def get_step_fn(model, optimizer, training, device,
                     pred_chexpert_probs = model_output['pred_chexpert_probs']
                 if classify_questions:
                     pred_qlabels_logits = model_output['pred_qlabels']
+                if classify_chest_imagenome:
+                    pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
+                    pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
 
                 if training:                    
                     # Compute losses
@@ -94,6 +101,9 @@ def get_step_fn(model, optimizer, training, device,
                     if classify_questions:
                         qlabels_loss = question_criterion(pred_qlabels_logits, question_labels.float())
                         losses.append(qlabels_loss)
+                    if classify_chest_imagenome:
+                        chest_imagenome_loss = chest_imagenome_multilabel_criterion(pred_chest_imagenome_logits, chest_imagenome.float())
+                        losses.append(chest_imagenome_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -136,6 +146,12 @@ def get_step_fn(model, optimizer, training, device,
             output['pred_qlabels'] = (pred_qlabels_logits.detach() > 0).cpu()
             if training:
                 output['qlabels_loss'] = qlabels_loss.detach()
+        if classify_chest_imagenome:
+            output['chest_imagenome'] = chest_imagenome.detach().cpu()
+            output[f'pred_chest_imagenome'] = (pred_chest_imagenome_logits.detach() > 0).cpu()
+            output[f'pred_chest_imagenome_probs'] = pred_chest_imagenome_probs.detach().cpu()
+            if training:
+                output[MetricNames.CHEST_IMAGENOME_LABEL_LOSS] = chest_imagenome_loss.detach()
 
         return output
 
@@ -221,7 +237,8 @@ def get_step_fn(model, optimizer, training, device,
 
     return step_fn
 
-def get_engine(model, classify_tags, classify_orientation, classify_chexpert, classify_questions, device,
+def get_engine(model, classify_tags, classify_orientation, classify_chexpert, classify_questions,
+               classify_chest_imagenome, device,
                binary_loss_name='bce',
                use_amp=False,
                training=False,
@@ -251,6 +268,11 @@ def get_engine(model, classify_tags, classify_orientation, classify_chexpert, cl
     else:
         question_criterion = None
 
+    if classify_chest_imagenome:
+        chest_imagenome_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name)
+    else:
+        chest_imagenome_multilabel_criterion = None
+
     if train_with_chexpert_dataset:
         chexpert_aux_criterion = nn.CrossEntropyLoss()
     else:
@@ -275,6 +297,9 @@ def get_engine(model, classify_tags, classify_orientation, classify_chexpert, cl
                           question_criterion=question_criterion,
                           # chexpert dataset
                           chexpert_aux_criterion=chexpert_aux_criterion,
-                          )
+                          # chest imagenome dataset
+                          classify_chest_imagenome=classify_chest_imagenome,
+                          chest_imagenome_multilabel_criterion=chest_imagenome_multilabel_criterion,                          
+                        )
     engine = Engine(step_fn)
     return engine

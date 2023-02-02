@@ -1,19 +1,25 @@
 import json
 import os
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_CACHE_DIR,
     CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR,
     CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH,
     CHEST_IMAGENOME_ATTRIBUTES_DICT,
 )
 from medvqa.datasets.mimiccxr import (
+    MIMICCXR_CACHE_DIR,
     MIMICCXR_IMAGE_REGEX,
+    MIMICCXR_STUDY_REGEX,
+    get_image_views_dict as get_mimiccxr_image_views_dict,
     get_mimiccxr_large_image_path,
     get_mimiccxr_report_path,
 )
 from medvqa.datasets.mimiccxr.preprocessing import image_paths_generator
+from medvqa.utils.files import get_cached_json_file, load_pickle
 
 # Load scene graphs
 def _load_scene_graphs(scene_graphs_dir, k=None, offset=0):    
@@ -46,6 +52,11 @@ def get_gold_scene_graphs_paths():
         if os.path.exists(scene_graph_path):
             output.append(scene_graph_path)
     return output
+
+def load_postprocessed_label_names(labels_filename):
+    labels = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, labels_filename))
+    assert labels is not None, labels_filename
+    return labels
         
 # Extract labels from a scene graph
 def extract_labels_from_scene_graph(scene_graph):
@@ -73,6 +84,61 @@ def get_imageId2partId():
         partId, _, _, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
         imageId2partId[imageId] = partId
     return imageId2partId
+
+def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(
+        chest_imagenome_labels_filename,
+        qa_adapted_reports_filename,
+    ):    
+    # Load chest_imagenome_labels    
+    chest_imagenome_labels = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, chest_imagenome_labels_filename))
+    assert chest_imagenome_labels is not None, chest_imagenome_labels_filename
+
+    # Obtain dicom_ids
+    dicom_ids = set(chest_imagenome_labels.keys())
+    
+    # Adapt chest_imagenome_labels so that they can be indexed by report_id            
+    mimiccxr_qa_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
+    n_reports = len(mimiccxr_qa_reports['reports'])
+    n_labels = len(next(iter(chest_imagenome_labels.values())))
+    adapted_chest_imagenome_labels = np.zeros((n_reports, n_labels), dtype=np.int8)    
+    # map dicom_id to report_id
+    image_views_dict = get_mimiccxr_image_views_dict()
+    did2rid = {}
+    for i, report in enumerate(mimiccxr_qa_reports['reports']):
+        _, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])            
+        views = image_views_dict[(subject_id, study_id)]
+        for view in views:
+            did2rid[view[0]] = i            
+    # use did2rid to map dicom_id to report_id to get the label
+    for dicom_id, label in chest_imagenome_labels.items():
+        adapted_chest_imagenome_labels[did2rid[dicom_id]] = label
+        
+    return dicom_ids, adapted_chest_imagenome_labels
+
+def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename):
+
+    # Load chest_imagenome_label_names and compute templates for each label
+    chest_imagenome_label_names = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, chest_imagenome_label_names_filename))
+    assert chest_imagenome_label_names is not None, chest_imagenome_label_names_filename
+    chest_imagenome_templates = {}
+    for label_name in chest_imagenome_label_names:
+        if len(label_name) == 3:
+            anomaly = label_name[2]
+            anomaly = anomaly.replace('/', ' or ')
+            anatomy = label_name[0]
+            positive_answer = f'{anomaly} in {anatomy}' # anomaly observed in anatomy
+        elif len(label_name) == 2:
+            anomaly = label_name[1]
+            anomaly = anomaly.replace('/', ' or ')
+            positive_answer = anomaly # anomaly observed
+        else:
+            raise ValueError(f'Unexpected label_name: {label_name}')
+        chest_imagenome_templates[label_name] = {
+            0: '', # no anomaly
+            1: positive_answer # anomaly observed
+        }
+        
+    return chest_imagenome_label_names, chest_imagenome_templates
 
 # Visualize a scene graph
 def visualize_scene_graph(scene_graph, imageId2partId, figsize=(10, 10)):

@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import pandas as pd
 from medvqa.utils.common import CACHE_DIR
 
 CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR']
@@ -106,3 +107,7 @@ CHEST_IMAGENOME_ATTRIBUTES_DICT = {
         'lucency',
     ],
 }
+
+def load_gold_standard_dicom_ids():
+    df = pd.read_csv(CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH)
+    return df['dicom_id'].tolist()

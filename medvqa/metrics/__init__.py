@@ -43,27 +43,9 @@ def _get_output_transform(pred_key, gt_key, valid_class_indices=None):
                    output[gt_key][:, valid_class_indices]
     return output_transform
 
-# def attach_bleu_question(engine, device, record_scores=False):
-#     blue = Bleu(output_transform = _get_output_transform('pred_questions', 'questions'),
-#                 device = device, record_scores=record_scores)
-#     blue.attach(engine, 'bleu_question')
-
-def attach_exactmatch_question(engine, device, record_scores=False):
-    em = ExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
-                device = device, record_scores=record_scores)
-    em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
-
-def attach_dataset_aware_exactmatch_question(engine, allowed_dataset_ids, record_scores=False):
-    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
-                allowed_dataset_ids=allowed_dataset_ids,
-                record_scores=record_scores)
-    em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
-
-def attach_dataset_aware_exactmatch_answer(engine, allowed_dataset_ids, record_scores=False):
-    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_answers', 'answers'),
-                allowed_dataset_ids=allowed_dataset_ids,
-                record_scores=record_scores)
-    em.attach(engine, MetricNames.EXACTMATCH_ANSWER)
+# ------------------------------------------------------------
+# NLP metrics (BLEU, ROUGE-L, METEOR, CIDEr-D, ExactMatch)
+# ------------------------------------------------------------
 
 def attach_bleu(engine, device, record_scores=False):
     # if ks is None:
@@ -110,6 +92,32 @@ def attach_dataset_aware_ciderd(engine, allowed_dataset_ids, record_scores=False
                 record_scores=record_scores)
     met.attach(engine, MetricNames.CIDER_D)
 
+# def attach_bleu_question(engine, device, record_scores=False):
+#     blue = Bleu(output_transform = _get_output_transform('pred_questions', 'questions'),
+#                 device = device, record_scores=record_scores)
+#     blue.attach(engine, 'bleu_question')
+
+def attach_exactmatch_question(engine, device, record_scores=False):
+    em = ExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
+                device = device, record_scores=record_scores)
+    em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
+
+def attach_dataset_aware_exactmatch_question(engine, allowed_dataset_ids, record_scores=False):
+    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_questions', 'questions'),
+                allowed_dataset_ids=allowed_dataset_ids,
+                record_scores=record_scores)
+    em.attach(engine, MetricNames.EXACTMATCH_QUESTION)
+
+def attach_dataset_aware_exactmatch_answer(engine, allowed_dataset_ids, record_scores=False):
+    em = DatasetAwareExactMatch(output_transform = _get_output_transform('pred_answers', 'answers'),
+                allowed_dataset_ids=allowed_dataset_ids,
+                record_scores=record_scores)
+    em.attach(engine, MetricNames.EXACTMATCH_ANSWER)
+
+# ------------------------------------------------------------------------------
+# Medical Completeness related metrics (these evaluate natural language answers)
+# ------------------------------------------------------------------------------
+
 def attach_medical_completeness(engine, device, tokenizer, record_scores=False):
     met = MedicalCompleteness(tokenizer,
                 output_transform = _get_output_transform('pred_answers', 'answers'),
@@ -129,10 +137,18 @@ def attach_dataset_aware_weighted_medical_completeness(engine, tokenizer, allowe
                 record_scores=record_scores)
     met.attach(engine, MetricNames.WMEDCOMP)
 
+# ---------------------------------------------
+# Medical tags prediction metrics
+# ---------------------------------------------
+
 def attach_medical_tags_f1score(engine, device, record_scores=False):
     met = MultiLabelF1score(output_transform = _get_output_transform('pred_tags', 'tags'),
                                 device=device, record_scores=record_scores)
     met.attach(engine, MetricNames.MEDTAGF1)
+
+# ---------------------------------------------
+# CheXpert related metrics
+# ---------------------------------------------
 
 def attach_chexpert_labels_accuracy(engine, device, record_scores=False):
     met = MultiLabelAccuracy(output_transform = _get_output_transform('pred_chexpert', 'chexpert'),
@@ -177,6 +193,58 @@ def attach_dataset_aware_chexpert_labels_roc_auc(engine, allowed_dataset_ids, de
                                   device=device)
     met.attach(engine, MetricNames.CHXLABEL_ROCAUC)
 
+def attach_chexpert_labels_microavgf1(engine, device):
+    met = MultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
+    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+
+def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices),
+                                           allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+
+# ---------------------------------------------
+# Chest-ImaGenome related metrics
+# ---------------------------------------------
+
+def attach_chest_imagenome_labels_accuracy(engine, device, record_scores=False):
+    met = MultiLabelAccuracy(output_transform = _get_output_transform('pred_chest_imagenome', 'chest_imagenome'),
+                                device=device, record_scores=record_scores)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELACC)
+
+def attach_chest_imagenome_labels_prf1(engine, device):
+    met = MultiLabelPRF1(output_transform = _get_output_transform('pred_chest_imagenome', 'chest_imagenome'), device=device)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABEL_PRF1)
+
+def attach_chest_imagenome_labels_roc_auc(engine, device):
+    met = EpochMetric(compute_fn=roc_auc_fn, output_transform=_get_output_transform('pred_chest_imagenome_probs', 'chest_imagenome'), device=device)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+def attach_dataset_aware_chest_imagenome_labels_accuracy(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelAccuracy(output_transform=_get_output_transform('pred_chest_imagenome', 'chest_imagenome'),
+                                        allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELACC)
+
+def attach_dataset_aware_chest_imagenome_labels_macroavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMacroAvgF1(output_transform=_get_output_transform('pred_chest_imagenome', 'chest_imagenome'),
+                                           allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
+
+def attach_dataset_aware_chest_imagenome_labels_microavgf1(engine, allowed_dataset_ids):
+    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chest_imagenome', 'chest_imagenome'),
+                                           allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
+
+def attach_dataset_aware_chest_imagenome_labels_roc_auc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=roc_auc_fn,
+                                  output_transform=_get_output_transform('pred_chest_imagenome_probs', 'chest_imagenome'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+# ---------------------------------------------
+# Question labels related metrics
+# ---------------------------------------------
+
 def attach_question_labels_f1score(engine, device, record_scores=False):
     met = MultiLabelF1score(output_transform = _get_output_transform('pred_qlabels', 'qlabels'),
                                 device=device, record_scores=record_scores)
@@ -198,14 +266,13 @@ def attach_dataset_aware_question_labels_microavgf1(engine, allowed_dataset_ids)
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.QLABELS_MICROAVGF1)
 
-def attach_chexpert_labels_microavgf1(engine, device):
-    met = MultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_chexpert', 'chexpert'), device=device)
-    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+def attach_question_labels_prf1(engine, device):
+    met = MultiLabelPRF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'), device=device)
+    met.attach(engine, MetricNames.QLABELS_PRF1)
 
-def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids, class_indices=None):
-    met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices),
-                                           allowed_dataset_ids=allowed_dataset_ids)
-    met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+# ---------------------------------------------
+# VinBigData related metrics
+# ---------------------------------------------
 
 def attach_dataset_aware_vinbig_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
     met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels', class_indices),
@@ -217,6 +284,10 @@ def attach_dataset_aware_vinbig_labels_microavgf1(engine, allowed_dataset_ids, c
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.VINBIGMICROAVGF1)
 
+# ---------------------------------------------
+# CXR14 related metrics
+# ---------------------------------------------
+
 def attach_dataset_aware_cxr14_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
     met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_cxr14', 'cxr14', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
@@ -226,6 +297,10 @@ def attach_dataset_aware_cxr14_labels_microavgf1(engine, allowed_dataset_ids, cl
     met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_cxr14', 'cxr14', class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CXR14MICROAVGF1)
+
+# ---------------------------------------------
+# PadChest related metrics
+# ---------------------------------------------
 
 def attach_dataset_aware_padchest_labels_macroavgf1(engine, allowed_dataset_ids, class_indices=None):
     met = DatasetAwareMultiLabelMacroAvgF1(output_transform = _get_output_transform('pred_padchest_labels', 'padchest_labels', class_indices),
@@ -247,19 +322,25 @@ def attach_dataset_aware_padchest_localization_microavgf1(engine, allowed_datase
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.PADCHEST_LOC_MICROAVGF1)
 
+# ---------------------------------------------
+# Other metrics
+# ---------------------------------------------
+
+# Gender
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
                                 allowed_dataset_ids=allowed_dataset_ids,
                                 record_scores=record_scores)
     met.attach(engine, MetricNames.GENDER_ACC)
 
-def attach_question_labels_prf1(engine, device):
-    met = MultiLabelPRF1(output_transform = _get_output_transform('pred_qlabels', 'qlabels'), device=device)
-    met.attach(engine, MetricNames.QLABELS_PRF1)
-
+# Orientation/View/Projection
 def attach_dataset_aware_orientation_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareOrientationAccuracy(allowed_dataset_ids, record_scores=record_scores)
     met.attach(engine, MetricNames.ORIENACC)
+
+# ---------------------------------------------
+# Losses
+# ---------------------------------------------
 
 def attach_dataset_aware_loss(engine, loss_name, allowed_dataset_ids):
     met = DatasetAwareLoss(

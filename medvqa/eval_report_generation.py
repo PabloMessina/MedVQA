@@ -23,8 +23,12 @@ from medvqa.utils.constants import (
     ReportEvalMode,
 )
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_EvalViewModes
 from medvqa.metrics import (
+    attach_dataset_aware_chest_imagenome_labels_accuracy,
+    attach_dataset_aware_chest_imagenome_labels_macroavgf1,
+    attach_dataset_aware_chest_imagenome_labels_microavgf1,
+    attach_dataset_aware_chest_imagenome_labels_roc_auc,
     attach_dataset_aware_chexpert_labels_accuracy,
     attach_dataset_aware_chexpert_labels_macroavgf1,
     attach_dataset_aware_chexpert_labels_microavgf1,
@@ -59,7 +63,7 @@ from medvqa.utils.files import (
 from medvqa.training.vqa import get_engine
 from medvqa.datasets.dataloading_utils import get_vqa_collate_batch_fn
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Evaluator
-from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
+# from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.datasets.preprocessing import get_sentences
 from medvqa.utils.logging import CountPrinter, print_blue
@@ -95,13 +99,11 @@ def parse_args():
     parser.add_argument('--use-random-image', dest='use_random_image', action='store_true')
     parser.set_defaults(use_random_image=False)
 
-    parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
-    parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
-    parser.set_defaults(eval_iuxray=True)
+    parser.add_argument('--eval-iuxray', dest='eval_iuxray', action='store_true')
+    parser.set_defaults(eval_iuxray=False)
 
-    parser.add_argument('--mimiccxr', dest='eval_mimiccxr', action='store_true')
-    parser.add_argument('--no-mimiccxr', dest='eval_mimiccxr', action='store_false')
-    parser.set_defaults(eval_mimiccxr=True)
+    parser.add_argument('--eval-mimiccxr', dest='eval_mimiccxr', action='store_true')
+    parser.set_defaults(eval_mimiccxr=False)
 
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
@@ -110,7 +112,9 @@ def parse_args():
 
     parser.add_argument('--save-for-error-analysis', dest='save_for_error_analysis', action='store_true')
     parser.set_defaults(save_for_error_analysis=False)
-    
+
+    parser.add_argument('--mimiccxr-eval-view-mode', type=str, default=MIMICCXR_EvalViewModes.FRONT_ALL)
+
     return parser.parse_args()
 
 def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer, results_folder_path,
@@ -126,7 +130,13 @@ def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer
     print (f'Report-level metrics successfully saved to {save_path}')
     return metrics
 
-def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_path, parenthesis_text=None):
+def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_path,
+        classify_orientation, classify_chexpert, classify_questions, classify_chest_imagenome,
+        chest_imagenome_labels, parenthesis_text=None):
+
+    if classify_chest_imagenome:
+        assert chest_imagenome_labels is not None
+
     metrics = results_dict[f'{dataset_name}_metrics']
     dataset = results_dict[f'{dataset_name}_dataset']
     reports = results_dict[f'{dataset_name}_reports']
@@ -139,17 +149,28 @@ def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_
         rid2i[dataset.report_ids[idx]] = i
 
     image_encoder_pred = dict()
-    met = metrics['pred_orientation']
-    image_encoder_pred['orientation'] = [met[rid2i[rid]].item() for rid in rids]
-    met = metrics['pred_chexpert']
-    image_encoder_pred['chexpert'] = [met[rid2i[rid]].numpy() for rid in rids]
-    met = metrics['pred_qlabels']
-    image_encoder_pred['qlabels'] = [met[rid2i[rid]].numpy() for rid in rids]
+    if classify_orientation:
+        met = metrics['pred_orientation']
+        image_encoder_pred['orientation'] = [met[rid2i[rid]].item() for rid in rids]
+    if classify_chexpert:
+        met = metrics['pred_chexpert']
+        image_encoder_pred['chexpert'] = [met[rid2i[rid]].numpy() for rid in rids]
+    if classify_questions:
+        met = metrics['pred_qlabels']
+        image_encoder_pred['qlabels'] = [met[rid2i[rid]].numpy() for rid in rids]
+    if classify_chest_imagenome:
+        met = metrics['pred_chest_imagenome']
+        image_encoder_pred['chest_imagenome'] = [met[rid2i[rid]].numpy() for rid in rids]
 
     image_encoder_gt = dict()
-    image_encoder_gt['orientation'] = [dataset.orientations[idxs[rid2i[rid]]] for rid in rids]
-    image_encoder_gt['chexpert'] = [dataset.chexpert_labels[rid] for rid in rids]
-    image_encoder_gt['qlabels'] = [dataset.question_labels[rid] for rid in rids]
+    if classify_orientation:
+        image_encoder_gt['orientation'] = [dataset.orientations[idxs[rid2i[rid]]] for rid in rids]
+    if classify_chexpert:
+        image_encoder_gt['chexpert'] = [dataset.chexpert_labels[rid] for rid in rids]
+    if classify_questions:
+        image_encoder_gt['qlabels'] = [dataset.question_labels[rid] for rid in rids]
+    if classify_chest_imagenome:
+        image_encoder_gt['chest_imagenome'] = [chest_imagenome_labels[rid] for rid in rids]
 
     output = {
         'images': [dataset.images[i] for i in idxs],
@@ -163,9 +184,10 @@ def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_
     save_to_pickle(output, save_path)
     print (f'Report-level results for error analysis successfully saved to {save_path}')
 
-def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
-                        checkpoint_path, precomputed_question_probs_path, use_random_image):
+def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, checkpoint_path,
+                        precomputed_question_probs_path, use_random_image, eval_view_mode):
     strings = [f'eval_mode={eval_mode}']
+    strings.append(f'eval_view_mode={eval_view_mode}')
     if eval_mode == ReportEvalMode.QUESTION_CLASSIFICATION or\
        eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION or\
        eval_mode == ReportEvalMode.MOST_POPULAR:
@@ -197,6 +219,7 @@ def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
        strings.append(f'epoch={split_checkpoint_name(os.path.basename(checkpoint_path)).epoch}')
     if use_random_image:
         strings.append('rand-img')
+    
     return ';'.join(strings)
 
 def _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer):
@@ -243,6 +266,7 @@ def _evaluate_model(
     eval_mimiccxr = True,
     max_processes_for_chexpert_labeler = 10,
     save_for_error_analysis = False,
+    mimiccxr_eval_view_mode = None,
 ):
     assert eval_iuxray or eval_mimiccxr
     assert eval_mode is not None
@@ -266,15 +290,14 @@ def _evaluate_model(
     if classify_tags:
         assert n_medical_tags is not None
         assert iuxray_medical_tags_per_report_filename is not None
-        assert mimiccxr_medical_tags_per_report_filename is not None
-    
+        assert mimiccxr_medical_tags_per_report_filename is not None    
     # auxiliary task: orientation classification
     classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
-
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
-    iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']    
-
+    # iuxray_chexpert_labels_filename = auxiliary_tasks_kwargs['iuxray_chexpert_labels_filename']
+    # auxiliary task: chest imagenome labels
+    classify_chest_imagenome = auxiliary_tasks_kwargs['classify_chest_imagenome']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
     n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
@@ -286,13 +309,7 @@ def _evaluate_model(
         if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
     
     if question_encoding == QuestionEncoding.ONE_HOT:
-        assert model_kwargs['n_questions'] is not None
-    
-    # QA dataset filenames
-    iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']
-    mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_evaluator_kwargs['qa_adapted_reports_filename']
-    assert iuxray_qa_adapted_reports_filename is not None
-    assert mimiccxr_qa_adapted_reports_filename is not None
+        assert model_kwargs['n_questions'] is not None    
     
     count_print = CountPrinter()
 
@@ -301,26 +318,28 @@ def _evaluate_model(
     count_print('device =', device)
 
     # Load qa adapted reports
-    count_print('Loading iuxray and mimiccxr QA adapted reports ...')
-    iuxray_qa_adapted_reports_path = os.path.join(IUXRAY_CACHE_DIR, iuxray_qa_adapted_reports_filename)
-    mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)
-    iuxray_qa_reports = get_cached_json_file(iuxray_qa_adapted_reports_path)
-    mimiccxr_qa_reports = get_cached_json_file(mimiccxr_qa_adapted_reports_path)
+    count_print('Loading QA adapted reports ...')
+    qa_adapted_datasets = []
+    if eval_mimiccxr:
+        mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_evaluator_kwargs['qa_adapted_reports_filename']
+        assert mimiccxr_qa_adapted_reports_filename is not None
+        mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)
+        mimiccxr_qa_reports = get_cached_json_file(mimiccxr_qa_adapted_reports_path)
+        qa_adapted_datasets.append(mimiccxr_qa_reports)
+    if eval_iuxray:
+        iuxray_qa_adapted_reports_filename = iuxray_vqa_trainer_kwargs['qa_adapted_reports_filename']    
+        assert iuxray_qa_adapted_reports_filename is not None
+        iuxray_qa_adapted_reports_path = os.path.join(IUXRAY_CACHE_DIR, iuxray_qa_adapted_reports_filename)
+        iuxray_qa_reports = get_cached_json_file(iuxray_qa_adapted_reports_path)
+        qa_adapted_datasets.append(iuxray_qa_reports)
 
     # Init tokenizer
     count_print('Initializing tokenizer ...')
-    vocab_min_freq = tokenizer_kwargs['vocab_min_freq']
-    medical_tokenization = tokenizer_kwargs['medical_tokenization']
-    medical_terms_frequency_filename = tokenizer_kwargs['medical_terms_frequency_filename']
-    assert medical_tokenization == (medical_terms_frequency_filename is not None)
-    tokenizer = Tokenizer(qa_adapted_dataset_paths=[iuxray_qa_adapted_reports_path,
-                                                    mimiccxr_qa_adapted_reports_path],
-                          min_freq=vocab_min_freq,
-                          medical_terms_frequency_filename=medical_terms_frequency_filename,
-                          vocab_filepath=tokenizer_kwargs['vocab_filepath'])
+    del tokenizer_kwargs['use_medical_tokenization']
+    tokenizer = Tokenizer(**tokenizer_kwargs)
     
     count_print('Estimating maximum answer length ...')
-    max_answer_length = _estimate_maximum_answer_length([iuxray_qa_reports, mimiccxr_qa_reports], tokenizer)
+    max_answer_length = _estimate_maximum_answer_length(qa_adapted_datasets, tokenizer)
     print('max_answer_length =', max_answer_length)    
     
     # Default image transform (no augmentations)
@@ -345,19 +364,20 @@ def _evaluate_model(
                                                             n_tags = n_medical_tags,
                                                             classify_orientation = classify_orientation,
                                                             classify_chexpert = classify_chexpert,
+                                                            classify_chest_imagenome = classify_chest_imagenome,
                                                             classify_questions = classify_questions)
     
-    if eval_iuxray:
-        iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
-                                                    verbose_question = verbose_question,
-                                                    one_hot_question_offset = _get_one_hot_question_offset(
-                                                                one_hot_question_offsets, IUXRAY_DATASET_ID, eval_mode),
-                                                    include_answer=False,
-                                                    classify_tags = classify_tags,
-                                                    n_tags = n_medical_tags,
-                                                    classify_orientation = classify_orientation,
-                                                    classify_chexpert = classify_chexpert,
-                                                    classify_questions = classify_questions)
+    # if eval_iuxray:
+    #     iuxray_collate_batch_fn = get_vqa_collate_batch_fn(IUXRAY_DATASET_ID,
+    #                                                 verbose_question = verbose_question,
+    #                                                 one_hot_question_offset = _get_one_hot_question_offset(
+    #                                                             one_hot_question_offsets, IUXRAY_DATASET_ID, eval_mode),
+    #                                                 include_answer=False,
+    #                                                 classify_tags = classify_tags,
+    #                                                 n_tags = n_medical_tags,
+    #                                                 classify_orientation = classify_orientation,
+    #                                                 classify_chexpert = classify_chexpert,
+    #                                                 classify_questions = classify_questions)
 
     # Load saved checkpoint    
     checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
@@ -375,7 +395,7 @@ def _evaluate_model(
         pretrained_weights = checkpoint['model'] # default -> same model
         pretrained_checkpoint_path = checkpoint_path
     print('pretrained_checkpoint_path =', pretrained_checkpoint_path)
-    
+
     # Create MIMIC-CXR vqa evaluator
     if eval_mimiccxr:
         count_print('Creating MIMIC-CXR vqa evaluator ...')
@@ -393,31 +413,32 @@ def _evaluate_model(
             precomputed_question_thresholds_path = precomputed_question_thresholds_path,
             n_questions_per_report = n_questions_per_report,
             qclass_threshold = qclass_threshold,
+            eval_view_mode = mimiccxr_eval_view_mode,
             **mimiccxr_vqa_evaluator_kwargs,
         )
     
     # Create IU X-Ray vqa trainer
-    if eval_iuxray:
-        count_print('Creating IU X-Ray vqa trainer ...')
-        iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
-            transform = img_transform,
-            collate_batch_fn = iuxray_collate_batch_fn,
-            num_workers = num_workers,
-            tokenizer = tokenizer,        
-            iuxray_qa_reports = iuxray_qa_reports,
-            classify_tags = classify_tags,
-            medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = iuxray_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = iuxray_question_labels_filename,
-            validation_only = True,
-            report_eval_mode = eval_mode,
-            ignore_medical_tokenization = tokenizer.medical_tokenization,
-            verbose_question = verbose_question,
-            **iuxray_vqa_trainer_kwargs,
-        )
+    # if eval_iuxray:
+    #     count_print('Creating IU X-Ray vqa trainer ...')
+    #     iuxray_vqa_trainer = IUXRAY_VQA_Trainer(
+    #         transform = img_transform,
+    #         collate_batch_fn = iuxray_collate_batch_fn,
+    #         num_workers = num_workers,
+    #         tokenizer = tokenizer,        
+    #         iuxray_qa_reports = iuxray_qa_reports,
+    #         classify_tags = classify_tags,
+    #         medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
+    #         classify_orientation = classify_orientation,
+    #         classify_chexpert = classify_chexpert,
+    #         chexpert_labels_filename = iuxray_chexpert_labels_filename,
+    #         classify_questions = classify_questions,
+    #         question_labels_filename = iuxray_question_labels_filename,
+    #         validation_only = True,
+    #         report_eval_mode = eval_mode,
+    #         ignore_medical_tokenization = tokenizer.medical_tokenization,
+    #         verbose_question = verbose_question,
+    #         **iuxray_vqa_trainer_kwargs,
+    #     )
 
     # Create model
     count_print('Creating instance of OpenEndedVQA model ...')
@@ -430,7 +451,7 @@ def _evaluate_model(
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
     evaluator = get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert,
-                           classify_questions, question_encoding, answer_decoding,
+                           classify_questions, classify_chest_imagenome, question_encoding, answer_decoding,
                            device, use_amp=use_amp, training=False, include_answer=False,
                            include_image=include_image, include_visual_features=include_visual_features,
                            max_answer_length=max_answer_length,
@@ -461,7 +482,12 @@ def _evaluate_model(
         attach_dataset_aware_chexpert_labels_accuracy(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
         attach_dataset_aware_chexpert_labels_macroavgf1(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
         attach_dataset_aware_chexpert_labels_microavgf1(evaluator, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_roc_auc(evaluator, _chexpert_labels_datasets, 'cpu', _chexpert_class_indices)        
+        attach_dataset_aware_chexpert_labels_roc_auc(evaluator, _chexpert_labels_datasets, 'cpu', _chexpert_class_indices)
+    if classify_chest_imagenome:
+        attach_dataset_aware_chest_imagenome_labels_accuracy(evaluator, [MIMICCXR_DATASET_ID])
+        attach_dataset_aware_chest_imagenome_labels_macroavgf1(evaluator, [MIMICCXR_DATASET_ID])
+        attach_dataset_aware_chest_imagenome_labels_microavgf1(evaluator, [MIMICCXR_DATASET_ID])
+        attach_dataset_aware_chest_imagenome_labels_roc_auc(evaluator, [MIMICCXR_DATASET_ID], 'cpu')
     if classify_questions:
         attach_dataset_aware_question_labels_macroavgf1(evaluator, _iu_mim_datasets)
 
@@ -476,6 +502,8 @@ def _evaluate_model(
         attach_accumulator(evaluator, 'pred_orientation')
     if classify_chexpert:
         attach_accumulator(evaluator, 'pred_chexpert')
+    if classify_chest_imagenome:
+        attach_accumulator(evaluator, 'pred_chest_imagenome')
     if classify_questions:
         attach_accumulator(evaluator, 'pred_qlabels')
     
@@ -496,6 +524,11 @@ def _evaluate_model(
         metrics_to_print.append(MetricNames.CHXLABELMACROAVGF1)
         metrics_to_print.append(MetricNames.CHXLABELACC)
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
+    if classify_chest_imagenome:
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
     if classify_questions:
         metrics_to_print.append(MetricNames.QLABELS_MACROAVGF1)
 
@@ -509,29 +542,7 @@ def _evaluate_model(
 
     # Run evaluation
     results_dict = dict(tokenizer = tokenizer)
-    results_folder_path = get_results_folder_path(checkpoint_folder_path)    
-    eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
-                                         pretrained_checkpoint_path, precomputed_question_probs_path,
-                                         use_random_image)
-
-    if eval_iuxray:
-        print('\n========================')
-        count_print('Running evaluator engine on IU X-Ray validation split ...')
-        print('len(dataset) =', len(iuxray_vqa_trainer.val_dataset))
-        print('len(dataloader) =', len(iuxray_vqa_trainer.val_dataloader))
-        evaluator.run(iuxray_vqa_trainer.val_dataloader)
-        
-        results_dict['iuxray_metrics'] = deepcopy(evaluator.state.metrics)            
-        results_dict['iuxray_dataset'] = iuxray_vqa_trainer.val_dataset
-        results_dict['iuxray_reports'] = recover_reports(
-            results_dict['iuxray_metrics'],
-            results_dict['iuxray_dataset'],
-            tokenizer, eval_mode, iuxray_qa_reports,
-            verbose_question=verbose_question,
-        )
-        results_dict['iuxray_report_metrics'] = _compute_and_save_report_level_metrics(
-            results_dict, 'iuxray', tokenizer, results_folder_path, parenthesis_text=eval_mode_text,
-            max_processes=max_processes_for_chexpert_labeler)
+    results_folder_path = get_results_folder_path(checkpoint_folder_path)        
 
     if eval_mimiccxr:
         print('\n========================')
@@ -539,6 +550,12 @@ def _evaluate_model(
         print('len(dataset) =', len(mimiccxr_vqa_evaluator.test_dataset))
         print('len(dataloader) =', len(mimiccxr_vqa_evaluator.test_dataloader))
         evaluator.run(mimiccxr_vqa_evaluator.test_dataloader)
+
+        assert mimiccxr_eval_view_mode is not None
+
+        eval_mode_text = _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold,
+                                         pretrained_checkpoint_path, precomputed_question_probs_path,
+                                         use_random_image, mimiccxr_eval_view_mode)
         
         print_blue('Computing metrics ...')
         results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
@@ -556,7 +573,35 @@ def _evaluate_model(
             max_processes=max_processes_for_chexpert_labeler)
 
         if save_for_error_analysis:
-            _save_results_for_error_analysis(results_dict, 'mimiccxr', results_folder_path, eval_mode_text)
+            _save_results_for_error_analysis(
+                results_dict=results_dict,
+                dataset_name='mimiccxr',
+                results_folder_path=results_folder_path,
+                classify_orientation=classify_orientation,
+                classify_chexpert=classify_chexpert,
+                classify_questions=classify_questions,
+                classify_chest_imagenome=classify_chest_imagenome,
+                chest_imagenome_labels=mimiccxr_vqa_evaluator.chest_imagenome_labels,
+                parenthesis_text=eval_mode_text)
+
+    # if eval_iuxray:
+    #     print('\n========================')
+    #     count_print('Running evaluator engine on IU X-Ray validation split ...')
+    #     print('len(dataset) =', len(iuxray_vqa_trainer.val_dataset))
+    #     print('len(dataloader) =', len(iuxray_vqa_trainer.val_dataloader))
+    #     evaluator.run(iuxray_vqa_trainer.val_dataloader)
+        
+    #     results_dict['iuxray_metrics'] = deepcopy(evaluator.state.metrics)            
+    #     results_dict['iuxray_dataset'] = iuxray_vqa_trainer.val_dataset
+    #     results_dict['iuxray_reports'] = recover_reports(
+    #         results_dict['iuxray_metrics'],
+    #         results_dict['iuxray_dataset'],
+    #         tokenizer, eval_mode, iuxray_qa_reports,
+    #         verbose_question=verbose_question,
+    #     )
+    #     results_dict['iuxray_report_metrics'] = _compute_and_save_report_level_metrics(
+    #         results_dict, 'iuxray', tokenizer, results_folder_path, parenthesis_text=eval_mode_text,
+    #         max_processes=max_processes_for_chexpert_labeler)
 
     torch.cuda.empty_cache()
     if return_results:
@@ -581,6 +626,7 @@ def evaluate_model(
     eval_mimiccxr = True,
     max_processes_for_chexpert_labeler = 10,
     save_for_error_analysis = False,
+    mimiccxr_eval_view_mode = None,
 ):
     print('----- Evaluating model ------')
 
@@ -591,13 +637,19 @@ def evaluate_model(
     tokenizer_kwargs = metadata['tokenizer_kwargs']
     model_kwargs = metadata['model_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
-    image_transform_kwargs = metadata['image_transform_kwargs']
+    image_transform_kwargs = metadata['train_image_transform_kwargs']
     image_transform_kwargs['augmentation_mode'] = None # no data augmentation
-    mimiccxr_vqa_evaluator_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
-    mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
-    mimiccxr_vqa_evaluator_kwargs['use_random_image'] = use_random_image
-    iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
-    iuxray_vqa_trainer_kwargs['batch_size'] = batch_size
+    if eval_mimiccxr:
+        mimiccxr_vqa_evaluator_kwargs = metadata['mimiccxr_vqa_trainer_kwargs']
+        mimiccxr_vqa_evaluator_kwargs['batch_size'] = batch_size
+        mimiccxr_vqa_evaluator_kwargs['use_random_image'] = use_random_image
+    else:
+        mimiccxr_vqa_evaluator_kwargs = None
+    if eval_iuxray:
+        iuxray_vqa_trainer_kwargs = metadata['iuxray_vqa_trainer_kwargs']
+        iuxray_vqa_trainer_kwargs['batch_size'] = batch_size
+    else:
+        iuxray_vqa_trainer_kwargs = None
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
     trainer_engine_kwargs = metadata['trainer_engine_kwargs']
 
@@ -627,6 +679,7 @@ def evaluate_model(
                 eval_mimiccxr = eval_mimiccxr,
                 max_processes_for_chexpert_labeler = max_processes_for_chexpert_labeler,
                 save_for_error_analysis = save_for_error_analysis,
+                mimiccxr_eval_view_mode = mimiccxr_eval_view_mode,
             )
 
 if __name__ == '__main__':

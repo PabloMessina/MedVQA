@@ -1,12 +1,13 @@
 import os
 import numpy as np
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase, VM_Trainer, VM_Evaluator
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_STUDY_REGEX,
     get_broken_images,
     get_image_views_dict,
-    get_mimiccxr_image_path,
+    get_mimiccxr_small_image_path,
     get_split_dict,
 )
 from medvqa.utils.constants import CHEXPERT_LABELS
@@ -58,9 +59,26 @@ class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 question_labels_filename = None,
+                classify_chest_imagenome = False,
+                chest_imagenome_labels_filename = None,
+                qa_adapted_reports_filename = None,
+                use_validation_indices = False,
                 **unused_kwargs,
         ):
         preprocessed_data_path = os.path.join(MIMICCXR_CACHE_DIR, preprocessed_data_filename)
+        
+        if classify_chest_imagenome: # Chest-Imagenome specific logic
+            assert chest_imagenome_labels_filename is not None
+            assert qa_adapted_reports_filename is not None
+            # Load Chest-Imagenome dicom_ids and labels
+            self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
+                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(
+                    chest_imagenome_labels_filename, qa_adapted_reports_filename)
+            # Necessary hack so that parent classes can access chest_imagenome_labels
+            other_tasks = [('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid])]
+        else:
+            other_tasks = None
+
         super().__init__(transform, batch_size, collate_batch_fn,
                         preprocessed_data_path,
                         MIMICCXR_CACHE_DIR,
@@ -71,7 +89,9 @@ class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
                         classify_chexpert = classify_chexpert,
                         chexpert_labels_filename = chexpert_labels_filename,
                         classify_questions = classify_questions,
-                        question_labels_filename = question_labels_filename)
+                        question_labels_filename = question_labels_filename,
+                        use_validation_indices = use_validation_indices,
+                        other_tasks = other_tasks)
 
 
 # MAE: Masked AutoEncoder
@@ -105,7 +125,7 @@ class MIMICCXR_MAE_Trainer(MAETrainerBase):
             for dicom_id, _ in views:
                 if (subject_id, study_id, dicom_id) not in broken_images:
                     report_ids.append(rid)
-                    image_path = get_mimiccxr_image_path(part_id, subject_id, study_id, dicom_id)
+                    image_path = get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id)
                     image_paths.append(image_path)
                     split = split_dict[(subject_id, study_id, dicom_id)]
                     if report_split is None:
