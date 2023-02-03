@@ -8,6 +8,48 @@ from medvqa.utils.common import CACHE_DIR
 CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR']
 CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH = os.environ['CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH']
 CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
+CHEST_IMAGENOME_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'bboxes.pkl')
+
+CHEST_IMAGENOME_NUM_BBOX_CLASSES = 36
+
+CHEST_IMAGENOME_BBOX_NAMES = [
+    'right lung',
+    'right upper lung zone',
+    'right mid lung zone',
+    'right lower lung zone',
+    'right hilar structures',
+    'right apical zone',
+    'right costophrenic angle',
+    'right cardiophrenic angle',
+    'right hemidiaphragm',
+    'left lung',
+    'left upper lung zone',
+    'left mid lung zone',
+    'left lower lung zone',
+    'left hilar structures',
+    'left apical zone',
+    'left costophrenic angle',
+    'left hemidiaphragm',
+    'trachea',
+    'spine',
+    'right clavicle',
+    'left clavicle',
+    'aortic arch',
+    'mediastinum',
+    'upper mediastinum',
+    'svc',
+    'cardiac silhouette',
+    'left cardiac silhouette',
+    'right cardiac silhouette',
+    'cavoatrial junction',
+    'right atrium',
+    'descending aorta',
+    'carina',
+    'left upper abdomen',
+    'right upper abdomen',
+    'abdomen',
+    'left cardiophrenic angle',
+]
 
 CHEST_IMAGENOME_ATTRIBUTES_DICT = {
     'anatomicalfinding': [

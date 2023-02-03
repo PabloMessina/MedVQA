@@ -681,6 +681,8 @@ class VQA_Base(LabelBasedVQAClass):
         self.questions = data['questions']
         if 'question_ids' in data: # backward compatible hack
             self.question_ids = data['question_ids']
+        if 'dicom_ids' in data:
+            self.dicom_ids = data['dicom_ids']
         if 'answers' in data:
             self.answers = data['answers']
         if self.training:
@@ -709,6 +711,8 @@ class VQA_Base(LabelBasedVQAClass):
             data['val_indices'] = self.val_indices
         if hasattr(self, 'orientations'):
             data['orientations'] = self.orientations
+        if hasattr(self, 'dicom_ids'):
+            data['dicom_ids'] = self.dicom_ids
         save_to_pickle(data, preprocessing_save_path)
         print('\tdone!')
         return True

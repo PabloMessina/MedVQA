@@ -1,10 +1,10 @@
 from collections import Counter
 import os
-import glob
 import numpy as np
 from tqdm import tqdm
-from medvqa.datasets.chest_imagenome import load_gold_standard_dicom_ids
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, load_gold_standard_dicom_ids
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_chest_imagenome_bboxes,
     load_chest_imagenome_label_names_and_templates,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
 )
@@ -12,7 +12,6 @@ from medvqa.datasets.utils import deduplicate_indices
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
-    MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
     MIMICCXR_EvalViewModes,
@@ -41,20 +40,14 @@ from medvqa.datasets.preprocessing import (
 )
 from medvqa.utils.logging import print_red
 
-def get_mimiccxr_image_paths(report):
-    filepath = report['filepath']
-    part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
-    images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
-    return images
-
-def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, include_chest_imagenome_mode):
+def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, use_chest_imagenome_compatible_data):
     tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'
     if tokenizer.medical_tokenization:
         tokenizer_string += f',{tokenizer.medical_terms_frequency_filename}'
     strings = [
         f'dataset={qa_adapted_reports_filename}',
         f'tokenizer={tokenizer_string}',
-        f'include_chest_imagenome_mode={include_chest_imagenome_mode}',
+        f'use_chest_imagenome_compatible_data={use_chest_imagenome_compatible_data}',
     ]
     return get_file_path_with_hashing_if_too_long(MIMICCXR_CACHE_DIR, 'mimiccxr_preprocessed_train_data__', strings, 'pkl')
 
@@ -287,9 +280,9 @@ def _precompute_questions_per_report(basic_data, report_eval_mode,
 
 def _get_basic_data(qa_adapted_reports_filename, image_views_dict, split_dict,
                     view_mode=MIMICCXR_ViewModes.ANY_SINGLE,
-                    include_chest_imagenome_mode=False, chest_imagenome_dicom_ids=None):
+                    use_chest_imagenome_compatible_data=False, chest_imagenome_dicom_ids=None):
 
-    if include_chest_imagenome_mode:
+    if use_chest_imagenome_compatible_data:
         assert chest_imagenome_dicom_ids is not None
         assert type(chest_imagenome_dicom_ids) == set
         assert view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME
@@ -418,7 +411,7 @@ def _preprocess_data(self, split_name):
     split_dict = get_split_dict()
     image_views_dict = get_image_views_dict()    
     basic_data = _get_basic_data(self.qa_adapted_reports_filename, image_views_dict, split_dict,
-                                 view_mode=self.view_mode, include_chest_imagenome_mode=self.include_chest_imagenome_mode,
+                                 view_mode=self.view_mode, use_chest_imagenome_compatible_data=self.use_chest_imagenome_compatible_data,
                                  chest_imagenome_dicom_ids=self.chest_imagenome_dicom_ids)
 
     if split_name == 'test' and self.report_eval_mode is not None:
@@ -447,9 +440,9 @@ def _preprocess_data(self, split_name):
         elif self.report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
             question_list = CHEXPERT_LABELS + mimiccxr_qa_reports['questions']
                                 
-    # Collect report_ids, image_paths and orientation_ids for the split
+    # Collect multiple fields considerng the split and mode
     if is_train_val:
-        if self.include_chest_imagenome_mode:
+        if self.use_chest_imagenome_compatible_data:
             # Use only instances whose dicom_id is not in Chest-Imagenome gold standard
             gold_dicom_ids = self.chest_imagenome_gold_dicom_ids
             assert type(gold_dicom_ids) is set
@@ -459,22 +452,26 @@ def _preprocess_data(self, split_name):
                     if s != 'test' and did not in gold_dicom_ids]
             orientation_ids = [oid for oid, s, did in zip(basic_data['orientation_ids'], basic_data['splits'], basic_data['dicom_ids'])\
                     if s != 'test' and did not in gold_dicom_ids]
+            dicom_ids = [did for s, did in zip(basic_data['splits'], basic_data['dicom_ids']) if s != 'test' and did not in gold_dicom_ids]
             splits = [s for s, did in zip(basic_data['splits'], basic_data['dicom_ids']) if s != 'test' and did not in gold_dicom_ids]
         else:
             report_ids = [rid for rid, s in zip(basic_data['report_ids'], basic_data['splits']) if s != 'test']
             image_paths = [ip for ip, s in zip(basic_data['image_paths'], basic_data['splits']) if s != 'test']
             orientation_ids = [oid for oid, s in zip(basic_data['orientation_ids'], basic_data['splits']) if s != 'test']
+            dicom_ids = [did for s, did in zip(basic_data['splits'], basic_data['dicom_ids']) if s != 'test']
             splits = [s for s in basic_data['splits'] if s != 'test']
     else:
         report_ids = [rid for rid, s in zip(basic_data['report_ids'], basic_data['splits']) if s == 'test']
         image_paths = [ip for ip, s in zip(basic_data['image_paths'], basic_data['splits']) if s == 'test']
         orientation_ids = [oid for oid, s in zip(basic_data['orientation_ids'], basic_data['splits']) if s == 'test']
-    assert len(report_ids) == len(image_paths) == len(orientation_ids)
+        dicom_ids = [did for s, did in zip(basic_data['splits'], basic_data['dicom_ids']) if s == 'test']
+    assert len(report_ids) == len(image_paths) == len(orientation_ids) == len(dicom_ids)
     assert len(report_ids) > 0
 
     # Collect data in VQA format (multiple questions per report)
     self.report_ids = []
     self.question_ids = []
+    self.dicom_ids = []
     self.images = []
     self.questions = []
     self.orientations = []
@@ -493,6 +490,7 @@ def _preprocess_data(self, split_name):
             sentences = report['sentences']
             image_path = image_paths[i]
             orientation_id = orientation_ids[i]
+            dicom_id = dicom_ids[i]
             split = splits[i]
 
             for qid, a_ids in report['qa'].items():
@@ -501,6 +499,7 @@ def _preprocess_data(self, split_name):
                 answer = '. '.join(sentences[i] for i in a_ids)
                 self.report_ids.append(ri)
                 self.question_ids.append(qid)
+                self.dicom_ids.append(dicom_id)
                 self.images.append(image_path)
                 self.questions.append(tokenizer.string2ids(question.lower()))
                 self.answers.append(answer_string2ids_func(answer.lower()))
@@ -522,6 +521,7 @@ def _preprocess_data(self, split_name):
             ri = report_ids[i]
             image_path = image_paths[i]
             orientation_id = orientation_ids[i]
+            dicom_id = dicom_ids[i]
             question_ids = questions_per_report[ri]
 
             # assert len(question_ids) > 0, mimiccxr_qa_reports['reports'][ri]
@@ -530,12 +530,14 @@ def _preprocess_data(self, split_name):
                 question = question_list[qid]
                 self.report_ids.append(ri)
                 self.question_ids.append(qid)
+                self.dicom_ids.append(dicom_id)
                 self.images.append(image_path)
                 self.questions.append(tokenizer.string2ids(question.lower()))
                 self.orientations.append(orientation_id)
         
     self.report_ids = np.array(self.report_ids, dtype=int)
     self.question_ids = np.array(self.question_ids, dtype=int)
+    self.dicom_ids = np.array(self.dicom_ids, dtype=str)
     self.images = np.array(self.images, dtype=str)
     self.questions = np.array(self.questions, dtype=object)
     self.orientations = np.array(self.orientations, dtype=int)
@@ -562,6 +564,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 chexpert_labels_filename = None,
                 classify_questions = False,
                 classify_chest_imagenome = False,
+                predict_bboxes_chest_imagenome = False,
                 question_labels_filename = None,
                 mimiccxr_qa_reports = None,
                 balanced_dataloading = False,
@@ -591,27 +594,40 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.classify_chest_imagenome = classify_chest_imagenome
+        self.use_chest_imagenome_compatible_data = (
+            include_chest_imagenome_mode or classify_chest_imagenome or predict_bboxes_chest_imagenome
+        )
         
-        if include_chest_imagenome_mode: # Chest-Imagenome specific logic
-            assert chest_imagenome_labels_filename is not None
-            assert chest_imagenome_label_names_filename is not None
+        other_tasks = [] # Hack so that parent class can handle other tasks
+
+        # --------- Chest-Imagenome specific logic ---------
+        if include_chest_imagenome_mode: 
             assert collate_batch_fn_chest_imagenome_mode is not None            
             self.collate_batch_fn_chest_imagenome_mode = collate_batch_fn_chest_imagenome_mode
+            # Load Chest-Imagenome label names and templates
+            assert chest_imagenome_label_names_filename is not None
+            self.chest_imagenome_label_names, self.chest_imagenome_templates = \
+                load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
+
+        if include_chest_imagenome_mode or classify_chest_imagenome:
+            assert chest_imagenome_labels_filename is not None
             # Load Chest-Imagenome dicom_ids and labels
             self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
                 load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)
-            # Load Chest-Imagenome label names and templates
-            self.chest_imagenome_label_names, self.chest_imagenome_templates = \
-                load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
             # Load Chest-Imagenome gold standard dicom_ids (they must be removed from training and validation sets)
-            self.chest_imagenome_gold_dicom_ids = set(load_gold_standard_dicom_ids())
-            # Necessary hack so that parent classes can access chest_imagenome_labels
-            if classify_chest_imagenome:
-                other_tasks = [('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid])]
-            else:
-                other_tasks = None
+            self.chest_imagenome_gold_dicom_ids = set(load_gold_standard_dicom_ids())            
+            
+        if classify_chest_imagenome:
+            other_tasks.append(('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid]))
         
-        preprocessing_save_path = _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, include_chest_imagenome_mode)
+        if predict_bboxes_chest_imagenome:
+            self.chest_imagenome_bboxes = load_chest_imagenome_bboxes()
+            _bbox_coords = np.empty((len(self.chest_imagenome_bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
+            _bbox_presence = np.empty((len(self.chest_imagenome_bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)            
+            other_tasks.append(('chest_imagenome_bbox_coords', lambda i, _: _bbox_coords[_dids[i]]))
+            other_tasks.append(('chest_imagenome_bbox_presence', lambda i, _: _bbox_presence[_dids[i]]))
+        
+        preprocessing_save_path = _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, self.use_chest_imagenome_compatible_data)
 
         print(f'MIMICCXR_VQA_Trainer: balanced_dataloading = {balanced_dataloading}')
 
@@ -645,6 +661,14 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         n_findings = n_findings,
                         other_tasks=other_tasks,
                         debug = debug)
+
+        if predict_bboxes_chest_imagenome: # Hack so that parent class can initialize self.dicom_ids
+            _did2idx = {did: i for i, did in enumerate(self.chest_imagenome_bboxes.keys())}
+            _dids = np.array([_did2idx[did] for did in self.dicom_ids], dtype=int)
+            for did in self.chest_imagenome_bboxes.keys():
+                i = _did2idx[did]
+                _bbox_coords[i] = self.chest_imagenome_bboxes[did]['coords']
+                _bbox_presence[i] = self.chest_imagenome_bboxes[did]['presence']
 
     def _preprocess_data(self):
         _preprocess_data(self, 'train_val')

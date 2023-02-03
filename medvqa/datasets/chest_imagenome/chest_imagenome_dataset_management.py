@@ -1,10 +1,12 @@
-import json
 import os
+import time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from multiprocessing import Pool
 
 from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_BBOXES_FILEPATH,
     CHEST_IMAGENOME_CACHE_DIR,
     CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR,
     CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH,
@@ -19,9 +21,11 @@ from medvqa.datasets.mimiccxr import (
     get_mimiccxr_report_path,
 )
 from medvqa.datasets.mimiccxr.preprocessing import image_paths_generator
-from medvqa.utils.files import get_cached_json_file, load_pickle
+from medvqa.utils.files import get_cached_json_file, load_json_file, load_pickle
 
-# Load scene graphs
+def _load_scene_graph(scene_graph_path):
+    return load_json_file(scene_graph_path)
+
 def _load_scene_graphs(scene_graphs_dir, k=None, offset=0):    
     filenames = os.listdir(scene_graphs_dir)
     scene_graphs = [None] * len(filenames)
@@ -30,14 +34,24 @@ def _load_scene_graphs(scene_graphs_dir, k=None, offset=0):
         if i == offset + k:
             i -= 1
             break
-        if f.endswith('.json'):
-            with open(os.path.join(scene_graphs_dir, f), 'r') as f:
-                scene_graphs[i-offset] = json.load(f)
+        scene_graphs[i-offset] = _load_scene_graph(os.path.join(scene_graphs_dir, f))
     i -= offset
     if k is None or k > 0:
         assert scene_graphs[i] is not None
     assert scene_graphs[i+1] is None
     scene_graphs = scene_graphs[:i+1]
+    return scene_graphs
+
+def load_scene_graphs_in_parallel(num_workers=4, first_k=None):
+    start_time = time.time()
+    filenames = os.listdir(CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR)
+    if first_k is not None:
+        filenames = filenames[:first_k]
+    filepaths = [os.path.join(CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR, f) for f in filenames]
+    with Pool(num_workers) as p:
+        scene_graphs = p.map(_load_scene_graph, filepaths)
+    elapsed_time = time.time() - start_time
+    print(f'Elapsed time: {elapsed_time:.2f} seconds')
     return scene_graphs
 
 def load_silver_scene_graphs(k, offset):
@@ -53,10 +67,20 @@ def get_gold_scene_graphs_paths():
             output.append(scene_graph_path)
     return output
 
-def load_postprocessed_label_names(labels_filename):
+def load_postprocessed_label_names(label_names_filename):
+    label_names = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, label_names_filename))
+    assert label_names is not None, label_names_filename
+    return label_names
+
+def load_postprocessed_labels(labels_filename):
     labels = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, labels_filename))
     assert labels is not None, labels_filename
     return labels
+
+def load_chest_imagenome_bboxes():
+    chest_imagenome_bboxes = load_pickle(CHEST_IMAGENOME_BBOXES_FILEPATH)
+    assert chest_imagenome_bboxes is not None, CHEST_IMAGENOME_BBOXES_FILEPATH
+    return chest_imagenome_bboxes
         
 # Extract labels from a scene graph
 def extract_labels_from_scene_graph(scene_graph):
@@ -90,8 +114,7 @@ def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(
         qa_adapted_reports_filename,
     ):    
     # Load chest_imagenome_labels    
-    chest_imagenome_labels = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, chest_imagenome_labels_filename))
-    assert chest_imagenome_labels is not None, chest_imagenome_labels_filename
+    chest_imagenome_labels = load_postprocessed_labels(chest_imagenome_labels_filename)
 
     # Obtain dicom_ids
     dicom_ids = set(chest_imagenome_labels.keys())
@@ -116,10 +139,8 @@ def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(
     return dicom_ids, adapted_chest_imagenome_labels
 
 def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename):
-
     # Load chest_imagenome_label_names and compute templates for each label
-    chest_imagenome_label_names = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, chest_imagenome_label_names_filename))
-    assert chest_imagenome_label_names is not None, chest_imagenome_label_names_filename
+    chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
     chest_imagenome_templates = {}
     for label_name in chest_imagenome_label_names:
         if len(label_name) == 3:
@@ -136,8 +157,7 @@ def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_f
         chest_imagenome_templates[label_name] = {
             0: '', # no anomaly
             1: positive_answer # anomaly observed
-        }
-        
+        }        
     return chest_imagenome_label_names, chest_imagenome_templates
 
 # Visualize a scene graph
@@ -175,21 +195,23 @@ def visualize_scene_graph(scene_graph, imageId2partId, figsize=(10, 10)):
         y = object['original_y1']
         w = object['original_x2'] - object['original_x1']
         h = object['original_y2'] - object['original_y1']
-        assert w == object['original_width']
-        assert h == object['original_height']
+        assert abs(w - object['original_width']) < 2, (w, object['original_width'])
+        assert abs(h - object['original_height']) < 2, (h, object['original_height'])
         # make bounding box transparent if it is not in labels
         in_labels = any([label[0] == object['bbox_name'] for label in labels])
         rect = patches.Rectangle((x, y), w, h, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none', alpha=0.3 if not in_labels else 1.0)
         ax.add_patch(rect)
         # add a label (make it transparent if it is not in labels)
         ax.text(x, y-3, object['bbox_name'], fontsize=16, color=plt.cm.tab20(i), alpha=0.3 if not in_labels else 1.0)
+        print('Object:', object['bbox_name'], (x, y, w, h))
+
+    print('Num objects:', len(scene_graph['objects']))
 
     # Show the image
     plt.show()
 
     # Print labels
     print('Labels:')
-    labels = extract_labels_from_scene_graph(scene_graph)
     for label in labels:
         print(label)
 

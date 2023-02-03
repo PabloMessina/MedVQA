@@ -1,11 +1,14 @@
 from dotenv import load_dotenv
+from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
 load_dotenv()
 
 from medvqa.utils.common import CACHE_DIR
 
 import os
 import re
+import glob
 import pandas as pd
+from tqdm import tqdm
 
 MIMICCXR_DATASET_DIR = os.environ['MIMICCXR_DATASET_DIR']
 MIMICCXR_DATASET_AUX_DIR = os.environ['MIMICCXR_DATASET_AUX_DIR']
@@ -136,3 +139,74 @@ def get_split_dict():
                                                                                                     mimiccxr_split['dicom_id'],
                                                                                                     mimiccxr_split['split']) }
     return split_dict
+
+def get_mimiccxr_image_paths(report):
+    filepath = report['filepath']
+    part_id, subject_id, study_id = MIMICCXR_STUDY_REGEX.findall(filepath)[0]
+    images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
+    return images
+
+def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
+
+    output_path = os.path.join(MIMICCXR_CACHE_DIR, f'{qa_adapted_reports_filename}__detailed_metadata.pkl')
+    if os.path.exists(output_path):
+        print(f'Loading cached detailed metadata from {output_path}')
+        return load_pickle(output_path)
+
+    qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))    
+    image_views_dict = get_image_views_dict()
+    split_dict = get_split_dict()
+    n_reports = len(qa_adapted_reports['reports'])
+    
+    backgrounds = [None] * n_reports
+    reports = [None] * n_reports
+    part_ids = [None] * n_reports
+    subject_ids = [None] * n_reports
+    study_ids = [None] * n_reports
+    dicom_id_view_pos_pairs = [None] * n_reports
+    splits = [None] * n_reports
+    filepaths = [None] * n_reports
+    
+    for i, report in tqdm(enumerate(qa_adapted_reports['reports'])):
+        filepath = report['filepath']
+        part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
+        
+        backgrounds[i] = report['background']
+        reports[i] = '.\n '.join(report['sentences'])
+        part_ids[i] = part_id
+        subject_ids[i] = subject_id
+        study_ids[i] = study_id
+        dicom_id_view_pos_pairs[i] = image_views_dict[(subject_id, study_id)]
+        splits[i] = split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][0][0])]
+        for j in range(1, len(dicom_id_view_pos_pairs[i])):
+            assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
+        filepaths[i] = filepath
+
+    report_metadata = dict(
+        backgrounds=backgrounds,
+        reports=reports,
+        part_ids=part_ids,
+        subject_ids=subject_ids,
+        study_ids=study_ids,
+        dicom_id_view_pos_pairs=dicom_id_view_pos_pairs,
+        splits=splits,
+        filepaths=filepaths,
+    )
+
+    save_to_pickle(report_metadata, output_path)
+    print(f'Saved detailed metadata to {output_path}')
+    return report_metadata    
+    
+    # reports_metadata = dict()
+    # for subject_id, study_id, dicom_id, view_pos, report in zip(mimiccxr_metadata['subject_id'],
+    #                                                             mimiccxr_metadata['study_id'],
+    #                                                             mimiccxr_metadata['dicom_id'],
+    #                                                             mimiccxr_metadata['ViewPosition'],
+    #                                                             mimiccxr_metadata['Report']):
+    #     key = (subject_id, study_id)
+    #     try:
+    #         reports = reports_metadata[key]
+    #     except KeyError:
+    #         reports = reports_metadata[key] = []
+    #     reports.append((dicom_id, view_pos, report))
+    # return reports_metadata

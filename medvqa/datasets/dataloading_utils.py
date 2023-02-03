@@ -193,7 +193,7 @@ def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question
                             include_image=True, include_visual_features=False, include_answer=True,
                             classify_tags=False, n_tags=None, classify_orientation=False,
                             classify_chexpert=False, classify_questions=False, classify_chest_imagenome=False,
-                            use_merged_findings=False):
+                            predict_bboxes_chest_imagenome=False, use_merged_findings=False):
 
     if classify_tags:
         mlb = MultiLabelBinarizer(list(range(n_tags)))
@@ -248,6 +248,9 @@ def get_vqa_collate_batch_fn(dataset_id, verbose_question=True, one_hot_question
                 batch_dict['qlabels'] = torch.tensor([batch[i]['qlabels'] for i in indexes])
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([batch[i]['chest_imagenome'] for i in indexes])
+            if predict_bboxes_chest_imagenome:
+                batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
+                batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([batch[i]['chest_imagenome_bbox_presence'] for i in indexes])
 
             return batch_dict
 

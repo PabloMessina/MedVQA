@@ -15,7 +15,7 @@ def split_checkpoint_name(name):
 def get_checkpoint_filepath(folder, verbose=True):
     checkpoint_names = [f for f in os.listdir(folder) if f.endswith('.pt')]
     if len(checkpoint_names) == 0:
-        raise Exception('No checkpoints found in', folder)
+        raise FileNotFoundError(f'No checkpoint found in {folder}')
     # TODO: this assumes a single metric, so consider generalizing this
     # to more than one metric in the same folder
     best_value = -9999

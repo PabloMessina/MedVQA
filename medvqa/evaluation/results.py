@@ -10,8 +10,9 @@ def collect_report_level_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
     qa_dirs = os.listdir(os.path.join(RESULTS_DIR,'qa'))
     vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
+    rg_dirs = os.listdir(os.path.join(RESULTS_DIR,'report_gen'))
     results = []
-    for dirs, kind in zip([vqa_dirs, qa_dirs, vm_dirs], ['vqa', 'qa', 'visual_module']):
+    for dirs, kind in zip([vqa_dirs, qa_dirs, vm_dirs, rg_dirs], ['vqa', 'qa', 'visual_module', 'report_gen']):
         for exp_name in dirs:
             exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
                                     if 'report_level' in x and dataset_name in x]
@@ -69,13 +70,19 @@ _REPLACEMENT_PAIRS = [
 
 def _get_metadata_generator(results):
     for r in results:
-        yield get_cached_json_file(os.path.join(WORKSPACE_DIR, 'models', r[0], r[1], 'metadata.json'))
+        try:
+            yield get_cached_json_file(os.path.join(WORKSPACE_DIR, 'models', r[0], r[1], 'metadata.json'))
+        except FileNotFoundError:
+            yield {} # TODO: this is a hack
 
 def _append_frozen_image_encoder_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
-        frozen = metadata['model_kwargs'].get('freeze_cnn', False) or\
-                 metadata['model_kwargs'].get('freeze_image_encoder', False)
+        try:
+            frozen = metadata['model_kwargs'].get('freeze_cnn', False) or\
+                    metadata['model_kwargs'].get('freeze_image_encoder', False)
+        except KeyError:
+            frozen = False
         column.append(frozen)
     df['vm-frozen'] = column
 
@@ -92,7 +99,10 @@ def _append_model_column(df, results):
     models = []
     for x in results:
         s = x[1].index('_',16)+1
-        e = x[1].index('_',s)
+        try:
+            e = x[1].index('_',s)
+        except ValueError:
+            e = len(x[1])
         models.append(x[1][s:e])
     df['model'] = models
 
@@ -137,7 +147,7 @@ def _append_medical_tokenization_column(df, results):
         column.append(medtok)
     df['medtok'] = column
 
-def _append_vinbig_mode(df, results):
+def _append_vinbig_mode_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
         try:
@@ -150,30 +160,42 @@ def _append_vinbig_mode(df, results):
 def _append_merge_findings_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
-        mf = metadata['model_kwargs'].get('merge_findings', False)
+        try:
+            mf = metadata['model_kwargs'].get('merge_findings', False)
+        except KeyError:
+            mf = False
         column.append(mf)
     df['mergef'] = column
 
 def _append_checkpoint_epoch_column(df, results):
     column = []
     for r in results:
-        checkpoint_folder_path = os.path.join(WORKSPACE_DIR, 'models', r[0], r[1])
-        checkpoint_filepath = get_checkpoint_filepath(checkpoint_folder_path, verbose=False)
-        epoch = re.findall(r'checkpoint_(\d+)_', checkpoint_filepath)[0]
+        try:
+            checkpoint_folder_path = os.path.join(WORKSPACE_DIR, 'models', r[0], r[1])
+            checkpoint_filepath = get_checkpoint_filepath(checkpoint_folder_path, verbose=False)
+            epoch = re.findall(r'checkpoint_(\d+)_', checkpoint_filepath)[0]
+        except FileNotFoundError:
+            epoch = None
         column.append(epoch)
     df['epoch'] = column
 
 def _append_pretrained_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
-        p = metadata['model_kwargs'].get('pretrained_checkpoint_folder_path', None) is not None
+        try:
+            p = metadata['model_kwargs'].get('pretrained_checkpoint_folder_path', None) is not None
+        except KeyError:
+            p = None
         column.append(p)
     df['pretrained'] = column
 
 def _append_pretrained_image_encoder_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
-        p = metadata['model_kwargs'].get('image_encoder_pretrained_weights_path', None) is not None
+        try:
+            p = metadata['model_kwargs'].get('image_encoder_pretrained_weights_path', None) is not None
+        except KeyError:
+            p = None
         column.append(p)
     df['pretr_imgenc'] = column
 
@@ -211,7 +233,7 @@ def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
     df['timestamp'] = [x[1][:15] for x in results]
     _append_datasets_column(df, results)
-    _append_vinbig_mode(df, results)
+    _append_vinbig_mode_column(df, results)
     _append_model_column(df, results)
     _append_eval_mode_column(df, results)
     _append_batch_size_column(df, results)
@@ -234,7 +256,7 @@ def _append_method_columns__visual_module(df, results):
     _append_amp_column(df, results)
     _append_merge_findings_column(df, results)
     _append_medical_tokenization_column(df, results)
-    _append_vinbig_mode(df, results)
+    _append_vinbig_mode_column(df, results)
     _append_pretrained_column(df, results)
     _append_batch_size_column(df, results)
     _append_gradient_accumulation_column(df, results)

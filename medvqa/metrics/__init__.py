@@ -1,3 +1,4 @@
+from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMacroAvgF1,
@@ -240,6 +241,16 @@ def attach_dataset_aware_chest_imagenome_labels_roc_auc(engine, allowed_dataset_
                                   allowed_dataset_ids=allowed_dataset_ids,
                                   device=device)
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids):
+    met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords'),
+                                allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMAE)
+
+def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids):
+    met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords'),
+                                allowed_dataset_ids=allowed_dataset_ids)
+    met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
 # ---------------------------------------------
 # Question labels related metrics

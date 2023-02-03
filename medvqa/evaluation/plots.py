@@ -10,7 +10,8 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
     ncols = 2 if n > 1 else 1
     nrows = n // ncols + bool(n % ncols)
 
-    logs = pd.read_csv(logs_path)
+    # load csv without index column    
+    logs = pd.read_csv(logs_path, index_col=False)
 
     figsize = (single_plot_figsize[0] * ncols, single_plot_figsize[1] * nrows)
     plt.figure(figsize=figsize)

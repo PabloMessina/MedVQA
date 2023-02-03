@@ -16,7 +16,6 @@ from medvqa.metrics.medical import (
     WeightedMedicalCompleteness,
 )
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
-from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 from medvqa.models.report_generation.templates.models import SimpleTemplateRGModel
 from medvqa.utils.constants import (
     CHEXPERT_LABEL2SHORT,
@@ -31,6 +30,14 @@ from medvqa.utils.common import CACHE_DIR, get_timestamp
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
+
+def _concatenate_report(qa_adapted_dataset, rid):
+    report = qa_adapted_dataset['reports'][rid]
+    n_sentences = len(report['sentences'])
+    is_valid = [True] * n_sentences
+    for i in report['invalid']: is_valid[i] = False
+    gt_report = '.\n '.join(report['sentences'][i].lower() for i in range(n_sentences) if is_valid[i])
+    return gt_report
 
 def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
                     qa_adapted_dataset=None, verbose_question=True):
@@ -73,14 +80,11 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
     gen_reports = []
     gt_reports = []
     for rid, indices in rid2indices.items():
-        report = qa_adapted_dataset['reports'][rid]
-        
-        gt_report = '.\n '.join(report['sentences'][i].lower() for i in report['matched'])
-        gt_report = tokenizer.clean_text(gt_report)
+        # Ground truth report
+        gt_report = _concatenate_report(qa_adapted_dataset, rid)
         gt_reports.append({'rid': rid, 'text': gt_report})
-        
+        # Generated report
         gen_report = {'q':[], 'a': []}
-
         for i in indices:
             q = _get_q(i)
             a = tokenizer.ids2string(metrics_dict['pred_answers'][i])
@@ -96,10 +100,11 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
 class TemplateBasedModes:
     CHEXPERT_LABELS = 'chexpert_labels'
     CHEST_IMAGENOME_LABELS = 'chest_imagenome_labels'
+    CHEST_IMAGENOME_LABELS__ORACLE = 'chest_imagenome_labels__oracle'
 
 def recover_reports__template_based(
-        mode, metrics_dict, dataset, qa_adapted_dataset, label_names, label_templates,
-        label_thresholds, label_order=None):
+        mode, metrics_dict, qa_adapted_dataset, label_names, label_templates,
+        label_thresholds, label_order=None, report_ids=None, dataset=None):
     '''
     mode: TemplateBasedModes
     label_names: list of str
@@ -107,13 +112,17 @@ def recover_reports__template_based(
     label_thresholds: list of float
     label_order: list of str
     '''
-    idxs = metrics_dict['idxs']
-    report_ids = [dataset.report_ids[i] for i in idxs]
-
     if mode == TemplateBasedModes.CHEXPERT_LABELS:
+        assert dataset is not None
+        report_ids = [dataset.report_ids[i] for i in metrics_dict['idxs']]
         pred_probs = metrics_dict['pred_chexpert_probs']
     elif mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS:
+        assert dataset is not None
+        report_ids = [dataset.report_ids[i] for i in metrics_dict['idxs']]
         pred_probs = metrics_dict['pred_chest_imagenome_probs']
+    elif mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE:
+        assert report_ids is not None
+        pred_probs = metrics_dict['oracle_probs']
     else: assert False, f'Unknown mode: {mode}'
     
     n = len(report_ids)
@@ -130,8 +139,7 @@ def recover_reports__template_based(
     for i in range(n):        
         # Ground truth report
         rid = report_ids[i]
-        report = qa_adapted_dataset['reports'][rid]
-        gt_report = '.\n '.join(report['sentences'][i].lower() for i in report['matched'])        
+        gt_report = _concatenate_report(qa_adapted_dataset, rid)
         gt_reports.append({'rid': rid, 'text': gt_report})        
         # Generated report
         gen_report = {'q':[], 'a': []}
@@ -162,6 +170,10 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
         gen_report = gen_reports[i]
         gen_text = ' . '.join(x for x in gen_report['a'] if len(x) > 0)
         gen_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
+
+    print('Computing report-level metrics...')
+    print('Example gt text: ', tokenizer.ids2string(gt_texts[0]))
+    print('Example gen text: ', tokenizer.ids2string(gen_texts[0]))
 
     metrics = {}
     
@@ -217,6 +229,7 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
                                             update_cache_on_disk=False, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
     
+    print('Done computing report-level metrics.')
     return metrics
 
 def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL_METRIC_NAMES):

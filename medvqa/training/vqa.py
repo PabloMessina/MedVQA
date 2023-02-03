@@ -60,6 +60,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # chest imagenome dataset
         classify_chest_imagenome=False,
         chest_imagenome_multilabel_criterion=None,
+        predict_bboxes_chest_imagenome=False,
+        chest_imagenome_bbox_coords_criterion=None,
+        chest_imagenome_bbox_presence_criterion=None,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -122,6 +125,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             question_labels = batch['qlabels'].to(device)
         if classify_chest_imagenome:
             chest_imagenome = batch['chest_imagenome'].to(device)
+        if predict_bboxes_chest_imagenome:
+            chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
+            chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -189,6 +195,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if classify_chest_imagenome:
                     pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
                     pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
+                if predict_bboxes_chest_imagenome:
+                    pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
+                    pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
 
                 if training:                    
                     # Compute losses
@@ -223,6 +232,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     if classify_chest_imagenome:
                         chest_imagenome_loss = chest_imagenome_multilabel_criterion(pred_chest_imagenome_logits, chest_imagenome.float())
                         losses.append(chest_imagenome_loss)
+                    if predict_bboxes_chest_imagenome:                        
+                        chest_imagenome_bbox_coords_loss = chest_imagenome_bbox_coords_criterion(
+                            pred_chest_imagenome_bbox_coords, chest_imagenome_bbox_coords.float())
+                        chest_imagenome_bbox_presence_loss = chest_imagenome_bbox_presence_criterion(
+                            pred_chest_imagenome_bbox_presence, chest_imagenome_bbox_presence.float())
+                        chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
+                        losses.append(chest_imagenome_bbox_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -283,6 +299,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output[f'pred_chest_imagenome_probs'] = pred_chest_imagenome_probs.detach().cpu()
             if training:
                 output[MetricNames.CHEST_IMAGENOME_LABEL_LOSS] = chest_imagenome_loss.detach()
+        if predict_bboxes_chest_imagenome:
+            output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
+            output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
+            output['pred_chest_imagenome_bbox_coords'] = pred_chest_imagenome_bbox_coords.detach().cpu()
+            output['pred_chest_imagenome_bbox_presence'] = pred_chest_imagenome_bbox_presence.detach().cpu()
+            if training:
+                output[MetricNames.CHEST_IMAGENOME_BBOX_LOSS] = chest_imagenome_bbox_loss.detach()
 
         return output
     
@@ -656,7 +679,7 @@ def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
     return mask
 
 def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-               classify_chest_imagenome, question_encoding, answer_decoding, device,
+               classify_chest_imagenome, predict_bboxes_chest_imagenome, question_encoding, answer_decoding, device,
                iters_to_accumulate=1,
                binary_loss_name='bce',
                include_image=True, include_visual_features=False,
@@ -746,48 +769,58 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
     else:
         chest_imagenome_multilabel_criterion = None
 
+    if predict_bboxes_chest_imagenome:
+        chest_imagenome_bbox_coords_criterion = nn.MSELoss()
+        chest_imagenome_bbox_presence_criterion = nn.BCEWithLogitsLoss()
+    else:
+        chest_imagenome_bbox_coords_criterion = None
+        chest_imagenome_bbox_presence_criterion = None
+
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
-                          include_visual_features=include_visual_features,
-                          include_image=include_image, include_answer=include_answer,
-                          max_answer_length=max_answer_length,
-                          training=training,
-                          device=device, use_amp=use_amp,
-                          question_encoding=question_encoding,
-                          answer_decoding=answer_decoding,
-                          beam_search_k=beam_search_k,
-                          shift_answer=shift_answer,
-                          use_merged_findings=use_merged_findings,
-                          iters_to_accumulate=iters_to_accumulate,
-                          # tags auxiliary task
-                          classify_tags=classify_tags,
-                          tags_criterion=tags_criterion,
-                          # orientation auxiliary task
-                          classify_orientation=classify_orientation,
-                          iuxray_orientation_criterion=iuxray_orientation_criterion,
-                          mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
-                          # chexpert auxiliary task
-                          classify_chexpert=classify_chexpert,
-                          chexpert_criterion=chexpert_criterion,
-                          # question auxiliary task
-                          classify_questions=classify_questions,
-                          question_criterion=question_criterion,
-                          # chexpert dataset
-                          chexpert_aux_criterion=chexpert_aux_criterion,
-                          chexpert_mode=chexpert_mode,
-                          # cxr14 dataset
-                          cxr14_criterion=cxr14_criterion,
-                          # vinbig dataset
-                          vinbig_criterion=vinbig_criterion,
-                          # padchest dataset
-                          padchest_multilabel_criterion=padchest_multilabel_criterion,
-                          padchest_singlelabel_criterion=padchest_singlelabel_criterion,
-                          # chest imagenome dataset
-                          classify_chest_imagenome=classify_chest_imagenome,
-                          chest_imagenome_multilabel_criterion=chest_imagenome_multilabel_criterion,
-                          # batchwise learning rate updates
-                          update_lr_batchwise=update_lr_batchwise,
-                          lr_scheduler=lr_scheduler,
+                            include_visual_features=include_visual_features,
+                            include_image=include_image, include_answer=include_answer,
+                            max_answer_length=max_answer_length,
+                            training=training,
+                            device=device, use_amp=use_amp,
+                            question_encoding=question_encoding,
+                            answer_decoding=answer_decoding,
+                            beam_search_k=beam_search_k,
+                            shift_answer=shift_answer,
+                            use_merged_findings=use_merged_findings,
+                            iters_to_accumulate=iters_to_accumulate,
+                            # tags auxiliary task
+                            classify_tags=classify_tags,
+                            tags_criterion=tags_criterion,
+                            # orientation auxiliary task
+                            classify_orientation=classify_orientation,
+                            iuxray_orientation_criterion=iuxray_orientation_criterion,
+                            mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
+                            # chexpert auxiliary task
+                            classify_chexpert=classify_chexpert,
+                            chexpert_criterion=chexpert_criterion,
+                            # question auxiliary task
+                            classify_questions=classify_questions,
+                            question_criterion=question_criterion,
+                            # chexpert dataset
+                            chexpert_aux_criterion=chexpert_aux_criterion,
+                            chexpert_mode=chexpert_mode,
+                            # cxr14 dataset
+                            cxr14_criterion=cxr14_criterion,
+                            # vinbig dataset
+                            vinbig_criterion=vinbig_criterion,
+                            # padchest dataset
+                            padchest_multilabel_criterion=padchest_multilabel_criterion,
+                            padchest_singlelabel_criterion=padchest_singlelabel_criterion,
+                            # chest imagenome dataset
+                            classify_chest_imagenome=classify_chest_imagenome,
+                            chest_imagenome_multilabel_criterion=chest_imagenome_multilabel_criterion,
+                            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+                            chest_imagenome_bbox_coords_criterion=chest_imagenome_bbox_coords_criterion,
+                            chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
+                            # batchwise learning rate updates
+                            update_lr_batchwise=update_lr_batchwise,
+                            lr_scheduler=lr_scheduler,
                           )
     engine = Engine(step_fn)
     return engine

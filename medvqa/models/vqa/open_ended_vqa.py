@@ -1,8 +1,10 @@
 import torch
 from torch import nn
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.text_encoder import BiLSTMBasedTextEncoder
 from medvqa.models.nlp.text_decoder import LSTMBasedTextDecoder
+from medvqa.models.vision.bbox_regression import BoundingBoxRegressor
 from medvqa.models.vision.visual_modules import (
     CLIP_RESNET_GLOBAL_FEAT_SIZE,
     CLIP_VIT_GLOBAL_FEAT_SIZE,
@@ -102,10 +104,12 @@ class OpenEndedVQA(nn.Module):
                  classify_chexpert=False,
                  classify_questions=False,
                  classify_chest_imagenome=False,
+                 predict_bboxes_chest_imagenome=False,
                  n_medical_tags=None,
                  n_questions=None,
                  n_questions_aux_task=None,
                  n_chest_imagenome_labels=None,
+                 chest_imagenome_bbox_hidden_size=None,
                  use_cxr14=False,
                  use_vinbig=False,
                  use_padchest=False,
@@ -160,9 +164,9 @@ class OpenEndedVQA(nn.Module):
             
         # Init auxiliary tasks
         self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                                classify_chest_imagenome, chexpert_mode, use_cxr14, use_vinbig, use_padchest,
-                                n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
-                                merge_findings=merge_findings, n_findings=n_findings)
+                                classify_chest_imagenome, predict_bboxes_chest_imagenome, chexpert_mode, use_cxr14,
+                                use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
+                                chest_imagenome_bbox_hidden_size, merge_findings=merge_findings, n_findings=n_findings)
 
         # Logging
         print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
@@ -185,6 +189,7 @@ class OpenEndedVQA(nn.Module):
             global_feat_size += mlp_out_dim
         
         assert global_feat_size > 0
+        self.local_feat_size = image_local_feat_size
         self.global_feat_size = global_feat_size
         print('  self.global_feat_size =', self.global_feat_size)
 
@@ -292,9 +297,9 @@ class OpenEndedVQA(nn.Module):
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
     def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              classify_chest_imagenome, chexpert_mode, use_cxr14, use_vinbig, use_padchest,
-                              n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
-                              merge_findings=False, n_findings=None):
+                              classify_chest_imagenome, predict_bboxes_chest_imagenome, chexpert_mode, use_cxr14,
+                              use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
+                              chest_imagenome_bbox_hidden_size, merge_findings=False, n_findings=None):
         
         # Optional auxiliary tasks
         self.merge_findings = merge_findings
@@ -349,19 +354,27 @@ class OpenEndedVQA(nn.Module):
             if use_vinbig:
                 self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
 
-            # 9) PadChest specific tasks
-            if use_padchest:
-                self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
-                self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
-                self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
+        # 9) PadChest specific tasks
+        if use_padchest:
+            self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
+            self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
+            self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
 
-            # 10) Chest ImaGenome specific tasks
-            if classify_chest_imagenome:
-                assert n_chest_imagenome_labels is not None
-                self.chst_imgn_label_aux_task = True
-                self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
-            else:
-                self.chst_imgn_label_aux_task = False
+        # 10) Chest ImaGenome specific tasks
+        if classify_chest_imagenome:
+            assert n_chest_imagenome_labels is not None
+            self.chst_imgn_label_aux_task = True
+            self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
+        else:
+            self.chst_imgn_label_aux_task = False
+        if predict_bboxes_chest_imagenome:
+            self.chst_imgn_bbox_aux_task = True
+            self.bbox_regressor_chst_imgn = BoundingBoxRegressor(
+                local_feat_dim=self.local_feat_size,
+                global_feat_dim=self.global_feat_size,
+                hidden_dim=chest_imagenome_bbox_hidden_size,
+                num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+            )
 
     @property
     def name(self):        
@@ -467,7 +480,7 @@ class OpenEndedVQA(nn.Module):
             output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
 
         if chexpert_forward:
-            if self.chexpert_mode == CHEXPERT_TASKS.VQA:                
+            if self.chexpert_mode == CHEXPERT_TASKS.VQA:
                 question_vectors = self.question_encoder(questions)            
             output['pred_orientation'] = self.W_ori_chexpert(global_feat)
             output['pred_gender'] = self.W_gender_chexpert(global_feat)
@@ -528,6 +541,11 @@ class OpenEndedVQA(nn.Module):
                 if self.chst_imgn_label_aux_task:
                     output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
                     output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+
+                if self.chst_imgn_bbox_aux_task:
+                    bbox_coords, bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
+                    output['pred_chest_imagenome_bbox_coords'] = torch.sigmoid(bbox_coords) # sigmoid to ensure values are in [0,1]
+                    output['pred_chest_imagenome_bbox_presence'] = bbox_presence # no sigmoid here, as we want to use BCEWithLogitsLoss
 
         # predict answers (if required)
         if question_vectors is not None:

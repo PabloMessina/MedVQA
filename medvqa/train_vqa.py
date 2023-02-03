@@ -5,7 +5,9 @@ import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_postprocessed_label_names
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
+)
 from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VQA_Trainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import (
     Chexpert_VQA_Trainer,
@@ -46,6 +48,8 @@ from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
+    attach_dataset_aware_chest_imagenome_bbox_mae,
+    attach_dataset_aware_chest_imagenome_bbox_iou,
     attach_dataset_aware_chest_imagenome_labels_accuracy,
     attach_dataset_aware_chest_imagenome_labels_macroavgf1,
     attach_dataset_aware_chest_imagenome_labels_microavgf1,
@@ -160,6 +164,7 @@ def parse_args(args=None):
     parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--clip-version', type=str, default=None)
     parser.add_argument('--huggingface-model-name', type=str, default=None)
+    parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     
     # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
@@ -308,6 +313,8 @@ def parse_args(args=None):
     # chest imagenome labels
     parser.add_argument('--classify-chest-imagenome', dest='classify_chest_imagenome', action='store_true')
     parser.set_defaults(classify_chest_imagenome=False)
+    parser.add_argument('--predict-bboxes-chest-imagenome', dest='predict_bboxes_chest_imagenome', action='store_true')
+    parser.set_defaults(predict_bboxes_chest_imagenome=False)
     # question classification
     parser.add_argument('--classify-questions', dest='classify_questions', action='store_true')
     parser.set_defaults(classify_questions=False)
@@ -343,6 +350,7 @@ _METRIC_WEIGHTS = {
     MetricNames.PADCHEST_LOC_MICROAVGF1: 0.5,
     MetricNames.CHESTIMAGENOMELABELMACROAVGF1: 1,
     MetricNames.CHESTIMAGENOMELABELMICROAVGF1: 1,
+    MetricNames.CHESTIMAGENOMEBBOXIOU: 1,
 }
 
 def _metric_getter(metrics_dict, key):
@@ -417,6 +425,7 @@ def train_model(
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
     # auxiliary task: chest imagenome labels
     classify_chest_imagenome = auxiliary_tasks_kwargs['classify_chest_imagenome']
+    predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
     n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
@@ -531,17 +540,18 @@ def train_model(
     one_hot_question_offsets = dataloading_kwargs.get('one_hot_question_offsets', None)
     if not verbose_question: assert one_hot_question_offsets is not None
     
-    _kwargs = dict(verbose_question = verbose_question,                    
-                   include_image = include_image,
-                   include_visual_features = include_visual_features,
-                   classify_tags = classify_tags,
-                   n_tags = n_medical_tags,
-                   classify_orientation = classify_orientation,
-                   classify_chexpert = classify_chexpert,
-                   classify_questions = classify_questions,
-                   classify_chest_imagenome = classify_chest_imagenome,
-                   one_hot_question_offsets = one_hot_question_offsets,
-                   use_merged_findings = use_merged_findings)
+    _kwargs = dict(verbose_question=verbose_question,
+                   include_image=include_image,
+                   include_visual_features=include_visual_features,
+                   classify_tags=classify_tags,
+                   n_tags=n_medical_tags,
+                   classify_orientation=classify_orientation,
+                   classify_chexpert=classify_chexpert,
+                   classify_questions=classify_questions,
+                   classify_chest_imagenome=classify_chest_imagenome,
+                   predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+                   one_hot_question_offsets=one_hot_question_offsets,
+                   use_merged_findings=use_merged_findings)
     if train_mimiccxr:
         mimiccxr_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID, **_kwargs)
         mimiccxr_chexpert_mode_collate_batch_fn = get_vqa_collate_batch_fn(MIMICCXR_DATASET_ID__CHEXPERT_MODE, **_kwargs)\
@@ -762,6 +772,7 @@ def train_model(
                              (train_chexpert and chexpert_mode == CHEXPERT_TASKS.VQA) or\
                              train_vinbig or train_cxr14 or train_padchest
 
+    _mim_datasets = [MIMICCXR_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
     _iu_mim_datasets = [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID]
     _iu_mim_datasets_chexp_mode =  [IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEXPERT_MODE]    
     _vqa_datasets = _iu_mim_datasets + _iu_mim_datasets_chexp_mode +\
@@ -865,21 +876,31 @@ def train_model(
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
 
     if classify_chest_imagenome:
-        attach_dataset_aware_chest_imagenome_labels_accuracy(trainer, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_accuracy(validator, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_macroavgf1(trainer, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_macroavgf1(validator, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_microavgf1(trainer, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_microavgf1(validator, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
-        attach_dataset_aware_chest_imagenome_labels_roc_auc(trainer, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE], 'cpu')
-        attach_dataset_aware_chest_imagenome_labels_roc_auc(validator, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE], 'cpu')
-        attach_dataset_aware_loss(trainer, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, [MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE])
+        attach_dataset_aware_chest_imagenome_labels_accuracy(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_accuracy(validator, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_macroavgf1(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_macroavgf1(validator, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_microavgf1(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_microavgf1(validator, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_labels_roc_auc(trainer, _mim_datasets, 'cpu')
+        attach_dataset_aware_chest_imagenome_labels_roc_auc(validator, _mim_datasets, 'cpu')
+        attach_dataset_aware_loss(trainer, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, _mim_datasets)
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+    if predict_bboxes_chest_imagenome:
+        attach_dataset_aware_chest_imagenome_bbox_mae(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_bbox_mae(validator, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_bbox_iou(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_bbox_iou(validator, _mim_datasets)
+        # for logging        
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXIOU)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
+        metrics_to_print.append(MetricNames.CHEST_IMAGENOME_BBOX_LOSS)
 
     if train_chexpert or train_cxr14 or train_padchest:
         attach_dataset_aware_gender_accuracy(trainer, _gender_datasets)
@@ -1074,6 +1095,7 @@ def train_from_scratch(
     dropout_prob,
     image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
+    chest_imagenome_bbox_hidden_size,
     clip_version,
     huggingface_model_name,
     # Optimizer args
@@ -1158,6 +1180,7 @@ def train_from_scratch(
     iuxray_question_labels_filename,
     mimiccxr_question_labels_filename,
     classify_chest_imagenome,
+    predict_bboxes_chest_imagenome,
     merge_findings,
     # GPU
     device,
@@ -1184,9 +1207,9 @@ def train_from_scratch(
 
     # Compute the total number of questions (that will be encoded as one-hot vectors)
     # considerning different modes of training and datasets
-    if mimiccxr_include_chest_imagenome_mode:
+    if classify_chest_imagenome or mimiccxr_include_chest_imagenome_mode:
         assert chest_imagenome_label_names_filename is not None
-        n_chest_imagenome_labels = len(load_postprocessed_label_names(chest_imagenome_label_names_filename))
+        n_chest_imagenome_labels = len(load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename))
     n_q_total = 0
     if iuxray_include_mined_questions_mode or mimiccxr_include_mined_questions_mode:
         assert n_mined_questions is not None
@@ -1293,8 +1316,10 @@ def train_from_scratch(
         classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         n_questions_aux_task=n_mined_questions,
         n_chest_imagenome_labels=n_chest_imagenome_labels,
+        chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
         use_cxr14=train_cxr14,
         use_vinbig=train_vinbig,
         use_padchest=train_padchest,
@@ -1363,29 +1388,30 @@ def train_from_scratch(
     if train_mimiccxr:
         print(f'Debug: balanced_dataloading = {balanced_dataloading}')
         mimiccxr_vqa_trainer_kwargs = dict(
-            qa_adapted_reports_filename = mimiccxr_qa_adapted_reports_filename,
-            balanced_dataloading = balanced_dataloading,
-            balanced_metadata_filename = mimiccxr_balanced_metadata_filename,
-            imbalance_reduction_coef = imbalance_reduction_coef,
-            include_mined_questions_mode = mimiccxr_include_mined_questions_mode,
-            include_chexpert_mode = mimiccxr_include_chexpert_mode,            
-            include_chest_imagenome_mode = mimiccxr_include_chest_imagenome_mode,
-            chest_imagenome_labels_filename = chest_imagenome_labels_filename,
-            chest_imagenome_label_names_filename = chest_imagenome_label_names_filename,
-            include_image = include_image,
-            view_mode = mimiccxr_view_mode,
-            use_precomputed_visual_features = include_visual_features,
-            precomputed_visual_features_path = mimiccxr_precomputed_visual_features_path,
-            classify_tags = classify_tags,
-            medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            classify_chest_imagenome = classify_chest_imagenome,
-            question_labels_filename = mimiccxr_question_labels_filename,
-            allowed_questions = allowed_questions,
-            verbose_question = verbose_question,
+            qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
+            balanced_dataloading=balanced_dataloading,
+            balanced_metadata_filename=mimiccxr_balanced_metadata_filename,
+            imbalance_reduction_coef=imbalance_reduction_coef,
+            include_mined_questions_mode=mimiccxr_include_mined_questions_mode,
+            include_chexpert_mode=mimiccxr_include_chexpert_mode,            
+            include_chest_imagenome_mode=mimiccxr_include_chest_imagenome_mode,
+            chest_imagenome_labels_filename=chest_imagenome_labels_filename,
+            chest_imagenome_label_names_filename=chest_imagenome_label_names_filename,
+            include_image=include_image,
+            view_mode=mimiccxr_view_mode,
+            use_precomputed_visual_features=include_visual_features,
+            precomputed_visual_features_path=mimiccxr_precomputed_visual_features_path,
+            classify_tags=classify_tags,
+            medical_tags_per_report_filename=mimiccxr_medical_tags_per_report_filename,
+            classify_orientation=classify_orientation,
+            classify_chexpert=classify_chexpert,
+            chexpert_labels_filename=mimiccxr_chexpert_labels_filename,
+            classify_questions=classify_questions,
+            classify_chest_imagenome=classify_chest_imagenome,
+            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+            question_labels_filename=mimiccxr_question_labels_filename,
+            allowed_questions=allowed_questions,
+            verbose_question=verbose_question,
         )
         if merge_findings:
             mimiccxr_vqa_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1393,25 +1419,25 @@ def train_from_scratch(
         mimiccxr_vqa_trainer_kwargs = None
 
     if train_iuxray:
-        iuxray_vqa_trainer_kwargs = dict(
-            qa_adapted_reports_filename = iuxray_qa_adapted_reports_filename,
-            balanced_dataloading = balanced_dataloading,
-            balanced_metadata_filename = iuxray_balanced_metadata_filename,
-            imbalance_reduction_coef = imbalance_reduction_coef,
-            include_mined_questions_mode = iuxray_include_mined_questions_mode,
-            include_chexpert_mode = iuxray_include_chexpert_mode,
-            include_image = include_image,
-            use_precomputed_visual_features = include_visual_features,
-            precomputed_visual_features_path = iuxray_precomputed_visual_features_path,
-            classify_tags = classify_tags,
-            medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-            classify_orientation = classify_orientation,
-            classify_chexpert = classify_chexpert,
-            chexpert_labels_filename = iuxray_chexpert_labels_filename,
-            classify_questions = classify_questions,
-            question_labels_filename = iuxray_question_labels_filename,
-            allowed_questions = allowed_questions,
-            verbose_question = verbose_question,
+        iuxray_vqa_trainer_kwargs=dict(
+            qa_adapted_reports_filename=iuxray_qa_adapted_reports_filename,
+            balanced_dataloading=balanced_dataloading,
+            balanced_metadata_filename=iuxray_balanced_metadata_filename,
+            imbalance_reduction_coef=imbalance_reduction_coef,
+            include_mined_questions_mode=iuxray_include_mined_questions_mode,
+            include_chexpert_mode=iuxray_include_chexpert_mode,
+            include_image=include_image,
+            use_precomputed_visual_features=include_visual_features,
+            precomputed_visual_features_path=iuxray_precomputed_visual_features_path,
+            classify_tags=classify_tags,
+            medical_tags_per_report_filename=iuxray_medical_tags_per_report_filename,
+            classify_orientation=classify_orientation,
+            classify_chexpert=classify_chexpert,
+            chexpert_labels_filename=iuxray_chexpert_labels_filename,
+            classify_questions=classify_questions,
+            question_labels_filename=iuxray_question_labels_filename,
+            allowed_questions=allowed_questions,
+            verbose_question=verbose_question,
         )
         if merge_findings:
             iuxray_vqa_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1431,22 +1457,22 @@ def train_from_scratch(
         cxr14_vqa_trainer_kwargs.update(_merged_findings_kwargs)
 
     vinbig_dataset_kwargs = dict(
-        include_image = include_image,
-        use_precomputed_visual_features = include_visual_features,
-        precomputed_visual_features_path = vinbig_precomputed_visual_features_path,
-        training_data = vinbig_training_data,
-        use_validation = vinbig_use_validation,
+        include_image=include_image,
+        use_precomputed_visual_features=include_visual_features,
+        precomputed_visual_features_path=vinbig_precomputed_visual_features_path,
+        training_data=vinbig_training_data,
+        use_validation=vinbig_use_validation,
     )
     if merge_findings:
         vinbig_dataset_kwargs.update(_merged_findings_kwargs)
 
     padchest_dataset_kwargs = dict(
-        include_image = include_image,
-        train_study_ids_path = padchest_train_study_ids_path,
-        val_study_ids_path = padchest_val_study_ids_path,
-        test_study_ids_path = padchest_test_study_ids_path,
-        training_data_mode = padchest_training_data_mode,
-        use_validation_set = padchest_use_validation,
+        include_image=include_image,
+        train_study_ids_path=padchest_train_study_ids_path,
+        val_study_ids_path=padchest_val_study_ids_path,
+        test_study_ids_path=padchest_test_study_ids_path,
+        training_data_mode=padchest_training_data_mode,
+        use_validation_set=padchest_use_validation,
     )
 
     trainer_engine_kwargs = dict(
@@ -1455,6 +1481,7 @@ def train_from_scratch(
         classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         question_encoding=question_encoding,
         answer_decoding=AnswerDecoding.TEACHER_FORCING,
         binary_loss_name=binary_loss_name,
@@ -1479,6 +1506,7 @@ def train_from_scratch(
         classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         question_encoding=question_encoding,
         answer_decoding=val_answer_decoding,
         include_image=include_image,
@@ -1492,36 +1520,37 @@ def train_from_scratch(
     )
     
     training_kwargs = dict(
-        use_amp = use_amp,
-        train_mimiccxr = train_mimiccxr,
-        train_iuxray = train_iuxray,
-        train_chexpert = train_chexpert,
-        train_cxr14 = train_cxr14,
-        train_vinbig = train_vinbig,
-        train_padchest = train_padchest,
-        chexpert_mode = chexpert_mode,
-        binary_loss_name = binary_loss_name,
+        use_amp=use_amp,
+        train_mimiccxr=train_mimiccxr,
+        train_iuxray=train_iuxray,
+        train_chexpert=train_chexpert,
+        train_cxr14=train_cxr14,
+        train_vinbig=train_vinbig,
+        train_padchest=train_padchest,
+        chexpert_mode=chexpert_mode,
+        binary_loss_name=binary_loss_name,
     )
 
     auxiliary_tasks_kwargs = dict(
         # medical tags
-        classify_tags = classify_tags,
-        n_medical_tags = n_medical_tags,
-        iuxray_medical_tags_per_report_filename = iuxray_medical_tags_per_report_filename,
-        mimiccxr_medical_tags_per_report_filename = mimiccxr_medical_tags_per_report_filename,
+        classify_tags=classify_tags,
+        n_medical_tags=n_medical_tags,
+        iuxray_medical_tags_per_report_filename=iuxray_medical_tags_per_report_filename,
+        mimiccxr_medical_tags_per_report_filename=mimiccxr_medical_tags_per_report_filename,
         # image orientation
-        classify_orientation = classify_orientation,
+        classify_orientation=classify_orientation,
         # chexpert labels
-        classify_chexpert = classify_chexpert,
-        iuxray_chexpert_labels_filename = iuxray_chexpert_labels_filename,
-        mimiccxr_chexpert_labels_filename = mimiccxr_chexpert_labels_filename,
+        classify_chexpert=classify_chexpert,
+        iuxray_chexpert_labels_filename=iuxray_chexpert_labels_filename,
+        mimiccxr_chexpert_labels_filename=mimiccxr_chexpert_labels_filename,
         # question labels
-        classify_questions = classify_questions,
-        n_questions_aux_task = n_mined_questions,
-        iuxray_question_labels_filename = iuxray_question_labels_filename,
-        mimiccxr_question_labels_filename = mimiccxr_question_labels_filename,
+        classify_questions=classify_questions,
+        n_questions_aux_task=n_mined_questions,
+        iuxray_question_labels_filename=iuxray_question_labels_filename,
+        mimiccxr_question_labels_filename=mimiccxr_question_labels_filename,
         # chest imagenome labels
-        classify_chest_imagenome = classify_chest_imagenome,
+        classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
     )
 
     return train_model(

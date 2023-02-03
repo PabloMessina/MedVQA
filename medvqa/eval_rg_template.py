@@ -9,6 +9,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_label_names_and_templates,
+    load_postprocessed_labels as load_chest_imagenome_postprocessed_labels,
 )
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.models.ensemble.multilabel_ensemble_search import MultilabelOptimalEnsembleSearcher
@@ -22,7 +23,7 @@ from medvqa.utils.constants import (
     MetricNames,
 )
 # from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, load_mimiccxr_reports_detailed_metadata
 from medvqa.metrics import (
     attach_chexpert_labels_prf1,
     attach_chexpert_labels_roc_auc,
@@ -49,6 +50,7 @@ from medvqa.utils.handlers import (
 )
 from medvqa.utils.files import (
     get_cached_json_file,
+    get_checkpoint_folder_path,
     get_results_folder_path,
     save_to_pickle,
 )
@@ -68,35 +70,35 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     # required arguments
-    parser.add_argument('--checkpoint-folder', type=str, required=True)
     parser.add_argument('--template-based-mode', type=str, required=True)
 
     # optional arguments
+    parser.add_argument('--checkpoint-folder', type=str)
     parser.add_argument('--calibrate-thresholds', dest='calibrate_thresholds', action='store_true')
     parser.set_defaults(calibrate_thresholds=False)
+    parser.add_argument('--batch-size', type=int, default=140)
+    parser.add_argument('--device', type=str, default='GPU')
+    parser.add_argument('--num-workers', type=int, default=0)
+    parser.add_argument('--max-processes-for-chexpert-labeler', type=int, default=4)
 
     parser.add_argument('--mimiccxr-preprocessed-test-data-filename', type=str)
     parser.add_argument('--mimiccxr-preprocessed-train-data-filename', type=str)
     parser.add_argument('--iuxray-preprocessed-train-data-filename', type=str)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str)
     parser.add_argument('--iuxray-qa-adapted-reports-filename', type=str)
-
-    parser.add_argument('--batch-size', type=int, default=140)
-    parser.add_argument('--device', type=str, default='GPU')
-    parser.add_argument('--num-workers', type=int, default=0)
-    parser.add_argument('--max-processes-for-chexpert-labeler', type=int, default=4)
+    parser.add_argument('--chest-imagenome-label-names-filename', type=str)
+    parser.add_argument('--chest-imagenome-labels-filename', type=str)
 
     parser.add_argument('--eval-iuxray', dest='eval_iuxray', action='store_true')
     parser.set_defaults(eval_iuxray=False)
-
     parser.add_argument('--eval-mimiccxr', dest='eval_mimiccxr', action='store_true')
     parser.set_defaults(eval_mimiccxr=False)
-
+    parser.add_argument('--eval-mimiccxr-oracle', dest='eval_mimiccxr_oracle', action='store_true')
+    parser.set_defaults(eval_mimiccxr_oracle=False)
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
     
     return parser.parse_args()
-
 
 _BEST_CHEXPERT_ORDER = [
     'Cardiomegaly',
@@ -166,6 +168,7 @@ def _recover_mimiccxr_vision_evaluator_kwargs(
 
 def _calibrate_thresholds(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
                           classify_chexpert, classify_chest_imagenome):
+    
     assert classify_chexpert != classify_chest_imagenome # Only one of them can be True
     
     if classify_chexpert:
@@ -230,7 +233,8 @@ def _calibrate_thresholds(model, device, use_amp, mimiccxr_vision_evaluator_kwar
             break
         prev_score = score
     thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
-    if classify_chexpert: # Only print thresholds for Chexpert
+    print('thresholds.shape:', thresholds.shape)
+    if classify_chexpert: # Only print thresholds for CheXpert
         print('thresholds:', thresholds)
     print('Done!')
     return thresholds
@@ -257,75 +261,95 @@ def _evaluate_model(
     device='GPU',
     checkpoint_folder_path=None,
     use_amp=False,
-    eval_iuxray=True,
-    eval_mimiccxr=True,
+    eval_iuxray=False,
+    eval_mimiccxr=False,
+    eval_mimiccxr_oracle=False,
     calibrate_thresholds=False,
     mimiccxr_preprocessed_train_data_filename=None,
+    mimiccxr_qa_adapted_reports_filename=None,
+    chest_imagenome_label_names_filename=None,
+    chest_imagenome_labels_filename=None,
     return_results=False,
 ):
-    # Sanity checks
-    assert eval_iuxray or eval_mimiccxr    
+    # Sanity checks    
+    assert sum([eval_iuxray, eval_mimiccxr, eval_mimiccxr_oracle]) == 1 # only one of these should be True
     if eval_mimiccxr and calibrate_thresholds:
         assert mimiccxr_preprocessed_train_data_filename is not None
+    if eval_mimiccxr_oracle:
+        assert template_based_mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE
+        assert chest_imagenome_label_names_filename is not None
+        assert chest_imagenome_labels_filename is not None
+        assert not calibrate_thresholds
 
-    # Pull out some args from kwargs
-
-    # auxiliary task: medical tags prediction
-    classify_tags = auxiliary_tasks_kwargs['classify_tags']
-    n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
-    iuxray_rid2tags_filename = auxiliary_tasks_kwargs.get('iuxray_rid2tags_filename', None)
-    mimiccxr_rid2tags_filename = auxiliary_tasks_kwargs.get('mimiccxr_rid2tags_filename', None)
-    if classify_tags:
-        assert n_medical_tags is not None
-        if eval_iuxray: assert iuxray_rid2tags_filename is not None
-        if eval_mimiccxr: assert mimiccxr_rid2tags_filename is not None    
-    # auxiliary task: orientation classification
-    classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
-    # auxiliary task: chexpert labels
-    classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
-    # auxiliary task: chest imagenome labels
-    classify_chest_imagenome = auxiliary_tasks_kwargs.get('classify_chest_imagenome', False)
-    # auxiliary task: questions classification
-    classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)    
-    iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
-    mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
-    if classify_questions:
-        if eval_iuxray: assert iuxray_question_labels_filename is not None
-        if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
+    use_experiment_metadata_kwargs = eval_mimiccxr or eval_iuxray
+    
+    if use_experiment_metadata_kwargs:
+        # Pull out some args from kwargs
+        # auxiliary task: medical tags prediction
+        classify_tags = auxiliary_tasks_kwargs['classify_tags']
+        n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
+        iuxray_rid2tags_filename = auxiliary_tasks_kwargs.get('iuxray_rid2tags_filename', None)
+        mimiccxr_rid2tags_filename = auxiliary_tasks_kwargs.get('mimiccxr_rid2tags_filename', None)
+        if classify_tags:
+            assert n_medical_tags is not None
+            if eval_iuxray: assert iuxray_rid2tags_filename is not None
+            if eval_mimiccxr: assert mimiccxr_rid2tags_filename is not None    
+        # auxiliary task: orientation classification
+        classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
+        # auxiliary task: chexpert labels
+        classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
+        # auxiliary task: chest imagenome labels
+        classify_chest_imagenome = auxiliary_tasks_kwargs.get('classify_chest_imagenome', False)
+        # auxiliary task: questions classification
+        classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)    
+        iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
+        mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
+        if classify_questions:
+            if eval_iuxray: assert iuxray_question_labels_filename is not None
+            if eval_mimiccxr: assert mimiccxr_question_labels_filename is not None
     
     count_print = CountPrinter()
 
-    # device
-    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
-    count_print('device =', device)
+    if use_experiment_metadata_kwargs:
+        # device
+        device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+        count_print('device =', device)
 
-    # Load saved checkpoint    
-    checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
-    count_print('Loading model from checkpoint ...')
-    print('checkpoint_path = ', checkpoint_path)
-    checkpoint = torch.load(checkpoint_path)
+        # Load saved checkpoint    
+        checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+        count_print('Loading model from checkpoint ...')
+        print('checkpoint_path = ', checkpoint_path)
+        checkpoint = torch.load(checkpoint_path)
 
-    # Create model
-    count_print('Creating instance of DensenetVisualModule model ...')
-    model = DensenetVisualModule(**model_kwargs)
-    model = model.to(device)
-    model.load_state_dict(checkpoint['model'], strict=False)
+        # Create model
+        count_print('Creating instance of DensenetVisualModule model ...')
+        model = DensenetVisualModule(**model_kwargs)
+        model = model.to(device)
+        model.load_state_dict(checkpoint['model'], strict=False)
 
-    # Create evaluator engine
-    count_print('Creating evaluator engine ...')
-    evaluator = get_engine(model, classify_tags, classify_orientation, classify_chexpert,
-                         classify_questions, classify_chest_imagenome, device, use_amp=use_amp, training=False)
+        # Create evaluator engine
+        count_print('Creating evaluator engine ...')
+        evaluator = get_engine(model, classify_tags, classify_orientation, classify_chexpert,
+                            classify_questions, classify_chest_imagenome, device, use_amp=use_amp, training=False)
 
     # Init tokenizer
     count_print('Initializing tokenizer ...')
-    for key in ['use_medical_tokenization', 'medical_tokenization']: # hack to avoid passing these args to tokenizer
-        if key in tokenizer_kwargs:
-            del tokenizer_kwargs[key]    
+    if use_experiment_metadata_kwargs:
+        for key in ['use_medical_tokenization', 'medical_tokenization']: # hack to avoid passing these args to tokenizer
+            if key in tokenizer_kwargs:
+                del tokenizer_kwargs[key]
+    else:
+        if eval_mimiccxr_oracle:
+            tokenizer_kwargs = {
+                'qa_adapted_dataset_paths': [os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)],
+            }
+        else: assert False, 'Unexpected case'
     tokenizer = Tokenizer(**tokenizer_kwargs)
         
     # Default image transform
-    count_print('Defining image transform ...')
-    img_transform = get_image_transform()
+    if use_experiment_metadata_kwargs:
+        count_print('Defining image transform ...')
+        img_transform = get_image_transform()
 
     # Define collate_batch_fn
     if eval_mimiccxr:
@@ -350,7 +374,7 @@ def _evaluate_model(
         mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(
             transform = img_transform,
             collate_batch_fn = mimiccxr_collate_batch_fn,
-            num_workers = num_workers,            
+            num_workers = num_workers,
             **mimiccxr_vision_evaluator_kwargs,
         )
     
@@ -372,75 +396,75 @@ def _evaluate_model(
     #         **iuxray_vision_trainer_kwargs,
     #     )
     
-    # Attach metrics, timer and events to engines    
-    count_print('Attaching metrics, timer and events to engines ...')
+    if use_experiment_metadata_kwargs:
+        # Attach metrics, timer and events to engines
+        count_print('Attaching metrics, timer and events to engines ...')
 
-    # Metrics
-    if classify_tags:
-        attach_medical_tags_f1score(evaluator, device)
-
-    if classify_orientation:
-        attach_dataset_aware_orientation_accuracy(evaluator)
-
-    if classify_chexpert:
-        attach_chexpert_labels_accuracy(evaluator, device)        
-        attach_chexpert_labels_prf1(evaluator, device)
-        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
-
-    if classify_questions:
-        attach_question_labels_prf1(evaluator, device)
-
-    if classify_chest_imagenome:
-        attach_chest_imagenome_labels_accuracy(evaluator, device)
-        attach_chest_imagenome_labels_prf1(evaluator, device)
-        attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
-
-    # Accumulators
-    attach_accumulator(evaluator, 'idxs')
-    if classify_chexpert:
-        attach_accumulator(evaluator, 'pred_chexpert_probs')
-    if classify_chest_imagenome:
-        attach_accumulator(evaluator, 'pred_chest_imagenome_probs')
-    if return_results:
+        # Metrics
         if classify_tags:
-            attach_accumulator(evaluator, 'pred_tags')
-        if classify_orientation:
-            attach_accumulator(evaluator, 'pred_orientation')
-        if classify_questions:
-            attach_accumulator(evaluator, 'pred_qlabels')
-    
-    # Timer
-    timer = Timer()
-    timer.attach(evaluator, start=Events.EPOCH_STARTED)
-    
-    # Logging
-    metrics_to_print=[]
-    if classify_tags:
-        metrics_to_print.append(MetricNames.MEDTAGF1)
-    if classify_orientation:
-        metrics_to_print.append(MetricNames.ORIENACC)
-    if classify_chexpert:
-        metrics_to_print.append(MetricNames.CHXLABEL_PRF1)
-        metrics_to_print.append(MetricNames.CHXLABELACC)
-        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
-    if classify_questions:
-        metrics_to_print.append(MetricNames.QLABELS_PRF1)
-    if classify_chest_imagenome:
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
+            attach_medical_tags_f1score(evaluator, device)
 
-    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
-    log_iteration_handler = get_log_iteration_handler()    
-    
-    # Attach handlers    
-    evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
-    evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
+        if classify_orientation:
+            attach_dataset_aware_orientation_accuracy(evaluator)
+
+        if classify_chexpert:
+            attach_chexpert_labels_accuracy(evaluator, device)        
+            attach_chexpert_labels_prf1(evaluator, device)
+            attach_chexpert_labels_roc_auc(evaluator, 'cpu')
+
+        if classify_questions:
+            attach_question_labels_prf1(evaluator, device)
+
+        if classify_chest_imagenome:
+            attach_chest_imagenome_labels_accuracy(evaluator, device)
+            attach_chest_imagenome_labels_prf1(evaluator, device)
+            attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
+
+        # Accumulators
+        attach_accumulator(evaluator, 'idxs')
+        if classify_chexpert:
+            attach_accumulator(evaluator, 'pred_chexpert_probs')
+        if classify_chest_imagenome:
+            attach_accumulator(evaluator, 'pred_chest_imagenome_probs')
+        if return_results:
+            if classify_tags:
+                attach_accumulator(evaluator, 'pred_tags')
+            if classify_orientation:
+                attach_accumulator(evaluator, 'pred_orientation')
+            if classify_questions:
+                attach_accumulator(evaluator, 'pred_qlabels')
+        
+        # Timer
+        timer = Timer()
+        timer.attach(evaluator, start=Events.EPOCH_STARTED)
+        
+        # Logging
+        metrics_to_print=[]
+        if classify_tags:
+            metrics_to_print.append(MetricNames.MEDTAGF1)
+        if classify_orientation:
+            metrics_to_print.append(MetricNames.ORIENACC)
+        if classify_chexpert:
+            metrics_to_print.append(MetricNames.CHXLABEL_PRF1)
+            metrics_to_print.append(MetricNames.CHXLABELACC)
+            metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
+        if classify_questions:
+            metrics_to_print.append(MetricNames.QLABELS_PRF1)
+        if classify_chest_imagenome:
+            metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
+            metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
+            metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+        log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
+        log_iteration_handler = get_log_iteration_handler()    
+        
+        # Attach handlers    
+        evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
+        evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
+        evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
 
     # Run evaluation
-    results_dict = { 'tokenizer': tokenizer }
-    results_folder_path = get_results_folder_path(checkpoint_folder_path)
+    results_dict = { 'tokenizer': tokenizer }   
 
     # if eval_iuxray:
     #     print('\n========================')
@@ -516,9 +540,52 @@ def _evaluate_model(
             label_thresholds=label_thresholds,
             label_order=label_order,
         )
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
         results_dict['mimiccxr_report_metrics'] = _compute_and_save_report_level_metrics(
             results_dict, 'mimiccxr', tokenizer, results_folder_path,
             max_processes_for_chexpert_labeler, template_based_mode, calibrate_thresholds)
+
+    if eval_mimiccxr_oracle:
+        if template_based_mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE:
+            print('Getting label names and templates from Chest-Imagenome ...')            
+            assert chest_imagenome_label_names_filename is not None
+            assert chest_imagenome_labels_filename is not None
+            assert mimiccxr_qa_adapted_reports_filename is not None
+            label_names, label_templates = load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
+            label_order = label_names
+            labels_dict = load_chest_imagenome_postprocessed_labels(chest_imagenome_labels_filename)
+            mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(mimiccxr_qa_adapted_reports_filename)
+            test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']
+            test_report_ids = []
+            test_labels = []
+            for idx in test_idxs:
+                rid = idx
+                dicom_id_view_pairs = mimiccxr_detailed_metadata['dicom_id_view_pos_pairs'][idx]
+                for dicom_id, _ in dicom_id_view_pairs:
+                    if dicom_id in labels_dict:
+                        label = labels_dict[dicom_id]
+                        test_report_ids.append(rid)
+                        test_labels.append(label)
+                        break
+            assert len(test_report_ids) == len(test_labels)
+            assert len(test_report_ids) > 0
+            test_labels = np.array(test_labels)
+            oracle_probs = test_labels # the oracle makes no mistakes
+            label_thresholds = np.array([0.5] * len(label_names)) # default thresholds so that the oracle is always correct            
+            results_dict['mimiccxr_reports'] = recover_reports__template_based(
+                mode=template_based_mode,
+                metrics_dict={'oracle_probs': oracle_probs},
+                qa_adapted_dataset=get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)),
+                report_ids=test_report_ids,
+                label_names=label_names,
+                label_templates=label_templates,
+                label_thresholds=label_thresholds,
+                label_order=label_order,
+            )
+            results_folder_path = get_results_folder_path(get_checkpoint_folder_path('report_gen', 'mimiccxr', 'oracle'))
+            results_dict['mimiccxr_report_metrics'] = _compute_and_save_report_level_metrics(
+                results_dict, 'mimiccxr', tokenizer, results_folder_path,
+                max_processes_for_chexpert_labeler, template_based_mode, calibrate_thresholds)
 
     torch.cuda.empty_cache()
     if return_results:
@@ -533,14 +600,17 @@ def evaluate_model(
     device='GPU',
     return_results=False,
     use_amp=False,
-    eval_iuxray=True,
-    eval_mimiccxr=True,
+    eval_iuxray=False,
+    eval_mimiccxr=False,
+    eval_mimiccxr_oracle=False,
     calibrate_thresholds=False,
     mimiccxr_preprocessed_test_data_filename=None,
     mimiccxr_preprocessed_train_data_filename=None,
     iuxray_preprocessed_train_data_filename=None,
     mimiccxr_qa_adapted_reports_filename=None,
     iuxray_qa_adapted_reports_filename=None,
+    chest_imagenome_label_names_filename=None,
+    chest_imagenome_labels_filename=None,
 ):
     print()
     print_blue('----- Evaluating model ------')
@@ -550,30 +620,41 @@ def evaluate_model(
         assert iuxray_preprocessed_train_data_filename is not None
     if eval_mimiccxr:
         assert mimiccxr_preprocessed_test_data_filename is not None
+    if eval_iuxray or eval_mimiccxr:
+        assert checkpoint_folder is not None
 
-    checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
-    metadata = load_metadata(checkpoint_folder)
-    # pprint(metadata)
-    print()
-    tokenizer_kwargs = _recover_tokenizer_kwargs(metadata)
-    model_kwargs = _recover_model_kwargs(metadata)
+    if checkpoint_folder is not None:
+        checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
+        metadata = load_metadata(checkpoint_folder)
+        # pprint(metadata)
+        tokenizer_kwargs = _recover_tokenizer_kwargs(metadata)
+        model_kwargs = _recover_model_kwargs(metadata)
+    else:
+        tokenizer_kwargs = None
+        model_kwargs = None
+
     if eval_mimiccxr:
         mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
             metadata, batch_size, mimiccxr_preprocessed_test_data_filename,
             mimiccxr_qa_adapted_reports_filename)
     else:
         mimiccxr_vision_evaluator_kwargs = None
+        
     if eval_iuxray:
         iuxray_vision_trainer_kwargs = _recover_iuxray_vision_trainer_kwargs(
             metadata, batch_size, iuxray_preprocessed_train_data_filename,
             iuxray_qa_adapted_reports_filename)
     else:
         iuxray_vision_trainer_kwargs = None
-    auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
-
-    # Temporary hack to fix a bug in the metadata (TODO: remove this)
-    auxiliary_tasks_kwargs['classify_orientation'] = False
-    mimiccxr_vision_evaluator_kwargs['classify_orientation'] = False
+    
+    if checkpoint_folder is not None:
+        auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
+        # Temporary hack to fix a bug in the metadata (TODO: remove this)
+        auxiliary_tasks_kwargs['classify_orientation'] = False
+        if eval_mimiccxr:
+            mimiccxr_vision_evaluator_kwargs['classify_orientation'] = False
+    else:
+        auxiliary_tasks_kwargs = None
 
     return _evaluate_model(
                 tokenizer_kwargs,
@@ -590,8 +671,12 @@ def evaluate_model(
                 use_amp=use_amp,
                 eval_iuxray=eval_iuxray,
                 eval_mimiccxr=eval_mimiccxr,
+                eval_mimiccxr_oracle=eval_mimiccxr_oracle,
                 calibrate_thresholds=calibrate_thresholds,
                 mimiccxr_preprocessed_train_data_filename=mimiccxr_preprocessed_train_data_filename,
+                mimiccxr_qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
+                chest_imagenome_label_names_filename=chest_imagenome_label_names_filename,
+                chest_imagenome_labels_filename=chest_imagenome_labels_filename,
             )
 
 if __name__ == '__main__':

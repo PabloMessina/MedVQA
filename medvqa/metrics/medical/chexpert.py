@@ -81,7 +81,7 @@ class ChexpertLabelerJob:
         in_df.to_csv(self.input_path, header=False, index=False, quoting=csv.QUOTE_ALL)
 
         # Build command
-        self.cmd = (f'docker run -v {TMP_FOLDER}:/data chexpert-labeler:latest '
+        self.cmd = (f'docker run --rm -v {TMP_FOLDER}:/data chexpert-labeler:latest '
         f'python label.py --reports_path /data/{input_filename} --output_path /data/{output_filename}')
     
     def remove_input_output_files(self):
