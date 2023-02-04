@@ -544,8 +544,8 @@ class OpenEndedVQA(nn.Module):
 
                 if self.chst_imgn_bbox_aux_task:
                     bbox_coords, bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
-                    output['pred_chest_imagenome_bbox_coords'] = torch.sigmoid(bbox_coords) # sigmoid to ensure values are in [0,1]
-                    output['pred_chest_imagenome_bbox_presence'] = bbox_presence # no sigmoid here, as we want to use BCEWithLogitsLoss
+                    output['pred_chest_imagenome_bbox_coords'] = bbox_coords
+                    output['pred_chest_imagenome_bbox_presence'] = bbox_presence
 
         # predict answers (if required)
         if question_vectors is not None:

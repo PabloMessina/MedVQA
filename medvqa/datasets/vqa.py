@@ -23,80 +23,6 @@ from medvqa.datasets.dataloading_utils import (
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 
-# def _split_data_train_val(report_ids, question_ids, answers, n_vals_per_question=4, min_question_count=100):
-#     """Splits questions and answers into train and val splits.
-
-#     Question-answer pairs are sampled for validation in a stratified manner, by sorting answers
-#     by length (for each question id), splitting answers into bins and then sampling randomly
-#     from each bin.
-
-#     Args:
-#         question_ids (list of ints): list of question ids, each id can be mapped to the original question
-#         answers (list of tokenized answers): each answer is a list of tokens
-#         n_vals_per_question (int, optional): number of validation instances to sample per question. Defaults to 10.
-#         min_question_count (int, optional): minimun number of examples for a question id to be considered for validation. Defaults to 100.
-
-#     Returns:
-#         pair of dicts: each dict maps question ids to list of indices. The actual questions
-#         and answers can be recovered from these indices.
-#     """
-    
-#     tmp = dict()
-#     for i, (qi, a) in enumerate(zip(question_ids, answers)):
-#         try:
-#             list_ = tmp[qi]
-#         except KeyError:
-#             list_ = tmp[qi] = []
-#         list_.append((len(a), i))
-    
-#     val_rids = set()
-#     forbidden_rids = set()
-#     for list_ in tmp.values():
-#         list_.sort()
-#         if len(list_) >= min_question_count:
-#             chunk_size = len(list_) // n_vals_per_question
-#             offset = 0
-#             while offset < len(list_):
-#                 min_i = offset
-#                 max_i = min(offset + chunk_size, len(list_)) - 1
-#                 if max_i - min_i + 1 == chunk_size:
-#                     val_i = random.randint(min_i, max_i)
-#                     val_rids.add(report_ids[list_[val_i][1]])
-#                 offset += chunk_size
-#         else:
-#             forbidden_rids.update(report_ids[e[1]] for e in list_)
-    
-#     # split indices into train and validation
-#     train_indices = { qid:[] for qid in tmp.keys() }
-#     val_indices = []
-#     for qid, list_ in tmp.items():
-#         for _, i in list_:
-#             if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
-#                 val_indices.append(i)
-#             else:
-#                 train_indices[qid].append(i)
-
-#     # convert to numpy arrays
-#     for qid in train_indices.keys():
-#         train_indices[qid] = np.array(train_indices[qid], dtype=int)
-#     val_indices = np.array(val_indices, dtype=int)
-
-#     return train_indices, val_indices
-
-# def _get_diverse_samples(k, indices, class_getter, max_tries=200):
-#     samples = []
-#     classes = []
-#     tries = 0
-#     while len(samples) < k and tries < max_tries:
-#         tries += 1
-#         i = random.choice(indices)
-#         c = class_getter(i)
-#         if c in classes: continue
-#         samples.append(i)
-#         classes.append(c)
-#     assert len(samples) > 0
-#     return samples
-
 def _group_indices_by_question_id(indices, question_ids, convert_to_numpy=True):
     # group by question id
     tmp = dict()
@@ -117,94 +43,6 @@ def _assign_all_data_to_train(question_ids):
     print(f'All data assigned to train: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
           f' len(val_indices) = 0')
     return train_indices
-
-# def _split_data_train_val__balanced(report_ids, question_ids, balanced_metadata,
-#         n_healthy_per_question=2, n_unhealthy_per_question=3, min_question_count=50,
-#         chexpert_labels=None, n_positive_per_chexpert_label=7):
-
-#     assert n_healthy_per_question < min_question_count
-#     assert n_unhealthy_per_question < min_question_count
-
-#     health_metadata = balanced_metadata['healthy']
-#     tags_based_class_metadata = balanced_metadata['tags_based_class']
-    
-#     # split indices by question
-#     n = len(report_ids)
-#     qid2indices = dict()
-#     for i in range(n):
-#         qid = question_ids[i]
-#         try:
-#             tmp = qid2indices[qid]
-#         except KeyError:
-#             tmp = qid2indices[qid] = []
-#         tmp.append(i)
-    
-#     # choose report ids for validation
-#     val_rids = set()
-#     forbidden_rids = set()
-#     for qid, indices in qid2indices.items():
-#         # split indices into healthy and unhealthy
-#         h_indices = []
-#         unh_indices = []
-#         for i in indices:
-#             healthy = health_metadata[report_ids[i]][str(qid)]
-#             if healthy: h_indices.append(i)
-#             else: unh_indices.append(i)
-        
-#         # get diverse samples from each category         
-#         class_getter = lambda i : tags_based_class_metadata[report_ids[i]][str(qid)]
-        
-#         if len(h_indices) >= min_question_count:
-#             h_samples = _get_diverse_samples(n_healthy_per_question, h_indices, class_getter)
-#             val_rids.update(report_ids[i] for i in h_samples)
-#         else:
-#             forbidden_rids.update(report_ids[i] for i in h_indices)
-
-#         if len(unh_indices) >= min_question_count:
-#             unh_samples = _get_diverse_samples(n_unhealthy_per_question, unh_indices, class_getter)
-#             val_rids.update(report_ids[i] for i in unh_samples)
-#         else:
-#             forbidden_rids.update(report_ids[i] for i in unh_indices)
-    
-#     # bin report ids by chexpert label
-#     if chexpert_labels is not None:
-#         print('_split_data_train_val__balanced(): sampling from chexpert labels')
-#         binned_report_ids = [[] for _ in range(len(CHEXPERT_LABELS))]
-#         for rid in report_ids:
-#             if rid in forbidden_rids: continue
-#             labels = chexpert_labels[rid]
-#             for i, label in enumerate(labels):
-#                 if label == 1:
-#                     binned_report_ids[i].append(rid)
-#         # add examples from each label to validation set
-#         for bin in binned_report_ids:
-#             bin = list(set(bin))
-#             if len(bin) > 0:
-#                 print('len(bin)=', len(bin), ', label=', chexpert_labels[bin[0]])
-#             else:
-#                 print('len(bin)=', len(bin))
-#             if len(bin) > n_positive_per_chexpert_label:
-#                 val_rids.update(random.sample(bin, n_positive_per_chexpert_label))
-    
-#     # split indices into train and validation
-#     train_indices = { qid:[] for qid in qid2indices.keys() }
-#     val_indices = []
-#     for qid, indices in qid2indices.items():    
-#         for i in indices:
-#             if report_ids[i] in val_rids and report_ids[i] not in forbidden_rids:
-#                 val_indices.append(i)
-#             else:
-#                 train_indices[qid].append(i)
-    
-#     # convert to numpy arrays
-#     for qid in train_indices.keys():
-#         train_indices[qid] = np.array(train_indices[qid], dtype=int)
-#     val_indices = np.array(val_indices, dtype=int)
-
-#     print(f'balanced splitting: len(train_indices) = {sum(len(x) for x in train_indices.values())},'
-#           f' len(val_indices) = {len(val_indices)}')
-
-#     return train_indices, val_indices
 
 def load_precomputed_visual_features(precomputed_visual_features_path, images):
     print(f'Loading precomputed visual features from {precomputed_visual_features_path} ...')
@@ -658,17 +496,6 @@ class VQA_Base(LabelBasedVQAClass):
             kwargs['idx2visfeatidx'] = self.idx2visfeatidx
         
         return VQADataset(**kwargs)
-
-    # def _load_split_from_path(self, preprocessing_save_path):
-    #     data = load_pickle(preprocessing_save_path)
-    #     if self.use_report_eval_mode:
-    #         report_ids = data['report_ids']
-    #         self.train_report_ids = list(set(report_ids[i] for i in data['train_indices']))
-    #         self.val_report_ids = list(set(report_ids[i] for i in data['val_indices']))
-    #     else:
-    #         self.train_indices = data['train_indices']
-    #         self.val_indices = data['val_indices']
-    #     print(f'Train-val split indices successfully loaded from {preprocessing_save_path}')
     
     def _load_cached_data(self, preprocessing_save_path):
         print(f'Checking if data is already cached in path {preprocessing_save_path} ...')
@@ -722,38 +549,6 @@ class VQA_Base(LabelBasedVQAClass):
         print('Assigning all data to training ...')        
         self.train_indices = _assign_all_data_to_train(self.question_ids)
     
-    # def _split_data_train_val(self,
-    #                           n_val_examples_per_question=10,
-    #                           min_train_examples_per_question=100):
-        
-    #     print('Splitting data into training and validation ...')
-        
-    #     train_indices, val_indices = _split_data_train_val(self.question_ids,
-    #                                                       self.answers,
-    #                                                       n_val_examples_per_question,
-    #                                                       min_train_examples_per_question)                
-    #     self.train_indices = train_indices
-    #     self.val_indices = val_indices
-    
-    # def _split_data_train_val__balanced(self,
-    #                                     n_healthy_per_question=2,
-    #                                     n_unhealthy_per_question=3,
-    #                                     min_question_count=100,
-    #                                     n_positive_per_chexpert_label=7):
-
-    #     print('Splitting data into training and validation in balanced mode ...')
-
-    #     train_indices, val_indices = _split_data_train_val__balanced(self.report_ids,
-    #                                                                  self.question_ids,
-    #                                                                  self.balanced_metadata,
-    #                                                                  n_healthy_per_question,
-    #                                                                  n_unhealthy_per_question,
-    #                                                                  min_question_count,
-    #                                                                  self.chexpert_labels,
-    #                                                                  n_positive_per_chexpert_label)
-    #     self.train_indices = train_indices
-    #     self.val_indices = val_indices
-
 class BalancedTreeNode:
     
     def __init__(self, indices=None, children=None, weights=None):
@@ -769,19 +564,6 @@ class BalancedTreeNode:
             assert len(self.children) == len(self.weights)
             datasets = [child.get_dataset(vqa_trainer) for child in self.children]
             return CompositeInfiniteDataset(datasets, self.weights)
-
-def _get_cached_balanced_train_datasets_path(preprocessing_save_path, batch_size, imbalance_reduction_coef, allowed_question_ids=None):
-    strings = []
-    strings.append(f'bs={batch_size}')
-    strings.append(f'imb_redu_coef={imbalance_reduction_coef}')
-    if allowed_question_ids is not None:
-        aqi_string = '(' + ','.join(map(str, allowed_question_ids)) + ')'
-        strings.append(f'aqi={aqi_string}')
-    filepath = f'{preprocessing_save_path}.balanced_train_data({",".join(strings)}).pkl'
-    if len(filepath) > MAX_FILENAME_LENGTH:
-        h = hash_string(filepath)
-        filepath = os.path.join(os.path.dirname(preprocessing_save_path), f'balanced_train_data(hash={h[0]},{h[1]}).pkl')
-    return filepath
 
 class VQA_Trainer(VQA_Base):
     
@@ -944,19 +726,6 @@ class VQA_Trainer(VQA_Base):
     
     def _generate_train_dataset__balanced(self, batch_size):
 
-        print('_generate_train_dataset__balanced()')
-
-        cached_balanced_train_datasets_path = _get_cached_balanced_train_datasets_path(
-            self.preprocessing_save_path, batch_size, self.imbalance_reduction_coef, self.allowed_question_ids)
-        cached_data = load_pickle(cached_balanced_train_datasets_path)
-        if cached_data is not None:
-            print(f'Balanced train data loaded from {cached_balanced_train_datasets_path}')
-            question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
-            question_weights = cached_data['question_weights']
-            self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
-            print(f'\tlen(question_datasets) = {len(question_datasets)}')
-            return
-
         print('Computing balanced datasets from scratch ...')
         print(f'self.imbalance_reduction_coef = {self.imbalance_reduction_coef}')
 
@@ -1041,14 +810,8 @@ class VQA_Trainer(VQA_Base):
             i = j + 1
             dataset_weights.append(acc_size)
         
-        cached_data = {
-            'question_nodes': merged_train_nodes,
-            'question_weights': get_imbalance_reduced_weights(dataset_weights, self.imbalance_reduction_coef),
-        }
-        save_to_pickle(cached_data, cached_balanced_train_datasets_path)
-        print(f'Balanced train data saved to {cached_balanced_train_datasets_path}')
-        question_datasets = [node.get_dataset(self) for node in cached_data['question_nodes']]
-        question_weights = cached_data['question_weights']
+        question_datasets = [node.get_dataset(self) for node in merged_train_nodes]
+        question_weights = get_imbalance_reduced_weights(dataset_weights, self.imbalance_reduction_coef)
         self.train_dataset = self._get_composite_dataset(question_datasets, question_weights, batch_size)
         print(f'\tlen(question_datasets) = {len(question_datasets)}')    
     

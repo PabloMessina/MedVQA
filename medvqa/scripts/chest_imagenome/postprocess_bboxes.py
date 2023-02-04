@@ -46,11 +46,11 @@ if __name__ == '__main__':
         bbox_presence = np.zeros((CHEST_IMAGENOME_NUM_BBOX_CLASSES,), dtype=np.float32) # 0 or 1
         for bbox in scene_graph['objects']:
             i = bboxName2index[bbox['bbox_name']]
-            # Normalize bbox coords and clamp to [0, 1]
-            x1 = max(0, min(1, bbox['original_x1'] / width))
-            y1 = max(0, min(1, bbox['original_y1'] / height))
-            x2 = max(0, min(1, bbox['original_x2'] / width))
-            y2 = max(0, min(1, bbox['original_y2'] / height))
+            # Normalize bbox coords
+            x1 = bbox['original_x1'] / width
+            y1 = bbox['original_y1'] / height
+            x2 = bbox['original_x2'] / width
+            y2 = bbox['original_y2'] / height
             bbox_coords[i * 4 + 0] = x1
             bbox_coords[i * 4 + 1] = y1
             bbox_coords[i * 4 + 2] = x2
