@@ -47,12 +47,17 @@ from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_Visua
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging import CountPrinter
 
+class EvalDatasets:
+    MIMICCXR_TEST_SET = 'mimiccxr_test_set'
+    CHEST_IMAGENOME_GOLD = 'chest_imagenome_gold'
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     
     # required arguments
     parser.add_argument('--checkpoint-folder', type=str, required=True,
                         help='Relative path to folder with checkpoint to evaluate')
+    parser.add_argument('--eval-dataset-name', type=str, required=True)
 
     # optional arguments
     parser.add_argument('--mimiccxr-preprocessed-test-data-filename', type=str, default=None)
@@ -63,14 +68,6 @@ def parse_args(args=None):
                         help='Device to use (GPU or CPU)')
     parser.add_argument('--num-workers', type=int, default=0,
                         help='Number of workers for parallel dataloading')
-
-    parser.add_argument('--iuxray', dest='eval_iuxray', action='store_true')
-    parser.add_argument('--no-iuxray', dest='eval_iuxray', action='store_false')
-    parser.set_defaults(eval_iuxray=True)
-
-    parser.add_argument('--mimiccxr', dest='eval_mimiccxr', action='store_true')
-    parser.add_argument('--no-mimiccxr', dest='eval_mimiccxr', action='store_false')
-    parser.set_defaults(eval_mimiccxr=True)
 
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)
@@ -125,6 +122,7 @@ def _adapt_checkpoint_keys(checkpoint):
     return checkpoint
 
 def _evaluate_model(
+    eval_dataset_name,
     model_kwargs,
     mimiccxr_vision_evaluator_kwargs,
     iuxray_vision_trainer_kwargs,
@@ -133,13 +131,9 @@ def _evaluate_model(
     device = 'GPU',
     checkpoint_folder_path = None,
     return_results = False,
-    use_amp = False,
-    eval_iuxray = True,
-    eval_mimiccxr = True,
+    use_amp = False,    
     debug = False,
 ):
-
-    assert eval_iuxray or eval_mimiccxr
 
     # Pull out some args from kwargs
 
@@ -172,54 +166,7 @@ def _evaluate_model(
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
     evaluator = get_engine(model, classify_tags, classify_orientation, classify_chexpert,
-                         classify_questions, device, use_amp=use_amp, training=False)
-    
-    # Default image transform
-    count_print('Defining image transform ...')
-    img_transform = get_image_transform()
-
-    # Define collate_batch_fn    
-    if eval_mimiccxr:
-        mimiccxr_collate_batch_fn = get_vision_collate_batch_fn(MIMICCXR_DATASET_ID,
-                                                        classify_tags = classify_tags,
-                                                        n_tags = n_medical_tags,
-                                                        classify_orientation = classify_orientation,
-                                                        classify_chexpert = classify_chexpert,
-                                                        classify_questions = classify_questions)
-    if eval_iuxray:
-        iuxray_collate_batch_fn = get_vision_collate_batch_fn(IUXRAY_DATASET_ID,
-                                                    classify_tags = classify_tags,
-                                                    n_tags = n_medical_tags,
-                                                    classify_orientation = classify_orientation,
-                                                    classify_chexpert = classify_chexpert,
-                                                    classify_questions = classify_questions)
-
-    # Create MIMIC-CXR visual module evaluator
-    if eval_mimiccxr:
-        count_print('Creating MIMIC-CXR visual module evaluator ...')
-        mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(
-            transform = img_transform,
-            collate_batch_fn = mimiccxr_collate_batch_fn,
-            num_workers = num_workers,
-            **mimiccxr_vision_evaluator_kwargs,
-        )
-    
-    # Create IU X-Ray visual module trainer
-    if eval_iuxray:
-        count_print('Creating IU X-Ray visual module trainer ...')
-        iuxray_vision_trainer = IUXRAY_VisualModuleTrainer(
-            transform = img_transform,
-            collate_batch_fn = iuxray_collate_batch_fn,
-            num_workers = num_workers,
-            validation_only = True,
-            **iuxray_vision_trainer_kwargs,
-        )
-
-    if debug: # if debugging
-        output = {}
-        if eval_mimiccxr: output['mimiccxr_vision_evaluator'] = mimiccxr_vision_evaluator
-        if eval_iuxray: output['iuxray_vision_trainer'] = iuxray_vision_trainer
-        return output
+                         classify_questions, device, use_amp=use_amp, training=False)    
 
     # Attach metrics, timer and events to engines    
     count_print('Attaching metrics, timer and events to engines ...')
@@ -227,17 +174,14 @@ def _evaluate_model(
     # Metrics
     if classify_tags:
         attach_medical_tags_f1score(evaluator, device)
-
     if classify_orientation:
         attach_dataset_aware_orientation_accuracy(evaluator, [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID])
-
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)        
         attach_chexpert_labels_prf1(evaluator, device)
         attach_chexpert_labels_roc_auc(evaluator, 'cpu')
-
     if classify_questions:
-        attach_question_labels_prf1(evaluator, device)
+        attach_question_labels_prf1(evaluator, device)        
 
     if return_results:
         attach_accumulator(evaluator, 'idxs')
@@ -283,30 +227,43 @@ def _evaluate_model(
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
 
+    # Default image transform
+    count_print('Defining image transform ...')
+    image_transform = get_image_transform(**image_transform_kwargs)
+
+    # Define test dataset and dataloader
+    if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
+        mimiccxr_collate_batch_fn = get_vision_collate_batch_fn(MIMICCXR_DATASET_ID,
+                                    classify_tags = classify_tags,
+                                    n_tags = n_medical_tags,
+                                    classify_orientation = classify_orientation,
+                                    classify_chexpert = classify_chexpert,
+                                    classify_questions = classify_questions)
+        mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(
+            transform = image_transform,
+            collate_batch_fn = mimiccxr_collate_batch_fn,
+            num_workers = num_workers,
+            **mimiccxr_vision_evaluator_kwargs,
+        )
+        if debug:
+            return {'mimiccxr_vision_evaluator' : mimiccxr_vision_evaluator}
+        dataset = mimiccxr_vision_evaluator.test_dataset
+        dataloader = mimiccxr_vision_evaluator.test_dataloader
+    else:
+        raise ValueError(f'Invalid eval_dataset_name: {eval_dataset_name}')
+
     # Run evaluation
     metrics_to_save = metrics_to_print
-    results_folder_path = get_results_folder_path(checkpoint_folder_path)    
+    results_folder_path = get_results_folder_path(checkpoint_folder_path)
     results_dict = {}
 
-    if eval_iuxray:
-        print('\n========================')
-        count_print('Running evaluator engine on IU X-Ray validation split ...')
-        print('len(dataset) =', len(iuxray_vision_trainer.val_dataset))
-        print('len(dataloader) =', len(iuxray_vision_trainer.val_dataloader))
-        evaluator.run(iuxray_vision_trainer.val_dataloader)    
-        results_dict['iuxray_metrics'] = deepcopy(evaluator.state.metrics)            
-        results_dict['iuxray_dataset'] = iuxray_vision_trainer.val_dataset
-        _save_metrics(results_dict, 'iuxray', metrics_to_save, results_folder_path)
-
-    if eval_mimiccxr:
-        print('\n========================')
-        count_print('Running evaluator engine on MIMIC-CXR test split ...')
-        print('len(dataset) =', len(mimiccxr_vision_evaluator.test_dataset))
-        print('len(dataloader) =', len(mimiccxr_vision_evaluator.test_dataloader))
-        evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
-        results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
-        results_dict['mimiccxr_dataset'] = mimiccxr_vision_evaluator.test_dataset            
-        _save_metrics(results_dict, 'mimiccxr', metrics_to_save, results_folder_path)
+    count_print('Running evaluator engine ...')
+    print('len(dataset) =', len(dataset))
+    print('len(dataloader) =', len(dataloader))
+    evaluator.run(dataloader)
+    results_dict['metrics'] = deepcopy(evaluator.state.metrics)
+    results_dict['dataset'] = dataset
+    _save_metrics(results_dict, eval_dataset_name, metrics_to_save, results_folder_path)
 
     if return_results:
         return results_dict

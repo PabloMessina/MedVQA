@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, load_gold_standard_dicom_ids
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_chest_imagenome_bboxes,
+    load_chest_imagenome_silver_bboxes,
     load_chest_imagenome_label_names_and_templates,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
 )
@@ -565,6 +565,7 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                 classify_questions = False,
                 classify_chest_imagenome = False,
                 predict_bboxes_chest_imagenome = False,
+                clamp_bboxes_chest_imagenome = False,
                 question_labels_filename = None,
                 mimiccxr_qa_reports = None,
                 balanced_dataloading = False,
@@ -594,38 +595,14 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.classify_chest_imagenome = classify_chest_imagenome
+        self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
+        self.chest_imagenome_label_names_filename = chest_imagenome_label_names_filename
+        self.chest_imagenome_labels_filename = chest_imagenome_labels_filename
         self.use_chest_imagenome_compatible_data = (
             include_chest_imagenome_mode or classify_chest_imagenome or predict_bboxes_chest_imagenome
         )
         
-        other_tasks = [] # Hack so that parent class can handle other tasks
-
-        # --------- Chest-Imagenome specific logic ---------
-        if include_chest_imagenome_mode: 
-            assert collate_batch_fn_chest_imagenome_mode is not None            
-            self.collate_batch_fn_chest_imagenome_mode = collate_batch_fn_chest_imagenome_mode
-            # Load Chest-Imagenome label names and templates
-            assert chest_imagenome_label_names_filename is not None
-            self.chest_imagenome_label_names, self.chest_imagenome_templates = \
-                load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
-
-        if include_chest_imagenome_mode or classify_chest_imagenome:
-            assert chest_imagenome_labels_filename is not None
-            # Load Chest-Imagenome dicom_ids and labels
-            self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
-                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)
-            # Load Chest-Imagenome gold standard dicom_ids (they must be removed from training and validation sets)
-            self.chest_imagenome_gold_dicom_ids = set(load_gold_standard_dicom_ids())            
-            
-        if classify_chest_imagenome:
-            other_tasks.append(('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid]))
-        
-        if predict_bboxes_chest_imagenome:
-            self.chest_imagenome_bboxes = load_chest_imagenome_bboxes()
-            _bbox_coords = np.empty((len(self.chest_imagenome_bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
-            _bbox_presence = np.empty((len(self.chest_imagenome_bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)            
-            other_tasks.append(('chest_imagenome_bbox_coords', lambda i, _: _bbox_coords[_dids[i]]))
-            other_tasks.append(('chest_imagenome_bbox_presence', lambda i, _: _bbox_presence[_dids[i]]))
+        other_tasks = [] # Hack so that parent class can handle other tasks        
         
         preprocessing_save_path = _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, self.use_chest_imagenome_compatible_data)
 
@@ -662,13 +639,45 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
                         other_tasks=other_tasks,
                         debug = debug)
 
-        if predict_bboxes_chest_imagenome: # Hack so that parent class can initialize self.dicom_ids
+        # --------- Chest-Imagenome specific logic ---------
+        if include_chest_imagenome_mode: 
+            assert collate_batch_fn_chest_imagenome_mode is not None            
+            self.collate_batch_fn_chest_imagenome_mode = collate_batch_fn_chest_imagenome_mode
+            # Load Chest-Imagenome label names and templates
+            assert chest_imagenome_label_names_filename is not None
+            self.chest_imagenome_label_names, self.chest_imagenome_templates = \
+                load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
+
+        if include_chest_imagenome_mode or classify_chest_imagenome:
+            assert chest_imagenome_labels_filename is not None
+            # Load Chest-Imagenome dicom_ids and labels
+            self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
+                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)
+            # Load Chest-Imagenome gold standard dicom_ids (they must be removed from training and validation sets)
+            self.chest_imagenome_gold_dicom_ids = set(load_gold_standard_dicom_ids())            
+            
+        if classify_chest_imagenome:
+            other_tasks.append(('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid]))
+        
+        if predict_bboxes_chest_imagenome:
+            self.chest_imagenome_bboxes = load_chest_imagenome_silver_bboxes()
+            _bbox_coords = np.empty((len(self.chest_imagenome_bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
+            _bbox_presence = np.empty((len(self.chest_imagenome_bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
             _did2idx = {did: i for i, did in enumerate(self.chest_imagenome_bboxes.keys())}
             _dids = np.array([_did2idx[did] for did in self.dicom_ids], dtype=int)
             for did in self.chest_imagenome_bboxes.keys():
                 i = _did2idx[did]
-                _bbox_coords[i] = self.chest_imagenome_bboxes[did]['coords']
+                _bbox_coords[i] = self.chest_imagenome_bboxes[did]['coords']                
                 _bbox_presence[i] = self.chest_imagenome_bboxes[did]['presence']
+            if clamp_bboxes_chest_imagenome:
+                print('Clamping Chest-Imagenome bounding boxes to [0, 1] in-place')
+                _bbox_coords.clip(0, 1, out=_bbox_coords) # Clip to [0, 1] in-place
+            self.dicomId2idx = _did2idx
+            self.dicom_idxs = _dids
+            self.bbox_coords = _bbox_coords
+            self.bbox_presence = _bbox_presence
+            other_tasks.append(('chest_imagenome_bbox_coords', lambda i, _: self.bbox_coords[self.dicom_idxs[i]]))
+            other_tasks.append(('chest_imagenome_bbox_presence', lambda i, _: self.bbox_presence[self.dicom_idxs[i]]))
 
     def _preprocess_data(self):
         _preprocess_data(self, 'train_val')
@@ -792,7 +801,7 @@ class MIMICCXR_VQA_Evaluator(VQA_Evaluator):
             assert chest_imagenome_labels_filename is not None
             # Load Chest-Imagenome dicom_ids and labels
             self.chest_imagenome_dicom_ids, self.chest_imagenome_labels = \
-                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)            
+                load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename, qa_adapted_reports_filename)
             # Necessary hack so that parent classes can access chest_imagenome_labels
             other_tasks = [('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid])]
         else:

@@ -2,7 +2,10 @@ import os
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
-from medvqa.models import vqa
+import matplotlib.patches as patches
+import imagesize
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_bboxes, load_postprocessed_label_names
 from medvqa.utils.metrics import (
     chexpert_label_array_to_string,
     chest_imagenome_label_array_to_string,
@@ -11,7 +14,7 @@ from medvqa.datasets.image_processing import inv_normalize
 from medvqa.utils.constants import CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 from medvqa.utils.files import get_cached_json_file
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
 
 def inspect_chexpert_vision_trainer(chexpert_vision_trainer, i):
     instance = chexpert_vision_trainer.dataset[i]
@@ -77,7 +80,7 @@ def inspect_mimiccxr_vision_trainer(mimiccxr_vision_trainer, split, i):
     plt.imshow(img)
     plt.show()
 
-def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i):
+def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i, figsize=(10, 10)):
     assert hasattr(vqa_trainer, dataset_name)
     dataset = getattr(vqa_trainer, dataset_name)
 
@@ -139,13 +142,58 @@ def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i):
     # Chest ImaGenome labels
     if hasattr(vqa_trainer, 'classify_chest_imagenome'):
         if vqa_trainer.classify_chest_imagenome:
+            if hasattr(vqa_trainer, 'chest_imagenome_label_names'):
+                chest_imagenome_label_names = vqa_trainer.chest_imagenome_label_names
+            else:
+                chest_imagenome_label_names = load_postprocessed_label_names(
+                    vqa_trainer.chest_imagenome_label_names_filename)
             print('chest imagenome labels:', instance['chest_imagenome'])
             print('chest imagenome labels (verbose):',
                 chest_imagenome_label_array_to_string(instance['chest_imagenome'],
-                vqa_trainer.chest_imagenome_label_names))
+                chest_imagenome_label_names))
 
-def inspect_iuxray_vqa_trainer(iuxray_vqa_trainer, split, i):
-    _inspect_vqa_trainer(iuxray_vqa_trainer, IUXRAY_CACHE_DIR, split, i)
+    # Chest ImaGenome bounding boxes
+    if hasattr(vqa_trainer, 'predict_bboxes_chest_imagenome'):
+        if vqa_trainer.predict_bboxes_chest_imagenome:
+            bbox_coords = instance['chest_imagenome_bbox_coords']
+            bbox_presence = instance['chest_imagenome_bbox_presence']
+            assert len(bbox_coords) == len(bbox_presence) * 4
+            print('chest imagenome bbox coords:', bbox_coords)
+            print('chest imagenome bbox presence:', bbox_presence)
+            print('dicom id:', vqa_trainer.dicom_ids[idx])
+            bboxes_dict = load_chest_imagenome_bboxes()
+            bbox = bboxes_dict[vqa_trainer.dicom_ids[idx]]
+            print('bbox:', bbox)
+            # Create figure and axes
+            fig, ax = plt.subplots(1, figsize=figsize)            
+            # Get the current image size
+            img_large_path = get_mimiccxr_large_image_path(*MIMICCXR_IMAGE_REGEX.findall(vqa_trainer.images[idx])[0])
+            width, height = imagesize.get(img_large_path)
+            # Load large image
+            img_large = Image.open(img_large_path).convert('RGB')
+            assert img_large.width == width
+            assert img_large.height == height
+            # Display the image
+            ax.imshow(img_large)
+            # Create a Rectangle patch for each bbox            
+            for i in range(len(bbox_presence)):
+                if bbox_presence[i] == 0:
+                    continue
+                x1 = bbox_coords[i*4] * img_large.width
+                y1 = bbox_coords[i*4+1] * img_large.height
+                x2 = bbox_coords[i*4+2] * img_large.width
+                y2 = bbox_coords[i*4+3] * img_large.height
+                w = x2 - x1
+                h = y2 - y1
+                rect = patches.Rectangle((x1, y1), w, h, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
+                ax.add_patch(rect)
+                # add a label (make it transparent if it is not in labels)
+                ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color=plt.cm.tab20(i))                
+                print(f'Object: {CHEST_IMAGENOME_BBOX_NAMES[i]} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})')
 
-def inspect_mimiccxr_vqa_trainer(mimiccxr_vqa_trainer, split, i):
-    _inspect_vqa_trainer(mimiccxr_vqa_trainer, MIMICCXR_CACHE_DIR, split, i)
+
+def inspect_iuxray_vqa_trainer(iuxray_vqa_trainer, dataset_name, i):
+    _inspect_vqa_trainer(iuxray_vqa_trainer, IUXRAY_CACHE_DIR, dataset_name, i)
+
+def inspect_mimiccxr_vqa_trainer(mimiccxr_vqa_trainer, dataset_name, i):
+    _inspect_vqa_trainer(mimiccxr_vqa_trainer, MIMICCXR_CACHE_DIR, dataset_name, i)

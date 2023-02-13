@@ -63,6 +63,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         predict_bboxes_chest_imagenome=False,
         chest_imagenome_bbox_coords_criterion=None,
         chest_imagenome_bbox_presence_criterion=None,
+        chest_imagenome_bbox_loss_weight=1.0,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -92,6 +93,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     
     _mimiccxr_dataset_ids = [MIMICCXR_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
                              MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
+
+    print('chest_imagenome_bbox_loss_weight: ', chest_imagenome_bbox_loss_weight)
     
     def step_fn__mimiccxr_iuxray(batch):
 
@@ -163,9 +166,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     model_kwargs['max_answer_length'] = max_answer_length
             
             if is_mimiccxr:
-                model_kwargs['mimiccxr_foward'] = True
+                model_kwargs['mimiccxr_forward'] = True
             else:
-                model_kwargs['iuxray_foward'] = True
+                model_kwargs['iuxray_forward'] = True
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -238,6 +241,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         chest_imagenome_bbox_presence_loss = chest_imagenome_bbox_presence_criterion(
                             pred_chest_imagenome_bbox_presence, chest_imagenome_bbox_presence.float())
                         chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
+                        chest_imagenome_bbox_loss = chest_imagenome_bbox_loss * chest_imagenome_bbox_loss_weight # weight the loss
                         losses.append(chest_imagenome_bbox_loss)
 
                     if len(losses) > 0:
@@ -692,6 +696,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                chexpert_mode=None,
                use_vinbig_dataset=False,
                use_padchest_dataset=False,
+               chest_imagenome_bbox_loss_weight=1.0,
                optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None,
                use_merged_findings=False, findings_remapper=None, n_findings=None):
@@ -818,6 +823,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
                             chest_imagenome_bbox_coords_criterion=chest_imagenome_bbox_coords_criterion,
                             chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
+                            chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,

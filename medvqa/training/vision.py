@@ -55,12 +55,12 @@ def get_step_fn(model, optimizer, training, device,
 
             # Prepare args for model forward
             model_kwargs = {
-                'images': images,
+                'raw_images': images,
             }
             if dataset_id == MIMICCXR_DATASET_ID:
-                model_kwargs['mimiccxr_foward'] = True
+                model_kwargs['mimiccxr_forward'] = True
             else:
-                model_kwargs['iuxray_foward'] = True
+                model_kwargs['iuxray_forward'] = True
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision

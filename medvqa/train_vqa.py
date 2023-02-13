@@ -7,6 +7,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
+    load_chest_imagenome_train_average_bbox_coords,
 )
 from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VQA_Trainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import (
@@ -54,6 +55,7 @@ from medvqa.metrics import (
     attach_dataset_aware_chest_imagenome_labels_macroavgf1,
     attach_dataset_aware_chest_imagenome_labels_microavgf1,
     attach_dataset_aware_chest_imagenome_labels_roc_auc,
+    attach_dataset_aware_chest_imagenome_bbox_meanf1,
     attach_dataset_aware_ciderd,
     attach_dataset_aware_exactmatch_question,
     attach_dataset_aware_exactmatch_answer,
@@ -165,6 +167,8 @@ def parse_args(args=None):
     parser.add_argument('--clip-version', type=str, default=None)
     parser.add_argument('--huggingface-model-name', type=str, default=None)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
+    parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default='v1')
+    parser.add_argument('--num-regions', type=int, default=None)
     
     # LSTM decoder
     parser.add_argument('--n-lstm-layers', type=int, default=1,
@@ -315,6 +319,8 @@ def parse_args(args=None):
     parser.set_defaults(classify_chest_imagenome=False)
     parser.add_argument('--predict-bboxes-chest-imagenome', dest='predict_bboxes_chest_imagenome', action='store_true')
     parser.set_defaults(predict_bboxes_chest_imagenome=False)
+    parser.add_argument('--clamp-bboxes-chest-imagenome', dest='clamp_bboxes_chest_imagenome', action='store_true')
+    parser.add_argument('--chest-imagenome-bbox-loss-weight', type=float, default=1.0)
     # question classification
     parser.add_argument('--classify-questions', dest='classify_questions', action='store_true')
     parser.set_defaults(classify_questions=False)
@@ -350,7 +356,7 @@ _METRIC_WEIGHTS = {
     MetricNames.PADCHEST_LOC_MICROAVGF1: 0.5,
     MetricNames.CHESTIMAGENOMELABELMACROAVGF1: 1,
     MetricNames.CHESTIMAGENOMELABELMICROAVGF1: 1,
-    MetricNames.CHESTIMAGENOMEBBOXIOU: 1,
+    MetricNames.CHESTIMAGENOMEBBOXMEANF1: 1,
 }
 
 def _metric_getter(metrics_dict, key):
@@ -897,10 +903,14 @@ def train_model(
         attach_dataset_aware_chest_imagenome_bbox_mae(validator, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_iou(trainer, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_iou(validator, _mim_datasets)
-        # for logging        
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXIOU)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
+        attach_dataset_aware_chest_imagenome_bbox_meanf1(trainer, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_bbox_meanf1(validator, _mim_datasets)
+        attach_dataset_aware_loss(trainer, MetricNames.CHEST_IMAGENOME_BBOX_LOSS, _mim_datasets)
+        # for logging
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXMEANF1)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_BBOX_LOSS)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)        
 
     if train_chexpert or train_cxr14 or train_padchest:
         attach_dataset_aware_gender_accuracy(trainer, _gender_datasets)
@@ -1081,6 +1091,7 @@ def train_from_scratch(
     visual_features_mlp_in_dim,
     visual_features_mlp_out_dim,
     visual_features_mlp_hidden_dims,
+    num_regions,
     embed_size,
     question_encoding,
     answer_decoding,
@@ -1096,6 +1107,7 @@ def train_from_scratch(
     image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
     chest_imagenome_bbox_hidden_size,
+    chest_imagenome_bbox_regressor_version,
     clip_version,
     huggingface_model_name,
     # Optimizer args
@@ -1181,6 +1193,8 @@ def train_from_scratch(
     mimiccxr_question_labels_filename,
     classify_chest_imagenome,
     predict_bboxes_chest_imagenome,
+    clamp_bboxes_chest_imagenome,
+    chest_imagenome_bbox_loss_weight,
     merge_findings,
     # GPU
     device,
@@ -1281,35 +1295,36 @@ def train_from_scratch(
         if type(image_size) is list: image_size = tuple(image_size)
         
     model_kwargs = dict(
-        embed_size = embed_size,
-        dropout_prob = dropout_prob,
-        pretrained_checkpoint_folder_path = os.path.join(WORKSPACE_DIR, pretrained_checkpoint_folder_path) \
+        embed_size=embed_size,
+        dropout_prob=dropout_prob,
+        pretrained_checkpoint_folder_path=os.path.join(WORKSPACE_DIR, pretrained_checkpoint_folder_path) \
             if pretrained_checkpoint_folder_path is not None else None,        
-        chexpert_mode = chexpert_mode,
+        chexpert_mode=chexpert_mode,
         n_questions=n_q_total,
         # Image encoder
-        visual_input_mode = visual_input_mode,
-        raw_image_encoding = raw_image_encoding,
-        freeze_image_encoder = freeze_image_encoder,
-        image_local_feat_size = image_local_feat_size,
-        image_encoder_pretrained_weights_path = image_encoder_pretrained_weights_path,
-        imagenet_pretrained = imagenet_pretrained,
-        mlp_in_dim = visual_features_mlp_in_dim,
-        mlp_out_dim = visual_features_mlp_out_dim,
-        mlp_hidden_dims = visual_features_mlp_hidden_dims,
-        clip_version = clip_version,
-        huggingface_model_name = huggingface_model_name,
+        visual_input_mode=visual_input_mode,
+        raw_image_encoding=raw_image_encoding,
+        freeze_image_encoder=freeze_image_encoder,
+        image_local_feat_size=image_local_feat_size,
+        image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,
+        imagenet_pretrained=imagenet_pretrained,
+        mlp_in_dim=visual_features_mlp_in_dim,
+        mlp_out_dim=visual_features_mlp_out_dim,
+        mlp_hidden_dims=visual_features_mlp_hidden_dims,
+        clip_version=clip_version,
+        huggingface_model_name=huggingface_model_name,
+        num_regions=num_regions,
         # Question encoder
-        question_encoding = question_encoding,
-        question_vec_size = question_vec_size,
-        question_hidden_size = question_hidden_size,
+        question_encoding=question_encoding,
+        question_vec_size=question_vec_size,
+        question_hidden_size=question_hidden_size,
         # Answer decoder
-        answer_decoding = answer_decoding,
-        answer_hidden_size = answer_hidden_size,
-        n_lstm_layers = n_lstm_layers,
-        transf_dec_nhead = transf_dec_nhead,
-        transf_dec_dim_forward = transf_dec_dim_forward,
-        transf_dec_num_layers = transf_dec_num_layers,
+        answer_decoding=answer_decoding,
+        answer_hidden_size=answer_hidden_size,
+        n_lstm_layers=n_lstm_layers,
+        transf_dec_nhead=transf_dec_nhead,
+        transf_dec_dim_forward=transf_dec_dim_forward,
+        transf_dec_num_layers=transf_dec_num_layers,
         # Aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
@@ -1320,55 +1335,61 @@ def train_from_scratch(
         n_questions_aux_task=n_mined_questions,
         n_chest_imagenome_labels=n_chest_imagenome_labels,
         chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
+        chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
         use_cxr14=train_cxr14,
         use_vinbig=train_vinbig,
         use_padchest=train_padchest,
         merge_findings=merge_findings,
         n_findings=n_findings,
     )
+    if predict_bboxes_chest_imagenome:
+        model_kwargs['chest_imagenome_train_average_bbox_coords'] = load_chest_imagenome_train_average_bbox_coords(
+            mimiccxr_qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
+            clamp_bbox_coords=clamp_bboxes_chest_imagenome,
+        ).tolist()
     
     optimizer_kwargs = dict(
-        name = optimizer_name,
-        lr = lr,
+        name=optimizer_name,
+        lr=lr,
     )
 
     lr_scheduler_kwargs = dict(
-        name = scheduler,
-        factor = lr_decay,
-        patience = lr_decay_patience,
-        warmup_and_decay_args = warmup_and_decay_args,
-        warmup_and_cosine_args = warmup_and_cosine_args,
-        n_batches_per_epoch = batches_per_epoch,
+        name=scheduler,
+        factor=lr_decay,
+        patience=lr_decay_patience,
+        warmup_and_decay_args=warmup_and_decay_args,
+        warmup_and_cosine_args=warmup_and_cosine_args,
+        n_batches_per_epoch=batches_per_epoch,
     )
     
     dataloading_kwargs = dict(
-        batch_size = batch_size,
-        mimiccxr_weight = mimiccxr_weight,
-        iuxray_weight = iuxray_weight,
-        chexpert_weight = chexpert_weight,
-        cxr14_weight = cxr14_weight,
-        vinbig_weight = vinbig_weight,
-        padchest_weight = padchest_weight,
-        mimiccxr_weight_chexpert_mode = mimiccxr_weight_chexpert_mode,
-        mimiccxr_weight_chest_imagenome_mode = mimiccxr_weight_chest_imagenome_mode,
-        iuxray_weight_chexpert_mode = iuxray_weight_chexpert_mode,
-        one_hot_question_offsets = one_hot_question_offsets,
+        batch_size=batch_size,
+        mimiccxr_weight=mimiccxr_weight,
+        iuxray_weight=iuxray_weight,
+        chexpert_weight=chexpert_weight,
+        cxr14_weight=cxr14_weight,
+        vinbig_weight=vinbig_weight,
+        padchest_weight=padchest_weight,
+        mimiccxr_weight_chexpert_mode=mimiccxr_weight_chexpert_mode,
+        mimiccxr_weight_chest_imagenome_mode=mimiccxr_weight_chest_imagenome_mode,
+        iuxray_weight_chexpert_mode=iuxray_weight_chexpert_mode,
+        one_hot_question_offsets=one_hot_question_offsets,
     )
 
     if merge_findings:
         _merged_findings_kwargs = dict(
-            use_merged_findings = True,
-            findings_remapper = finding_labels_remapper,
-            n_findings = n_findings,
+            use_merged_findings=True,
+            findings_remapper=finding_labels_remapper,
+            n_findings=n_findings,
         )
 
     train_image_transform_kwargs = dict(
-        image_size = image_size,
-        augmentation_mode = img_aug_mode,
-        use_clip_transform = use_clip,
-        clip_version = clip_version,
-        use_huggingface_vitmodel_transform = use_huggingface_vitmodel,
-        huggingface_vitmodel_name = huggingface_model_name,
+        image_size=image_size,
+        augmentation_mode=img_aug_mode,
+        use_clip_transform=use_clip,
+        clip_version=clip_version,
+        use_huggingface_vitmodel_transform=use_huggingface_vitmodel,
+        huggingface_vitmodel_name=huggingface_model_name,
     )
 
     # clone to avoid modifying the original one
@@ -1409,6 +1430,7 @@ def train_from_scratch(
             classify_questions=classify_questions,
             classify_chest_imagenome=classify_chest_imagenome,
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+            clamp_bboxes_chest_imagenome=clamp_bboxes_chest_imagenome,
             question_labels_filename=mimiccxr_question_labels_filename,
             allowed_questions=allowed_questions,
             verbose_question=verbose_question,
@@ -1496,6 +1518,7 @@ def train_from_scratch(
         use_vinbig_dataset=train_vinbig,
         use_padchest_dataset=train_padchest,
         iters_to_accumulate=iters_to_accumulate,
+        chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
     )
     if merge_findings:
         trainer_engine_kwargs.update(_merged_findings_kwargs)

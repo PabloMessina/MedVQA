@@ -11,8 +11,6 @@ from medvqa.utils.files import (
     get_cached_json_file,
     save_to_pickle,
 )
-from medvqa.utils.files import MAX_FILENAME_LENGTH
-from medvqa.utils.hashing import hash_string
 from medvqa.datasets.dataloading_utils import (
     CompositeDataset,
     CompositeInfiniteDataset,
@@ -173,7 +171,7 @@ class VQADataset(Dataset):
         # other tasks
         if self.other_tasks is not None:
             for task in self.other_tasks:
-                output[task[0]] = task[1](i, rid)
+                output[task[0]] = task[1](idx, rid)
         return output
 
 class LabelBasedVQAClass:

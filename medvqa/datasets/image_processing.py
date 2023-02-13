@@ -167,13 +167,13 @@ inv_normalize = T.Normalize(
 )
 
 class ImageDataset(Dataset):
-    def __init__(self, images, transform):
-        self.images = images
-        self.transform = transform    
+    def __init__(self, image_paths, image_transform):
+        self.image_paths = image_paths
+        self.image_transform = image_transform    
     def __len__(self):
-        return len(self.images)
+        return len(self.image_paths)
     def __getitem__(self, i):
-        return {'i': self.transform(Image.open(self.images[i]).convert('RGB')) }
+        return {'i': self.image_transform(Image.open(self.image_paths[i]).convert('RGB')) }
 
 def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,
         top_k, threshold, min_num_q_per_report=5):

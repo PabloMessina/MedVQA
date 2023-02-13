@@ -93,7 +93,6 @@ class MIMICCXR_VisualModuleEvaluator(VM_Evaluator):
                         use_validation_indices = use_validation_indices,
                         other_tasks = other_tasks)
 
-
 # MAE: Masked AutoEncoder
 class MIMICCXR_MAE_Trainer(MAETrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers,

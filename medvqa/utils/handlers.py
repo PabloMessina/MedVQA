@@ -83,6 +83,9 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MICRO)
                 scores.append(score['macro_avg'])
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MACRO)
+            # elif m == MetricNames.CHESTIMAGENOMEBBOXMAP:
+            #     scores.append(score['map'])
+            #     metric_names.append(MetricNames.CHESTIMAGENOMEBBOXMAP)
             else:
                 if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
                     try:

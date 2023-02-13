@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, save_to_pickle
 load_dotenv()
 
 from medvqa.utils.common import CACHE_DIR
@@ -151,7 +151,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
     output_path = os.path.join(MIMICCXR_CACHE_DIR, f'{qa_adapted_reports_filename}__detailed_metadata.pkl')
     if os.path.exists(output_path):
         print(f'Loading cached detailed metadata from {output_path}')
-        return load_pickle(output_path)
+        return get_cached_pickle_file(output_path)
 
     qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))    
     image_views_dict = get_image_views_dict()
@@ -195,18 +195,24 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
 
     save_to_pickle(report_metadata, output_path)
     print(f'Saved detailed metadata to {output_path}')
-    return report_metadata    
-    
-    # reports_metadata = dict()
-    # for subject_id, study_id, dicom_id, view_pos, report in zip(mimiccxr_metadata['subject_id'],
-    #                                                             mimiccxr_metadata['study_id'],
-    #                                                             mimiccxr_metadata['dicom_id'],
-    #                                                             mimiccxr_metadata['ViewPosition'],
-    #                                                             mimiccxr_metadata['Report']):
-    #     key = (subject_id, study_id)
-    #     try:
-    #         reports = reports_metadata[key]
-    #     except KeyError:
-    #         reports = reports_metadata[key] = []
-    #     reports.append((dicom_id, view_pos, report))
-    # return reports_metadata
+    return report_metadata
+
+def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
+    detailed_metadata = load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename)    
+    output = []
+    for i in range(len(detailed_metadata['dicom_id_view_pos_pairs'])):
+        for dicom_id_view_pos_pair in detailed_metadata['dicom_id_view_pos_pairs'][i]:
+            if dicom_id_view_pos_pair[0] == dicom_id:
+                output.append({
+                    'background': detailed_metadata['backgrounds'][i],
+                    'report': detailed_metadata['reports'][i],
+                    'part_id': detailed_metadata['part_ids'][i],
+                    'subject_id': detailed_metadata['subject_ids'][i],
+                    'study_id': detailed_metadata['study_ids'][i],
+                    'dicom_id': dicom_id,
+                    'view_pos': dicom_id_view_pos_pair[1],
+                    'split': detailed_metadata['splits'][i],                    
+                    'filepath': detailed_metadata['filepaths'][i],
+                    'dicom_id_view_pos_pairs': detailed_metadata['dicom_id_view_pos_pairs'][i],
+                })
+    return output

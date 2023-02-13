@@ -12,7 +12,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_postprocessed_labels as load_chest_imagenome_postprocessed_labels,
 )
 from medvqa.datasets.tokenizer import Tokenizer
-from medvqa.models.ensemble.multilabel_ensemble_search import MultilabelOptimalEnsembleSearcher
+from medvqa.evaluation.visual_module import calibrate_thresholds_for_mimiccxr_test_set
 from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
 from medvqa.models.vision.visual_modules import DensenetVisualModule
 
@@ -166,88 +166,17 @@ def _recover_mimiccxr_vision_evaluator_kwargs(
     return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size,
         preprocessed_data_filename, qa_adapted_reports_filename)
 
-def _calibrate_thresholds(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-                          classify_chexpert, classify_chest_imagenome):
-    
-    assert classify_chexpert != classify_chest_imagenome # Only one of them can be True
-    
-    if classify_chexpert:
-        labeler_name = 'chexpert'
-    elif classify_chest_imagenome:
-        labeler_name = 'chest_imagenome'
-    else: assert False, 'This should not happen'
-
-    # Run model on MIMICCXR validation dataset to get predictions
-    assert mimiccxr_vision_evaluator_kwargs['use_validation_indices']
-    mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(**mimiccxr_vision_evaluator_kwargs)
-    evaluator = get_engine(model, classify_tags=False, classify_orientation=False, classify_questions=False,
-                           classify_chexpert=classify_chexpert,
-                           classify_chest_imagenome=classify_chest_imagenome,
-                           device=device, use_amp=use_amp, training=False)
-    if classify_chexpert:
-        attach_chexpert_labels_accuracy(evaluator, device)
-        attach_chexpert_labels_prf1(evaluator, device)
-        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
-    elif classify_chest_imagenome:
-        attach_chest_imagenome_labels_accuracy(evaluator, device)
-        attach_chest_imagenome_labels_prf1(evaluator, device)
-        attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
-    else: assert False
-    attach_accumulator(evaluator, f'pred_{labeler_name}_probs')
-    attach_accumulator(evaluator, labeler_name)
-    timer = Timer()
-    timer.attach(evaluator, start=Events.EPOCH_STARTED)
-    metrics_to_print=[]
-    if classify_chexpert:
-        metrics_to_print.append(MetricNames.CHXLABEL_PRF1)
-        metrics_to_print.append(MetricNames.CHXLABELACC)
-        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
-    elif classify_chest_imagenome:
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
-    else: assert False
-    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
-    log_iteration_handler = get_log_iteration_handler()    
-    evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
-    print('Running model on MIMICCXR validation dataset ...')
-    evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
-    # Retrieve predictions and ground truth labels
-    pred_probs = evaluator.state.metrics[f'pred_{labeler_name}_probs']
-    pred_probs = torch.stack(pred_probs).numpy()
-    pred_probs = np.expand_dims(pred_probs, axis=0) # add extra dimension
-    gt_labels = evaluator.state.metrics[labeler_name]
-    gt_labels = torch.stack(gt_labels).numpy()
-    print('pred_probs.shape:', pred_probs.shape)
-    print('gt_labels.shape:', gt_labels.shape)
-    # Search optimal thresholds
-    print('Searching optimal thresholds ...')
-    mloes = MultilabelOptimalEnsembleSearcher(probs=pred_probs, gt=gt_labels)
-    mloes.sample_weights(n_tries=100)
-    prev_score = mloes.evaluate_best_predictions()
-    while True:
-        mloes.sample_weights_from_previous_ones(n_tries=100, noise_coef=0.05)
-        score = mloes.evaluate_best_predictions()
-        if abs(score - prev_score) < 1e-3:
-            break
-        prev_score = score
-    thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
-    print('thresholds.shape:', thresholds.shape)
-    if classify_chexpert: # Only print thresholds for CheXpert
-        print('thresholds:', thresholds)
-    print('Done!')
-    return thresholds
-
 def _calibrate_thresholds_using_chexpert_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs):
     print_blue('Calibrating thresholds using MIMICCXR validation dataset and CheXpert labels')
-    return _calibrate_thresholds(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-                                 classify_chexpert=True, classify_chest_imagenome=False)
+    return calibrate_thresholds_for_mimiccxr_test_set(
+        model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
+        classify_chexpert=True, classify_chest_imagenome=False)
 
 def _calibrate_thresholds_using_chest_imagenome_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs):
     print_blue('Calibrating thresholds using MIMICCXR validation dataset and Chest-ImaGenome labels')
-    return _calibrate_thresholds(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-                                 classify_chexpert=False, classify_chest_imagenome=True)
+    return calibrate_thresholds_for_mimiccxr_test_set(
+        model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
+        classify_chexpert=False, classify_chest_imagenome=True)
 
 def _evaluate_model(
     tokenizer_kwargs,

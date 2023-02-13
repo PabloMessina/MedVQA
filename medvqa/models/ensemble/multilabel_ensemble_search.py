@@ -23,7 +23,7 @@ class _Item:
         return self.score < other.score        
 
 class MultilabelOptimalEnsembleSearcher:
-    def __init__(self, probs, gt, topk=6):
+    def __init__(self, probs, gt, topk=10):
     
         assert len(probs.shape) == 3
         assert len(gt.shape) == 2

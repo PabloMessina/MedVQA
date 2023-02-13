@@ -7,7 +7,7 @@ def roc_auc_fn(y_pred, y_true):
     except ValueError:
         print(y_true, y_pred)
         raise
-    n_classes = y_pred.size(1)
+    n_classes = y_pred.shape[1]
     per_class = [None] * n_classes
     for i in range(n_classes):
         try:

@@ -1,5 +1,32 @@
+import torch
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+from ignite.engine import Events
+from ignite.handlers.timing import Timer
+from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_BBOX_NAMES,
+    CHEST_IMAGENOME_GOLD_BBOX_NAMES,
+    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+)
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    visualize_ground_truth_bounding_boxes,
+    visualize_predicted_bounding_boxes,
+)
+from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleEvaluator
+from medvqa.metrics import (
+    attach_chest_imagenome_labels_accuracy,
+    attach_chest_imagenome_labels_prf1,
+    attach_chest_imagenome_labels_roc_auc,
+    attach_chexpert_labels_accuracy,
+    attach_chexpert_labels_prf1,
+    attach_chexpert_labels_roc_auc,
+)
+from medvqa.metrics.bbox.utils import compute_iou
+from medvqa.models.ensemble.multilabel_ensemble_search import MultilabelOptimalEnsembleSearcher
+from medvqa.training.vision import get_engine
 from medvqa.utils.constants import MetricNames
 from medvqa.utils.constants import (
     CHEXPERT_LABEL2SHORT,
@@ -7,8 +34,9 @@ from medvqa.utils.constants import (
     METRIC2SHORT,
 )
 from medvqa.utils.files import load_pickle
+from medvqa.utils.handlers import attach_accumulator, get_log_iteration_handler, get_log_metrics_handlers
 
-_METRIC_NAMES = [
+_VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,
     MetricNames.CHXLABELACC,
     MetricNames.CHXLABEL_PRF1,
@@ -16,10 +44,10 @@ _METRIC_NAMES = [
     MetricNames.QLABELS_PRF1,
 ]
 
-_empty_dict = {}
+_empty_dict = {} # to avoid creating a new dict every time
 
-def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_METRIC_NAMES):
-    assert type(metrics_paths) is list or type(metrics_paths) is str
+def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_VISUAL_MODULE_METRIC_NAMES):
+    assert type(metrics_paths) == list or type(metrics_paths) == str
     if type(metrics_paths) is str:
         metrics_paths  = [metrics_paths]
     columns = ['metrics_path']
@@ -89,3 +117,200 @@ def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_METRIC_NAME
                 if row_i == 0: columns.append(METRIC2SHORT.get(mn, mn))
     
     return pd.DataFrame(data=data, columns=columns)
+
+def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
+    assert type(metrics_paths) == list or type(metrics_paths) == str
+    if type(metrics_paths) is str:
+        metrics_paths  = [metrics_paths]    
+    print(f'Loading {len(metrics_paths)} metrics files...')
+    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]
+    # Get all metric names
+    metric_names = set()
+    for metrics_dict in metrics_dict_list:
+        metric_names.update(metrics_dict.keys())
+    metric_names = list(metric_names)
+    metric_names.sort()
+    # Create dataframe
+    columns = ['metrics_path']
+    columns.extend(metric_names)
+    data = [[] for _ in range(len(metrics_paths))]
+    for row_i, metrics_dict in tqdm(enumerate(metrics_dict_list)):
+        data[row_i].append(metrics_paths[row_i])
+        for mn in metric_names:            
+            met = metrics_dict.get(mn, None)
+            data[row_i].append(met)
+    return pd.DataFrame(data=data, columns=columns)
+
+
+class ChestImagenomeBboxPredictionsVisualizer:
+
+    def __init__(self, predictions_path=None, data=None):
+        if predictions_path is not None:
+            data = load_pickle(predictions_path)
+        elif data is None:
+            raise ValueError('Either predictions_path or data must be provided')
+        self.dicom_ids = data['dicom_ids']
+        self.pred_bbox_coords = data['pred_bbox_coords']
+        self.pred_bbox_presences = data['pred_bbox_presences']
+        self.test_bbox_coords = data['test_bbox_coords']
+        self.test_bbox_presences = data['test_bbox_presences']
+        n_bbox_classes = len(self.test_bbox_presences[0])
+        if n_bbox_classes == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
+            self.bbox_names = CHEST_IMAGENOME_BBOX_NAMES
+        elif n_bbox_classes == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
+            self.bbox_names = [name for name in CHEST_IMAGENOME_BBOX_NAMES if name in CHEST_IMAGENOME_GOLD_BBOX_NAMES]
+        else:
+            raise ValueError(f'Unknown number of bbox classes: {n_bbox_classes}')
+        iou_scores = [None] * len(self.dicom_ids)
+        scores = np.empty((n_bbox_classes,), dtype=float)
+        for i in tqdm(range(len(self.dicom_ids))):
+            pred_coords = self.pred_bbox_coords[i]
+            pred_presences = self.pred_bbox_presences[i]
+            test_coords = self.test_bbox_coords[i]
+            test_presences = self.test_bbox_presences[i]
+            for j in range(n_bbox_classes):
+                if test_presences[j] == 1:
+                    if pred_presences[j] >= 0:
+                        scores[j] = compute_iou(pred_coords[j*4:(j+1)*4], test_coords[j*4:(j+1)*4])
+                    else:
+                        scores[j] = 0
+                else:
+                    scores[j] = 1 if pred_presences[j] < 0 else 0
+            iou_scores[i] = scores.mean()
+        self.iou_scores = np.array(iou_scores)
+        self.iou_scores_mean = np.mean(self.iou_scores)
+        self.iou_scores_std = np.std(self.iou_scores)
+        self.iou_ranked_indices = np.argsort(self.iou_scores)
+        if predictions_path is not None:
+            print(f'Loaded and processed {len(self.dicom_ids)} predictions from {predictions_path}')
+        else:
+            print(f'Processed {len(self.dicom_ids)} predictions')
+        print(f'IoU mean: {self.iou_scores_mean:.4f}, std: {self.iou_scores_std:.4f}')
+
+    def plot_iou_scores(self, figsize=(10, 5)):
+        plt.figure(figsize=figsize)
+        plt.hist(self.iou_scores, bins=100)
+        plt.title(f'IoU scores (mean: {self.iou_scores_mean:.4f}, std: {self.iou_scores_std:.4f})')
+        plt.xlabel('IoU score')
+        plt.ylabel('Count')
+        plt.show()
+
+    def print_iou_scores_statistics(self):
+        print(f'IoU mean: {self.iou_scores_mean:.4f}')
+        print(f'IoU std: {self.iou_scores_std:.4f}')
+        print(f'IoU min: {np.min(self.iou_scores):.4f}')
+        print(f'IoU max: {np.max(self.iou_scores):.4f}')
+        # Number of predictions with IoU between consecutive thresholds
+        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+        acc_count = 0
+        for i in range(len(thresholds)):
+            if i == 0:
+                count = np.sum(self.iou_scores <= thresholds[i])
+                acc_count += count
+                print(f'IoU <= {thresholds[i]:.1f}: {count}, cumulative: {acc_count}')
+            else:
+                count = np.sum((self.iou_scores > thresholds[i-1]) & (self.iou_scores <= thresholds[i]))
+                acc_count += count
+                print(f'{thresholds[i-1]:.1f} < IoU <= {thresholds[i]:.1f}: {count}, cumulative: {acc_count}')            
+
+    def visualize_bbox_predictions_example(self, i=None):
+        if i is None:
+            i = np.random.randint(len(self.dicom_ids))
+        i = self.iou_ranked_indices[i]
+        dicom_id = self.dicom_ids[i]
+        pred_bbox_coords = self.pred_bbox_coords[i]
+        pred_bbox_presences = self.pred_bbox_presences[i]
+        test_bbox_coords = self.test_bbox_coords[i]
+        test_bbox_presences = self.test_bbox_presences[i]
+        iou_score = self.iou_scores[i]
+        print(f'IoU score: {iou_score:.4f}')
+        print(f'DICOM ID: {dicom_id}')
+        print(f'Predicted bounding box coordinates: {pred_bbox_coords}')
+        print(f'Predicted bounding box presences: {pred_bbox_presences}')
+        print(f'Test bounding box coordinates: {test_bbox_coords}')
+        print(f'Test bounding box presences: {test_bbox_presences}')
+        visualize_ground_truth_bounding_boxes(dicom_id)
+        visualize_predicted_bounding_boxes(dicom_id, pred_bbox_coords, pred_bbox_presences,
+                                            test_bbox_coords, test_bbox_presences,
+                                            bbox_names=self.bbox_names)
+
+    
+def calibrate_thresholds_for_mimiccxr_test_set(
+    model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
+    classify_chexpert, classify_chest_imagenome, max_iterations=10):
+    
+    assert classify_chexpert != classify_chest_imagenome # Only one of them can be True
+    
+    if classify_chexpert:
+        labeler_name = 'chexpert'
+    elif classify_chest_imagenome:
+        labeler_name = 'chest_imagenome'
+    else: assert False, 'This should not happen'
+
+    # Run model on MIMICCXR validation dataset to get predictions
+    assert mimiccxr_vision_evaluator_kwargs['use_validation_indices']
+    mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(**mimiccxr_vision_evaluator_kwargs)
+    evaluator = get_engine(model, classify_tags=False, classify_orientation=False, classify_questions=False,
+                           classify_chexpert=classify_chexpert,
+                           classify_chest_imagenome=classify_chest_imagenome,
+                           device=device, use_amp=use_amp, training=False)
+    if classify_chexpert:
+        attach_chexpert_labels_accuracy(evaluator, device)
+        attach_chexpert_labels_prf1(evaluator, device)
+        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
+    elif classify_chest_imagenome:
+        attach_chest_imagenome_labels_accuracy(evaluator, device)
+        attach_chest_imagenome_labels_prf1(evaluator, device)
+        attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
+    else: assert False
+    attach_accumulator(evaluator, f'pred_{labeler_name}_probs')
+    attach_accumulator(evaluator, labeler_name)
+    timer = Timer()
+    timer.attach(evaluator, start=Events.EPOCH_STARTED)
+    metrics_to_print=[]
+    if classify_chexpert:
+        metrics_to_print.append(MetricNames.CHXLABEL_PRF1)
+        metrics_to_print.append(MetricNames.CHXLABELACC)
+        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
+    elif classify_chest_imagenome:
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
+    else: assert False
+    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
+    log_iteration_handler = get_log_iteration_handler()    
+    evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
+    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
+    print('Running model on MIMICCXR validation dataset ...')
+    evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
+    # Retrieve predictions and ground truth labels
+    pred_probs = evaluator.state.metrics[f'pred_{labeler_name}_probs']
+    pred_probs = torch.stack(pred_probs).numpy()
+    pred_probs = np.expand_dims(pred_probs, axis=0) # add extra dimension
+    gt_labels = evaluator.state.metrics[labeler_name]
+    gt_labels = torch.stack(gt_labels).numpy()
+    print('pred_probs.shape:', pred_probs.shape)
+    print('gt_labels.shape:', gt_labels.shape)
+    # Search optimal thresholds
+    print('Searching optimal thresholds ...')
+    mloes = MultilabelOptimalEnsembleSearcher(probs=pred_probs, gt=gt_labels)
+    mloes.sample_weights(n_tries=100)
+    prev_score = mloes.evaluate_best_predictions()
+    for _ in range(max_iterations):
+        mloes.sample_weights_from_previous_ones(n_tries=100, noise_coef=0.05)
+        score = mloes.evaluate_best_predictions()
+        if abs(score - prev_score) < 1e-3:
+            break
+        prev_score = score
+    thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
+    print('thresholds.shape:', thresholds.shape)
+    if classify_chexpert: # Only print thresholds for CheXpert
+        print('thresholds:', thresholds)
+    print('Done!')
+    return thresholds
+    
+
+        
+
+
+    

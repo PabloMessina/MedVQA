@@ -47,6 +47,18 @@ def collect_chexpert_based_output_results():
                 results.append((kind, exp_name, filename))
     return results
 
+def collect_chest_imagenome_bbox_results(dataset_name):
+    vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
+    bbox_dirs = os.listdir(os.path.join(RESULTS_DIR,'bbox'))
+    results = []
+    for dirs, kind in zip([vqa_dirs, bbox_dirs], ['vqa', 'bbox']):
+        for exp_name in dirs:
+            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
+                                    if dataset_name in x and 'bbox_metrics' in x and 'chest_imagenome' in x]
+            for filename in exp_result_filenames:
+                results.append((kind, exp_name, filename))
+    return results
+
 def collect_multimodal_question_probs(dataset_name):
     dirs = os.listdir(os.path.join(RESULTS_DIR,'multimodal'))
     results = []
@@ -229,6 +241,16 @@ def _append_gradient_accumulation_column(df, results):
         column.append(iters)
     df['gradacc_iters'] = column
 
+def _append_chest_imagenome_bbox_regressor_version(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            version = metadata['model_kwargs']['chest_imagenome_bbox_regressor_version']
+        except KeyError:
+            version = None
+        column.append(version)
+    df['chstimgn_bbox_model'] = column
+
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
     df['timestamp'] = [x[1][:15] for x in results]
@@ -262,6 +284,15 @@ def _append_method_columns__visual_module(df, results):
     _append_gradient_accumulation_column(df, results)
     _append_checkpoint_epoch_column(df, results)
 
+def _append_method_columns__chest_imagenome_bbox(df, results):
+    df['folder'] = [x[0] for x in results]
+    df['timestamp'] = [x[1][:15] for x in results]
+    _append_datasets_column(df, results)
+    _append_model_column(df, results)
+    _append_chest_imagenome_bbox_regressor_version(df, results)
+    _append_eval_mode_column(df, results)
+
+
 def get_report_level_metrics_dataframe(dataset_name):
     results = collect_report_level_results(dataset_name)
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]    
@@ -281,6 +312,13 @@ def get_chexpert_based_output_metrics_dataframe():
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = report_generation.get_chexpert_based_outputs_dataframe(metrics_paths)
     _append_method_columns__report_level(df, results)
+    return df
+
+def get_chest_imagenome_bbox_metrics_dataframe(dataset_name):
+    results = collect_chest_imagenome_bbox_results(dataset_name)
+    metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
+    df = visual_module.get_chest_imagenome_bbox_metrics_dataframe(metrics_paths)
+    _append_method_columns__chest_imagenome_bbox(df, results)
     return df
 
 def get_validation_metrics_dataframe(metrics_logs_paths,

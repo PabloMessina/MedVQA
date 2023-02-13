@@ -219,6 +219,7 @@ class MetricNames:
     CHESTIMAGENOMELABEL_PRF1 = 'chestimagenome_label_prf1'
     CHESTIMAGENOMEBBOXIOU = 'chestimagenome_bbox_iou'
     CHESTIMAGENOMEBBOXMAE = 'chestimagenome_bbox_mae'
+    CHESTIMAGENOMEBBOXMEANF1 = 'chestimagenome_bbox_meanf1'
     QUESTION_LOSS = 'question_loss'
     ANSWER_LOSS = 'answer_loss'
     BACKGROUND_LOSS = 'background_loss'
@@ -287,6 +288,7 @@ METRIC2SHORT = {
     'chestimagenome_label_prf1': 'chestimglprf1',
     'chestimagenome_bbox_iou': 'chestimgbbiou',
     'chestimagenome_bbox_mae': 'chestimgbbmae',
+    'chestimagenome_bbox_meanf1': 'chestimgbbmf1',
     'chestimagenome_bbox_loss': 'chestimgbb_loss',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
