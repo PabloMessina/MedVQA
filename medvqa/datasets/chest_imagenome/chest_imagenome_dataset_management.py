@@ -11,6 +11,7 @@ import torch
 
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
+    CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH,
     CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH,
     CHEST_IMAGENOME_CACHE_DIR,
     CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH,
@@ -86,6 +87,39 @@ def load_chest_imagenome_silver_bboxes():
     chest_imagenome_bboxes = get_cached_pickle_file(CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH)
     assert chest_imagenome_bboxes is not None, CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH
     return chest_imagenome_bboxes
+
+def load_gold_standard_dicom_ids():
+    df = pd.read_csv(CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH)
+    return df['dicom_id'].tolist()
+
+def load_nongold_dicom_ids():
+    cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'nongold_dicom_ids.pkl')
+    if os.path.exists(cache_path):
+        return load_pickle(cache_path)
+    dicom_ids_set = set(load_chest_imagenome_silver_bboxes().keys())
+    gold_ids_set = set(load_gold_standard_dicom_ids())
+    dicom_ids = list(dicom_ids_set - gold_ids_set)
+    save_to_pickle(dicom_ids, cache_path)
+    return dicom_ids
+
+def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False):
+    bboxes = load_chest_imagenome_silver_bboxes()
+    bbox_coords = np.empty((len(bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
+    bbox_presence = np.empty((len(bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
+    did2idx = {did: i for i, did in enumerate(bboxes.keys())}
+    idxs = np.array([did2idx[did] for did in dicom_ids_list], dtype=int)
+    for did in bboxes.keys():
+        idx = did2idx[did]
+        bbox = bboxes[did]
+        bbox_coords[idx] = bbox['coords']
+        bbox_presence[idx] = bbox['presence']
+    if clamp:
+        bbox_coords.clip(0, 1, out=bbox_coords) # Clip to [0, 1] in-place
+    return idxs, bbox_coords, bbox_presence
+
+def load_chest_imagenome_dicom_ids():
+    chest_imagenome_bboxes = load_chest_imagenome_silver_bboxes()
+    return list(chest_imagenome_bboxes.keys())
 
 def load_chest_imagenome_gold_bboxes():
     cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'chest_imagenome_gold_bboxes.pkl')

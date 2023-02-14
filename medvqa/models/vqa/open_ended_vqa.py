@@ -1,47 +1,15 @@
-import torch
 from torch import nn
-from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
-from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.text_encoder import BiLSTMBasedTextEncoder
 from medvqa.models.nlp.text_decoder import LSTMBasedTextDecoder
-from medvqa.models.vision.bbox_regression import (
-    BBoxRegressorVersion,
-    BoundingBoxRegressor_v1,
-    BoundingBoxRegressor_v2,
-    BoundingBoxRegressor_v3,
-)
 from medvqa.models.vision.visual_modules import (
-    CLIP_RESNET_GLOBAL_FEAT_SIZE,
-    CLIP_VIT_GLOBAL_FEAT_SIZE,
-    HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE,
-    HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE,
-    HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT,
-    HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE,
-    HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE,
-    HUGGINGFACE_VITMODEL_NAMES_2_SHORT,
-    HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX,
-    create_clip_vit_feature_extractor,
-    create_clip_resnet_feature_extractor,
-    create_densenet121_feature_extractor,
-    create_huggingface_clip_vit_feature_extractor,
-    create_huggingface_vitmodel_feature_extractor,
+    MultiPurposeVisualModule,
+    RawImageEncoding,
+    VisualInputMode,
+    does_include_image,
 )
 from medvqa.models.vqa.lstm_answer_decoder import LSTMAnswerDecoder
-from medvqa.models.mlp import MLP
-from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
-from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.vqa.transformer_answer_decoder import TransformerAnswerDecoder
-from medvqa.utils.constants import (
-    CHEXPERT_LABELS,
-    CHEXPERT_GENDERS,
-    CHEXPERT_ORIENTATIONS,
-    CHEXPERT_TASKS,
-    CXR14_LABELS,
-    VINBIG_DISEASES,
-    PADCHEST_NUM_LABELS,
-    PADCHEST_NUM_LOCALIZATIONS,
-    PADCHEST_PROJECTIONS,
-)
+from medvqa.utils.constants import CHEXPERT_TASKS
 
 class QuestionEncoding:
     BILSTM = 'bilstm'
@@ -51,28 +19,7 @@ class AnswerDecoding:
     LSTM = 'lstm'
     TRANSFORMER  = 'transformer'
 
-class RawImageEncoding:
-    DENSENET_121 = 'densenet-121'
-    CLIP_RESNET = 'clip-resnet'
-    CLIP_VIT = 'clip-vit'
-    CLIP_VIT__HUGGINGFACE = 'clip-vit-huggingface'
-    CLIP_VIT_LARGE__HUGGINGFACE = 'clip-vit-large-huggingface'
-    CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
-    VITMODEL__HUGGINGFACE = 'vitmodel-huggingface'
-    VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
-
-class VisualInputMode:
-    RAW_IMAGE = 'raw-image'
-    PRECOMP_FEAT = 'precomp-feat' # precomputed visual features
-    HYBRID = 'hybrid'
-
-def does_include_image(visual_input_mode):
-    return visual_input_mode in (VisualInputMode.RAW_IMAGE, VisualInputMode.HYBRID)
-
-def does_include_visual_features(visual_input_mode):
-    return visual_input_mode in (VisualInputMode.PRECOMP_FEAT, VisualInputMode.HYBRID)
-
-class OpenEndedVQA(nn.Module):
+class OpenEndedVQA(MultiPurposeVisualModule):
 
     def __init__(self,
                  # Vocab args
@@ -107,6 +54,7 @@ class OpenEndedVQA(nn.Module):
                  # Auxiliary tasks args
                  classify_tags=False,
                  classify_orientation=False,
+                 classify_gender=False,
                  classify_chexpert=False,
                  classify_questions=False,
                  classify_chest_imagenome=False,
@@ -118,6 +66,9 @@ class OpenEndedVQA(nn.Module):
                  n_chest_imagenome_labels=None,
                  chest_imagenome_bbox_hidden_size=None,
                  chest_imagenome_bbox_regressor_version=None,
+                 use_mimiccxr=False,
+                 use_iuxray=False,
+                 use_chexpert=False,
                  use_cxr14=False,
                  use_vinbig=False,
                  use_padchest=False,
@@ -127,7 +78,7 @@ class OpenEndedVQA(nn.Module):
                  chexpert_mode=None,
                  dropout_prob=0,
                  device=None,
-                 use_image_encoder_only=False,
+                 use_visual_module_only=False,
                  **unused_kwargs,
                  ): 
         super().__init__()
@@ -136,32 +87,59 @@ class OpenEndedVQA(nn.Module):
 
         print('  image_encoder_pretrained_weights_path', image_encoder_pretrained_weights_path)
 
-        self.use_image_encoder_only = use_image_encoder_only
+        # Init MultiPurposeVisualModule components (for image encoder and auxiliary tasks)
+        super().__init__(
+            # Image Encoder kwargs
+            visual_input_mode=visual_input_mode,
+            raw_image_encoding=raw_image_encoding,
+            image_local_feat_size=image_local_feat_size,
+            freeze_image_encoder=freeze_image_encoder,
+            image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,
+            imagenet_pretrained=imagenet_pretrained,
+            mlp_in_dim=mlp_in_dim,
+            mlp_out_dim=mlp_out_dim,
+            mlp_hidden_dims=mlp_hidden_dims,
+            clip_version=clip_version,
+            num_regions=num_regions,
+            huggingface_model_name=huggingface_model_name,
+            # Auxiliary tasks kwargs
+            use_mimiccxr=use_mimiccxr,
+            use_iuxray=use_iuxray,
+            use_chexpert=use_chexpert,
+            use_cxr14=use_cxr14,
+            use_vinbig=use_vinbig,
+            use_padchest=use_padchest,
+            classify_tags=classify_tags,
+            classify_orientation=classify_orientation,
+            classify_gender=classify_gender,
+            classify_chexpert=classify_chexpert,
+            classify_questions=classify_questions,
+            classify_chest_imagenome=classify_chest_imagenome,
+            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+            chest_imagenome_train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
+            n_medical_tags=n_medical_tags,
+            n_questions_aux_task=n_questions_aux_task,
+            n_chest_imagenome_labels=n_chest_imagenome_labels,
+            chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
+            chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
+            merge_findings=merge_findings,
+            n_findings=n_findings,
+        )
+
+        self.use_visual_module_only = use_visual_module_only
 
         self.chexpert_mode = chexpert_mode
         if chexpert_mode == CHEXPERT_TASKS.VQA:
             assert question_encoding == QuestionEncoding.ONE_HOT
 
-        if not use_image_encoder_only:
+        if not use_visual_module_only:
             # Init vocab embedding table
             self.embedding_table = nn.Embedding(
                 num_embeddings=vocab_size,
                 embedding_dim=embed_size,
                 padding_idx=0,
             )
-        
-        # Init Visual Module
-        self.visual_input_mode = visual_input_mode
-        self.clip_version = clip_version
-        self.huggingface_model_name = huggingface_model_name
-        if raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
-            assert huggingface_model_name is not None
-        self._init_visual_module(visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
-                            imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            clip_version, huggingface_model_name, freeze_image_encoder)
-        
-        
-        if not use_image_encoder_only:
+
             # Init Question Encoder
             self.question_encoding = question_encoding
             self._init_question_encoder(question_encoding, question_hidden_size=question_hidden_size,
@@ -175,82 +153,11 @@ class OpenEndedVQA(nn.Module):
                                 answer_hidden_size, n_lstm_layers, start_idx, eos_idx, padding_idx, vocab_size,
                                 transf_dec_nhead, transf_dec_dim_forward, transf_dec_num_layers, dropout_prob,
                                 use_local_features=does_include_image(visual_input_mode))
-            
-        # Init auxiliary tasks
-        self._init_auxiliary_tasks(classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                                classify_chest_imagenome, predict_bboxes_chest_imagenome, chexpert_mode, use_cxr14,
-                                use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
-                                chest_imagenome_bbox_hidden_size, chest_imagenome_train_average_bbox_coords,
-                                chest_imagenome_bbox_regressor_version, num_regions,
-                                merge_findings=merge_findings, n_findings=n_findings)
 
         # Logging
         print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
               f'  question_encoding = {question_encoding}\n  answer_decoding = {answer_decoding}\n'
               f'  visual_input_mode = {visual_input_mode}\n  name = {self.name}')
-
-    def _init_visual_module(self, visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
-                            imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            clip_version, huggingface_model_name, freeze_image_encoder):
-        global_feat_size = 0
-        
-        if does_include_image(visual_input_mode):
-            model_name = clip_version if clip_version is not None else huggingface_model_name
-            self._init_raw_image_encoder(raw_image_encoding, image_encoder_pretrained_weights_path,
-                                         imagenet_pretrained, model_name, freeze_image_encoder)
-            global_feat_size += self._get_raw_image_encoder_global_feat_size(image_local_feat_size)
-        
-        if does_include_visual_features(visual_input_mode):
-            self._init_mlp_visual_feat_encoder(mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder)
-            global_feat_size += mlp_out_dim
-        
-        assert global_feat_size > 0
-        self.local_feat_size = image_local_feat_size
-        self.global_feat_size = global_feat_size
-        print('  self.global_feat_size =', self.global_feat_size)
-
-    def _get_raw_image_encoder_global_feat_size(self, image_local_feat_size):
-        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-            return 2 * image_local_feat_size
-        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
-            return CLIP_VIT_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
-            return CLIP_RESNET_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE:
-            return HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
-            return HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET__HUGGINGFACE:
-            return CLIP_RESNET_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
-            return HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE
-        if self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
-            return HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE
-        raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
-    
-    def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
-                                imagenet_pretrained, model_name, freeze_image_encoder):
-        self.raw_image_encoding = raw_image_encoding
-        ignore_name_regex = None
-        if raw_image_encoding == RawImageEncoding.DENSENET_121:
-            self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
-        elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
-            self.raw_image_encoder = create_clip_resnet_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
-            self.raw_image_encoder = create_clip_vit_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-                raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
-            self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
-                raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
-            self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
-            ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
-        else: raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
-        if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
-
-    def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
-        self.mlp_vf_encoder = MLP(in_dim=mlp_in_dim, out_dim=mlp_out_dim, hidden_dims=mlp_hidden_dims)
-        if freeze_image_encoder: freeze_parameters(self.mlp_vf_encoder)
 
     def _init_question_encoder(self, question_encoding, question_hidden_size=None,
                                embed_size=None, question_vec_size=None, vocab_size=None,
@@ -312,139 +219,10 @@ class OpenEndedVQA(nn.Module):
         else:
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
-    def _init_auxiliary_tasks(self, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-                              classify_chest_imagenome, predict_bboxes_chest_imagenome, chexpert_mode, use_cxr14,
-                              use_vinbig, use_padchest, n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
-                              chest_imagenome_bbox_hidden_size, chest_imagenome_train_average_bbox_coords,
-                              chest_imagenome_bbox_regressor_version, num_regions=None,
-                              merge_findings=False, n_findings=None):
-        
-        # Optional auxiliary tasks
-        self.merge_findings = merge_findings
-        
-        # 1) medical tags classification
-        if classify_tags:
-            assert n_medical_tags is not None
-            self.W_tags = nn.Linear(self.global_feat_size, n_medical_tags)
-            self.tags_aux_task = True
-        else:
-            self.tags_aux_task = False
-        
-        # 2) orientation classifiction
-        if classify_orientation:
-            self.W_ori_mimiccxr = nn.Linear(self.global_feat_size, len(MIMICCXR_IMAGE_ORIENTATIONS))
-            self.W_ori_iuxray = nn.Linear(self.global_feat_size, len(IUXRAY_IMAGE_ORIENTATIONS))
-            self.orien_aux_task = True
-        else:
-            self.orien_aux_task = False
-
-        # 3) questions classification
-        if classify_questions:
-            self.W_q = nn.Linear(self.global_feat_size, n_questions_aux_task)
-            self.q_aux_task = True
-        else:
-            self.q_aux_task = False
-
-        # 4) gender classification (chexpert & CRX14 & PadChest)
-        if chexpert_mode is not None or use_cxr14 or use_padchest:
-            self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
-
-        # 5) orientation classification (weight sharing among chexpert & CRX14)
-        if chexpert_mode is not None or use_cxr14:
-            self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
-
-        if merge_findings:
-            assert n_findings is not None
-            self.W_findings = nn.Linear(self.global_feat_size, n_findings)
-        else:        
-            # 6) chexpert classifiction
-            if classify_chexpert:
-                self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
-                self.chx_aux_task = True
-            else:
-                self.chx_aux_task = False
-
-            # 7) CXR14 specific tasks
-            if use_cxr14:
-                self.W_cxr14 = nn.Linear(self.global_feat_size, len(CXR14_LABELS))
-
-            # 8) VinBig specific tasks
-            if use_vinbig:
-                self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
-
-        # 9) PadChest specific tasks
-        if use_padchest:
-            self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
-            self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
-            self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
-
-        # 10) Chest ImaGenome specific tasks
-        if classify_chest_imagenome:
-            assert n_chest_imagenome_labels is not None
-            self.chst_imgn_label_aux_task = True
-            self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
-        else:
-            self.chst_imgn_label_aux_task = False
-        if predict_bboxes_chest_imagenome:
-            assert chest_imagenome_bbox_hidden_size is not None
-            assert chest_imagenome_bbox_regressor_version is not None
-            self.chst_imgn_bbox_aux_task = True
-            if chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V1:
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v1(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                )
-            elif chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V2:
-                assert num_regions is not None
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v2(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                    num_regions=num_regions,
-                )
-            elif chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V3:
-                assert num_regions is not None
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v3(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                    num_regions=num_regions,                    
-                )
-            else:
-                raise ValueError(f'Unknown bbox regressor version: {chest_imagenome_bbox_regressor_version}')
-        else:
-            self.chst_imgn_bbox_aux_task = False
-
     @property
     def name(self):
-        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-            img_str = 'dense121'
-        elif self.raw_image_encoding in (RawImageEncoding.CLIP_VIT,
-                                         RawImageEncoding.CLIP_RESNET):
-            img_str = f'clip-{self.clip_version}'
-        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-                self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
-            img_str = HUGGINGFACE_CLIP_VIT_NAMES_2_SHORT[self.clip_version]
-        elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
-                self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
-            img_str = HUGGINGFACE_VITMODEL_NAMES_2_SHORT[self.huggingface_model_name]
-        else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
-        vf_str = 'mlp(vf)'
-        if self.visual_input_mode == VisualInputMode.HYBRID:
-            vm_str = f'{img_str}+{vf_str}'
-        elif self.visual_input_mode == VisualInputMode.PRECOMP_FEAT:
-            vm_str = vf_str
-        elif self.visual_input_mode == VisualInputMode.RAW_IMAGE:
-            vm_str = img_str
-        else: assert False
-        if not self.use_image_encoder_only:
+        vm_str = super().name # visual module name
+        if not self.use_visual_module_only:
             q_enc_str = 'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot'
             a_dec_str = 'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf'
             strings = [vm_str, q_enc_str, a_dec_str]
@@ -471,148 +249,56 @@ class OpenEndedVQA(nn.Module):
         padchest_forward=False,
         device=None,
     ):
-        # Visual Component                
-        assert (raw_images is not None) or (visual_features is not None)
-        local_feat = None
-        global_list = []        
-        
-        if raw_images is not None:
+        # Visual Component
+        output = super().forward(
+            raw_images=raw_images,
+            visual_features=visual_features,
+            iuxray_forward=iuxray_forward,
+            mimiccxr_forward=mimiccxr_forward,
+            chexpert_forward=chexpert_forward,
+            cxr14_forward=cxr14_forward,
+            vinbig_forward=vinbig_forward,
+            padchest_forward=padchest_forward,
+        )
 
-            if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-                # densenet local features
-                local_feat = self.raw_image_encoder(raw_images)
-                batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
-
-                # compute global features
-                global_avg_pool = local_feat.mean(1)
-                global_max_pool = local_feat.max(1)[0]
-                global_list.append(global_avg_pool)
-                global_list.append(global_max_pool)
-
-            elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
-                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
-                batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)                
-                global_list.append(global_feat)
+        if not self.use_visual_module_only:
             
-            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
-                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
-                global_list.append(global_feat)
-            
-            elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-                    self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE or \
-                    self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
-                    self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
-                tmp = self.raw_image_encoder(raw_images)
-                global_feat, local_feat = tmp.pooler_output, tmp.last_hidden_state
-                global_list.append(global_feat)
-            
-            else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
+            includes_questions = (
+                (chexpert_forward and self.chexpert_mode == CHEXPERT_TASKS.VQA) or
+                cxr14_forward or vinbig_forward or padchest_forward or iuxray_forward or mimiccxr_forward
+            )
 
-        if visual_features is not None:
-            global_vf  = self.mlp_vf_encoder(visual_features)
-            global_list.append(global_vf)
-
-        if len(global_list) > 1:
-            global_feat = torch.cat(global_list, 1)
-        else:
-            global_feat = global_list[0]
-
-        output = {}
-        question_vectors = None
-
-        if self.merge_findings:
-            output['pred_findings'] = self.W_findings(global_feat)
-            output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
-
-        if chexpert_forward:
-            if self.chexpert_mode == CHEXPERT_TASKS.VQA:
-                question_vectors = self.question_encoder(questions)            
-            output['pred_orientation'] = self.W_ori_chexpert(global_feat)
-            output['pred_gender'] = self.W_gender_chexpert(global_feat)
-            if not self.merge_findings:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-        elif cxr14_forward:
-            question_vectors = self.question_encoder(questions)
-            output['pred_orientation'] = self.W_ori_chexpert(global_feat) # weight sharing with chexpert
-            output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
-            if not self.merge_findings:
-                output['pred_cxr14'] = self.W_cxr14(global_feat)
-                output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
-        elif vinbig_forward:
-            question_vectors = self.question_encoder(questions)
-            if not self.merge_findings:
-                output['pred_vinbig'] = self.W_vinbig(global_feat)
-                output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
-        elif padchest_forward:
-            question_vectors = self.question_encoder(questions)
-            output['pred_orientation'] = self.W_padchest_ori(global_feat)
-            output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
-            output['pred_padchest_labels'] = self.W_padchest_labels(global_feat)
-            output['pred_padchest_labels_probs'] = torch.sigmoid(output['pred_padchest_labels'])
-            output['pred_padchest_loc'] = self.W_padchest_loc(global_feat)
-            output['pred_padchest_loc_probs'] = torch.sigmoid(output['pred_padchest_loc'])
-        else:
-            if not self.use_image_encoder_only:
-                # process questions
-                if self.question_encoding == QuestionEncoding.BILSTM:
+            if includes_questions:
+                # encode questions
+                if self.question_encoding == QuestionEncoding.BILSTM: # BiLSTM (verbose)
                     question_vectors = self.question_encoder(questions, question_lengths)
-                else: # one-hot
-                    question_vectors = self.question_encoder(questions)            
-
-                # recover questions from vectors if in BILSTM mode
+                elif self.question_encoding == QuestionEncoding.ONE_HOT: # one-hot (non-verbose)
+                    question_vectors = self.question_encoder(questions)
+                else:
+                    raise ValueError(f'Unknown question encoding strategy {self.question_encoding}')
+                
+                # decode questions back from encoded vectors (if in verbose mode)
                 if self.question_encoding == QuestionEncoding.BILSTM:
                     pred_questions = self.question_decoder(question_vectors, questions, question_lengths)
-                    output['pred_questions'] = pred_questions
+                    output['pred_questions'] = pred_questions            
 
-            # auxiliary tasks (optional)
-            
-            if self.tags_aux_task:
-                output['pred_tags'] = self.W_tags(global_feat)
-            
-            if self.orien_aux_task:
-                if iuxray_forward:
-                    output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
-                if mimiccxr_forward:
-                    output['mimiccxr_pred_orientation'] = self.W_ori_mimiccxr(global_feat)
-
-            if self.q_aux_task:
-                output['pred_qlabels'] = self.W_q(global_feat)
-
-            if not self.merge_findings and self.chx_aux_task:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-
-            if mimiccxr_forward:
-                if self.chst_imgn_label_aux_task:
-                    output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
-                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-
-                if self.chst_imgn_bbox_aux_task:
-                    bbox_coords, bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
-                    output['pred_chest_imagenome_bbox_coords'] = bbox_coords
-                    output['pred_chest_imagenome_bbox_presence'] = bbox_presence
-
-        if not self.use_image_encoder_only:
-            # predict answers (if required)
-            if question_vectors is not None:
-                if self.answer_decoding == AnswerDecoding.LSTM: # LSTM-based decoding            
-                    if mode == 'train':
-                        pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
-                    elif beam_search_k:
-                        pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
-                    else:
-                        pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)                
-                elif self.answer_decoding == AnswerDecoding.TRANSFORMER: # Transformr-based decoding
-                    if mode == 'train':
-                        pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers, device)
-                    else:
-                        pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device)
-                else: assert False
-                output['pred_answers'] = pred_answers
+                # predict answers
+                if question_vectors is not None:
+                    local_feat = output['local_feat']
+                    global_feat = output['global_feat']
+                    if self.answer_decoding == AnswerDecoding.LSTM: # LSTM-based decoding            
+                        if mode == 'train':
+                            pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers)
+                        elif beam_search_k:
+                            pred_answers = self.answer_decoder.beam_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device, beam_search_k)
+                        else:
+                            pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length)                
+                    elif self.answer_decoding == AnswerDecoding.TRANSFORMER: # Transformr-based decoding
+                        if mode == 'train':
+                            pred_answers = self.answer_decoder.teacher_forcing_decoding(local_feat, global_feat, question_vectors, answers, device)
+                        else:
+                            pred_answers = self.answer_decoder.greedy_search_decoding(local_feat, global_feat, question_vectors, max_answer_length, device)
+                    else: assert False
+                    output['pred_answers'] = pred_answers
 
         return output

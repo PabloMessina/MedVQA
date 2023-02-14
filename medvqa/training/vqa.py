@@ -21,11 +21,12 @@ from medvqa.utils.constants import (
     MetricNames,
 )
 
-def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,        
-        question_encoding = QuestionEncoding.BILSTM,
-        answer_decoding = AnswerDecoding.TEACHER_FORCING,
-        shift_answer = False,
-        beam_search_k = None,
+def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
+        use_visual_module_only=False,
+        question_encoding=QuestionEncoding.BILSTM,
+        answer_decoding=AnswerDecoding.TEACHER_FORCING,
+        shift_answer=False,
+        beam_search_k=None,
         include_answer=True,
         include_image=True,
         include_visual_features=False,
@@ -41,6 +42,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         classify_orientation=False,
         iuxray_orientation_criterion=None,
         mimiccxr_orientation_criterion=None,
+        # gender aux task
+        classify_gender=False,
         # chexpert aux task
         classify_chexpert=False,
         chexpert_criterion=None,
@@ -70,49 +73,48 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     ):
 
     scaler = GradScaler(enabled=use_amp)
-    verbose_question = question_encoding != QuestionEncoding.ONE_HOT   
 
-    assert training == (answer_decoding == AnswerDecoding.TEACHER_FORCING)
-
-    use_beam_search = answer_decoding == AnswerDecoding.BEAM_SEARCH
-    
-    if use_beam_search:
-        assert beam_search_k is not None
-
-    if not include_answer:
-        assert max_answer_length is not None
+    if not use_visual_module_only:
+        verbose_question = question_encoding != QuestionEncoding.ONE_HOT
+        # teacher forcing only during training
+        assert training == (answer_decoding == AnswerDecoding.TEACHER_FORCING)
+        use_beam_search = answer_decoding == AnswerDecoding.BEAM_SEARCH    
+        if use_beam_search:
+            assert beam_search_k is not None
+        if not include_answer:
+            assert max_answer_length is not None
+        use_chexpert_vqa = chexpert_mode == CHEXPERT_TASKS.VQA
 
     if update_lr_batchwise:
         assert lr_scheduler is not None
 
-    use_chexpert_vqa = chexpert_mode == CHEXPERT_TASKS.VQA
-
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
-
     
     _mimiccxr_dataset_ids = [MIMICCXR_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
                              MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
 
-    print('chest_imagenome_bbox_loss_weight: ', chest_imagenome_bbox_loss_weight)
+    if predict_bboxes_chest_imagenome:
+        print('chest_imagenome_bbox_loss_weight: ', chest_imagenome_bbox_loss_weight)
     
     def step_fn__mimiccxr_iuxray(batch):
 
         # Extract elements from batch
         idxs = batch['idx']
-        dataset_id = batch['dataset_id']
-        questions = batch['q'].to(device)
+        dataset_id = batch['dataset_id']        
         if include_image:
             images = batch['i'].to(device)
         if include_visual_features:
             visual_features = batch['vf'].to(device)
-        if verbose_question:
-            question_lengths = batch['ql']
-        if include_answer:
-            answers = batch['a'].to(device)
-            if shift_answer:
-                answers_start = answers[:, :-1]
-                answers_end = answers[:, 1:]
+        if not use_visual_module_only:
+            questions = batch['q'].to(device)
+            if verbose_question:
+                question_lengths = batch['ql']
+            if include_answer:
+                answers = batch['a'].to(device)
+                if shift_answer:
+                    answers_start = answers[:, :-1]
+                    answers_end = answers[:, 1:]
 
         is_mimiccxr = dataset_id in _mimiccxr_dataset_ids
 
@@ -137,51 +139,40 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             model.train(training)
 
             # Prepare args for model forward
-            model_kwargs = {
-                'questions': questions,
+            model_kwargs = {                
                 'device': device,
-            }
-            
+                'mode': 'train' if training else 'eval',
+            }            
             if include_image:
                 model_kwargs['raw_images'] = images
             if include_visual_features:
                 model_kwargs['visual_features'] = visual_features
-
-            if verbose_question:
-                model_kwargs['question_lengths'] = question_lengths
-
-            if training:
-                model_kwargs['mode'] = 'train'
-                if shift_answer:
-                    model_kwargs['answers'] = answers_start
-                else:
-                    model_kwargs['answers'] = answers
-            else:
-                model_kwargs['mode'] = 'eval'
-                if use_beam_search:
-                    model_kwargs['beam_search_k'] = beam_search_k
-                if include_answer:
-                    model_kwargs['max_answer_length'] = answers.size(1)
-                else:                    
-                    model_kwargs['max_answer_length'] = max_answer_length
-            
             if is_mimiccxr:
                 model_kwargs['mimiccxr_forward'] = True
             else:
                 model_kwargs['iuxray_forward'] = True
 
+            if not use_visual_module_only:
+                model_kwargs['questions'] = questions
+                if verbose_question:
+                    model_kwargs['question_lengths'] = question_lengths
+                if training:
+                    if shift_answer:
+                        model_kwargs['answers'] = answers_start
+                    else:
+                        model_kwargs['answers'] = answers
+                else:
+                    if use_beam_search:
+                        model_kwargs['beam_search_k'] = beam_search_k
+                    if include_answer:
+                        model_kwargs['max_answer_length'] = answers.size(1)
+                    else:                    
+                        model_kwargs['max_answer_length'] = max_answer_length
+
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
-
-                model_output = model(**model_kwargs)
-
-                if training:
-                    pred_answer_logits = model_output['pred_answers']
-                else:
-                    pred_answers = model_output['pred_answers']
                 
-                if verbose_question:
-                    pred_question_logits = model_output['pred_questions']
+                model_output = model(**model_kwargs)
                 
                 if classify_tags:
                     pred_tags_logits = model_output['pred_tags']            
@@ -202,21 +193,18 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
                     pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
 
+                if not use_visual_module_only:
+                    if training:
+                        pred_answer_logits = model_output['pred_answers']
+                    else:
+                        pred_answers = model_output['pred_answers']
+                    
+                    if verbose_question:
+                        pred_question_logits = model_output['pred_questions']
+
                 if training:                    
                     # Compute losses
-                    losses = []
-                    if verbose_question:
-                        question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
-                        losses.append(question_loss)
-                    if include_answer:
-                        # print('pred_answer_logits.shape =', pred_answer_logits.shape)
-                        # print('answers.shape =', answers.shape)
-                        # answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                        if shift_answer:
-                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
-                        else:
-                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                        losses.append(answer_loss)
+                    losses = []                    
                     if classify_tags:
                         tags_loss = tags_criterion(pred_tags_logits, tags.float())
                         losses.append(tags_loss)
@@ -243,6 +231,17 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
                         chest_imagenome_bbox_loss = chest_imagenome_bbox_loss * chest_imagenome_bbox_loss_weight # weight the loss
                         losses.append(chest_imagenome_bbox_loss)
+                    
+                    if not use_visual_module_only:
+                        if verbose_question:
+                            question_loss = nlg_criterion(pred_question_logits.view(-1, pred_question_logits.shape[-1]), questions.view(-1))            
+                            losses.append(question_loss)
+                        if include_answer:                        
+                            if shift_answer:
+                                answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                            else:
+                                answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                            losses.append(answer_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -252,30 +251,14 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss)
 
-        # Compute predicted Q & A
-        if training:
-            pred_answers = pred_answer_logits.argmax(-1)
-        if verbose_question:
-            pred_questions = pred_question_logits.argmax(-1)
-        
+        # Prepare output
         output = {
-            'idxs': idxs,
-            'pred_answers': tokenizer.clean_batch(pred_answers.detach()),
+            'idxs': idxs,            
             'dataset_id': dataset_id,
         }
+
         if training and batch_loss is not None:
-            output['loss'] = batch_loss.detach()
-        if verbose_question:
-            output['questions'] = tokenizer.clean_batch(questions.detach())
-            output['pred_questions'] = tokenizer.clean_batch(pred_questions.detach())
-            if training:
-                output['question_loss'] = question_loss.detach()
-        else:
-            output['questions'] = questions.detach()
-        if include_answer:
-            output['answers'] = tokenizer.clean_batch(answers.detach())
-            if training:
-                output['answer_loss'] = answer_loss.detach()
+            output['loss'] = batch_loss.detach()        
         if classify_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
@@ -311,6 +294,25 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             if training:
                 output[MetricNames.CHEST_IMAGENOME_BBOX_LOSS] = chest_imagenome_bbox_loss.detach()
 
+        if not use_visual_module_only:
+            # Compute predicted Q & A
+            if training:
+                pred_answers = pred_answer_logits.argmax(-1)
+            if verbose_question:
+                pred_questions = pred_question_logits.argmax(-1)            
+            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+            if verbose_question:
+                output['questions'] = tokenizer.clean_batch(questions.detach())
+                output['pred_questions'] = tokenizer.clean_batch(pred_questions.detach())
+                if training:
+                    output['question_loss'] = question_loss.detach()
+            else:
+                output['questions'] = questions.detach()
+            if include_answer:
+                output['answers'] = tokenizer.clean_batch(answers.detach())
+                if training:
+                    output['answer_loss'] = answer_loss.detach()
+
         return output
     
     def step_fn__chexpert_cxr14(batch):
@@ -318,14 +320,18 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # Extract elements from batch
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
-        orientations = batch['o'].to(device)
-        genders = batch['g'].to(device)
-        labels = batch['l'].to(device)
-        use_vqa_mode = use_chexpert_vqa or dataset_id == CXR14_DATASET_ID
+        use_labels = (dataset_id == CHEXPERT_DATASET_ID and classify_chexpert) or (dataset_id == CXR14_DATASET_ID)
+        use_vqa_mode = not use_visual_module_only and (use_chexpert_vqa or dataset_id == CXR14_DATASET_ID)
         dataset_name = 'chexpert' if dataset_id == CHEXPERT_DATASET_ID else 'cxr14'
         findings_name = 'findings' if use_merged_findings else dataset_name
         findings_criterion = chexpert_criterion if dataset_id == CHEXPERT_DATASET_ID else cxr14_criterion
 
+        if classify_orientation:
+            orientations = batch['o'].to(device)
+        if classify_gender:
+            genders = batch['g'].to(device)
+        if use_labels:
+            labels = batch['l'].to(device)
         if include_image:
             images = batch['i'].to(device)
         if include_visual_features:
@@ -373,11 +379,14 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             with autocast(enabled=use_amp): # automatic mixed precision
 
                 model_output = model(**model_kwargs)
-                
-                pred_labels_logits = model_output[f'pred_{findings_name}']
-                pred_labels_probs = model_output[f'pred_{findings_name}_probs']
-                pred_orientation_logits = model_output['pred_orientation']
-                pred_gender_logits = model_output['pred_gender']
+
+                if use_labels:                
+                    pred_labels_logits = model_output[f'pred_{findings_name}']
+                    pred_labels_probs = model_output[f'pred_{findings_name}_probs']
+                if classify_orientation:
+                    pred_orientation_logits = model_output['pred_orientation']
+                if classify_gender:
+                    pred_gender_logits = model_output['pred_gender']
                 if use_vqa_mode:
                     if training:
                         pred_answer_logits = model_output['pred_answers']
@@ -385,20 +394,27 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         pred_answers = model_output['pred_answers']
 
                 if training:                    
-                    # Compute losses                    
-                    labels_loss = findings_criterion(pred_labels_logits, labels.float())
-                    orientation_loss = chexpert_aux_criterion(pred_orientation_logits, orientations)
-                    gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)
-                    batch_loss = labels_loss + orientation_loss + gender_loss
+                    # Compute losses
+                    losses = []
+                    if use_labels:
+                        labels_loss = findings_criterion(pred_labels_logits, labels.float())
+                        losses.append(labels_loss)
+                    if classify_orientation:
+                        orientation_loss = chexpert_aux_criterion(pred_orientation_logits, orientations)
+                        losses.append(orientation_loss)
+                    if classify_gender:
+                        gender_loss = chexpert_aux_criterion(pred_gender_logits, genders)
+                        losses.append(gender_loss)                    
                     if use_vqa_mode:
                         # answer_loss = nlg_criterion(pred_answer_logits.view(-1, pred_answer_logits.shape[-1]), answers.view(-1))
                         if shift_answer:
                             answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
                         else:
                             answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                        batch_loss += answer_loss
-
-                    # Backward pass + optimizer step if training
+                        losses.append(answer_loss)                    
+                    # Backward pass + optimizer step
+                    assert len(losses) > 0
+                    batch_loss = sum(losses)
                     gradient_accumulator.step(batch_loss)
         
         output = {
@@ -409,23 +425,26 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['loss'] = batch_loss.detach()
             
         # dataset-specific labels
-        output[dataset_name] = labels.detach().cpu()
-        output[f'pred_{dataset_name}'] = (pred_labels_logits.detach() > 0).cpu()
-        output[f'pred_{dataset_name}_probs'] = pred_labels_probs.detach().cpu()
-        if training:
-            output[f'{dataset_name}_loss'] = labels_loss.detach()
+        if use_labels:
+            output[dataset_name] = labels.detach().cpu()
+            output[f'pred_{dataset_name}'] = (pred_labels_logits.detach() > 0).cpu()
+            output[f'pred_{dataset_name}_probs'] = pred_labels_probs.detach().cpu()
+            if training:
+                output[f'{dataset_name}_loss'] = labels_loss.detach()
 
         # orientation
-        output['orientation'] = orientations.detach()
-        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()        
-        if training:
-            output['orientation_loss'] = orientation_loss.detach()
+        if classify_orientation:
+            output['orientation'] = orientations.detach()
+            output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()        
+            if training:
+                output['orientation_loss'] = orientation_loss.detach()
 
         # gender
-        output['gender'] = genders.detach()
-        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
-        if training:
-            output['gender_loss'] = gender_loss.detach()
+        if classify_gender:
+            output['gender'] = genders.detach()
+            output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
+            if training:
+                output['gender_loss'] = gender_loss.detach()
 
         # answers (vqa)
         if use_vqa_mode:
@@ -442,16 +461,17 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # Extract elements from batch
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
-        vinbig_labels = batch['l'].to(device)
-        questions = batch['q'].to(device)
-        answers = batch['a'].to(device)
-        if shift_answer:
-            answers_start = answers[:, :-1]
-            answers_end = answers[:, 1:]
+        vinbig_labels = batch['l'].to(device)        
         if include_image:
             images = batch['i'].to(device)
         if include_visual_features:
             visual_features = batch['vf'].to(device)
+        if not use_visual_module_only:
+            questions = batch['q'].to(device)
+            answers = batch['a'].to(device)
+            if shift_answer:
+                answers_start = answers[:, :-1]
+                answers_end = answers[:, 1:]
 
         findings_name = 'findings' if use_merged_findings else 'vinbig'
         
@@ -463,28 +483,28 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             model_kwargs = {
                 'vinbig_forward': True,
                 'device': device,
+                'mode': 'train' if training else 'eval',
             }
 
             if include_image:
                 model_kwargs['raw_images'] = images
             if include_visual_features:
                 model_kwargs['visual_features'] = visual_features
-            
-            model_kwargs['questions'] = questions
-            if training:
-                model_kwargs['mode'] = 'train'
-                if shift_answer:
-                    model_kwargs['answers'] = answers_start
+
+            if not use_visual_module_only:
+                model_kwargs['questions'] = questions
+                if training:
+                    if shift_answer:
+                        model_kwargs['answers'] = answers_start
+                    else:
+                        model_kwargs['answers'] = answers
                 else:
-                    model_kwargs['answers'] = answers
-            else:
-                model_kwargs['mode'] = 'eval'
-                if use_beam_search:
-                    model_kwargs['beam_search_k'] = beam_search_k
-                if include_answer:
-                    model_kwargs['max_answer_length'] = answers.size(1)
-                else:                    
-                    model_kwargs['max_answer_length'] = max_answer_length
+                    if use_beam_search:
+                        model_kwargs['beam_search_k'] = beam_search_k
+                    if include_answer:
+                        model_kwargs['max_answer_length'] = answers.size(1)
+                    else:                    
+                        model_kwargs['max_answer_length'] = max_answer_length
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -493,21 +513,22 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 
                 pred_vinbig_logits = model_output[f'pred_{findings_name}']
                 pred_vinbig_probs = model_output[f'pred_{findings_name}_probs']
-                if training:
-                    pred_answer_logits = model_output['pred_answers']
-                else:
-                    pred_answers = model_output['pred_answers']
+                if not use_visual_module_only:
+                    if training:
+                        pred_answer_logits = model_output['pred_answers']
+                    else:
+                        pred_answers = model_output['pred_answers']
 
                 if training:
                     # Compute losses
                     vinbig_loss = vinbig_criterion(pred_vinbig_logits, vinbig_labels.float())                    
                     batch_loss = vinbig_loss
-                    if shift_answer:
-                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
-                    else:
-                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                    batch_loss += answer_loss
-
+                    if not use_visual_module_only:
+                        if shift_answer:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                        else:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        batch_loss += answer_loss
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss)
         
@@ -526,11 +547,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output[f'vinbig_loss'] = vinbig_loss.detach()
 
         # answers (vqa)
-        if training:
-            pred_answers = pred_answer_logits.argmax(-1)        
-            output['answer_loss'] = answer_loss.detach()            
-        output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
-        output['answers'] = tokenizer.clean_batch(answers.detach())                
+        if not use_visual_module_only:
+            if training:
+                pred_answers = pred_answer_logits.argmax(-1)        
+                output['answer_loss'] = answer_loss.detach()            
+            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+            output['answers'] = tokenizer.clean_batch(answers.detach())                
 
         return output
 
@@ -541,15 +563,18 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         dataset_id = batch['dataset_id']
         padchest_labels = batch['l'].to(device)
         padchest_loc = batch['loc'].to(device)
-        orientations = batch['o'].to(device)
-        genders = batch['g'].to(device)
-        questions = batch['q'].to(device)
-        answers = batch['a'].to(device)
-        if shift_answer:
-            answers_start = answers[:, :-1]
-            answers_end = answers[:, 1:]
-        if include_image:
-            images = batch['i'].to(device)
+        if classify_orientation:
+            orientations = batch['o'].to(device)
+        if classify_gender:
+            genders = batch['g'].to(device)
+        if not use_visual_module_only:
+            questions = batch['q'].to(device)
+            answers = batch['a'].to(device)
+            if shift_answer:
+                answers_start = answers[:, :-1]
+                answers_end = answers[:, 1:]
+            if include_image:
+                images = batch['i'].to(device)
 
         with torch.set_grad_enabled(training):
 
@@ -559,26 +584,26 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             model_kwargs = {
                 'padchest_forward': True,
                 'device': device,
+                'mode': 'train' if training else 'eval',
             }
 
             if include_image:
                 model_kwargs['raw_images'] = images
-            
-            model_kwargs['questions'] = questions
-            if training:
-                model_kwargs['mode'] = 'train'
-                if shift_answer:
-                    model_kwargs['answers'] = answers_start
+
+            if not use_visual_module_only:            
+                model_kwargs['questions'] = questions
+                if training:
+                    if shift_answer:
+                        model_kwargs['answers'] = answers_start
+                    else:
+                        model_kwargs['answers'] = answers
                 else:
-                    model_kwargs['answers'] = answers
-            else:
-                model_kwargs['mode'] = 'eval'
-                if use_beam_search:
-                    model_kwargs['beam_search_k'] = beam_search_k
-                if include_answer:
-                    model_kwargs['max_answer_length'] = answers.size(1)
-                else:                    
-                    model_kwargs['max_answer_length'] = max_answer_length
+                    if use_beam_search:
+                        model_kwargs['beam_search_k'] = beam_search_k
+                    if include_answer:
+                        model_kwargs['max_answer_length'] = answers.size(1)
+                    else:                    
+                        model_kwargs['max_answer_length'] = max_answer_length
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -589,31 +614,38 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 pred_padchest_labels_probs = model_output['pred_padchest_labels_probs']
                 pred_padchest_loc_logits = model_output['pred_padchest_loc']
                 pred_padchest_loc_probs = model_output['pred_padchest_loc_probs']
-                pred_orientation_logits = model_output['pred_orientation']
-                pred_gender_logits = model_output['pred_gender']
-
-                if training:
-                    pred_answer_logits = model_output['pred_answers']
-                else:
-                    pred_answers = model_output['pred_answers']
+                if classify_orientation:
+                    pred_orientation_logits = model_output['pred_orientation']
+                if classify_gender:
+                    pred_gender_logits = model_output['pred_gender']
+                if not use_visual_module_only:
+                    if training:
+                        pred_answer_logits = model_output['pred_answers']
+                    else:
+                        pred_answers = model_output['pred_answers']
 
                 if training:
                     # Compute losses
+                    losses = []
                     padchest_label_loss = padchest_multilabel_criterion(pred_padchest_labels_logits, padchest_labels.float())
+                    losses.append(padchest_label_loss)
                     padchest_loc_loss = padchest_multilabel_criterion(pred_padchest_loc_logits, padchest_loc.float())
-                    orientation_loss = padchest_singlelabel_criterion(pred_orientation_logits, orientations)
-                    gender_loss = padchest_singlelabel_criterion(pred_gender_logits, genders)
-                    batch_loss = padchest_label_loss +\
-                                 padchest_loc_loss +\
-                                 orientation_loss +\
-                                 gender_loss
-                    if shift_answer:
-                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
-                    else:
-                        answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
-                    batch_loss += answer_loss
-
-                    # Backward pass + optimizer step if training
+                    losses.append(padchest_loc_loss)
+                    if classify_orientation:
+                        orientation_loss = padchest_singlelabel_criterion(pred_orientation_logits, orientations)
+                        losses.append(orientation_loss)
+                    if classify_gender:
+                        gender_loss = padchest_singlelabel_criterion(pred_gender_logits, genders)
+                        losses.append(gender_loss)
+                    if not use_visual_module_only:                    
+                        if shift_answer:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers_end.reshape(-1))
+                        else:
+                            answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
+                        losses.append(answer_loss)
+                    # Backward pass + optimizer step
+                    assert len(losses) > 0
+                    batch_loss = sum(losses)
                     gradient_accumulator.step(batch_loss)
 
         output = {
@@ -630,22 +662,26 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         output['padchest_loc'] = padchest_loc.detach().cpu()
         output['pred_padchest_loc'] = (pred_padchest_loc_logits.detach() > 0).cpu()
         output['pred_padchest_loc_probs'] = pred_padchest_loc_probs.detach().cpu()
-        output['orientation'] = orientations.detach()
-        output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
-        output['gender'] = genders.detach()
-        output['pred_gender'] = pred_gender_logits.argmax(-1).detach()        
         if training:
             output['padchest_label_loss'] = padchest_label_loss.detach()
             output['padchest_loc_loss'] = padchest_loc_loss.detach()
-            output['orientation_loss'] = orientation_loss.detach()
-            output['gender_loss'] = gender_loss.detach()
-
+        if classify_orientation:
+            output['orientation'] = orientations.detach()
+            output['pred_orientation'] = pred_orientation_logits.argmax(-1).detach()
+            if training:
+                output['orientation_loss'] = orientation_loss.detach()
+        if classify_gender:
+            output['gender'] = genders.detach()
+            output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
+            if training:
+                output['gender_loss'] = gender_loss.detach()
         # answers (vqa)
-        if training:
-            pred_answers = pred_answer_logits.argmax(-1)
-            output['answer_loss'] = answer_loss.detach()
-        output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
-        output['answers'] = tokenizer.clean_batch(answers.detach())                
+        if not use_visual_module_only:
+            if training:
+                pred_answers = pred_answer_logits.argmax(-1)
+                output['answer_loss'] = answer_loss.detach()
+            output['pred_answers'] = tokenizer.clean_batch(pred_answers.detach())
+            output['answers'] = tokenizer.clean_batch(answers.detach())                
 
         return output
 
@@ -682,29 +718,38 @@ def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
     mask = torch.tensor(mask).to(device)
     return mask
 
-def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_chexpert, classify_questions,
-               classify_chest_imagenome, predict_bboxes_chest_imagenome, question_encoding, answer_decoding, device,
-               iters_to_accumulate=1,
-               binary_loss_name='bce',
-               include_image=True, include_visual_features=False,
-               shift_answer=False, include_answer=True,
-               beam_search_k=None, max_answer_length=None,
-               use_amp=False,
-               training=False,
-               train_with_chexpert_dataset=False,
-               train_with_cxr14=False,
-               chexpert_mode=None,
-               use_vinbig_dataset=False,
-               use_padchest_dataset=False,
-               chest_imagenome_bbox_loss_weight=1.0,
-               optimizer=None,
-               update_lr_batchwise=False, lr_scheduler=None,
-               use_merged_findings=False, findings_remapper=None, n_findings=None):
+def get_engine(model, classify_tags, classify_orientation, classify_gender,
+                classify_chexpert, classify_questions, classify_chest_imagenome,
+                predict_bboxes_chest_imagenome, device,
+                tokenizer=None,
+                question_encoding=None,
+                answer_decoding=None,
+                iters_to_accumulate=1,
+                binary_loss_name='bce',
+                include_image=True, include_visual_features=False,
+                shift_answer=False, include_answer=True,
+                beam_search_k=None, max_answer_length=None,
+                use_amp=False,
+                training=False,
+                use_chexpert_dataset=False,
+                use_cxr14_dataset=False,
+                chexpert_mode=None,
+                use_vinbig_dataset=False,
+                use_padchest_dataset=False,
+                chest_imagenome_bbox_loss_weight=1.0,
+                optimizer=None,
+                update_lr_batchwise=False, lr_scheduler=None,
+                use_merged_findings=False, findings_remapper=None, n_findings=None,
+                use_visual_module_only=False,
+            ):
     
     print(f'get_engine(): shift_answer={shift_answer}')
     
     # Criterion
-    nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
+    if not use_visual_module_only:
+        nlg_criterion = nn.CrossEntropyLoss(ignore_index=0) # ignore padding in loss
+    else:
+        nlg_criterion = None
 
     if use_merged_findings and training:
         assert binary_loss_name == 'wbce-c'
@@ -729,13 +774,13 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
     else:
         question_criterion = None
 
-    if training and train_with_chexpert_dataset or train_with_cxr14 or train_with_cxr14:
+    if training and (use_chexpert_dataset or use_cxr14_dataset or use_cxr14_dataset):
         chexpert_aux_criterion = nn.CrossEntropyLoss()
         assert chexpert_mode is not None
     else:
         chexpert_aux_criterion = None
 
-    if training and classify_chexpert or train_with_chexpert_dataset:
+    if training and classify_chexpert:
         if use_merged_findings:
             chexpert_mask = _get_dataset_masks(CHEXPERT_DATASET_ID, findings_remapper, n_findings, device)
             chexpert_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=chexpert_mask)
@@ -744,7 +789,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
     else:
         chexpert_criterion = None
 
-    if training and train_with_cxr14:
+    if training and use_cxr14_dataset:
         if use_merged_findings:
             cxr14_mask = _get_dataset_masks(CXR14_DATASET_ID, findings_remapper, n_findings, device)
             cxr14_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=cxr14_mask)
@@ -783,6 +828,7 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
 
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
+                            use_visual_module_only=use_visual_module_only,
                             include_visual_features=include_visual_features,
                             include_image=include_image, include_answer=include_answer,
                             max_answer_length=max_answer_length,
@@ -801,6 +847,8 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                             classify_orientation=classify_orientation,
                             iuxray_orientation_criterion=iuxray_orientation_criterion,
                             mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
+                            # gender auxiliary task
+                            classify_gender=classify_gender,
                             # chexpert auxiliary task
                             classify_chexpert=classify_chexpert,
                             chexpert_criterion=chexpert_criterion,
@@ -827,6 +875,6 @@ def get_engine(model, tokenizer, classify_tags, classify_orientation, classify_c
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,
-                          )
+                        )
     engine = Engine(step_fn)
     return engine

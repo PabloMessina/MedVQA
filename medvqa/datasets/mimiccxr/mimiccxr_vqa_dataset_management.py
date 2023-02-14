@@ -7,6 +7,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_silver_bboxes,
     load_chest_imagenome_label_names_and_templates,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
+    load_chest_imagenome_silver_bboxes_as_numpy_array,
 )
 from medvqa.datasets.utils import deduplicate_indices
 from medvqa.datasets.vqa import VQA_Evaluator, VQA_Trainer
@@ -660,22 +661,9 @@ class MIMICCXR_VQA_Trainer(VQA_Trainer):
             other_tasks.append(('chest_imagenome', lambda _, rid: self.chest_imagenome_labels[rid]))
         
         if predict_bboxes_chest_imagenome:
-            self.chest_imagenome_bboxes = load_chest_imagenome_silver_bboxes()
-            _bbox_coords = np.empty((len(self.chest_imagenome_bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
-            _bbox_presence = np.empty((len(self.chest_imagenome_bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
-            _did2idx = {did: i for i, did in enumerate(self.chest_imagenome_bboxes.keys())}
-            _dids = np.array([_did2idx[did] for did in self.dicom_ids], dtype=int)
-            for did in self.chest_imagenome_bboxes.keys():
-                i = _did2idx[did]
-                _bbox_coords[i] = self.chest_imagenome_bboxes[did]['coords']                
-                _bbox_presence[i] = self.chest_imagenome_bboxes[did]['presence']
-            if clamp_bboxes_chest_imagenome:
-                print('Clamping Chest-Imagenome bounding boxes to [0, 1] in-place')
-                _bbox_coords.clip(0, 1, out=_bbox_coords) # Clip to [0, 1] in-place
-            self.dicomId2idx = _did2idx
-            self.dicom_idxs = _dids
-            self.bbox_coords = _bbox_coords
-            self.bbox_presence = _bbox_presence
+            self.dicom_idxs, self.bbox_coords, self.bbox_presence =\
+                load_chest_imagenome_silver_bboxes_as_numpy_array(
+                    self.dicom_ids, clamp_bboxes_chest_imagenome)
             other_tasks.append(('chest_imagenome_bbox_coords', lambda i, _: self.bbox_coords[self.dicom_idxs[i]]))
             other_tasks.append(('chest_imagenome_bbox_presence', lambda i, _: self.bbox_presence[self.dicom_idxs[i]]))
 

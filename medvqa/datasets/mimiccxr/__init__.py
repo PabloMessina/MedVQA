@@ -148,10 +148,10 @@ def get_mimiccxr_image_paths(report):
 
 def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
 
-    output_path = os.path.join(MIMICCXR_CACHE_DIR, f'{qa_adapted_reports_filename}__detailed_metadata.pkl')
-    if os.path.exists(output_path):
-        print(f'Loading cached detailed metadata from {output_path}')
-        return get_cached_pickle_file(output_path)
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, f'{qa_adapted_reports_filename}__detailed_metadata.pkl')
+    if os.path.exists(cache_path):
+        print(f'Loading cached detailed metadata from {cache_path}')
+        return get_cached_pickle_file(cache_path)
 
     qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))    
     image_views_dict = get_image_views_dict()
@@ -193,8 +193,8 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
         filepaths=filepaths,
     )
 
-    save_to_pickle(report_metadata, output_path)
-    print(f'Saved detailed metadata to {output_path}')
+    save_to_pickle(report_metadata, cache_path)
+    print(f'Saved detailed metadata to {cache_path}')
     return report_metadata
 
 def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):

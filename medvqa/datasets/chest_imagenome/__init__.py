@@ -2,14 +2,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import pandas as pd
 from medvqa.utils.common import CACHE_DIR
 
 CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR']
+CHEST_IMAGENOME_SILVER_DATASET_DIR = os.environ['CHEST_IMAGENOME_SILVER_DATASET_DIR']
 CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH = os.environ['CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH']
 CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH = os.environ['CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH']
 CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'bboxes.pkl')
+
 
 CHEST_IMAGENOME_NUM_BBOX_CLASSES = 36
 CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES = 26
@@ -179,8 +180,4 @@ CHEST_IMAGENOME_ATTRIBUTES_DICT = {
         'calcified',
         'lucency',
     ],
-}
-
-def load_gold_standard_dicom_ids():
-    df = pd.read_csv(CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH)
-    return df['dicom_id'].tolist()
+}   
