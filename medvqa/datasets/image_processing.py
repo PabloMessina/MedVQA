@@ -1,5 +1,7 @@
 import torch
 import torchvision.transforms as T
+import torchxrayvision as xrv
+import cv2
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from tqdm import tqdm
@@ -19,7 +21,10 @@ from medvqa.models.vision.visual_modules import (
 )
 from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
 from medvqa.utils.hashing import hash_string
-from medvqa.datasets.augmentation import ImageAugmentationTransforms
+from medvqa.datasets.augmentation import (
+    ImageAugmentationTransforms,
+    ImageBboxAugmentationTransforms,
+)
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -38,19 +43,28 @@ def get_image_transform(
     mean = (0.485, 0.456, 0.406),
     std = (0.229, 0.224, 0.225),
     augmentation_mode = None,
-    default_prob=0.3,
+    default_prob=0.5,
     use_clip_transform=False,
     clip_version=None,
     use_huggingface_vitmodel_transform=False,
+    use_torchxrayvision_transform=False,
     huggingface_vitmodel_name=None,
+    use_bbox_aware_transform=False,
 ):
+    print('get_image_transform()')
+
+    # Only one of the following can be true
+    assert sum([use_clip_transform, use_huggingface_vitmodel_transform, use_torchxrayvision_transform,
+                use_bbox_aware_transform]) <= 1
 
     if use_clip_transform:
         assert clip_version is not None
         print(f'Using CLIP transform for version {clip_version}')
+        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
         mean, std = CLIP_VERSION_2_IMAGE_MEAN_STD.get(clip_version, CLIP_DEFAULT_IMAGE_MEAN_STD)
         tf_normalize = T.Normalize(mean, std)
+
     elif use_huggingface_vitmodel_transform:
         assert huggingface_vitmodel_name is not None
         print(f'Using Huggingface ViT model transform for {huggingface_vitmodel_name}')
@@ -63,10 +77,92 @@ def get_image_transform(
             image_size = (feature_extractor.size["height"], feature_extractor.size["width"])
         if type(image_size) is int:
             image_size = (image_size, image_size)
+        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
         tf_normalize = T.Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
+
+    elif use_torchxrayvision_transform:
+        assert image_size[0] == image_size[1]
+        assert augmentation_mode is None # augmentation not supported. TODO: add support
+        print(f'Using torchxrayvision transform (image_size = {image_size})')
+        from skimage.io import imread
+        tf = T.Compose([
+            imread, # read image
+            lambda x: xrv.datasets.normalize(x, 255, True), # normalize
+            xrv.datasets.XRayResizer(image_size[0], 'cv2'), # resize
+            torch.from_numpy, # convert to tensor
+        ])
+        return tf
+
+    elif use_bbox_aware_transform:
+        print(f'  Using bounding box aware transforms')
+        tf_load_image = T.Lambda(lambda x: cv2.imread(x))
+        # tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
+        tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
+        tf_totensor = T.ToTensor()
+        tf_normalize = T.Normalize(mean, std)
+
+        def _default_transform(image_path, bboxes=None, category_ids=None):
+            image = tf_load_image(image_path)
+            # image = tf_bgr2rgb(image)
+            image = tf_resize(image)
+            image = tf_totensor(image)
+            image = tf_normalize(image)
+            # assert len(image.shape) == 3 # (C, H, W)
+            if bboxes is None:
+                assert category_ids is None
+                return image
+            return image, bboxes, category_ids
+
+        if augmentation_mode is None: # no augmentation
+            print('    Returning default transform (no augmentation)')
+            return _default_transform
+        
+        _augmented_bbox_transforms = []
+        img_bbox_aug_transfoms = ImageBboxAugmentationTransforms(image_size)
+        if augmentation_mode == 'random-color':
+            aug_transforms = img_bbox_aug_transfoms.get_color_transforms_list()
+        elif augmentation_mode == 'random-spatial':
+            aug_transforms = img_bbox_aug_transfoms.get_spatial_transforms_list()
+        elif augmentation_mode == 'random-color-and-spatial':
+            aug_transforms = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list()
+        else:
+            raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
+
+        def _get_transform(tf_img_bbox_aug): # closure (closure is needed to capture tf_img_bbox_aug)
+            def _transform(image_path, bboxes, category_ids):
+                image = tf_load_image(image_path)
+                # image = tf_bgr2rgb(image)
+                image = tf_resize(image)
+                augmented = tf_img_bbox_aug(image=image, bboxes=bboxes, category_ids=category_ids)
+                image = augmented['image']
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                bboxes = augmented['bboxes']
+                category_ids = augmented['category_ids']
+                assert len(image.shape) == 3 # (C, H, W)
+                return image, bboxes, category_ids
+            return _transform
+
+        for tf_img_bbox_aug in aug_transforms:
+            _augmented_bbox_transforms.append(_get_transform(tf_img_bbox_aug))
+        
+        print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
+        print('    augmentation_mode =', augmentation_mode)
+        print('    default_prob =', default_prob)
+
+        def transform_fn(img, bboxes, category_ids):
+            # randomly choose between default transform and augmented transform
+            if random.random() < default_prob:
+                return _default_transform(img, bboxes, category_ids)
+            return random.choice(_augmented_bbox_transforms)(img, bboxes, category_ids)
+
+        print(f'    Returning augmented transforms with mode {augmentation_mode}')
+        return transform_fn
+
     else:
-        print(f'Using default transform')
+        print(f'Using standard transform')
+        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
         tf_resize = T.Resize(image_size)
         tf_normalize = T.Normalize(mean, std)
 
@@ -83,9 +179,9 @@ def get_image_transform(
     
     if use_center_crop:
         tf_ccrop = T.CenterCrop(image_size)
-        default_transform = T.Compose([tf_resize, tf_ccrop, tf_totensor, tf_normalize])
+        default_transform = T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_totensor, tf_normalize])
     else:
-        default_transform = T.Compose([tf_resize, tf_totensor, tf_normalize])
+        default_transform = T.Compose([tf_load_image, tf_resize, tf_totensor, tf_normalize])
 
     if augmentation_mode is None:
         print('Returning transform without augmentation')
@@ -99,24 +195,24 @@ def get_image_transform(
         aug_transforms = image_aug_transforms.get_color_transforms()
         if use_center_crop:
             final_transforms = [
-                T.Compose([tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
+                T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
                 for tf_aug in aug_transforms
             ]
         else:
             final_transforms = [
-            T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
+            T.Compose([tf_load_image, tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
     elif augmentation_mode == 'random-spatial':
         aug_transforms = image_aug_transforms.get_spatial_transforms()
         if use_center_crop:
             final_transforms = [
-                T.Compose([tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
+                T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
                 for tf_aug in aug_transforms
             ]
         else:
             final_transforms = [
-            T.Compose([tf_resize, tf_aug, tf_totensor, tf_normalize])
+            T.Compose([tf_load_image, tf_resize, tf_aug, tf_totensor, tf_normalize])
             for tf_aug in aug_transforms
         ]
     elif augmentation_mode == 'random-color-and-spatial':
@@ -126,9 +222,9 @@ def get_image_transform(
         for stf in spatial_transforms:
             for ctf in color_transforms:
                 if use_center_crop:
-                    final_transforms.append(T.Compose([tf_resize, tf_ccrop, stf, ctf, tf_totensor, tf_normalize]))
+                    final_transforms.append(T.Compose([tf_load_image, tf_resize, tf_ccrop, stf, ctf, tf_totensor, tf_normalize]))
                 else:
-                    final_transforms.append(T.Compose([tf_resize, stf, ctf, tf_totensor, tf_normalize]))
+                    final_transforms.append(T.Compose([tf_load_image, tf_resize, stf, ctf, tf_totensor, tf_normalize]))
     else:
         assert False
 
@@ -173,7 +269,7 @@ class ImageDataset(Dataset):
     def __len__(self):
         return len(self.image_paths)
     def __getitem__(self, i):
-        return {'i': self.image_transform(Image.open(self.image_paths[i]).convert('RGB')) }
+        return {'i': self.image_transform(self.image_paths[i]) }
 
 def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,
         top_k, threshold, min_num_q_per_report=5):

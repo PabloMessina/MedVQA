@@ -221,6 +221,7 @@ def get_vqa_collate_batch_fn(
             
             if include_image:
                 batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+                # print(f'collate_batch_fn(): batch_dict["i"].shape={batch_dict["i"].shape}')
             if include_visual_features:
                 batch_dict['vf'] = torch.tensor([batch[i]['vf'] for i in indexes]).float()
             # Auxiliary tasks

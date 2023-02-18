@@ -50,6 +50,11 @@ def get_matching_checkpoint_epoch(results_file_path):
     assert best_epoch != -1
     return best_epoch
 
+def get_model_name_from_checkpoint_path(checkpoint_path):
+    x = f'{os.path.sep}models{os.path.sep}'
+    assert x in checkpoint_path
+    return checkpoint_path.split(x)[1].split(os.path.sep)[0]
+
 def load_metadata(folder):
     fpath = os.path.join(folder, 'metadata.json')    
     data = load_json_file(fpath)

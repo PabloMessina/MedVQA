@@ -28,6 +28,7 @@ from medvqa.training.utils import append_metric_name
 from medvqa.utils.constants import (
     CXR14_DATASET_ID,
     CHEXPERT_DATASET_ID,
+    DATASET_NAMES,
     IUXRAY_DATASET_ID,
     MIMICCXR_DATASET_ID,
     VINBIG_DATASET_ID,
@@ -133,6 +134,7 @@ def parse_args(args=None):
     parser.add_argument('--huggingface-model-name', type=str, default=None)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default='v1')
+    parser.add_argument('--torchxrayvision-weights-name', type=str, default=None)
     parser.add_argument('--num-regions', type=int, default=None)
     
     parser.add_argument('--optimizer-name', type=str, default='adam')
@@ -358,7 +360,7 @@ def train_model(
     count_print('device =', device)
 
     # Create model
-    count_print('Creating instance of MultiPurposeVisualModel ...')    
+    count_print('Creating instance of MultiPurposeVisualModule ...')
     model = MultiPurposeVisualModule(**model_kwargs)
     model = model.to(device)
 
@@ -388,14 +390,7 @@ def train_model(
     count_print('Creating trainer and validator engines ...')    
     trainer_engine = get_engine(model=model, optimizer=optimizer, device=device, 
         update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
-    validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)
-
-    # Define image transform
-    count_print('Defining image transform ...')
-    print('train_image_transform_kwargs:', train_image_transform_kwargs)
-    train_img_transform = get_image_transform(**train_image_transform_kwargs)
-    print('val_image_transform_kwargs:', val_image_transform_kwargs)
-    val_img_transform = get_image_transform(**val_image_transform_kwargs)
+    validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)    
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -428,8 +423,8 @@ def train_model(
     if train_mimiccxr:
         count_print('Creating MIMIC-CXR visual module trainer ...')
         mimiccxr_trainer = MIMICCXR_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
             batch_size = batch_size,
             collate_batch_fn = mimiccxr_collate_batch_fn,            
             num_workers = num_workers,
@@ -440,8 +435,8 @@ def train_model(
     if train_iuxray:
         count_print('Creating IU X-Ray visual module trainer ...')
         iuxray_trainer = IUXRAY_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
             batch_size = batch_size,
             collate_batch_fn = iuxray_collate_batch_fn,            
             num_workers = num_workers,
@@ -452,8 +447,8 @@ def train_model(
     if train_chexpert:
         count_print('Creating CheXpert visual module trainer ...')
         chexpert_trainer = Chexpert_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
             batch_size=batch_size,
             collate_batch_fn=chexpert_collate_batch_fn,
             num_workers=num_workers,
@@ -464,8 +459,8 @@ def train_model(
     if train_cxr14:
         count_print('Creating CXR14 visual module trainer ...')
         cxr14_trainer = CXR14_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CXR14]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CXR14]),
             batch_size=batch_size,
             collate_batch_fn=cxr14_collate_batch_fn,
             num_workers=num_workers,
@@ -476,8 +471,8 @@ def train_model(
     if train_vinbig:
         count_print('Creating VinBig visual module trainer ...')
         vinbig_trainer = VinBig_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
             batch_size=batch_size,
             collate_batch_fn=vinbig_collate_batch_fn,
             num_workers=num_workers,
@@ -488,8 +483,8 @@ def train_model(
     if train_padchest:
         count_print('Creating PadChest visual module trainer ...')
         padchest_trainer = PadChest_VisualModuleTrainer(
-            train_image_transform = train_img_transform,
-            val_image_transform = val_img_transform,
+            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
+            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
             batch_size=batch_size,
             collate_batch_fn=padchest_collate_batch_fn,
             num_workers=num_workers,
@@ -824,6 +819,7 @@ def train_from_scratch(
     chest_imagenome_bbox_regressor_version,
     clip_version,
     huggingface_model_name,
+    torchxrayvision_weights_name,
     # Optimizer args
     optimizer_name,
     lr,
@@ -911,6 +907,13 @@ def train_from_scratch(
                 RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE,
                 RawImageEncoding.CLIP_RESNET__HUGGINGFACE)
     use_huggingface_vitmodel = raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE
+    use_torchxrayvision_transform = raw_image_encoding in (
+        RawImageEncoding.DENSENET_121__TORCHXRAYVISION,
+        RawImageEncoding.RESNET__TORCHXRAYVISION,
+        RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
+    )
+    use_bbox_aware_transform = predict_bboxes_chest_imagenome and img_aug_mode is not None
+    
     if use_clip or use_huggingface_vitmodel:
         if use_clip: assert clip_version is not None
         if use_huggingface_vitmodel: assert huggingface_model_name is not None
@@ -944,6 +947,7 @@ def train_from_scratch(
         mlp_hidden_dims=visual_features_mlp_hidden_dims,
         clip_version=clip_version,
         huggingface_model_name=huggingface_model_name,
+        torchxrayvision_weights_name=torchxrayvision_weights_name,
         num_regions=num_regions,        
         # Aux tasks
         n_medical_tags=n_medical_tags,
@@ -999,18 +1003,22 @@ def train_from_scratch(
             n_findings=n_findings,
         )
 
-    train_image_transform_kwargs = dict(
-        image_size=image_size,
-        augmentation_mode=img_aug_mode,
-        use_clip_transform=use_clip,
-        clip_version=clip_version,
-        use_huggingface_vitmodel_transform=use_huggingface_vitmodel,
-        huggingface_vitmodel_name=huggingface_model_name,
-    )
-
-    # clone to avoid modifying the original one
-    val_image_transform_kwargs = train_image_transform_kwargs.copy()
-    val_image_transform_kwargs['augmentation_mode'] = None # no augmentation for validation
+    # Image transforms
+    train_image_transform_kwargs = {}
+    val_image_transform_kwargs = {}
+    if train_mimiccxr:
+        train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = dict(
+            image_size=image_size,
+            augmentation_mode=img_aug_mode,
+            use_clip_transform=use_clip,
+            clip_version=clip_version,
+            use_huggingface_vitmodel_transform=use_huggingface_vitmodel,
+            huggingface_vitmodel_name=huggingface_model_name,
+            use_torchxrayvision_transform=use_torchxrayvision_transform,
+            use_bbox_aware_transform=use_bbox_aware_transform,
+        )
+        val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
+        val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]['augmentation_mode'] = None # no augmentation for validation
 
     include_image = does_include_image(visual_input_mode)
     include_visual_features = does_include_visual_features(visual_input_mode)
@@ -1038,6 +1046,7 @@ def train_from_scratch(
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
             clamp_bboxes_chest_imagenome=clamp_bboxes_chest_imagenome,
             question_labels_filename=mimiccxr_question_labels_filename,
+            data_augmentation_enabled=img_aug_mode is not None,
         )
         if merge_findings:
             mimiccxr_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1200,8 +1209,7 @@ def resume_training(
     lr_decay_patience,
     warmup_and_decay_args,
     warmup_and_cosine_args,
-    num_workers,
-    val_answer_decoding,
+    num_workers,    
     epochs = 1,
     batches_per_epoch = 1000,
     device = 'GPU',
@@ -1214,7 +1222,6 @@ def resume_training(
 
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)
-    tokenizer_kwargs = metadata['tokenizer_kwargs']
     model_kwargs = metadata['model_kwargs']
     optimizer_kwargs = metadata['optimizer_kwargs']
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']
@@ -1229,7 +1236,7 @@ def resume_training(
     val_image_transform_kwargs = metadata['val_image_transform_kwargs']
     training_kwargs = metadata['training_kwargs']
     trainer_engine_kwargs = metadata['trainer_engine_kwargs']
-    val_engine_kwargs = metadata['val_engine_kwargs']                
+    validator_engine_kwargs = metadata['validator_engine_kwargs']                
     auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
 
     if override_lr:
@@ -1247,32 +1254,31 @@ def resume_training(
         )
 
     return train_model(
-                tokenizer_kwargs,
-                model_kwargs,
-                optimizer_kwargs,
-                lr_scheduler_kwargs,
-                mimiccxr_trainer_kwargs,
-                iuxray_trainer_kwargs,
-                chexpert_trainer_kwargs,
-                cxr14_trainer_kwargs,
-                vinbig_trainer_kwargs,
-                padchest_trainer_kwargs,
-                dataloading_kwargs,
-                train_image_transform_kwargs,
-                val_image_transform_kwargs,
-                training_kwargs,
-                trainer_engine_kwargs,
-                val_engine_kwargs,
-                auxiliary_tasks_kwargs,
-                val_answer_decoding,
-                epochs,
-                batches_per_epoch,
-                num_workers,
-                device = device,
-                checkpoint_folder_path = checkpoint_folder,
-                save = save,
-                override_lr = override_lr,
-                debug = debug)
+                model_kwargs=model_kwargs,
+                optimizer_kwargs=optimizer_kwargs,
+                lr_scheduler_kwargs=lr_scheduler_kwargs,
+                mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
+                iuxray_trainer_kwargs=iuxray_trainer_kwargs,
+                chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+                cxr14_trainer_kwargs=cxr14_trainer_kwargs,
+                vinbig_trainer_kwargs=vinbig_trainer_kwargs,
+                padchest_trainer_kwargs=padchest_trainer_kwargs,
+                dataloading_kwargs=dataloading_kwargs,
+                train_image_transform_kwargs=train_image_transform_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                training_kwargs=training_kwargs,
+                trainer_engine_kwargs=trainer_engine_kwargs,
+                validator_engine_kwargs=validator_engine_kwargs,
+                auxiliary_tasks_kwargs=auxiliary_tasks_kwargs,
+                epochs=epochs,
+                batches_per_epoch=batches_per_epoch,
+                num_workers=num_workers,
+                device=device,
+                checkpoint_folder_path=checkpoint_folder,
+                save=save,
+                override_lr=override_lr,
+                debug=debug)
+                
 
 def debug_main(args):
     args = parse_args(args)

@@ -20,13 +20,19 @@ from medvqa.datasets.mimiccxr import get_mimiccxr_small_image_path, load_mimiccx
 from medvqa.datasets.mimiccxr.preprocessing import get_imageId2PartPatientStudy
 from medvqa.metrics.bbox.bbox_iou import DatasetAwareBboxIOU
 from medvqa.metrics.bbox.bbox_mae import DatasetAwareBboxMAE
-from medvqa.metrics.bbox.bbox_mean_f1 import DatasetAwareBboxMeanF1
-from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
+from medvqa.metrics.bbox.bbox_mean_prf1 import (
+    DatasetAwareBboxMeanF1,
+    DatasetAwareBboxMeanPrecision,
+    DatasetAwareBboxMeanRecall,
+)
+from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_name_from_checkpoint_path, load_metadata
+from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
 from medvqa.utils.common import (
     WORKSPACE_DIR,
     parsed_args_to_dict,
 )
+from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.files import (
     get_checkpoint_folder_path,
     get_results_folder_path,
@@ -93,6 +99,28 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_b
         metrics['meanf1'] = metrics.get('meanf1', 0) + metrics[f'f1@{iou_thrs}']
         count += 1
     metrics['meanf1'] /= count
+    # Mean Precision
+    print('Computing Mean Precision ...')
+    count = 0
+    for iou_thrs in [0.5, 0.6, 0.7, 0.8, 0.9]:
+        print(f'   Computing Precision at IOU threshold {iou_thrs} ...')
+        meanp = DatasetAwareBboxMeanPrecision(lambda x:x, None, n_classes, [iou_thrs])
+        meanp.update((pred_bbox_coords, test_bbox_coords, pred_bbox_presences, test_bbox_presences))
+        metrics[f'p@{iou_thrs}'] = meanp.compute()
+        metrics['meanp'] = metrics.get('meanp', 0) + metrics[f'p@{iou_thrs}']
+        count += 1
+    metrics['meanp'] /= count
+    # Mean Recall
+    print('Computing Mean Recall ...')
+    count = 0
+    for iou_thrs in [0.5, 0.6, 0.7, 0.8, 0.9]:
+        print(f'   Computing Recall at IOU threshold {iou_thrs} ...')
+        meanr = DatasetAwareBboxMeanRecall(lambda x:x, None, n_classes, [iou_thrs])
+        meanr.update((pred_bbox_coords, test_bbox_coords, pred_bbox_presences, test_bbox_presences))
+        metrics[f'r@{iou_thrs}'] = meanr.compute()
+        metrics['meanr'] = metrics.get('meanr', 0) + metrics[f'r@{iou_thrs}']
+        count += 1
+    metrics['meanr'] /= count
     # Save metrics    
     save_path = os.path.join(results_folder_path,
         f'{eval_dataset_name}__bbox_metrics(eval_mode={eval_mode}{",clamped" if clamp_bbox_coords else ""}).pkl')
@@ -260,7 +288,10 @@ def _evaluate_model(
                 coords.clip(0, 1, out=coords)
 
         # Define image transform
-        image_transform = get_image_transform(**image_transform_kwargs)
+        if DATASET_NAMES.MIMICCXR in image_transform_kwargs:
+            image_transform = get_image_transform(**image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        else: # for backward compatibility
+            image_transform = get_image_transform(**image_transform_kwargs)
 
         # Define test bbox dataset and dataloader
         test_dataset = ImageDataset(
@@ -277,13 +308,19 @@ def _evaluate_model(
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f'Device: {device}')
 
-        # Load saved checkpoint    
+        # Load saved checkpoint
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
         checkpoint = torch.load(checkpoint_path)
 
         # Create model
-        model = OpenEndedVQA(**model_kwargs, device=device, use_image_encoder_only=True,
-                               vocab_size=None, start_idx=None)
+        model_name = get_model_name_from_checkpoint_path(checkpoint_path)
+        if model_name == 'vqa':
+            model = OpenEndedVQA(**model_kwargs, device=device, use_image_encoder_only=True,
+                                vocab_size=None, start_idx=None)
+        elif model_name == 'visual_module':
+            model = MultiPurposeVisualModule(**model_kwargs)
+        else:
+            raise ValueError(f'Invalid model_name: {model_name}')
         model = model.to(device)
         model.load_state_dict(checkpoint['model'], strict=False)
 
@@ -348,10 +385,17 @@ def evaluate_model(
         image_transform_kwargs = metadata['val_image_transform_kwargs']
         image_transform_kwargs['augmentation_mode'] = None # no data augmentation during evaluation
         model_kwargs = metadata['model_kwargs']
-        if 'mimiccxr_vqa_trainer_kwargs' in metadata and eval_mode == EvalMode.CHEST_IMAGENOME__TRAINED_MODEL:
-            # set clamp_bbox_coords to True if the model was trained with clamp_bbox_coords=True
-            clamp_bbox_coords = metadata['mimiccxr_vqa_trainer_kwargs']['clamp_bboxes_chest_imagenome']
-            print(f'clamp_bbox_coords: {clamp_bbox_coords}')
+        for key in [ # to handle different naming conventions and backward compatibility
+            'mimiccxr_vqa_trainer_kwargs',
+            'mimiccxr_visual_trainer_kwargs',
+            'mimiccxr_vision_trainer_kwargs',
+            'mimiccxr_trainer_kwargs',
+        ]:
+            if key in metadata and eval_mode == EvalMode.CHEST_IMAGENOME__TRAINED_MODEL:
+                # set clamp_bbox_coords to True if the model was trained with clamp_bbox_coords=True
+                clamp_bbox_coords = metadata[key]['clamp_bboxes_chest_imagenome']
+                print(f'clamp_bbox_coords: {clamp_bbox_coords}')
+                break
     else:
         checkpoint_folder_path = None
         image_transform_kwargs = None

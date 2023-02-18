@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
@@ -35,6 +34,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 include_image=True,
                 image_paths=None,
                 image_transform=None,
+                data_augmentation_enabled=False,
                 # aux task: medical tags
                 classify_tags=False,
                 rid2tags=None,
@@ -62,7 +62,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
             ):
         self.indices = indices
         self.report_ids = report_ids
-        self.include_image = include_image        
+        self.include_image = include_image
+        self.data_augmentation_enabled = data_augmentation_enabled    
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.classify_tags = classify_tags
@@ -82,6 +83,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.precomputed_visual_features = precomputed_visual_features
         self.idx2visfeatidx = idx2visfeatidx
+        # self.DEBUG = True
     
     def __len__(self):
         return len(self.indices)
@@ -92,8 +94,63 @@ class MIMICCXR_Visual_Dataset(Dataset):
         output = { 'idx': idx }
         if self.include_image:
             image_path = self.image_paths[idx]
-            image = Image.open(image_path).convert('RGB')
-            image = self.image_transform(image)
+            if self.predict_bboxes_chest_imagenome: # handle transform differently for chest imagenome bboxes
+                dicom_idx = self.dicom_idxs[idx]
+                bbox_coords = self.bbox_coords[dicom_idx]
+                bbox_presence = self.bbox_presence[dicom_idx]                
+                if self.data_augmentation_enabled: # data augmentation with albumentations
+                    # if self.DEBUG:
+                    #     print('Before data augmentation:')
+                    #     print('dicom_idx', dicom_idx)
+                    #     print('bbox_coords', bbox_coords)
+                    #     print('bbox_presence', bbox_presence)
+                    albumentation_bbox_coords = []
+                    albumentation_category_ids = []
+                    for i in range(len(bbox_presence)):
+                        if bbox_presence[i] == 1:
+                            x_min = bbox_coords[i * 4 + 0]
+                            y_min = bbox_coords[i * 4 + 1]
+                            x_max = bbox_coords[i * 4 + 2]
+                            y_max = bbox_coords[i * 4 + 3]
+                            assert x_min <= x_max
+                            assert y_min <= y_max
+                            if x_min < x_max and y_min < y_max: # ignore invalid bboxes
+                                albumentation_bbox_coords.append([
+                                    bbox_coords[i * 4 + 0],
+                                    bbox_coords[i * 4 + 1],
+                                    bbox_coords[i * 4 + 2],
+                                    bbox_coords[i * 4 + 3],
+                                ])
+                                albumentation_category_ids.append(i)
+                    # if self.DEBUG:
+                    #     print('albumentation_bbox_coords', albumentation_bbox_coords)
+                    #     print('albumentation_category_ids', albumentation_category_ids)
+                    image, albumentation_bbox_coords, albumentation_category_ids = self.image_transform(
+                        image_path, albumentation_bbox_coords, albumentation_category_ids)
+                    bbox_coords.fill(0)
+                    bbox_presence.fill(0)
+                    for i in range(len(albumentation_category_ids)):
+                        cid = albumentation_category_ids[i]
+                        bbox_presence[cid] = 1
+                        for j in range(4):
+                            bbox_coords[cid * 4 + j] = albumentation_bbox_coords[i][j]
+                    # if self.DEBUG:
+                    #     print('After data augmentation:')
+                    #     print('dicom_idx', dicom_idx)
+                    #     print('bbox_coords', bbox_coords)
+                    #     print('bbox_presence', bbox_presence)
+                    #     self.DEBUG = False # only print once
+
+                else: # no data augmentation
+                    image = self.image_transform(image_path)
+                    # if self.DEBUG:
+                    #     print('No data augmentation')
+                    #     print(f'image.shape: {image.shape}')
+                    #     self.DEBUG = False
+                output['chest_imagenome_bbox_coords'] = bbox_coords
+                output['chest_imagenome_bbox_presence'] = bbox_presence
+            else:
+                image = self.image_transform(image_path)
             output['i'] = image
         if self.use_precomputed_visual_features:
             visfeat_idx = self.idx2visfeatidx[idx]
@@ -108,11 +165,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
         if self.classify_chest_imagenome:
-            output['chest_imagenome'] = self.chest_imagenome_labels[rid]
-        if self.predict_bboxes_chest_imagenome:
-            dicom_idx = self.dicom_idxs[idx]
-            output['chest_imagenome_bbox_coords'] = self.bbox_coords[dicom_idx]
-            output['chest_imagenome_bbox_presence'] = self.bbox_presence[dicom_idx]
+            output['chest_imagenome'] = self.chest_imagenome_labels[rid]        
         return output
 
 class MIMICCXR_VisualModuleTrainer():
@@ -121,6 +174,7 @@ class MIMICCXR_VisualModuleTrainer():
                 batch_size, collate_batch_fn,
                 num_workers,
                 qa_adapted_reports_filename,
+                data_augmentation_enabled=False,
                 include_image=True,
                 view_mode = MIMICCXR_ViewModes.ANY_SINGLE,                
                 classify_tags = False,
@@ -143,6 +197,7 @@ class MIMICCXR_VisualModuleTrainer():
 
         self.train_image_transform = train_image_transform
         self.val_image_transform = val_image_transform
+        self.data_augmentation_enabled = data_augmentation_enabled
         self.include_image = include_image
         self.batch_size = batch_size
         self.collate_batch_fn = collate_batch_fn
@@ -196,6 +251,9 @@ class MIMICCXR_VisualModuleTrainer():
         self.orientations = np.array(orientations[:idx])
         self.train_indices = np.array(train_indices)
         self.val_indices = np.array(val_indices)
+
+        print(f'len(self.train_indices) = {len(self.train_indices)}')
+        print(f'len(self.val_indices) = {len(self.val_indices)}')
 
         # Optional data to load
         self.classify_tags = classify_tags
@@ -277,19 +335,22 @@ class MIMICCXR_VisualModuleTrainer():
         
         # Create train dataset and dataloader
         self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
-            self.train_indices, train_image_transform, shuffle=True)
+            self.train_indices, train_image_transform,
+            data_augmentation_enabled=self.data_augmentation_enabled,
+            shuffle=True)
 
         # Create validation dataset and dataloader
         self.val_dataset, self.val_dataloader = self._create_dataset_and_dataloader(
-            self.val_indices, val_image_transform, shuffle=False)
+            self.val_indices, val_image_transform)
 
-    def _create_dataset_and_dataloader(self, indices, image_transform, shuffle=True):
+    def _create_dataset_and_dataloader(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False):
         dataset = MIMICCXR_Visual_Dataset(
             indices=indices,
             report_ids=self.report_ids,
             include_image=self.include_image,
             image_paths=self.image_paths,
             image_transform=image_transform,
+            data_augmentation_enabled=data_augmentation_enabled,
             classify_tags=self.classify_tags,
             rid2tags=self.rid2tags,
             classify_orientation=self.classify_orientation,

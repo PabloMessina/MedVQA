@@ -50,8 +50,9 @@ def collect_chexpert_based_output_results():
 def collect_chest_imagenome_bbox_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
     bbox_dirs = os.listdir(os.path.join(RESULTS_DIR,'bbox'))
+    vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
     results = []
-    for dirs, kind in zip([vqa_dirs, bbox_dirs], ['vqa', 'bbox']):
+    for dirs, kind in zip([vqa_dirs, bbox_dirs, vm_dirs], ['vqa', 'bbox', 'visual_module']):
         for exp_name in dirs:
             exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
                                     if dataset_name in x and 'bbox_metrics' in x and 'chest_imagenome' in x]

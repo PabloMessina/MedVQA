@@ -145,6 +145,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             }            
             if include_image:
                 model_kwargs['raw_images'] = images
+                # print(f'step_fn__mimiccxr_iuxray: images.shape: {images.shape}')
+                # assert len(images.shape) == 4
             if include_visual_features:
                 model_kwargs['visual_features'] = visual_features
             if is_mimiccxr:

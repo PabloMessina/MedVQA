@@ -1,19 +1,37 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+import torchxrayvision as xrv
 import clip
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.common import freeze_parameters, load_model_state_dict
 from medvqa.models.mlp import MLP
-from medvqa.models.vision.bbox_regression import BBoxRegressorVersion, BoundingBoxRegressor_v1, BoundingBoxRegressor_v2, BoundingBoxRegressor_v3
-from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS, CXR14_LABELS, PADCHEST_NUM_LABELS, PADCHEST_NUM_LOCALIZATIONS, PADCHEST_PROJECTIONS, VINBIG_DISEASES
+from medvqa.models.vision.bbox_regression import (
+    BBoxRegressorVersion,
+    BoundingBoxRegressor_v1,
+    BoundingBoxRegressor_v2,
+    BoundingBoxRegressor_v3,
+)
+from medvqa.utils.constants import (
+    CHEXPERT_LABELS,
+    CHEXPERT_GENDERS,
+    CHEXPERT_ORIENTATIONS,
+    CXR14_LABELS,
+    PADCHEST_NUM_LABELS,
+    PADCHEST_NUM_LOCALIZATIONS,
+    PADCHEST_PROJECTIONS,
+    VINBIG_DISEASES,
+)
 from transformers import AutoModel, ViTModel
 import re
 
 class RawImageEncoding:
     DENSENET_121 = 'densenet-121'
+    DENSENET_121__TORCHXRAYVISION = 'densenet-121-torchxrayvision'
+    RESNET__TORCHXRAYVISION = 'resnet-torchxrayvision'
+    RESNET_AUTOENCODER__TORCHXRAYVISION = 'resnet-autoencoder-torchxrayvision'
     CLIP_RESNET = 'clip-resnet'
     CLIP_VIT = 'clip-vit'
     CLIP_VIT__HUGGINGFACE = 'clip-vit-huggingface'
@@ -50,6 +68,7 @@ class MultiPurposeVisualModule(nn.Module):
                 clip_version=None,
                 num_regions=None,
                 huggingface_model_name=None,
+                torchxrayvision_weights_name=None,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -80,8 +99,15 @@ class MultiPurposeVisualModule(nn.Module):
         self.visual_input_mode = visual_input_mode
         self.clip_version = clip_version
         self.huggingface_model_name = huggingface_model_name
+        self.torchxrayvision_weights_name = torchxrayvision_weights_name
         if raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
             assert huggingface_model_name is not None
+        if raw_image_encoding in [
+            RawImageEncoding.DENSENET_121__TORCHXRAYVISION,
+            RawImageEncoding.RESNET__TORCHXRAYVISION,
+            RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
+        ]:
+            assert torchxrayvision_weights_name is not None
         
         # Init visual backbone
         self._init_visual_backbone(
@@ -93,8 +119,6 @@ class MultiPurposeVisualModule(nn.Module):
             mlp_in_dim=mlp_in_dim,
             mlp_out_dim=mlp_out_dim,
             mlp_hidden_dims=mlp_hidden_dims,
-            clip_version=clip_version,
-            huggingface_model_name=huggingface_model_name,
             freeze_image_encoder=freeze_image_encoder,
         )
             
@@ -124,13 +148,22 @@ class MultiPurposeVisualModule(nn.Module):
             n_findings=n_findings,
         )
 
+        print(f'MultiPurposeVisualModule: self.name={self.name}')
+
     def _init_visual_backbone(self, visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
                             imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            clip_version, huggingface_model_name, freeze_image_encoder):
+                            freeze_image_encoder):
         global_feat_size = 0
         
         if does_include_image(visual_input_mode):
-            model_name = clip_version if clip_version is not None else huggingface_model_name
+            if self.clip_version is not None:
+                model_name = self.clip_version
+            elif self.huggingface_model_name is not None:
+                model_name = self.huggingface_model_name
+            elif self.torchxrayvision_weights_name is not None:
+                model_name = self.torchxrayvision_weights_name
+            else:
+                model_name = None
             self._init_raw_image_encoder(raw_image_encoding, image_encoder_pretrained_weights_path,
                                          imagenet_pretrained, model_name, freeze_image_encoder)
             global_feat_size += self._get_raw_image_encoder_global_feat_size(image_local_feat_size)
@@ -145,8 +178,13 @@ class MultiPurposeVisualModule(nn.Module):
         print('  self.global_feat_size =', self.global_feat_size)
 
     def _get_raw_image_encoder_global_feat_size(self, image_local_feat_size):
-        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-            return 2 * image_local_feat_size
+        if self.raw_image_encoding in [
+            RawImageEncoding.DENSENET_121,
+            RawImageEncoding.DENSENET_121__TORCHXRAYVISION,
+            RawImageEncoding.RESNET__TORCHXRAYVISION,
+            RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
+        ]:
+            return 2 * image_local_feat_size        
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
             return CLIP_VIT_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
@@ -169,6 +207,12 @@ class MultiPurposeVisualModule(nn.Module):
         ignore_name_regex = None
         if raw_image_encoding == RawImageEncoding.DENSENET_121:
             self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
+        elif raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
+            self.raw_image_encoder = create_torchxrayvision_densenet121_feature_extractor(model_name)
+        elif raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
+            self.raw_image_encoder = create_torchxrayvision_resnet_feature_extractor(model_name)
+        elif raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
+            self.raw_image_encoder = create_torchxrayvision_resnet_autoencoder_feature_extractor(model_name)
         elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             self.raw_image_encoder = create_clip_resnet_feature_extractor(model_name, pretrained_weights_path)
         elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
@@ -291,7 +335,13 @@ class MultiPurposeVisualModule(nn.Module):
     @property
     def name(self):
         if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-            img_str = 'dense121'
+            img_str = 'dn121'
+        elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
+            img_str = f'dn121-txv({self.torchxrayvision_weights_name})'
+        elif self.raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
+            img_str = f'resnet-txv({self.torchxrayvision_weights_name})'
+        elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
+            img_str = f'resnet-ae-txv({self.torchxrayvision_weights_name})'
         elif self.raw_image_encoding in (RawImageEncoding.CLIP_VIT,
                                          RawImageEncoding.CLIP_RESNET):
             img_str = f'clip-{self.clip_version}'
@@ -309,7 +359,7 @@ class MultiPurposeVisualModule(nn.Module):
             vm_str = vf_str
         elif self.visual_input_mode == VisualInputMode.RAW_IMAGE:
             vm_str = img_str
-        else: assert False
+        else: assert False, f'Unknown visual input mode {self.visual_input_mode}'
         return vm_str
 
     def forward(
@@ -331,12 +381,35 @@ class MultiPurposeVisualModule(nn.Module):
         if raw_images is not None:
 
             if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-                # densenet local features
+                # compute local features
                 local_feat = self.raw_image_encoder(raw_images)
                 batch_size = raw_images.size(0)
                 feat_size = local_feat.size(1)
                 local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                # compute global features
+                global_avg_pool = local_feat.mean(1)
+                global_max_pool = local_feat.max(1)[0]
+                global_list.append(global_avg_pool)
+                global_list.append(global_max_pool)
 
+            elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
+                # compute local features
+                local_feat = self.raw_image_encoder.features(raw_images)
+                batch_size = raw_images.size(0)
+                feat_size = local_feat.size(1)
+                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                # compute global features
+                global_avg_pool = local_feat.mean(1)
+                global_max_pool = local_feat.max(1)[0]
+                global_list.append(global_avg_pool)
+                global_list.append(global_max_pool)
+            
+            elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
+                # compute local features
+                local_feat = self.raw_image_encoder.encode(raw_images)
+                batch_size = raw_images.size(0)
+                feat_size = local_feat.size(1)
+                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 # compute global features
                 global_avg_pool = local_feat.mean(1)
                 global_max_pool = local_feat.max(1)[0]
@@ -626,6 +699,43 @@ def create_densenet121_feature_extractor(
     else:
         densenet = models.densenet121(pretrained=False, drop_rate=drop_rate)
     return densenet.features
+
+def create_torchxrayvision_densenet121_feature_extractor(weights_name):
+    print('create_torchxrayvision_densenet121_feature_extractor()')
+    model = xrv.models.DenseNet(weights=weights_name)
+    return model
+
+def create_torchxrayvision_resnet_feature_extractor(weights_name):
+    print('create_torchxrayvision_resnet_feature_extractor()')
+    model = xrv.models.ResNet(weights=weights_name)
+    model.forward = _torchxrayvision_resnet_modified_forward.__get__(model) # HACK: monkey patching
+    return model
+
+def create_torchxrayvision_resnet_autoencoder_feature_extractor(weights_name):
+    print('create_torchxrayvision_resnet_autoencoder_feature_extractor()')
+    model = xrv.autoencoders.ResNetAE(weights=weights_name)
+    return model
+
+def _torchxrayvision_resnet_modified_forward(self, x):
+    # x = fix_resolution(x, 512, self)
+    # warn_normalization(x)
+
+    x = self.model.conv1(x)
+    x = self.model.bn1(x)
+    x = self.model.relu(x)
+    x = self.model.maxpool(x)
+
+    x = self.model.layer1(x)
+    x = self.model.layer2(x)
+    x = self.model.layer3(x)
+    x = self.model.layer4(x)
+    local_features = x
+
+    x = self.model.avgpool(x)
+    x = torch.flatten(x, 1)
+    global_features = x
+    
+    return global_features, local_features
 
 _CLIP_VIT_VERSIONS = ['ViT-B/32', 'ViT-B/16', 'ViT-L/14', 'ViT-L/14@336px']
 _CLIP_RESNET_VERSIONS = ['RN50', 'RN101', 'RN50x4', 'RN50x16', 'RN50x64']

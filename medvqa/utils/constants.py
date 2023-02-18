@@ -312,6 +312,17 @@ CXR14_DATASET_ID = 6
 PADCHEST_DATASET_ID = 7
 MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE = 8
 
+class DATASET_NAMES:
+    IUXRAY = 'iuxray'
+    MIMICCXR = 'mimic-cxr'
+    CHEXPERT = 'chexpert'
+    IUXRAY_CHEXPERT_MODE = 'iuxray-chexpert-mode'
+    MIMICCXR_CHEXPERT_MODE = 'mimic-cxr-chexpert-mode'
+    VINBIG = 'vinbig'
+    CXR14 = 'cxr14'
+    PADCHEST = 'padchest'
+    MIMICCXR_CHEST_IMAGENOME_MODE = 'mimic-cxr-chest-imagenome-mode'
+
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'
     MOST_POPULAR = 'most-popular'

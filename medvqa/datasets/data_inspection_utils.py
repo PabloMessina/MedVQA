@@ -4,8 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import imagesize
+from tqdm import tqdm
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
-from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_bboxes, load_postprocessed_label_names
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_chest_imagenome_silver_bboxes,
+    load_postprocessed_label_names,
+)
 from medvqa.utils.metrics import (
     chexpert_label_array_to_string,
     chest_imagenome_label_array_to_string,
@@ -161,7 +165,7 @@ def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i, figsize=(10, 1
             print('chest imagenome bbox coords:', bbox_coords)
             print('chest imagenome bbox presence:', bbox_presence)
             print('dicom id:', vqa_trainer.dicom_ids[idx])
-            bboxes_dict = load_chest_imagenome_bboxes()
+            bboxes_dict = load_chest_imagenome_silver_bboxes()
             bbox = bboxes_dict[vqa_trainer.dicom_ids[idx]]
             print('bbox:', bbox)
             # Create figure and axes
@@ -197,3 +201,83 @@ def inspect_iuxray_vqa_trainer(iuxray_vqa_trainer, dataset_name, i):
 
 def inspect_mimiccxr_vqa_trainer(mimiccxr_vqa_trainer, dataset_name, i):
     _inspect_vqa_trainer(mimiccxr_vqa_trainer, MIMICCXR_CACHE_DIR, dataset_name, i)
+
+_shared_image_id_to_binary_labels = None
+def _count_labels(idx):
+        count = 0
+        for binary_labels in _shared_image_id_to_binary_labels.values():
+            if binary_labels[idx] == 1:
+                count += 1
+        return count, idx
+def _count_labels_in_parallel(label_idxs, label_alias, image_id_to_binary_labels, num_workers=10):
+    from multiprocessing import Pool
+    import time
+    global _shared_image_id_to_binary_labels
+    _shared_image_id_to_binary_labels = image_id_to_binary_labels
+    print(f'Num {label_alias} labels:', len(label_idxs))
+    print(f'Counting labels in parallel ({num_workers} workers)...')
+    start = time.time()
+    with Pool(num_workers) as p:
+        label_counts = p.map(_count_labels, label_idxs)
+    print(f'Done counting labels ({time.time() - start:.1f}s)')
+    return label_counts
+
+def _plot_chest_imagenome_label_distribution(label_idxs, label_alias, label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6), n_splits=3):
+    label_counts = _count_labels_in_parallel(label_idxs, label_alias, image_id_to_binary_labels, num_workers)
+    label_counts = sorted(label_counts, key=lambda x: x[0])
+    label_names = [label_names[i] for _, i in label_counts]
+    label_counts = [count for count, _ in label_counts]
+    total = len(image_id_to_binary_labels)    
+    xlim = None
+    # Generate n_splits plots
+    for i in range(n_splits):
+        i = n_splits - i - 1
+        a = i * len(label_counts) // n_splits
+        b = (i+1) * len(label_counts) // n_splits
+        # Vertical bar chart
+        plt.figure(figsize=figsize)
+        if xlim is not None:
+            plt.xlim(xlim)
+        plt.barh(range(b-a), label_counts[a:b])
+        yticks = [f'{str(label_name)} ({count}) ({count/total:.3%})' for\
+            label_name, count in zip(label_names[a:b], label_counts[a:b])]
+        plt.yticks(range(b-a), yticks)
+        if xlim is None:
+            xlim = plt.gca().get_xlim()
+        plt.show()
+
+def plot_chest_imagenome_localized_label_distribution(label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6), n_splits=6):
+    localized_idxs = [i for i, label_name in enumerate(label_names) if len(label_name) == 3]
+    _plot_chest_imagenome_label_distribution(localized_idxs, 'localized', label_names, image_id_to_binary_labels,
+        num_workers=num_workers, figsize=figsize, n_splits=n_splits) 
+
+def plot_chest_imagenome_nonlocalized_label_distribution(label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6), n_splits=3):
+    nonlocalized_idxs = [i for i, label_name in enumerate(label_names) if len(label_name) == 2]
+    _plot_chest_imagenome_label_distribution(nonlocalized_idxs, 'nonlocalized', label_names, image_id_to_binary_labels,
+        num_workers=num_workers, figsize=figsize, n_splits=n_splits)
+
+def _plot_chest_imagenome_label_frequency_histogram(label_idxs, label_alias, label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6)):
+    label_counts = _count_labels_in_parallel(label_idxs, label_alias, image_id_to_binary_labels, num_workers)    
+    label_counts = [count for count, _ in label_counts]
+    plt.figure(figsize=figsize)
+    plt.title(f'Label frequency histogram ({label_alias} labels)')
+    plt.hist(label_counts, bins=100)
+    plt.xlabel('Number of images')
+    plt.ylabel('Number of labels')
+    plt.show()
+
+def plot_chest_imagenome_localized_label_frequency_histogram(label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6)):
+    localized_idxs = [i for i, label_name in enumerate(label_names) if len(label_name) == 3]
+    _plot_chest_imagenome_label_frequency_histogram(localized_idxs, 'localized', label_names, image_id_to_binary_labels,
+        num_workers=num_workers, figsize=figsize)
+
+def plot_chest_imagenome_nonlocalized_label_frequency_histogram(label_names, image_id_to_binary_labels,
+        num_workers=10, figsize=(8, 6)):
+    nonlocalized_idxs = [i for i, label_name in enumerate(label_names) if len(label_name) == 2]
+    _plot_chest_imagenome_label_frequency_histogram(nonlocalized_idxs, 'nonlocalized', label_names, image_id_to_binary_labels,
+        num_workers=num_workers, figsize=figsize)
