@@ -1,21 +1,12 @@
 import re
 import os
-from pathlib import Path
 from pprint import pprint
-from tqdm import tqdm
 from collections import OrderedDict
 from nltk import wordpunct_tokenize
 
-from medvqa.datasets.mimiccxr import (
-    MIMICCXR_CACHE_DIR,
-    MIMICCXR_DATASET_DIR,
-    MIMICCXR_IMAGE_REGEX,
-    MIMICCXR_JPG_IMAGES_SMALL_DIR,
-    MIMICCXR_REPORTS_TXT_PATHS,
-)
 from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, read_lines_from_txt, save_to_pickle
+from medvqa.utils.files import read_lines_from_txt
 
 # _re_header = re.compile(r'[A-Z]+( +[A-Z]+)*?:')
 _re_header = re.compile(r'(^|\n)\s*([A-Z][a-zA-Z]*(( |-|&)+[a-zA-Z]+)*?:)')
@@ -206,55 +197,6 @@ def _contains_medical_terms(text, k):
 
 def _contains_no_invalid_patterns(text):
     return not _re_invalid.search(text)
-
-def get_reports_txt_paths():
-    # if cached
-    report_paths = load_pickle(MIMICCXR_REPORTS_TXT_PATHS)
-    if report_paths is not None:
-        return report_paths
-    # if not cached
-    report_paths = [None] * 300000
-    for i, rp in tqdm(enumerate(report_paths_generator())):
-        report_paths[i] = rp.as_posix()
-    report_paths = report_paths[:i+1]
-    save_to_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
-    print('reports txt paths saved to', MIMICCXR_REPORTS_TXT_PATHS)
-    return report_paths
-
-def report_paths_generator():
-    for x in range(10, 20):
-        for filepath in Path(os.path.join(MIMICCXR_DATASET_DIR, f'files/p{x}/')).rglob("s*.txt"):
-            yield filepath
-
-def image_paths_generator():
-    for x in range(10, 20):
-        for filepath in Path(os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, f'p{x}/')).rglob("*.jpg"):
-            yield filepath
-
-def get_imageId2partId():
-    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2partId.pkl')
-    if os.path.exists(cache_path):
-        return get_cached_pickle_file(cache_path)
-    imageId2partId = {}
-    for image_path in tqdm(image_paths_generator()):
-        image_path = str(image_path)
-        partId, _, _, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
-        imageId2partId[imageId] = partId
-    save_to_pickle(imageId2partId, cache_path)
-    return imageId2partId
-
-def get_imageId2PartPatientStudy():
-    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2PartPatientStudy.pkl')
-    if os.path.exists(cache_path):
-        return get_cached_pickle_file(cache_path)
-    imageId2partId = {}
-    for image_path in tqdm(image_paths_generator()):
-        image_path = str(image_path)
-        partId, patientId, studyId, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
-        imageId2partId[imageId] = (partId, patientId, studyId)
-    save_to_pickle(imageId2partId, cache_path)
-    return imageId2partId
-
 
 _SECTION_HEADERS_FOR_REPORT = set([
     'FINDINGS:',

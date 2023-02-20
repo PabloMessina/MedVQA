@@ -27,8 +27,9 @@ from medvqa.datasets.mimiccxr import (
     get_mimiccxr_report_path,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.datasets.mimiccxr.preprocessing import get_imageId2PartPatientStudy, get_imageId2partId
+from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_json_file, load_pickle, save_to_pickle
+from medvqa.metrics.bbox.utils import compute_iou
 
 def _load_scene_graph(scene_graph_path):
     return load_json_file(scene_graph_path)
@@ -176,7 +177,7 @@ def get_chest_imagenome_gold_bbox_names():
 def load_chest_imagenome_train_average_bbox_coords(mimiccxr_qa_adapted_reports_filename, clamp_bbox_coords=True):
     # Define output path
     output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
-        f'chest_imagenome_train_average_bbox_coords({mimiccxr_qa_adapted_reports_filename},{"clamped" if clamp_bbox_coords else "unclamped"}.pkl')    
+        f'chest_imagenome_train_average_bbox_coords({mimiccxr_qa_adapted_reports_filename},{"clamped" if clamp_bbox_coords else "unclamped"}).pkl')    
     # Load from cache if possible
     if os.path.exists(output_path):
         print(f'Loading {output_path}...')
@@ -189,6 +190,40 @@ def load_chest_imagenome_train_average_bbox_coords(mimiccxr_qa_adapted_reports_f
     bbox_counts = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES * 4)
     for idx in train_idxs:
         dicom_id_view_pairs = mimiccxr_detailed_metadata['dicom_id_view_pos_pairs'][idx]
+        for dicom_id, _ in dicom_id_view_pairs:
+            if dicom_id in bboxes_dict:
+                bbox = bboxes_dict[dicom_id]
+                bbox_coords = bbox['coords']
+                if clamp_bbox_coords:
+                    bbox_coords.clip(0, 1, out=bbox_coords)
+                bbox_presence = bbox['presence']
+                for i in range(CHEST_IMAGENOME_NUM_BBOX_CLASSES):
+                    if bbox_presence[i]:
+                        s = i*4
+                        e = (i+1)*4
+                        avg_bbox_coords[s:e] += bbox_coords[s:e]
+                        bbox_counts[s:e] += 1
+    avg_bbox_coords /= bbox_counts
+    # Save the average bbox coords
+    save_to_pickle(avg_bbox_coords, output_path)
+    print(f'Saved {output_path}')
+    # Return the average bbox coords
+    return avg_bbox_coords
+
+def load_chest_imagenome_average_bbox_coords(clamp_bbox_coords=True):
+    # Define output path
+    output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
+        f'chest_imagenome_train_average_bbox_coords({"clamped" if clamp_bbox_coords else "unclamped"}).pkl')
+    # Load from cache if possible
+    if os.path.exists(output_path):
+        print(f'Loading {output_path}...')
+        return load_pickle(output_path)
+    # Compute the average bbox for each class from the training set    
+    bboxes_dict = load_chest_imagenome_silver_bboxes()
+    mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata()
+    avg_bbox_coords = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES * 4)
+    bbox_counts = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES * 4)
+    for dicom_id_view_pairs in mimiccxr_detailed_metadata['dicom_id_view_pos_pairs']:
         for dicom_id, _ in dicom_id_view_pairs:
             if dicom_id in bboxes_dict:
                 bbox = bboxes_dict[dicom_id]
@@ -422,6 +457,197 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='blue', facecolor='none', linestyle='dashed')
             ax.add_patch(rect)
             ax.text(x1, y1-3, bbox_names[i], fontsize=16, color='blue')
+    plt.show()
+
+_RIGHT_LEFT_PAIRS = []
+for _reg_r, _reg_l in [
+    ('right lung', 'left lung'),
+    ('right upper lung zone', 'left upper lung zone'),
+    ('right mid lung zone', 'left mid lung zone'),
+    ('right lower lung zone', 'left lower lung zone'),
+    ('right hilar structures', 'left hilar structures'),
+    ('right apical zone', 'left apical zone'),
+    ('right costophrenic angle', 'left costophrenic angle'),
+    ('right cardiophrenic angle', 'left cardiophrenic angle'),
+    ('right hemidiaphragm', 'left hemidiaphragm'),
+    ('right clavicle', 'left clavicle'),
+    ('right cardiac silhouette', 'left cardiac silhouette'),
+    ('right upper abdomen', 'left upper abdomen'),
+]:
+    _RIGHT_LEFT_PAIRS.append((
+        CHEST_IMAGENOME_BBOX_NAMES.index(_reg_r),
+        CHEST_IMAGENOME_BBOX_NAMES.index(_reg_l),
+    ))
+
+def determine_if_image_is_decent(dicom_id, average_bboxes, detailed_output=False, debug=False):
+    bboxes_dict = load_chest_imagenome_silver_bboxes()
+    bbox = bboxes_dict[dicom_id]
+    coords = bbox['coords']
+    presence = bbox['presence']
+
+    if debug:
+        imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+        part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+        image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
+        width, height = imagesize.get(image_path)
+        print(f'Image path: {image_path}')
+        print(f'Image size: {width} x {height}')
+        print(f'Image ID: {dicom_id}')
+        print(f'bbox: {bbox}')
+
+    # Heuristic 1: if the average distance vector between pairs of bboxes of symmetric objects is roughly horizontal,
+    # and the standard deviation of the distance vectors is small, then the image is decent
+    vector_list = []
+    for r_idx, l_idx in _RIGHT_LEFT_PAIRS:
+        if presence[r_idx] == 1 and presence[l_idx] == 1:
+            r_x1 = coords[r_idx * 4 + 0]
+            r_y1 = coords[r_idx * 4 + 1]
+            r_x2 = coords[r_idx * 4 + 2]
+            r_y2 = coords[r_idx * 4 + 3]
+            l_x1 = coords[l_idx * 4 + 0]
+            l_y1 = coords[l_idx * 4 + 1]
+            l_x2 = coords[l_idx * 4 + 2]
+            l_y2 = coords[l_idx * 4 + 3]
+            r_center = np.array([(r_x1 + r_x2) / 2, (r_y1 + r_y2) / 2])
+            l_center = np.array([(l_x1 + l_x2) / 2, (l_y1 + l_y2) / 2])
+            vector = l_center - r_center            
+            vector /= np.linalg.norm(vector) # normalize
+            vector_list.append(vector)
+            if debug:
+                print(f'{CHEST_IMAGENOME_BBOX_NAMES[r_idx]} - {CHEST_IMAGENOME_BBOX_NAMES[l_idx]} = {vector}')            
+    if len(vector_list) > 0.4 * len(_RIGHT_LEFT_PAIRS): # if more than 40% of symmetric objects are present
+        # Sub-heuristic: if all vectors point to the same direction except for one, then
+        # remove the outlier vector
+        for i in range(2): # do this twice because i=0 may be the outlier
+            outlier_idxs = []
+            for j in range(len(vector_list)):
+                if np.dot(vector_list[i], vector_list[j]) < 0.5:
+                    outlier_idxs.append(j)
+            if len(outlier_idxs) == 1:                
+                vector_list.pop(outlier_idxs[0])
+                if debug:
+                    print(f'Remove outlier vector {outlier_idxs[0]}')
+                break
+
+        avg_vector = np.mean(vector_list, axis=0)
+        std_vector = np.std(vector_list, axis=0)
+        if debug:
+            print('avg_vector:', avg_vector)
+            print('std_vector:', std_vector)
+        if abs(avg_vector[0]) * 0.4 > abs(avg_vector[1]) and avg_vector[0] > 0\
+            and std_vector[0] + std_vector[1] < 0.65:
+
+            if detailed_output:
+                return True, vector_list
+            return True
+
+    # Heuristic 2: if the IoU between these bboxes and the average bboxes across all images
+    # is high, then the image is decent
+    mean_iou = 0
+    for i in range(len(presence)):
+        if presence[i] == 1:
+            iou = compute_iou(coords[i * 4: i * 4 + 4], average_bboxes[i * 4: i * 4 + 4])
+            mean_iou += iou
+    den = sum(presence)
+    if den > 0:
+        mean_iou /= den
+    if debug:
+        print('mean_iou:', mean_iou)
+    if mean_iou > 0.75:
+        if detailed_output:
+            return True, vector_list
+        return True
+
+    if detailed_output:
+        return False, vector_list
+    return False
+
+def determine_if_image_is_rotated(dicom_id, average_bboxes, debug=False):
+
+    # Heuristic 1: if image is decent, then it is not rotated.
+    ans, vector_list = determine_if_image_is_decent(dicom_id, average_bboxes, detailed_output=True, debug=debug)
+    if ans: return False
+
+    # Heuristic 2: if few pairs are present, then the image is not rotated.
+    if len(vector_list) < len(_RIGHT_LEFT_PAIRS) * 0.5:
+        return False
+
+    # Heuristic 3: if for some reason the image is still roughly horizontal, then the image is not rotated.
+    avg_vector = np.mean(vector_list, axis=0)
+    if debug:
+        print('avg_vector:', avg_vector)
+    if abs(avg_vector[0]) * 0.5 > abs(avg_vector[1]) and avg_vector[0] > 0:
+        return False
+
+    # Heuristic 4: if the standard deviation of the vectors is not small, then the image is not rotated.
+    std_vector = np.std(vector_list, axis=0)
+    if debug:
+        print('std_vector:', std_vector)
+    if std_vector[0] + std_vector[1] > 0.25:
+        return False
+    
+    # It probably is rotated
+    return True
+
+def visualize_symmetric_ground_truth_bounding_boxes(dicom_id):
+    bboxes_dict = load_chest_imagenome_silver_bboxes()
+    imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+    bbox = bboxes_dict[dicom_id]
+    coords = bbox['coords']
+    presence = bbox['presence']
+    part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+    # Large image
+    image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    ax.imshow(image)
+    print(f'Image path: {image_path}')
+    unused_idxs = set(range(len(CHEST_IMAGENOME_BBOX_NAMES)))
+    # Plot symmetric bboxes
+    i = 0
+    for r_idx, l_idx in _RIGHT_LEFT_PAIRS:
+        if presence[r_idx] == 1 and presence[l_idx] == 1:
+            r_x1 = coords[r_idx * 4 + 0] * width
+            r_y1 = coords[r_idx * 4 + 1] * height
+            r_x2 = coords[r_idx * 4 + 2] * width
+            r_y2 = coords[r_idx * 4 + 3] * height
+            l_x1 = coords[l_idx * 4 + 0] * width
+            l_y1 = coords[l_idx * 4 + 1] * height
+            l_x2 = coords[l_idx * 4 + 2] * width
+            l_y2 = coords[l_idx * 4 + 3] * height
+            r_center = np.array([(r_x1 + r_x2) / 2, (r_y1 + r_y2) / 2])
+            l_center = np.array([(l_x1 + l_x2) / 2, (l_y1 + l_y2) / 2])
+            # right bbox
+            rect = patches.Rectangle((r_x1, r_y1), r_x2-r_x1, r_y2-r_y1, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
+            ax.add_patch(rect)
+            ax.text(r_x1, r_y1, CHEST_IMAGENOME_BBOX_NAMES[r_idx], fontsize=16, color=plt.cm.tab20(i))
+            # left bbox
+            rect = patches.Rectangle((l_x1, l_y1), l_x2-l_x1, l_y2-l_y1, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
+            ax.add_patch(rect)
+            ax.text(l_x1, l_y1, CHEST_IMAGENOME_BBOX_NAMES[l_idx], fontsize=16, color=plt.cm.tab20(i))
+            # line
+            ax.plot([r_center[0], l_center[0]], [r_center[1], l_center[1]], color=plt.cm.tab20(i), linewidth=3)
+            unused_idxs.remove(r_idx)
+            unused_idxs.remove(l_idx)
+            i += 1
+    # Plot unused bboxes
+    for idx in unused_idxs:
+        if presence[idx] == 1:
+            x1 = coords[idx * 4 + 0] * width
+            y1 = coords[idx * 4 + 1] * height
+            x2 = coords[idx * 4 + 2] * width
+            y2 = coords[idx * 4 + 3] * height
+            # make the bbox a bit transparent unless it is the spine
+            is_spine = CHEST_IMAGENOME_BBOX_NAMES[idx] == 'spine'
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, edgecolor='y', facecolor='none', alpha=1.0 if is_spine else 0.3)
+            ax.add_patch(rect)
+            ax.text(x1, y1, CHEST_IMAGENOME_BBOX_NAMES[idx], fontsize=16, color='y', alpha=1.0 if is_spine else 0.3)
+    # Show
     plt.show()
 
 class ChestImagenomeBboxDataset(Dataset):

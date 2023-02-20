@@ -10,6 +10,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_silver_bboxes,
     load_postprocessed_label_names,
 )
+from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.utils.metrics import (
     chexpert_label_array_to_string,
     chest_imagenome_label_array_to_string,
@@ -281,3 +282,30 @@ def plot_chest_imagenome_nonlocalized_label_frequency_histogram(label_names, ima
     nonlocalized_idxs = [i for i, label_name in enumerate(label_names) if len(label_name) == 2]
     _plot_chest_imagenome_label_frequency_histogram(nonlocalized_idxs, 'nonlocalized', label_names, image_id_to_binary_labels,
         num_workers=num_workers, figsize=figsize)
+
+def plot_chest_imagenome_iou_histogram(average_bbox_coords, dicom_ids, figsize=(8, 6), return_iou=False):
+    bbox_dict = load_chest_imagenome_silver_bboxes()
+    ious = [None] * len(dicom_ids)
+    for i, dicom_id in enumerate(dicom_ids):
+        bboxes = bbox_dict[dicom_id]
+        coords = bboxes['coords']
+        presence = bboxes['presence']
+        mean_iou = 0
+        for j in range(len(presence)):
+            if presence[j] == 1:
+                mean_iou += compute_iou(average_bbox_coords[4*j:4*j+4], coords[4*j:4*j+4])
+        mean_iou /= sum(presence)
+        ious[i] = mean_iou
+    plt.figure(figsize=figsize)
+    plt.title('IoU histogram')
+    plt.hist(ious, bins=100)
+    plt.xlabel('IoU')
+    plt.ylabel('Number of images')
+    plt.show()
+    if return_iou:
+        idxs = np.argsort(ious)
+        return {
+            'ious': [ious[i] for i in idxs],
+            'dicom_ids': [dicom_ids[i] for i in idxs]
+        }
+

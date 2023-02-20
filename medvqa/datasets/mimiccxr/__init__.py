@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, save_to_pickle
+from pathlib import Path
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_to_pickle
 load_dotenv()
 
 from medvqa.utils.common import CACHE_DIR
@@ -146,20 +147,74 @@ def get_mimiccxr_image_paths(report):
     images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
     return images
 
-def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
+def get_reports_txt_paths():
+    # if cached
+    report_paths = load_pickle(MIMICCXR_REPORTS_TXT_PATHS)
+    if report_paths is not None:
+        return report_paths
+    # if not cached
+    report_paths = [None] * 300000
+    for i, rp in tqdm(enumerate(report_paths_generator())):
+        report_paths[i] = rp.as_posix()
+    report_paths = report_paths[:i+1]
+    save_to_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
+    print('reports txt paths saved to', MIMICCXR_REPORTS_TXT_PATHS)
+    return report_paths
 
-    cache_path = os.path.join(MIMICCXR_CACHE_DIR, f'{qa_adapted_reports_filename}__detailed_metadata.pkl')
+def report_paths_generator():
+    for x in range(10, 20):
+        for filepath in Path(os.path.join(MIMICCXR_DATASET_DIR, f'files/p{x}/')).rglob("s*.txt"):
+            yield filepath
+
+def image_paths_generator():
+    for x in range(10, 20):
+        for filepath in Path(os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, f'p{x}/')).rglob("*.jpg"):
+            yield filepath
+
+def get_imageId2partId():
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2partId.pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
+    imageId2partId = {}
+    for image_path in tqdm(image_paths_generator()):
+        image_path = str(image_path)
+        partId, _, _, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
+        imageId2partId[imageId] = partId
+    save_to_pickle(imageId2partId, cache_path)
+    return imageId2partId
+
+def get_imageId2PartPatientStudy():
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2PartPatientStudy.pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
+    imageId2partId = {}
+    for image_path in tqdm(image_paths_generator()):
+        image_path = str(image_path)
+        partId, patientId, studyId, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
+        imageId2partId[imageId] = (partId, patientId, studyId)
+    save_to_pickle(imageId2partId, cache_path)
+    return imageId2partId
+
+def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
+
+    if qa_adapted_reports_filename is None:
+        filename = 'detailed_metadata.pkl'
+    else:
+        filename = f'{qa_adapted_reports_filename}__detailed_metadata.pkl'
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, filename)
     if os.path.exists(cache_path):
         print(f'Loading cached detailed metadata from {cache_path}')
         return get_cached_pickle_file(cache_path)
 
-    qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))    
-    image_views_dict = get_image_views_dict()
-    split_dict = get_split_dict()
-    n_reports = len(qa_adapted_reports['reports'])
+    if qa_adapted_reports_filename is not None:
+        qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
+        n_reports = len(qa_adapted_reports['reports'])
+    else:
+        report_paths = get_reports_txt_paths()
+        n_reports = len(report_paths)
     
-    backgrounds = [None] * n_reports
-    reports = [None] * n_reports
+    image_views_dict = get_image_views_dict()
+    split_dict = get_split_dict()        
     part_ids = [None] * n_reports
     subject_ids = [None] * n_reports
     study_ids = [None] * n_reports
@@ -167,24 +222,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
     splits = [None] * n_reports
     filepaths = [None] * n_reports
     
-    for i, report in tqdm(enumerate(qa_adapted_reports['reports'])):
-        filepath = report['filepath']
-        part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
-        
-        backgrounds[i] = report['background']
-        reports[i] = '.\n '.join(report['sentences'])
-        part_ids[i] = part_id
-        subject_ids[i] = subject_id
-        study_ids[i] = study_id
-        dicom_id_view_pos_pairs[i] = image_views_dict[(subject_id, study_id)]
-        splits[i] = split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][0][0])]
-        for j in range(1, len(dicom_id_view_pos_pairs[i])):
-            assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
-        filepaths[i] = filepath
-
     report_metadata = dict(
-        backgrounds=backgrounds,
-        reports=reports,
         part_ids=part_ids,
         subject_ids=subject_ids,
         study_ids=study_ids,
@@ -192,6 +230,37 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename):
         splits=splits,
         filepaths=filepaths,
     )
+    
+    if qa_adapted_reports_filename is not None:
+        backgrounds = [None] * n_reports
+        reports = [None] * n_reports
+        report_metadata['backgrounds'] = backgrounds
+        report_metadata['reports'] = reports
+        for i, report in tqdm(enumerate(qa_adapted_reports['reports'])):
+            filepath = report['filepath']
+            part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])            
+            backgrounds[i] = report['background']
+            reports[i] = '.\n '.join(report['sentences'])
+            part_ids[i] = part_id
+            subject_ids[i] = subject_id
+            study_ids[i] = study_id
+            dicom_id_view_pos_pairs[i] = image_views_dict[(subject_id, study_id)]
+            splits[i] = split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][0][0])]
+            for j in range(1, len(dicom_id_view_pos_pairs[i])):
+                assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
+            filepaths[i] = filepath
+    else:
+        for i, report_path in tqdm(enumerate(report_paths)):
+            report_path = str(report_path)
+            part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report_path)[0])
+            part_ids[i] = part_id
+            subject_ids[i] = subject_id
+            study_ids[i] = study_id
+            dicom_id_view_pos_pairs[i] = image_views_dict[(subject_id, study_id)]
+            splits[i] = split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][0][0])]
+            for j in range(1, len(dicom_id_view_pos_pairs[i])):
+                assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
+            filepaths[i] = report_path
 
     save_to_pickle(report_metadata, cache_path)
     print(f'Saved detailed metadata to {cache_path}')
@@ -216,3 +285,6 @@ def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
                     'dicom_id_view_pos_pairs': detailed_metadata['dicom_id_view_pos_pairs'][i],
                 })
     return output
+
+def get_mimimiccxr_test_dicom_ids():
+    return [x[0][2] for x in get_split_dict().items() if x[1] == 'test']
