@@ -50,6 +50,7 @@ def get_image_transform(
     use_torchxrayvision_transform=False,
     huggingface_vitmodel_name=None,
     use_bbox_aware_transform=False,
+    horizontal_flip_prob=0,
 ):
     print('get_image_transform()')
 
@@ -99,20 +100,18 @@ def get_image_transform(
         tf_load_image = T.Lambda(lambda x: cv2.imread(x))
         # tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
         tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
+        tf_hflip = T.Lambda(lambda x: cv2.flip(x, 1))
         tf_totensor = T.ToTensor()
         tf_normalize = T.Normalize(mean, std)
 
-        def _default_transform(image_path, bboxes=None, category_ids=None):
+        def _default_transform(image_path):
             image = tf_load_image(image_path)
             # image = tf_bgr2rgb(image)
             image = tf_resize(image)
             image = tf_totensor(image)
             image = tf_normalize(image)
             # assert len(image.shape) == 3 # (C, H, W)
-            if bboxes is None:
-                assert category_ids is None
-                return image
-            return image, bboxes, category_ids
+            return image
 
         if augmentation_mode is None: # no augmentation
             print('    Returning default transform (no augmentation)')
@@ -129,19 +128,35 @@ def get_image_transform(
         else:
             raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
 
-        def _get_transform(tf_img_bbox_aug): # closure (closure is needed to capture tf_img_bbox_aug)
-            def _transform(image_path, bboxes, category_ids):
+        flip_image = 'spatial' in augmentation_mode and horizontal_flip_prob > 0        
+        # DEBUG = True
+        # DEBUG_COUNT = 0
+        def _get_transform(tf_img_bbox_aug): # closure (needed to capture tf_img_bbox_aug)
+            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter):
                 image = tf_load_image(image_path)
                 # image = tf_bgr2rgb(image)
                 image = tf_resize(image)
+                if flip_image:
+                    if random.random() < 0.5:
+                        # nonlocal DEBUG_COUNT, DEBUG
+                        # if DEBUG:
+                        #     print('(DEBUG) image_processing.py: flipping image')
+                        #     DEBUG_COUNT += 1
+                        #     if DEBUG_COUNT > 10:
+                        #         DEBUG = False
+                        image = tf_hflip(image)
+                        bboxes = flipped_bboxes
+                        presence = flipped_presence
+                bboxes, category_ids = albumentation_adapter.encode(bboxes, presence)
                 augmented = tf_img_bbox_aug(image=image, bboxes=bboxes, category_ids=category_ids)
                 image = augmented['image']
                 image = tf_totensor(image)
                 image = tf_normalize(image)
                 bboxes = augmented['bboxes']
                 category_ids = augmented['category_ids']
+                bboxes, presence = albumentation_adapter.decode(bboxes, category_ids)
                 assert len(image.shape) == 3 # (C, H, W)
-                return image, bboxes, category_ids
+                return image, bboxes, presence
             return _transform
 
         for tf_img_bbox_aug in aug_transforms:
@@ -150,12 +165,16 @@ def get_image_transform(
         print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
         print('    augmentation_mode =', augmentation_mode)
         print('    default_prob =', default_prob)
+        print('    horizontal_flip_prob =', horizontal_flip_prob)
+        print('    flip_image =', flip_image)
 
-        def transform_fn(img, bboxes, category_ids):
+        def transform_fn(img, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter):
             # randomly choose between default transform and augmented transform
             if random.random() < default_prob:
-                return _default_transform(img, bboxes, category_ids)
-            return random.choice(_augmented_bbox_transforms)(img, bboxes, category_ids)
+                img = _default_transform(img)
+                return img, bboxes, presence
+            return random.choice(_augmented_bbox_transforms)(
+                img, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter)
 
         print(f'    Returning augmented transforms with mode {augmentation_mode}')
         return transform_fn

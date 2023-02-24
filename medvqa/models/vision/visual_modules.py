@@ -148,7 +148,7 @@ class MultiPurposeVisualModule(nn.Module):
             n_findings=n_findings,
         )
 
-        print(f'MultiPurposeVisualModule: self.name={self.name}')
+        print(f'MultiPurposeVisualModule: self.name={self.get_name()}')
 
     def _init_visual_backbone(self, visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
                             imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
@@ -184,7 +184,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.RESNET__TORCHXRAYVISION,
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
         ]:
-            return 2 * image_local_feat_size        
+            return 2 * image_local_feat_size
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
             return CLIP_VIT_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
@@ -332,8 +332,7 @@ class MultiPurposeVisualModule(nn.Module):
             else:
                 raise ValueError(f'Unknown bbox regressor version: {chest_imagenome_bbox_regressor_version}')
 
-    @property
-    def name(self):
+    def get_name(self):
         if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
             img_str = 'dn121'
         elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:

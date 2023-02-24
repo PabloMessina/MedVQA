@@ -2,7 +2,9 @@ import os
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_chest_imagenome_dicom_ids,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
     load_chest_imagenome_silver_bboxes_as_numpy_array,
     load_nongold_dicom_ids,
@@ -17,10 +19,12 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_IMAGE_ORIENTATIONS,
     MIMICCXR_STUDY_REGEX,
+    MIMICCXR_ImageSizeModes,
     MIMICCXR_ViewModes,
     get_broken_images,
     get_dicom_id_and_orientation_list,
     get_image_views_dict,
+    get_mimiccxr_medium_image_path,
     get_mimiccxr_small_image_path,
     get_split_dict,
     load_mimiccxr_reports_detailed_metadata,
@@ -28,6 +32,42 @@ from medvqa.datasets.mimiccxr import (
 from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
+
+class _AlbumentationAdapter:
+
+    def __init__(self, num_bbox_classes):
+        self.num_bbox_classes = num_bbox_classes
+    
+    def encode(self, bbox_coords, bbox_presence):
+        albumentation_bbox_coords = []
+        albumentation_category_ids = []
+        for i in range(len(bbox_presence)):
+            if bbox_presence[i] == 1:
+                x_min = bbox_coords[i * 4 + 0]
+                y_min = bbox_coords[i * 4 + 1]
+                x_max = bbox_coords[i * 4 + 2]
+                y_max = bbox_coords[i * 4 + 3]
+                assert x_min <= x_max
+                assert y_min <= y_max
+                if x_min < x_max and y_min < y_max: # ignore invalid bboxes
+                    albumentation_bbox_coords.append([
+                        bbox_coords[i * 4 + 0],
+                        bbox_coords[i * 4 + 1],
+                        bbox_coords[i * 4 + 2],
+                        bbox_coords[i * 4 + 3],
+                    ])
+                    albumentation_category_ids.append(i)
+        return albumentation_bbox_coords, albumentation_category_ids
+    
+    def decode(self, albumentation_bbox_coords, albumentation_category_ids):
+        bbox_coords = np.zeros(self.num_bbox_classes * 4, dtype=np.float32)
+        bbox_presence = np.zeros(self.num_bbox_classes, dtype=np.float32)
+        for i in range(len(albumentation_category_ids)):
+            cid = albumentation_category_ids[i]
+            bbox_presence[cid] = 1
+            for j in range(4):
+                bbox_coords[cid * 4 + j] = albumentation_bbox_coords[i][j]
+        return bbox_coords, bbox_presence
 
 class MIMICCXR_Visual_Dataset(Dataset):
     def __init__(self, indices, report_ids,
@@ -55,6 +95,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 dicom_idxs=None,
                 bbox_coords=None,
                 bbox_presence=None,
+                flipped_bbox_coords=None, # for data augmentation
+                flipped_bbox_presence=None, # for data augmentation
                 # precomputed visual features
                 use_precomputed_visual_features=False,
                 precomputed_visual_features=None,
@@ -83,7 +125,13 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.precomputed_visual_features = precomputed_visual_features
         self.idx2visfeatidx = idx2visfeatidx
-        # self.DEBUG = True
+        if self.predict_bboxes_chest_imagenome:
+            if self.data_augmentation_enabled:
+                assert flipped_bbox_coords is not None
+                assert flipped_bbox_presence is not None
+                self.albumentation_adapter = _AlbumentationAdapter(CHEST_IMAGENOME_NUM_BBOX_CLASSES)
+                self.flipped_bbox_coords = flipped_bbox_coords
+                self.flipped_bbox_presence = flipped_bbox_presence
     
     def __len__(self):
         return len(self.indices)
@@ -99,54 +147,13 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 bbox_coords = self.bbox_coords[dicom_idx]
                 bbox_presence = self.bbox_presence[dicom_idx]                
                 if self.data_augmentation_enabled: # data augmentation with albumentations
-                    # if self.DEBUG:
-                    #     print('Before data augmentation:')
-                    #     print('dicom_idx', dicom_idx)
-                    #     print('bbox_coords', bbox_coords)
-                    #     print('bbox_presence', bbox_presence)
-                    albumentation_bbox_coords = []
-                    albumentation_category_ids = []
-                    for i in range(len(bbox_presence)):
-                        if bbox_presence[i] == 1:
-                            x_min = bbox_coords[i * 4 + 0]
-                            y_min = bbox_coords[i * 4 + 1]
-                            x_max = bbox_coords[i * 4 + 2]
-                            y_max = bbox_coords[i * 4 + 3]
-                            assert x_min <= x_max
-                            assert y_min <= y_max
-                            if x_min < x_max and y_min < y_max: # ignore invalid bboxes
-                                albumentation_bbox_coords.append([
-                                    bbox_coords[i * 4 + 0],
-                                    bbox_coords[i * 4 + 1],
-                                    bbox_coords[i * 4 + 2],
-                                    bbox_coords[i * 4 + 3],
-                                ])
-                                albumentation_category_ids.append(i)
-                    # if self.DEBUG:
-                    #     print('albumentation_bbox_coords', albumentation_bbox_coords)
-                    #     print('albumentation_category_ids', albumentation_category_ids)
-                    image, albumentation_bbox_coords, albumentation_category_ids = self.image_transform(
-                        image_path, albumentation_bbox_coords, albumentation_category_ids)
-                    bbox_coords.fill(0)
-                    bbox_presence.fill(0)
-                    for i in range(len(albumentation_category_ids)):
-                        cid = albumentation_category_ids[i]
-                        bbox_presence[cid] = 1
-                        for j in range(4):
-                            bbox_coords[cid * 4 + j] = albumentation_bbox_coords[i][j]
-                    # if self.DEBUG:
-                    #     print('After data augmentation:')
-                    #     print('dicom_idx', dicom_idx)
-                    #     print('bbox_coords', bbox_coords)
-                    #     print('bbox_presence', bbox_presence)
-                    #     self.DEBUG = False # only print once
-
+                    flipped_bbox_coords = self.flipped_bbox_coords[dicom_idx]
+                    flipped_bbox_presence = self.flipped_bbox_presence[dicom_idx]
+                    image, bbox_coords, bbox_presence = self.image_transform(
+                        image_path, bbox_coords, bbox_presence,
+                        flipped_bbox_coords, flipped_bbox_presence, self.albumentation_adapter)
                 else: # no data augmentation
                     image = self.image_transform(image_path)
-                    # if self.DEBUG:
-                    #     print('No data augmentation')
-                    #     print(f'image.shape: {image.shape}')
-                    #     self.DEBUG = False
                 output['chest_imagenome_bbox_coords'] = bbox_coords
                 output['chest_imagenome_bbox_presence'] = bbox_presence
             else:
@@ -176,23 +183,25 @@ class MIMICCXR_VisualModuleTrainer():
                 qa_adapted_reports_filename,
                 data_augmentation_enabled=False,
                 include_image=True,
-                view_mode = MIMICCXR_ViewModes.ANY_SINGLE,                
-                classify_tags = False,
-                medical_tags_per_report_filename = None,
-                classify_orientation = False,
-                classify_chexpert = False,
-                chexpert_labels_filename = None,
-                classify_questions = False,
-                question_labels_filename = None,
-                classify_chest_imagenome = False,
-                predict_bboxes_chest_imagenome = False,
-                clamp_bboxes_chest_imagenome = False,
-                chest_imagenome_labels_filename = None,
-                use_precomputed_visual_features = False,
-                precomputed_visual_features_path = None,
-                use_merged_findings = False,
-                findings_remapper = None,
-                n_findings = None,                
+                source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
+                view_mode=MIMICCXR_ViewModes.ANY_SINGLE,
+                use_decent_images_only=False,
+                classify_tags=False,
+                medical_tags_per_report_filename=None,
+                classify_orientation=False,
+                classify_chexpert=False,
+                chexpert_labels_filename=None,
+                classify_questions=False,
+                question_labels_filename=None,
+                classify_chest_imagenome=False,
+                predict_bboxes_chest_imagenome=False,
+                clamp_bboxes_chest_imagenome=False,
+                chest_imagenome_labels_filename=None,
+                use_precomputed_visual_features=False,
+                precomputed_visual_features_path=None,
+                use_merged_findings=False,
+                findings_remapper=None,
+                n_findings=None,                
             ):
 
         self.train_image_transform = train_image_transform
@@ -222,6 +231,20 @@ class MIMICCXR_VisualModuleTrainer():
         val_indices = []
         idx = 0
 
+        if source_image_size_mode == MIMICCXR_ImageSizeModes.SMALL_256x256:
+            image_path_getter = get_mimiccxr_small_image_path
+        elif source_image_size_mode == MIMICCXR_ImageSizeModes.MEDIUM_512:
+            image_path_getter = get_mimiccxr_medium_image_path
+        else:
+            raise ValueError(f'Unknown source image size mode: {source_image_size_mode}')
+        print(f'Using source image size mode: {source_image_size_mode}')
+
+        if use_decent_images_only:
+            decent_dicom_ids = load_chest_imagenome_dicom_ids(decent_images_only=True)
+            decent_dicom_ids = set(decent_dicom_ids)
+            print(f'Loaded {len(decent_dicom_ids)} decent image IDs')
+            skipped = 0
+
         for rid, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
             tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
                 mimiccxr_metadata['subject_ids'],
@@ -232,9 +255,12 @@ class MIMICCXR_VisualModuleTrainer():
             for dicom_id, view in get_dicom_id_and_orientation_list(
                     dicom_id_view_pairs, view_mode, chest_imagenome_nongold_dicom_ids):
                 dicom_ids[idx] = dicom_id
-                image_paths[idx] = get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id)
+                image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                 report_ids[idx] = rid
                 orientations[idx] = MIMICCXR_IMAGE_ORIENTATIONS.index(view)
+                if use_decent_images_only and dicom_id not in decent_dicom_ids:
+                    skipped += 1
+                    continue
                 if split == 'train':
                     train_indices.append(idx)
                 elif split == 'validate':
@@ -244,6 +270,9 @@ class MIMICCXR_VisualModuleTrainer():
                 else:
                     raise ValueError(f'Unknown split {split}')
                 idx += 1
+
+        if use_decent_images_only:
+            print(f'Skipped {skipped} non-decent images')
         
         self.dicom_ids = np.array(dicom_ids[:idx])
         self.image_paths = np.array(image_paths[:idx])
@@ -309,6 +338,14 @@ class MIMICCXR_VisualModuleTrainer():
             self.dicom_idxs = None
             self.bbox_coords = None
             self.bbox_presence = None
+        if predict_bboxes_chest_imagenome and data_augmentation_enabled:
+            print('Loading Chest Imagenome bounding boxes (flipped)...')
+            _, self.flipped_bbox_coords, self.flipped_bbox_presence =\
+                load_chest_imagenome_silver_bboxes_as_numpy_array(
+                    self.dicom_ids, clamp_bboxes_chest_imagenome, flipped=True)
+        else:
+            self.flipped_bbox_coords = None
+            self.flipped_bbox_presence = None
         
         if use_precomputed_visual_features:
             print('Loading precomputed visual features...')
@@ -365,6 +402,8 @@ class MIMICCXR_VisualModuleTrainer():
             dicom_idxs=self.dicom_idxs,
             bbox_coords=self.bbox_coords,
             bbox_presence=self.bbox_presence,
+            flipped_bbox_coords=self.flipped_bbox_coords,
+            flipped_bbox_presence=self.flipped_bbox_presence,
             use_precomputed_visual_features=self.use_precomputed_visual_features,
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx=self.idx2visfeatidx,

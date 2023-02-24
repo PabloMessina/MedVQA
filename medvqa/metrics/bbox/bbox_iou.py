@@ -14,18 +14,16 @@ class DatasetAwareBboxIOU(DatasetAwareMetric):
         self._count = 0
 
     def update(self, output):
-        pred_coords, gt_coords = output
-        n, m = pred_coords.shape
-        assert m % 4 == 0 # each bounding box is represented by 4 coordinates
+        pred_coords, gt_coords, gt_presence = output
+        n, m = gt_presence.shape
+        assert m * 4 == gt_coords.shape[1] # each bounding box is represented by 4 coordinates
         for i in range(n):
-            pred = pred_coords[i]
-            gt = gt_coords[i]
-            score = 0
-            for j in range(0, m, 4):
-                score += compute_iou(pred[j:j+4], gt[j:j+4])
-            score /= m // 4 # average over all bounding boxes
-            self._acc_score += score
-        self._count += n
+            for j in range(0, m):
+                if gt_presence[i, j] == 1:
+                    pred = pred_coords[i, j*4:(j+1)*4]
+                    gt = gt_coords[i, j*4:(j+1)*4]
+                    self._acc_score += compute_iou(pred, gt)
+                    self._count += 1
 
     def compute(self):
         if self._count == 0:

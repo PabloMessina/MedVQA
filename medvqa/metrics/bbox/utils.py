@@ -1,4 +1,7 @@
 import torch
+import numpy as np
+from multiprocessing import Pool
+from sklearn.metrics import f1_score, precision_score, recall_score
 
 def compute_iou(pred, gt):
     # compute intersection over union (IoU)
@@ -20,3 +23,113 @@ def compute_iou(pred, gt):
     # return the intersection over union value
     if torch.is_tensor(iou): iou = iou.item()
     return iou
+
+# HACK to make multiprocessing work. Based on https://stackoverflow.com/a/37746961/2801404
+_shared_pred_presences = None
+_shared_pred_coords = None
+_shared_gt_presences = None
+_shared_gt_coords = None
+
+def _compute_mean_iou(j):
+    mean_iou = 0
+    count = 0
+    for i in range(_shared_pred_coords.shape[0]):
+        if _shared_gt_presences[i, j] == 1:
+            mean_iou += compute_iou(_shared_pred_coords[i, j*4:(j+1)*4], _shared_gt_coords[i, j*4:(j+1)*4])
+            count += 1
+    mean_iou /= count
+    return mean_iou
+def compute_mean_iou_per_class(pred_coords, gt_coords, gt_presences, num_workers=5):
+    m = pred_coords.shape[1] // 4
+    assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
+    global _shared_pred_coords, _shared_gt_coords, _shared_gt_presences
+    _shared_pred_coords = pred_coords
+    _shared_gt_coords = gt_coords
+    _shared_gt_presences = gt_presences
+    task_args = [i for i in range(m)]
+    with Pool(num_workers) as p:
+        mean_ious = p.map(_compute_mean_iou, task_args)
+    return mean_ious
+
+def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
+    m = pred_coords.shape[1] // 4
+    assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
+    mae = np.zeros((m,), dtype=np.float32)
+    for i in range(m):
+        if gt_presences[:, i].sum() > 0:
+            mae[i] = np.abs(pred_coords[:, i*4:(i+1)*4] - gt_coords[:, i*4:(i+1)*4])[gt_presences[:, i] == 1].mean()
+    return mae
+
+def _compute_score(task, metric_fn):
+    iou_thrs, c, n = task
+    y_score = np.zeros((n,), dtype=np.float32)
+    y_true = np.zeros((n,), dtype=np.int8)
+    a = 4 * c
+    b = 4 * c + 4
+    if type(_shared_pred_presences) == list:
+        for i in range(n):
+            if _shared_pred_presences[i][c] > 0 and compute_iou(_shared_pred_coords[i][a:b], _shared_gt_coords[i][a:b]) >= iou_thrs:
+                y_score[i] = 1
+            else:
+                y_score[i] = 0
+            y_true[i] = _shared_gt_presences[i][c]
+    else: # numpy array or torch tensor -> use comma indexing
+        for i in range(n):
+            if _shared_pred_presences[i, c] > 0 and compute_iou(_shared_pred_coords[i, a:b], _shared_gt_coords[i, a:b]) >= iou_thrs:
+                y_score[i] = 1
+            else:
+                y_score[i] = 0
+            y_true[i] = _shared_gt_presences[i, c]
+    return metric_fn(y_true, y_score)
+
+def _compute_f1(task):
+    return _compute_score(task, f1_score)
+
+def _compute_precision(task):
+    return _compute_score(task, precision_score)
+
+def _compute_recall(task):
+    return _compute_score(task, recall_score)
+
+def _compute_prf1(task):
+    metric_fn = lambda y_true, y_score: (
+        precision_score(y_true, y_score),
+        recall_score(y_true, y_score),
+        f1_score(y_true, y_score))
+    return _compute_score(task, metric_fn)
+
+def _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presences, iou_thresholds, num_workers, metric_fn):
+    global _shared_pred_coords, _shared_pred_presences, _shared_gt_coords, _shared_gt_presences
+    _shared_pred_coords = pred_coords
+    _shared_pred_presences = pred_presences
+    _shared_gt_coords = gt_coords
+    _shared_gt_presences = gt_presences
+    num_classes = len(gt_presences[0])
+    num_samples = len(gt_presences)
+    task_args = []
+    for iou_thr in iou_thresholds:
+        for c in range(num_classes):
+            task_args.append((iou_thr, c, num_samples))
+    with Pool(num_workers) as p:
+        scores = p.map(metric_fn, task_args)
+    if type(scores[0]) == tuple:
+        scores = np.array(scores).reshape((len(iou_thresholds), num_classes, len(scores[0])))
+    else:
+        scores = np.array(scores).reshape((len(iou_thresholds), num_classes))
+    return scores
+
+def compute_multiple_f1_scores(pred_coords, pred_presences, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    return _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presences,
+                                    iou_thresholds, num_workers, _compute_f1)
+
+def compute_multiple_precision_scores(pred_coords, pred_presences, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    return _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presences,
+                                    iou_thresholds, num_workers, _compute_precision)
+
+def compute_multiple_recall_scores(pred_coords, pred_presences, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    return _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presences,
+                                    iou_thresholds, num_workers, _compute_recall)
+
+def compute_multiple_prf1_scores(pred_coords, pred_presences, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    return _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presences,
+                                    iou_thresholds, num_workers, _compute_prf1)

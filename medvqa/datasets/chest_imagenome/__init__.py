@@ -10,7 +10,7 @@ CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH = os.environ['CHEST_IMAGENOME_IMAGES_TO
 CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH = os.environ['CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH']
 CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'bboxes.pkl')
-
+CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'horizontally_flipped_bboxes.pkl')
 
 CHEST_IMAGENOME_NUM_BBOX_CLASSES = 36
 CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES = 26
@@ -54,6 +54,52 @@ CHEST_IMAGENOME_BBOX_NAMES = [
     'left cardiophrenic angle',
 ]
 
+CHEST_IMAGENOME_BBOX_NAME_TO_SHORT = {
+    'right lung': 'RL',
+    'right upper lung zone': 'RULZ',
+    'right mid lung zone': 'RMLZ',
+    'right lower lung zone': 'RLLZ',
+    'right hilar structures': 'RHS',
+    'right apical zone': 'RAZ',
+    'right costophrenic angle': 'RCOA',
+    'right cardiophrenic angle': 'RCAA',
+    'right hemidiaphragm': 'RHD',
+    'left lung': 'LL',
+    'left upper lung zone': 'LULZ',
+    'left mid lung zone': 'LMLZ',
+    'left lower lung zone': 'LLLZ',
+    'left hilar structures': 'LHS',
+    'left apical zone': 'LAZ',
+    'left costophrenic angle': 'LCOA',
+    'left hemidiaphragm': 'LHD',
+    'trachea': 'T',
+    'spine': 'S',
+    'right clavicle': 'RC',
+    'left clavicle': 'LC',
+    'aortic arch': 'AA',
+    'mediastinum': 'M',
+    'upper mediastinum': 'UM',
+    'svc': 'SVC',
+    'cardiac silhouette': 'CS',
+    'left cardiac silhouette': 'LCS',
+    'right cardiac silhouette': 'RCS',
+    'cavoatrial junction': 'CAJ',
+    'right atrium': 'RA',
+    'descending aorta': 'DA',
+    'carina': 'C',
+    'left upper abdomen': 'LUA',
+    'right upper abdomen': 'RUA',
+    'abdomen': 'A',
+    'left cardiophrenic angle': 'LCAA',
+}
+
+CHEST_IMAGENOME_SHORT_TO_BBOX_NAME = {}
+for k, v in CHEST_IMAGENOME_BBOX_NAME_TO_SHORT.items():
+    CHEST_IMAGENOME_SHORT_TO_BBOX_NAME[v] = k
+
+assert set(CHEST_IMAGENOME_SHORT_TO_BBOX_NAME.keys()) == set(CHEST_IMAGENOME_BBOX_NAME_TO_SHORT.values())
+assert set(CHEST_IMAGENOME_SHORT_TO_BBOX_NAME.values()) == set(CHEST_IMAGENOME_BBOX_NAME_TO_SHORT.keys())
+
 CHEST_IMAGENOME_GOLD_BBOX_NAMES = [
     'aortic arch',
     'cardiac silhouette',
@@ -81,6 +127,27 @@ CHEST_IMAGENOME_GOLD_BBOX_NAMES = [
     'svc',
     'trachea',
     'upper mediastinum',
+]
+
+CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED = []
+for name in CHEST_IMAGENOME_BBOX_NAMES:
+    if name in CHEST_IMAGENOME_GOLD_BBOX_NAMES:
+        CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED.append(name)
+assert len(CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED) == len(CHEST_IMAGENOME_GOLD_BBOX_NAMES)
+
+CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS = [
+    ('right lung', 'left lung'),
+    ('right upper lung zone', 'left upper lung zone'),
+    ('right mid lung zone', 'left mid lung zone'),
+    ('right lower lung zone', 'left lower lung zone'),
+    ('right hilar structures', 'left hilar structures'),
+    ('right apical zone', 'left apical zone'),
+    ('right costophrenic angle', 'left costophrenic angle'),
+    ('right cardiophrenic angle', 'left cardiophrenic angle'),
+    ('right hemidiaphragm', 'left hemidiaphragm'),
+    ('right clavicle', 'left clavicle'),
+    ('right cardiac silhouette', 'left cardiac silhouette'),
+    ('right upper abdomen', 'left upper abdomen'),
 ]
 
 CHEST_IMAGENOME_ATTRIBUTES_DICT = {

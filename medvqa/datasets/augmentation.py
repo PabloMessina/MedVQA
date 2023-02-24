@@ -2,6 +2,8 @@ import torchvision.transforms as T
 import cv2
 import albumentations as A
 
+from medvqa.utils.constants import get_enum_class_attribute_values
+
 _SPATIAL_TRANSFORMS = [
     'crop',
     'translate',
@@ -77,6 +79,9 @@ class ImageAugmentationTransforms:
 
 class SPATIAL_TRANSFORMS__BBOX:
     CROP = 'crop'
+    SHIFT = 'shift'
+    SCALE = 'scale'
+    ROTATE = 'rotate'
     SHIFT_SCALE_ROTATE = 'shift-scale-rotate'
 
 class COLOR_TRANSFORMS__BBOX:
@@ -86,7 +91,7 @@ class COLOR_TRANSFORMS__BBOX:
 class ImageBboxAugmentationTransforms:
 
     def __init__(self, image_size,
-                crop=0.8, shift=0.1, scale=0.1, rotate=20, contrast=0.2, brightness=0.2, gaussian_noise_var=(10, 50)):
+                crop=0.8, shift=0.1, scale=0.1, rotate=15, contrast=0.2, brightness=0.2, gaussian_noise_var=(10, 50)):
         
         self._transform_fns = dict()
 
@@ -98,15 +103,45 @@ class ImageBboxAugmentationTransforms:
 
         if crop is not None:
             self._transform_fns[SPATIAL_TRANSFORMS__BBOX.CROP] = A.RandomResizedCrop(
-                width=width, height=height, scale=(crop, 1), always_apply=True,
+                width=width,
+                height=height,
+                scale=(crop, 1),
                 interpolation=cv2.INTER_CUBIC,
+                always_apply=True,
             )
 
-        if shift is not None or scale is not None or rotate is not None:
+        if shift is not None:
+            self._transform_fns[SPATIAL_TRANSFORMS__BBOX.SHIFT] = A.ShiftScaleRotate(
+                shift_limit=shift,
+                scale_limit=0,
+                rotate_limit=0,
+                border_mode=cv2.BORDER_CONSTANT,
+                always_apply=True,
+            )
+        
+        if scale is not None:
+            self._transform_fns[SPATIAL_TRANSFORMS__BBOX.SCALE] = A.ShiftScaleRotate(
+                shift_limit=0,
+                scale_limit=scale,
+                rotate_limit=0,
+                border_mode=cv2.BORDER_CONSTANT,
+                always_apply=True,
+            )
+
+        if rotate is not None:
+            self._transform_fns[SPATIAL_TRANSFORMS__BBOX.ROTATE] = A.ShiftScaleRotate(
+                shift_limit=0,
+                scale_limit=0,
+                rotate_limit=rotate,
+                border_mode=cv2.BORDER_CONSTANT,
+                always_apply=True,
+            )
+
+        if (shift is not None) + (scale is not None) + (rotate is not None) > 1:
             self._transform_fns[SPATIAL_TRANSFORMS__BBOX.SHIFT_SCALE_ROTATE] = A.ShiftScaleRotate(
-                shift_limit=shift if shift is not None else 0,
-                scale_limit=scale if scale is not None else 0,
-                rotate_limit=rotate if rotate is not None else 0,
+                shift_limit=shift,
+                scale_limit=scale,
+                rotate_limit=rotate,
                 border_mode=cv2.BORDER_CONSTANT,
                 always_apply=True,
             )
@@ -119,25 +154,20 @@ class ImageBboxAugmentationTransforms:
             )
 
         if gaussian_noise_var is not None:
-            self._transform_fns['gaussian-noise'] = A.GaussNoise(
+            self._transform_fns[COLOR_TRANSFORMS__BBOX.GAUSSIAN_NOISE] = A.GaussNoise(
                 var_limit=gaussian_noise_var,
                 always_apply=True,
             )
 
         self._spatial_transforms = []
-        if SPATIAL_TRANSFORMS__BBOX.CROP in self._transform_fns:
-            self._spatial_transforms.append(self._transform_fns[SPATIAL_TRANSFORMS__BBOX.CROP])
-        if SPATIAL_TRANSFORMS__BBOX.SHIFT_SCALE_ROTATE in self._transform_fns:
-            self._spatial_transforms.append(self._transform_fns[SPATIAL_TRANSFORMS__BBOX.SHIFT_SCALE_ROTATE])
+        for key in get_enum_class_attribute_values(SPATIAL_TRANSFORMS__BBOX):
+            if key in self._transform_fns:
+                self._spatial_transforms.append(self._transform_fns[key])
         
         self._color_transforms = []
-        if COLOR_TRANSFORMS__BBOX.RANDOM_BRIGHTNESS_CONTRAST in self._transform_fns:
-            self._color_transforms.append(self._transform_fns[COLOR_TRANSFORMS__BBOX.RANDOM_BRIGHTNESS_CONTRAST])
-        if COLOR_TRANSFORMS__BBOX.GAUSSIAN_NOISE in self._transform_fns:
-            self._color_transforms.append(self._transform_fns[COLOR_TRANSFORMS__BBOX.GAUSSIAN_NOISE])
-
-        assert len(self._spatial_transforms) > 0 or len(self._color_transforms) > 0,\
-            'At least one spatial or color transform must be specified'
+        for key in get_enum_class_attribute_values(COLOR_TRANSFORMS__BBOX):
+            if key in self._transform_fns:
+                self._color_transforms.append(self._transform_fns[key])
     
     def get_transform(self, name):
         return A.Compose(
@@ -146,12 +176,14 @@ class ImageBboxAugmentationTransforms:
         )
 
     def get_color_transforms_list(self):
+        assert len(self._color_transforms) > 0, 'At least one color transform must be specified'
         return [
             A.Compose([transform], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])) \
             for transform in self._color_transforms
         ]
     
     def get_spatial_transforms_list(self):
+        assert len(self._spatial_transforms) > 0, 'At least one spatial transform must be specified'
         return [
             A.Compose([transform], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])) \
             for transform in self._spatial_transforms
@@ -159,10 +191,10 @@ class ImageBboxAugmentationTransforms:
 
     def get_merged_spatial_color_transforms_list(self):
         """Returns a list of transforms, each of which is a composition of spatial and color transforms."""
-        if len(self._color_transforms) == 0:
-            return [A.Compose(self._spatial_transforms, bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids']))]
+        assert len(self._spatial_transforms) > 0 and len(self._color_transforms) > 0,\
+            'At least one spatial and color transform must be specified'
         output = []
-        for transform in self._color_transforms:
-            tfs = [transform] + self._spatial_transforms
-            output.append(A.Compose(tfs, bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])))
+        for color_tf in self._color_transforms:
+            for spatial_tf in self._spatial_transforms:
+                output.append(A.Compose([spatial_tf, color_tf], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])))
         return output

@@ -6,13 +6,14 @@ import torch
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_chest_imagenome_train_average_bbox_coords,
+    get_chest_imagenome_train_average_bbox_coords,
     load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
 )
 from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VisualModuleTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import (
     Chexpert_VisualModuleTrainer,
 )
+from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.utils import get_merged_findings
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
 from medvqa.losses.optimizers import create_optimizer
@@ -157,6 +158,7 @@ def parse_args(args=None):
     parser.add_argument('--img-aug-mode', type=str, default=None,
                         help='Mode of data augmentation used for images')
     parser.add_argument('--image-size', nargs='+', type=int, default=(256,256))
+    parser.add_argument('--horizontal-flip-prob', type=float, default=0)
 
     # Weights for the different datasets. Used for training with multiple datasets
     parser.add_argument('--mimiccxr-weight', type=float, default=1)
@@ -166,11 +168,12 @@ def parse_args(args=None):
     parser.add_argument('--iuxray-weight', type=float, default=0.05)    
     parser.add_argument('--padchest-weight', type=float, default=0.4)  
 
-    # mimiccxr view mode
     parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single')    
     
     parser.add_argument('--chest-imagenome-labels-filename', type=str, default=None)
-    parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)    
+    parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
+    parser.add_argument('--use-chest-imagenome-decent-images-only', dest='use_chest_imagenome_decent_images_only', action='store_true')
+    parser.set_defaults(use_chest_imagenome_decent_images_only=False)
 
     parser.add_argument('--use-amp', dest='use_amp', action='store_true')
     parser.set_defaults(use_amp=False)    
@@ -731,7 +734,7 @@ def train_model(
     if checkpoint_folder_path is None: # first time
         if save: # only if we want to save checkpoints to disk
             count_print('Defining checkpoint folder path ...')
-            checkpoint_folder_path = get_checkpoint_folder_path('visual_module', merged_dataset_name, model.name,
+            checkpoint_folder_path = get_checkpoint_folder_path('visual_module', merged_dataset_name, model.get_name(),
                 f'dws={",".join(map(str, _train_weights))}' if len(_train_weights) > 1 else None,
             )
             print_red('checkpoint_folder_path =', checkpoint_folder_path)
@@ -843,6 +846,7 @@ def train_from_scratch(
     padchest_test_study_ids_path,
     chest_imagenome_labels_filename,
     chest_imagenome_label_names_filename,
+    use_chest_imagenome_decent_images_only,
     # Dataloading args
     batch_size,
     num_workers,
@@ -853,6 +857,7 @@ def train_from_scratch(
     vinbig_weight,
     padchest_weight,
     img_aug_mode,
+    horizontal_flip_prob,
     # Fixed traning args
     train_mimiccxr,
     train_iuxray,
@@ -967,10 +972,11 @@ def train_from_scratch(
         n_findings=n_findings,
     )
     if predict_bboxes_chest_imagenome:
-        model_kwargs['chest_imagenome_train_average_bbox_coords'] = load_chest_imagenome_train_average_bbox_coords(
-            mimiccxr_qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
-            clamp_bbox_coords=clamp_bboxes_chest_imagenome,
-        ).tolist()
+        model_kwargs['chest_imagenome_train_average_bbox_coords'] =\
+            get_chest_imagenome_train_average_bbox_coords(
+                clamp_bbox_coords=clamp_bboxes_chest_imagenome,
+                use_decent_images_only=use_chest_imagenome_decent_images_only,
+            ).tolist()
     
     optimizer_kwargs = dict(
         name=optimizer_name,
@@ -1016,6 +1022,7 @@ def train_from_scratch(
             huggingface_vitmodel_name=huggingface_model_name,
             use_torchxrayvision_transform=use_torchxrayvision_transform,
             use_bbox_aware_transform=use_bbox_aware_transform,
+            horizontal_flip_prob=horizontal_flip_prob,
         )
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]['augmentation_mode'] = None # no augmentation for validation
@@ -1028,12 +1035,19 @@ def train_from_scratch(
         if train_chexpert: assert chexpert_precomputed_visual_features_path is not None
         if train_vinbig: assert vinbig_precomputed_visual_features_path is not None
     
-    if train_mimiccxr:        
+    if train_mimiccxr:
+        x = image_size if type(image_size) is int else image_size[0]
+        if x > 256:
+            source_image_size_mode = MIMICCXR_ImageSizeModes.MEDIUM_512
+        else:
+            source_image_size_mode = MIMICCXR_ImageSizeModes.SMALL_256x256
+        print(f'source_image_size_mode: {source_image_size_mode}')
         mimiccxr_trainer_kwargs = dict(
             qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
             chest_imagenome_labels_filename=chest_imagenome_labels_filename,
             include_image=include_image,
             view_mode=mimiccxr_view_mode,
+            source_image_size_mode=source_image_size_mode,
             use_precomputed_visual_features=include_visual_features,
             precomputed_visual_features_path=mimiccxr_precomputed_visual_features_path,
             classify_tags=classify_tags,
@@ -1045,6 +1059,7 @@ def train_from_scratch(
             classify_chest_imagenome=classify_chest_imagenome,
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
             clamp_bboxes_chest_imagenome=clamp_bboxes_chest_imagenome,
+            use_decent_images_only=use_chest_imagenome_decent_images_only,
             question_labels_filename=mimiccxr_question_labels_filename,
             data_augmentation_enabled=img_aug_mode is not None,
         )

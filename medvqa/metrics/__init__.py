@@ -249,12 +249,16 @@ def attach_dataset_aware_chest_imagenome_labels_roc_auc(engine, allowed_dataset_
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
 
 def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids):
-    met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords'),
+    met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
                                 allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMAE)
 
 def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids):
-    met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords'),
+    met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
                                 allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 

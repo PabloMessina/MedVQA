@@ -13,18 +13,16 @@ from medvqa.datasets.chest_imagenome import (
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
     load_chest_imagenome_silver_bboxes,
-    load_chest_imagenome_train_average_bbox_coords,
+    get_chest_imagenome_train_average_bbox_coords,
 )
 from medvqa.datasets.image_processing import get_image_transform, ImageDataset
-from medvqa.datasets.mimiccxr import get_mimiccxr_small_image_path, load_mimiccxr_reports_detailed_metadata
-from medvqa.datasets.mimiccxr.preprocessing import get_imageId2PartPatientStudy
-from medvqa.metrics.bbox.bbox_iou import DatasetAwareBboxIOU
-from medvqa.metrics.bbox.bbox_mae import DatasetAwareBboxMAE
-from medvqa.metrics.bbox.bbox_mean_prf1 import (
-    DatasetAwareBboxMeanF1,
-    DatasetAwareBboxMeanPrecision,
-    DatasetAwareBboxMeanRecall,
+from medvqa.datasets.mimiccxr import (
+    # get_mimiccxr_small_image_path,
+    get_mimiccxr_medium_image_path,
+    load_mimiccxr_reports_detailed_metadata,
+    get_imageId2PartPatientStudy,
 )
+from medvqa.metrics.bbox.utils import compute_mae_per_class, compute_mean_iou_per_class, compute_multiple_prf1_scores
 from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_name_from_checkpoint_path, load_metadata
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
@@ -57,7 +55,6 @@ def parse_args():
     parser.add_argument('--eval-dataset-name', type=str, required=True)
 
     # optional arguments
-    parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str)
     parser.add_argument('--checkpoint-folder', type=str)
     parser.add_argument('--batch-size', type=int, default=140)
     parser.add_argument('--num-workers', type=int, default=0)
@@ -78,54 +75,54 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_b
     assert len(test_bbox_coords) == len(pred_bbox_coords)    
 
     metrics = {}
+    
     # Mean Absolute Error
     print('Computing Mean Absolute Error (MAE) ...')
-    mae = DatasetAwareBboxMAE(lambda x:x, None)
-    mae.update((pred_bbox_coords, test_bbox_coords))
-    metrics['mae'] = mae.compute()
+    metrics['mae'] = compute_mae_per_class(pred_bbox_coords, test_bbox_coords, test_bbox_presences)
+    metrics['mean_mae'] = np.mean(metrics['mae'])
+    
     # Mean Intersection Over Union (IOU)
     print('Computing Mean Intersection Over Union (IOU) ...')
-    iou = DatasetAwareBboxIOU(lambda x:x, None)
-    iou.update((pred_bbox_coords, test_bbox_coords))
-    metrics['iou'] = iou.compute()
-    # Mean F1 Score
-    print('Computing Mean F1 Score ...')
-    count = 0
-    for iou_thrs in [0.5, 0.6, 0.7, 0.8, 0.9]:
-        print(f'   Computing F1 Score at IOU threshold {iou_thrs} ...')
-        meanf1 = DatasetAwareBboxMeanF1(lambda x:x, None, n_classes, [iou_thrs])
-        meanf1.update((pred_bbox_coords, test_bbox_coords, pred_bbox_presences, test_bbox_presences))
-        metrics[f'f1@{iou_thrs}'] = meanf1.compute()
-        metrics['meanf1'] = metrics.get('meanf1', 0) + metrics[f'f1@{iou_thrs}']
-        count += 1
-    metrics['meanf1'] /= count
-    # Mean Precision
-    print('Computing Mean Precision ...')
-    count = 0
-    for iou_thrs in [0.5, 0.6, 0.7, 0.8, 0.9]:
-        print(f'   Computing Precision at IOU threshold {iou_thrs} ...')
-        meanp = DatasetAwareBboxMeanPrecision(lambda x:x, None, n_classes, [iou_thrs])
-        meanp.update((pred_bbox_coords, test_bbox_coords, pred_bbox_presences, test_bbox_presences))
-        metrics[f'p@{iou_thrs}'] = meanp.compute()
-        metrics['meanp'] = metrics.get('meanp', 0) + metrics[f'p@{iou_thrs}']
-        count += 1
-    metrics['meanp'] /= count
-    # Mean Recall
-    print('Computing Mean Recall ...')
-    count = 0
-    for iou_thrs in [0.5, 0.6, 0.7, 0.8, 0.9]:
-        print(f'   Computing Recall at IOU threshold {iou_thrs} ...')
-        meanr = DatasetAwareBboxMeanRecall(lambda x:x, None, n_classes, [iou_thrs])
-        meanr.update((pred_bbox_coords, test_bbox_coords, pred_bbox_presences, test_bbox_presences))
-        metrics[f'r@{iou_thrs}'] = meanr.compute()
-        metrics['meanr'] = metrics.get('meanr', 0) + metrics[f'r@{iou_thrs}']
-        count += 1
-    metrics['meanr'] /= count
+    metrics['iou'] = compute_mean_iou_per_class(pred_bbox_coords, test_bbox_coords, test_bbox_presences)
+    metrics['mean_iou'] = np.mean(metrics['iou'])
+    
+    # Precision, Recall, and F1 Score
+    iou_thresholds = [0.5, 0.6, 0.7, 0.8, 0.9]
+    print(f'Computing Precision, Recall, and F1 Score at IOU thresholds {iou_thresholds} ...')
+    scores = compute_multiple_prf1_scores(
+        pred_coords=pred_bbox_coords,
+        pred_presences=pred_bbox_presences,
+        gt_coords=test_bbox_coords,
+        gt_presences=test_bbox_presences,
+        iou_thresholds=iou_thresholds,
+    )
+    assert scores.shape == (len(iou_thresholds), n_classes, 3)
+    mean_p = 0
+    mean_r = 0
+    mean_f1 = 0
+    for i, iou_thrs in enumerate(iou_thresholds):
+        metrics[f'p@{iou_thrs}'] = scores[i, :, 0]
+        metrics[f'r@{iou_thrs}'] = scores[i, :, 1]
+        metrics[f'f1@{iou_thrs}'] = scores[i, :, 2]
+        metrics[f'mean_p@{iou_thrs}'] = metrics[f'p@{iou_thrs}'].mean()
+        metrics[f'mean_r@{iou_thrs}'] = metrics[f'r@{iou_thrs}'].mean()
+        metrics[f'mean_f1@{iou_thrs}'] = metrics[f'f1@{iou_thrs}'].mean()
+        mean_p += metrics[f'mean_p@{iou_thrs}']
+        mean_r += metrics[f'mean_r@{iou_thrs}']
+        mean_f1 += metrics[f'mean_f1@{iou_thrs}']
+    mean_p /= len(iou_thresholds)
+    mean_r /= len(iou_thresholds)
+    mean_f1 /= len(iou_thresholds)
+    metrics['mean_p'] = mean_p
+    metrics['mean_r'] = mean_r
+    metrics['mean_f1'] = mean_f1
+    
     # Save metrics    
     save_path = os.path.join(results_folder_path,
         f'{eval_dataset_name}__bbox_metrics(eval_mode={eval_mode}{",clamped" if clamp_bbox_coords else ""}).pkl')
     save_to_pickle(metrics, save_path)
     print(f'Saved bbox metrics to {save_path}')
+    
     # Save predictions
     if save_predictions:
         assert dicom_ids is not None
@@ -148,7 +145,6 @@ def _evaluate_model(
     image_transform_kwargs=None,
     model_kwargs=None,
     checkpoint_folder_path=None,
-    mimiccxr_qa_adapted_reports_filename=None,
     clamp_bbox_coords=False,
     save_predictions=False,
 ):
@@ -163,17 +159,16 @@ def _evaluate_model(
                 presence_indices.append(i)
 
     if eval_mode == EvalMode.CHEST_IMAGENOME__AVERAGE_BBOX:
-        assert mimiccxr_qa_adapted_reports_filename is not None
                 
         # Compute the average bbox for each class from the training set
-        avg_bbox_coords = load_chest_imagenome_train_average_bbox_coords(mimiccxr_qa_adapted_reports_filename, clamp_bbox_coords)
+        avg_bbox_coords = get_chest_imagenome_train_average_bbox_coords(clamp_bbox_coords)
 
         # Collect the test set bbox coords and presences
         if save_predictions:
             dicom_ids = []
         if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
             bboxes_dict = load_chest_imagenome_silver_bboxes()
-            mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(mimiccxr_qa_adapted_reports_filename)
+            mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata()
             test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']
             test_bbox_coords = []
             test_bbox_presences = []
@@ -199,11 +194,14 @@ def _evaluate_model(
             n_bbox_classes = CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
         else:
             raise ValueError(f'Invalid eval_dataset_name: {eval_dataset_name}')
+        
+        # Convert to numpy arrays
+        test_bbox_coords = np.array(test_bbox_coords)
+        test_bbox_presences = np.array(test_bbox_presences)
 
         # Clamp the bbox coords to [0, 1]
         if clamp_bbox_coords:
-            for coords in test_bbox_coords:
-                coords.clip(0, 1, out=coords)
+            test_bbox_coords.clip(0, 1, out=test_bbox_coords)
 
         # Prepare predictions
         pred_bbox_coords = np.tile(avg_bbox_coords, (len(test_bbox_coords), 1))
@@ -234,7 +232,6 @@ def _evaluate_model(
             dicom_ids=dicom_ids if save_predictions else None,
         )
     elif eval_mode == EvalMode.CHEST_IMAGENOME__TRAINED_MODEL:
-        assert mimiccxr_qa_adapted_reports_filename is not None
         assert batch_size is not None
         assert num_workers is not None
         assert image_transform_kwargs is not None
@@ -249,7 +246,7 @@ def _evaluate_model(
                 dicom_ids = []
         if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
             bboxes_dict = load_chest_imagenome_silver_bboxes()
-            mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(mimiccxr_qa_adapted_reports_filename)
+            mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata()
             test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']            
             for idx in test_idxs:
                 dicom_id_view_pairs = mimiccxr_detailed_metadata['dicom_id_view_pos_pairs'][idx]
@@ -258,7 +255,7 @@ def _evaluate_model(
                 study_id = mimiccxr_detailed_metadata['study_ids'][idx]
                 for dicom_id, _ in dicom_id_view_pairs:
                     if dicom_id in bboxes_dict:
-                        image_path = get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id)
+                        image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
                         test_image_paths.append(image_path)
                         bbox = bboxes_dict[dicom_id]
                         bbox_coords = bbox['coords']                        
@@ -272,7 +269,7 @@ def _evaluate_model(
             imageId2PartPatientStudy = get_imageId2PartPatientStudy()
             for dicom_id, bbox in gold_bboxes.items():
                 part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
-                image_path = get_mimiccxr_small_image_path(part_id, patient_id, study_id, dicom_id)
+                image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
                 test_image_paths.append(image_path)
                 test_bbox_coords.append(bbox['coords'][coord_indices])
                 test_bbox_presences.append(bbox['presence'][presence_indices])
@@ -281,11 +278,6 @@ def _evaluate_model(
             n_bbox_classes = CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
         else:
             raise ValueError(f'Invalid eval_dataset_name: {eval_dataset_name}')
-
-        # Clamp bbox coords to [0, 1]
-        if clamp_bbox_coords:
-            for coords in test_bbox_coords:
-                coords.clip(0, 1, out=coords)
 
         # Define image transform
         if DATASET_NAMES.MIMICCXR in image_transform_kwargs:
@@ -315,7 +307,7 @@ def _evaluate_model(
         # Create model
         model_name = get_model_name_from_checkpoint_path(checkpoint_path)
         if model_name == 'vqa':
-            model = OpenEndedVQA(**model_kwargs, device=device, use_image_encoder_only=True,
+            model = OpenEndedVQA(**model_kwargs, device=device, use_visual_module_only=True,
                                 vocab_size=None, start_idx=None)
         elif model_name == 'visual_module':
             model = MultiPurposeVisualModule(**model_kwargs)
@@ -338,11 +330,15 @@ def _evaluate_model(
                     pred_bbox_coords.append(bbox_coords[i])
                     pred_bbox_presences.append(bbox_presence[i])
 
-        # Conver to numpy arrays
+        # Convert to numpy arrays
         test_bbox_coords = np.array(test_bbox_coords)
         test_bbox_presences = np.array(test_bbox_presences)
         pred_bbox_coords = np.array(pred_bbox_coords)
         pred_bbox_presences = np.array(pred_bbox_presences)
+
+        # Clamp test bbox coords to [0, 1]
+        if clamp_bbox_coords:
+            test_bbox_coords.clip(0, 1, out=test_bbox_coords)
 
         if eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
             # Filter out the bboxes that are not in the gold set
@@ -369,7 +365,6 @@ def _evaluate_model(
 def evaluate_model(
     eval_mode,
     eval_dataset_name,
-    mimiccxr_qa_adapted_reports_filename=None,
     batch_size=None,
     num_workers=None,
     checkpoint_folder=None,
@@ -404,7 +399,6 @@ def evaluate_model(
     return _evaluate_model(
         eval_mode=eval_mode,
         eval_dataset_name=eval_dataset_name,
-        mimiccxr_qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
         batch_size=batch_size,
         num_workers=num_workers,
         image_transform_kwargs=image_transform_kwargs,

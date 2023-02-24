@@ -22,70 +22,77 @@ class AnswerDecoding:
 class OpenEndedVQA(MultiPurposeVisualModule):
 
     def __init__(self,
-                 # Vocab args
-                 vocab_size, embed_size,
-                 start_idx=None,
-                 eos_idx=None,
-                 padding_idx=None,
-                 # Image Encoder args
-                 visual_input_mode=VisualInputMode.RAW_IMAGE,
-                 raw_image_encoding=RawImageEncoding.DENSENET_121,
-                 image_local_feat_size=None,
-                 freeze_image_encoder=False,
-                 image_encoder_pretrained_weights_path=None,
-                 imagenet_pretrained=True,
-                 mlp_in_dim=None,
-                 mlp_out_dim=None,
-                 mlp_hidden_dims=None,
-                 clip_version=None,
-                 num_regions=None,
-                 huggingface_model_name=None,
-                 # Question Encoder args
-                 question_encoding = QuestionEncoding.BILSTM,
-                 question_vec_size=None,
-                 question_hidden_size=None,
-                 # Answer Decoder args
-                 answer_decoding =  AnswerDecoding.LSTM,
-                 answer_hidden_size=None,
-                 n_lstm_layers=None,
-                 transf_dec_nhead=None,
-                 transf_dec_dim_forward=None,
-                 transf_dec_num_layers=None,
-                 # Auxiliary tasks args
-                 classify_tags=False,
-                 classify_orientation=False,
-                 classify_gender=False,
-                 classify_chexpert=False,
-                 classify_questions=False,
-                 classify_chest_imagenome=False,
-                 predict_bboxes_chest_imagenome=False,
-                 chest_imagenome_train_average_bbox_coords=None,
-                 n_medical_tags=None,
-                 n_questions=None,
-                 n_questions_aux_task=None,
-                 n_chest_imagenome_labels=None,
-                 chest_imagenome_bbox_hidden_size=None,
-                 chest_imagenome_bbox_regressor_version=None,
-                 use_mimiccxr=False,
-                 use_iuxray=False,
-                 use_chexpert=False,
-                 use_cxr14=False,
-                 use_vinbig=False,
-                 use_padchest=False,
-                 merge_findings=False,
-                 n_findings=None,
-                 # Other args
-                 chexpert_mode=None,
-                 dropout_prob=0,
-                 device=None,
-                 use_visual_module_only=False,
-                 **unused_kwargs,
-                 ): 
-        super().__init__()
+                # Vocab args
+                vocab_size, embed_size,
+                start_idx=None,
+                eos_idx=None,
+                padding_idx=None,
+                # Image Encoder args
+                visual_input_mode=VisualInputMode.RAW_IMAGE,
+                raw_image_encoding=RawImageEncoding.DENSENET_121,
+                image_local_feat_size=None,
+                freeze_image_encoder=False,
+                image_encoder_pretrained_weights_path=None,
+                imagenet_pretrained=True,
+                mlp_in_dim=None,
+                mlp_out_dim=None,
+                mlp_hidden_dims=None,
+                clip_version=None,
+                num_regions=None,
+                huggingface_model_name=None,
+                # Question Encoder args
+                question_encoding = QuestionEncoding.BILSTM,
+                question_vec_size=None,
+                question_hidden_size=None,
+                # Answer Decoder args
+                answer_decoding =  AnswerDecoding.LSTM,
+                answer_hidden_size=None,
+                n_lstm_layers=None,
+                transf_dec_nhead=None,
+                transf_dec_dim_forward=None,
+                transf_dec_num_layers=None,
+                # Auxiliary tasks args
+                classify_tags=False,
+                classify_orientation=False,
+                classify_gender=False,
+                classify_chexpert=False,
+                classify_questions=False,
+                classify_chest_imagenome=False,
+                predict_bboxes_chest_imagenome=False,
+                chest_imagenome_train_average_bbox_coords=None,
+                n_medical_tags=None,
+                n_questions=None,
+                n_questions_aux_task=None,
+                n_chest_imagenome_labels=None,
+                chest_imagenome_bbox_hidden_size=None,
+                chest_imagenome_bbox_regressor_version=None,
+                use_mimiccxr=False,
+                use_iuxray=False,
+                use_chexpert=False,
+                use_cxr14=False,
+                use_vinbig=False,
+                use_padchest=False,
+                merge_findings=False,
+                n_findings=None,
+                # Other args
+                chexpert_mode=None,
+                dropout_prob=0,
+                device=None,
+                use_visual_module_only=False,
+                **unused_kwargs,
+                ):
 
         print('OpenEndedVQA():')
 
         print('  image_encoder_pretrained_weights_path', image_encoder_pretrained_weights_path)
+        self.use_visual_module_only = use_visual_module_only
+
+        self.chexpert_mode = chexpert_mode
+        if chexpert_mode == CHEXPERT_TASKS.VQA:
+            assert question_encoding == QuestionEncoding.ONE_HOT
+        
+        self.question_encoding = question_encoding
+        self.answer_decoding = answer_decoding
 
         # Init MultiPurposeVisualModule components (for image encoder and auxiliary tasks)
         super().__init__(
@@ -126,13 +133,7 @@ class OpenEndedVQA(MultiPurposeVisualModule):
             n_findings=n_findings,
         )
 
-        self.use_visual_module_only = use_visual_module_only
-
-        self.chexpert_mode = chexpert_mode
-        if chexpert_mode == CHEXPERT_TASKS.VQA:
-            assert question_encoding == QuestionEncoding.ONE_HOT
-
-        if not use_visual_module_only:
+        if not self.use_visual_module_only:
             # Init vocab embedding table
             self.embedding_table = nn.Embedding(
                 num_embeddings=vocab_size,
@@ -140,15 +141,13 @@ class OpenEndedVQA(MultiPurposeVisualModule):
                 padding_idx=0,
             )
 
-            # Init Question Encoder
-            self.question_encoding = question_encoding
+            # Init Question Encoder            
             self._init_question_encoder(question_encoding, question_hidden_size=question_hidden_size,
                             embed_size=embed_size, question_vec_size=question_vec_size,
                             vocab_size=vocab_size, start_idx=start_idx, n_questions=n_questions,
                             device=device)
             
             # Init Answer Decoder
-            self.answer_decoding = answer_decoding
             self._init_answer_decoder(image_local_feat_size, question_vec_size, embed_size,
                                 answer_hidden_size, n_lstm_layers, start_idx, eos_idx, padding_idx, vocab_size,
                                 transf_dec_nhead, transf_dec_dim_forward, transf_dec_num_layers, dropout_prob,
@@ -157,7 +156,7 @@ class OpenEndedVQA(MultiPurposeVisualModule):
         # Logging
         print(f'  n_questions = {n_questions}\n  n_questions_aux_task = {n_questions_aux_task}\n'
               f'  question_encoding = {question_encoding}\n  answer_decoding = {answer_decoding}\n'
-              f'  visual_input_mode = {visual_input_mode}\n  name = {self.name}')
+              f'  visual_input_mode = {visual_input_mode}\n  name = {self.get_name()}')
 
     def _init_question_encoder(self, question_encoding, question_hidden_size=None,
                                embed_size=None, question_vec_size=None, vocab_size=None,
@@ -219,9 +218,8 @@ class OpenEndedVQA(MultiPurposeVisualModule):
         else:
             assert False, f'Unknown answer decoding module {self.answer_decoding}'
 
-    @property
-    def name(self):
-        vm_str = super().name # visual module name
+    def get_name(self):
+        vm_str = super().get_name() # visual module name
         if not self.use_visual_module_only:
             q_enc_str = 'bilstm' if self.question_encoding == QuestionEncoding.BILSTM else 'onehot'
             a_dec_str = 'lstm' if self.answer_decoding == AnswerDecoding.LSTM else 'transf'

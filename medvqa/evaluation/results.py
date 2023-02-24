@@ -3,6 +3,7 @@ import re
 import pandas as pd
 from medvqa.models.checkpoint import get_checkpoint_filepath
 from medvqa.utils.common import RESULTS_DIR, WORKSPACE_DIR
+from medvqa.utils.constants import DATASET_NAME_TO_SHORT
 from medvqa.utils.files import get_cached_json_file
 from medvqa.evaluation import report_generation, visual_module
 
@@ -73,20 +74,36 @@ def collect_multimodal_question_probs(dataset_name):
             continue
     return results
 
-_REPLACEMENT_PAIRS = [
-    ('question-classification', 'qclass'),
-    ('n_questions_per_report', 'nqpr'),
-    ('n_q_per_report', 'nqpr'),
-    ('most-popular', 'mostpop'),
-    ('qclass_threshold', 'qclassthr'),
-]
-
 def _get_metadata_generator(results):
     for r in results:
         try:
             yield get_cached_json_file(os.path.join(WORKSPACE_DIR, 'models', r[0], r[1], 'metadata.json'))
         except FileNotFoundError:
             yield {} # TODO: this is a hack
+
+def _extract_image_transform_argument(metadata, arg_name):
+    try:
+        return metadata['image_transform_kwargs'][arg_name]
+    except KeyError:
+        pass
+    try:
+        return metadata['train_image_transform_kwargs'][arg_name]
+    except KeyError:
+        pass
+    try:
+        aug = None
+        transform_kwargs = metadata['train_image_transform_kwargs']
+        for long_name, short_name in DATASET_NAME_TO_SHORT.items():
+            if long_name in transform_kwargs:
+                if aug is not None:
+                    aug += '\n'
+                else:
+                    aug = ''
+                aug += f'{short_name}: {transform_kwargs[long_name][arg_name]}'
+        return aug
+    except KeyError:
+        pass
+    return None
 
 def _append_frozen_image_encoder_column(df, results):
     column = []
@@ -108,6 +125,10 @@ def _append_amp_column(df, results):
             column.append(False)
     df['amp'] = column
 
+
+_MODEL_REPLACEMENT_PAIRS = [
+    ('dense121', 'dn121'),
+]
 def _append_model_column(df, results):
     models = []
     for x in results:
@@ -116,7 +137,10 @@ def _append_model_column(df, results):
             e = x[1].index('_',s)
         except ValueError:
             e = len(x[1])
-        models.append(x[1][s:e])
+        model_name = x[1][s:e]
+        for x in _MODEL_REPLACEMENT_PAIRS:
+            model_name = model_name.replace(*x)
+        models.append(model_name)
     df['model'] = models
 
 def _append_datasets_column(df, results):
@@ -127,13 +151,21 @@ def _append_datasets_column(df, results):
         column.append(d)
     df['datasets'] = column
 
+_EVAL_MODE_REPLACEMENT_PAIRS = [
+    ('question-classification', 'qclass'),
+    ('n_questions_per_report', 'nqpr'),
+    ('n_q_per_report', 'nqpr'),
+    ('most-popular', 'mostpop'),
+    ('qclass_threshold', 'qclassthr'),
+]
+
 def _append_eval_mode_column(df, results):
     eval_modes = []
     for x in results:
         try:
             filename = x[2]
             em = filename[filename.index('eval_mode=')+10:-5]
-            for x in _REPLACEMENT_PAIRS:
+            for x in _EVAL_MODE_REPLACEMENT_PAIRS:
                 em = em.replace(*x)
         except ValueError:
             em = '****************'
@@ -212,23 +244,42 @@ def _append_pretrained_image_encoder_column(df, results):
         column.append(p)
     df['pretr_imgenc'] = column
 
+def _data_augmentation_extraction_method_1(metadata):
+    try:
+        return metadata['image_transform_kwargs']['augmentation_mode']
+    except KeyError:
+        return None
+def _data_augmentation_extraction_method_2(metadata):
+    try:
+        return metadata['dataloading_kwargs']['img_aug_mode']
+    except KeyError:
+        return None
+def _data_augmentation_extraction_method_3(metadata):
+    try:
+        return metadata['train_image_transform_kwargs']['augmentation_mode']
+    except KeyError:
+        return None
+def _data_augmentation_extraction_method_4(metadata):
+    try:
+        aug = None
+        transform_kwargs = metadata['train_image_transform_kwargs']
+        for long_name, short_name in DATASET_NAME_TO_SHORT.items():
+            if long_name in transform_kwargs:
+                if aug is not None:
+                    aug += '\n'
+                else:
+                    aug = ''
+                aug += f'{short_name}: {transform_kwargs[long_name]["augmentation_mode"]}'
+        return aug
+    except KeyError:
+        return None
 def _append_data_augmentation_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
-        try:
-            aug1 = metadata['image_transform_kwargs']['augmentation_mode']
-        except KeyError:
-            aug1 = None
-        try:
-            aug2 = metadata['dataloading_kwargs']['img_aug_mode']
-        except KeyError:
-            aug2 = None
-        try:
-            aug3 = metadata['train_image_transform_kwargs']['augmentation_mode']
-        except KeyError:
-            aug3 = None
-        # make aug the first one that is not None
-        aug = aug1 or aug2 or aug3
+        aug = _data_augmentation_extraction_method_1(metadata) \
+            or _data_augmentation_extraction_method_2(metadata) \
+            or _data_augmentation_extraction_method_3(metadata) \
+            or _data_augmentation_extraction_method_4(metadata)
         column.append(aug)
     df['aug'] = column
 
@@ -242,7 +293,7 @@ def _append_gradient_accumulation_column(df, results):
         column.append(iters)
     df['gradacc_iters'] = column
 
-def _append_chest_imagenome_bbox_regressor_version(df, results):
+def _append_chest_imagenome_bbox_regressor_version_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
         try:
@@ -251,6 +302,23 @@ def _append_chest_imagenome_bbox_regressor_version(df, results):
             version = None
         column.append(version)
     df['chstimgn_bbox_model'] = column
+
+def _append_image_size_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        size = _extract_image_transform_argument(metadata, 'image_size')
+        column.append(size)
+    df['img_size'] = column
+
+def _append_decent_images_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            use_decent_images = metadata['mimiccxr_trainer_kwargs']['use_decent_images_only']
+        except KeyError:
+            use_decent_images = None
+        column.append(use_decent_images)
+    df['decent_images'] = column
 
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
@@ -290,9 +358,11 @@ def _append_method_columns__chest_imagenome_bbox(df, results):
     df['timestamp'] = [x[1][:15] for x in results]
     _append_datasets_column(df, results)
     _append_model_column(df, results)
-    _append_chest_imagenome_bbox_regressor_version(df, results)
+    _append_chest_imagenome_bbox_regressor_version_column(df, results)
+    _append_data_augmentation_column(df, results)
     _append_eval_mode_column(df, results)
-
+    _append_image_size_column(df, results)
+    _append_decent_images_column(df, results)
 
 def get_report_level_metrics_dataframe(dataset_name):
     results = collect_report_level_results(dataset_name)

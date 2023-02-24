@@ -1,6 +1,7 @@
 import json
 import pickle
 import os
+from tqdm import tqdm
 
 from medvqa.utils.common import (
     WORKSPACE_DIR,
@@ -96,3 +97,43 @@ def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings, ext='pk
         h = hash_string(file_path)
         file_path = os.path.join(folder_path, f'{prefix}(hash={h[0]},{h[1]}).{ext}')
     return file_path
+
+def find_inconsistencies_between_directories(dir_path_1, dir_path_2):
+    # 1) Check that all files and subdirectories in dir_path_1 are also in dir_path_2
+    print(f'Checking that all files and subdirectories in {dir_path_1} are also in {dir_path_2}...')
+    in_dir1_not_in_dir2 = []
+    for root, dirs, files in tqdm(os.walk(dir_path_1)):
+        for f in files:
+            path_1 = os.path.join(root, f)
+            path_2 = path_1.replace(dir_path_1, dir_path_2)
+            if not os.path.exists(path_2):
+                in_dir1_not_in_dir2.append(path_1)
+        for d in dirs:
+            path_1 = os.path.join(root, d)
+            path_2 = path_1.replace(dir_path_1, dir_path_2)
+            if not os.path.exists(path_2):
+                in_dir1_not_in_dir2.append(path_1)
+    # 2) Check that all files and subdirectories in dir_path_2 are also in dir_path_1
+    print(f'Checking that all files and subdirectories in {dir_path_2} are also in {dir_path_1}...')
+    in_dir2_not_in_dir1 = []
+    for root, dirs, files in tqdm(os.walk(dir_path_2)):
+        for f in files:
+            path_2 = os.path.join(root, f)
+            path_1 = path_2.replace(dir_path_2, dir_path_1)
+            if not os.path.exists(path_1):
+                in_dir2_not_in_dir1.append(path_2)
+        for d in dirs:
+            path_2 = os.path.join(root, d)
+            path_1 = path_2.replace(dir_path_2, dir_path_1)
+            if not os.path.exists(path_1):
+                in_dir2_not_in_dir1.append(path_2)
+    # 3) Print a summary
+    print(f'In {dir_path_1} but not in {dir_path_2}: {len(in_dir1_not_in_dir2)}')
+    print(f'In {dir_path_2} but not in {dir_path_1}: {len(in_dir2_not_in_dir1)}')
+    if len(in_dir1_not_in_dir2) == 0 and len(in_dir2_not_in_dir1) == 0:
+        print('No inconsistencies found!')
+    # 4) Return the results
+    return {
+        'in_dir1_not_in_dir2': in_dir1_not_in_dir2,
+        'in_dir2_not_in_dir1': in_dir2_not_in_dir1,
+    }

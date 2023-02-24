@@ -323,6 +323,18 @@ class DATASET_NAMES:
     PADCHEST = 'padchest'
     MIMICCXR_CHEST_IMAGENOME_MODE = 'mimic-cxr-chest-imagenome-mode'
 
+DATASET_NAME_TO_SHORT = {
+    DATASET_NAMES.IUXRAY: 'iux',
+    DATASET_NAMES.MIMICCXR: 'mim',
+    DATASET_NAMES.CHEXPERT: 'chx',
+    DATASET_NAMES.IUXRAY_CHEXPERT_MODE: 'iux-chx',
+    DATASET_NAMES.MIMICCXR_CHEXPERT_MODE: 'mim-chx',
+    DATASET_NAMES.VINBIG: 'vnbg',
+    DATASET_NAMES.CXR14: 'cxr14',
+    DATASET_NAMES.PADCHEST: 'padch',
+    DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME_MODE: 'mim-chestimg',
+}
+
 class ReportEvalMode:
     GROUND_TRUTH = 'ground-truth'
     MOST_POPULAR = 'most-popular'
@@ -331,3 +343,8 @@ class ReportEvalMode:
     CHEXPERT_LABELS = 'chexpert-labels'
     CHEXPERT_AND_QUESTION_CLASSIFICATION = 'chexpert+qclass'
     VINBIG_DISEASES = 'vinbig-diseases'
+
+def get_enum_class_attribute_values(enum_class):
+    for name, value in vars(enum_class).items():
+        if not name.startswith('__'):
+            yield value

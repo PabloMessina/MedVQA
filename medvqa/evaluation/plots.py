@@ -1,5 +1,14 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
+from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_BBOX_NAMES,
+    CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED,
+    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+)
+
+from medvqa.utils.files import get_cached_pickle_file
 
 def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
@@ -60,3 +69,109 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
         ax.legend()
     
     plt.show()
+
+def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliases, metric_name, metric_alias,
+                                                  dataset_name, thresholds=[0.5, 0.6, 0.7, 0.8, 0.9], figsize=(8, 6)):
+    assert type(metrics_paths) == list
+    assert type(method_aliases) == list
+    assert len(metrics_paths) == len(method_aliases)
+    assert len(metrics_paths) > 0    
+    metrics_list = [get_cached_pickle_file(path) for path in metrics_paths]
+    n = len(metrics_list)
+    # Get the scores for each method at each threshold
+    scores_per_method = []
+    for i in range(n):
+        scores_per_method.append([])
+        for t in thresholds:
+            scores_per_method[i].append(metrics_list[i][f'{metric_name}@{t}'])
+    # Sort methods by the mean score
+    method_idxs = list(range(n))
+    mean_scores = [sum(scores_per_method[i]) / len(scores_per_method[i]) for i in range(n)]
+    method_idxs.sort(key=lambda i: mean_scores[i], reverse=True)
+    # Create a vertical barchart plot, where each method has a bar for each threshold
+    # The height of the bar is the score
+    # Each method is a different color
+    plt.figure(figsize=figsize)
+    width = 0.8 / n
+    for i in range(n):
+        label = f'{method_aliases[method_idxs[i]]} ({mean_scores[method_idxs[i]]:.3f})'
+        plt.bar([j + i*width for j in range(1, len(thresholds)+1)], scores_per_method[method_idxs[i]], width=width, label=label)
+    plt.xticks([width * (n/2-0.5)+ i for i in range(1, len(thresholds)+1)], thresholds)
+    plt.xlabel('Threshold')
+    plt.ylabel(metric_alias)
+    plt.title(f'{metric_alias} per IoU threshold on {dataset_name}')
+    # Plot legend outside the plot
+    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    # Plot horizontal lines of grid
+    plt.grid(axis='y')
+    plt.show()
+
+def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_aliases, metric_name, metric_alias,
+        dataset_name, figsize=(8,6), horizontal=True):
+    assert type(metrics_paths) == list
+    assert type(method_aliases) == list
+    assert len(metrics_paths) == len(method_aliases)
+    assert len(metrics_paths) > 0
+    metrics_list = [get_cached_pickle_file(path) for path in metrics_paths]
+    n = len(metrics_list)
+    
+    # Get the scores for each method and each bounding box class
+    scores_per_method = []
+    n_bboxes = None
+    bbox_names = None
+    for i in range(n):
+        scores_per_method.append([])
+        metrics_per_class = metrics_list[i][metric_name]
+        assert type(metrics_per_class) == list or type(metrics_per_class) == np.ndarray
+        assert len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
+            len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
+        if n_bboxes is None:
+            n_bboxes = len(metrics_per_class)
+            if n_bboxes == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
+                bbox_names = CHEST_IMAGENOME_BBOX_NAMES
+            elif n_bboxes == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
+                bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED
+            else:
+                assert False
+        else:
+            assert n_bboxes == len(metrics_per_class)
+        for j in range(n_bboxes):
+            scores_per_method[i].append(metrics_list[i][metric_name][j])
+
+    # Sort methods by the mean score
+    method_idxs = list(range(n))
+    mean_scores = [sum(scores_per_method[i]) / len(scores_per_method[i]) for i in range(n)]
+    method_idxs.sort(key=lambda i: mean_scores[i], reverse=True)
+
+    # Sort bbox classes by the mean score
+    bbox_idxs = list(range(n_bboxes))
+    mean_scores_per_bbox = [sum(scores_per_method[i][j] for i in range(n)) / n for j in range(n_bboxes)]
+    bbox_idxs.sort(key=lambda i: mean_scores_per_bbox[i], reverse=horizontal)
+    
+    # Create a horizontal scatter plot, where each method has one point for each bounding box class
+    # Each point is a pair of (score, bounding box class)
+    # Each method is a different color
+    plt.figure(figsize=figsize)
+    for i in range(n):
+        label = f'{method_aliases[method_idxs[i]]} ({mean_scores[method_idxs[i]]:.3f})'
+        sorted_scores = [scores_per_method[method_idxs[i]][bbox_idxs[j]] for j in range(n_bboxes)]
+        if horizontal:
+            plt.scatter(range(1, n_bboxes+1), sorted_scores, label=label)
+        else:
+            plt.scatter(sorted_scores, range(1, n_bboxes+1), label=label)
+    if horizontal:
+        # Rotate the xticks by 45 degrees and move them to the right so they don't overlap
+        plt.xticks(range(1, n_bboxes+1), [bbox_names[i] for i in bbox_idxs], rotation=45, ha='right')
+        plt.ylabel(metric_alias)
+        plt.xlabel('Bounding box class')
+        plt.grid(axis='y')
+    else:
+        plt.yticks(range(1, n_bboxes+1), [bbox_names[i] for i in bbox_idxs])
+        plt.xlabel(metric_alias)
+        plt.ylabel('Bounding box class')
+        plt.grid(axis='x')
+    plt.title(f'{metric_alias} per bounding box class on {dataset_name}')
+    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    plt.show()
+    
+    

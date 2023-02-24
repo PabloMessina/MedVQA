@@ -11,6 +11,8 @@ import torch
 
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
+    CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS,
+    CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH,
     CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH,
     CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH,
     CHEST_IMAGENOME_CACHE_DIR,
@@ -30,6 +32,7 @@ from medvqa.datasets.mimiccxr import (
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_json_file, load_pickle, save_to_pickle
 from medvqa.metrics.bbox.utils import compute_iou
+from medvqa.utils.logging import print_blue, print_red
 
 def _load_scene_graph(scene_graph_path):
     return load_json_file(scene_graph_path)
@@ -89,6 +92,70 @@ def load_chest_imagenome_silver_bboxes():
     assert chest_imagenome_bboxes is not None, CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH
     return chest_imagenome_bboxes
 
+def load_chest_imagenome_horizontally_flipped_silver_bboxes():
+    if os.path.exists(CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH):
+        flipped_bboxes = get_cached_pickle_file(CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH)
+        return flipped_bboxes
+    
+    print('Horizontally flipping bboxes...')
+    silver_bboxes = load_chest_imagenome_silver_bboxes()
+    flipped_bboxes = {}
+    to_flip_idx_pairs = []
+    other_idxs = set(range(CHEST_IMAGENOME_NUM_BBOX_CLASSES))
+    for r, l in CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS:
+        r_idx = CHEST_IMAGENOME_BBOX_NAMES.index(r)
+        l_idx = CHEST_IMAGENOME_BBOX_NAMES.index(l)
+        to_flip_idx_pairs.append((r_idx, l_idx))
+        other_idxs.remove(r_idx)
+        other_idxs.remove(l_idx)
+    other_idxs = list(other_idxs)
+    
+    for dicom_id, bboxes in silver_bboxes.items():
+        coords = bboxes['coords']
+        presence = bboxes['presence']
+        flipped_coords = np.zeros_like(coords)
+        flipped_presence = np.zeros_like(presence)
+        for idx in other_idxs:
+            x1 = coords[4 * idx + 0]
+            y1 = coords[4 * idx + 1]
+            x2 = coords[4 * idx + 2]
+            y2 = coords[4 * idx + 3]
+            flipped_coords[4 * idx + 0] = 1.0 - x2
+            flipped_coords[4 * idx + 1] = y1
+            flipped_coords[4 * idx + 2] = 1.0 - x1
+            flipped_coords[4 * idx + 3] = y2
+            flipped_presence[idx] = presence[idx]
+        for r_idx, l_idx in to_flip_idx_pairs:
+            # right -> left
+            x1 = coords[4 * r_idx + 0]
+            y1 = coords[4 * r_idx + 1]
+            x2 = coords[4 * r_idx + 2]
+            y2 = coords[4 * r_idx + 3]
+            flipped_coords[4 * l_idx + 0] = 1.0 - x2
+            flipped_coords[4 * l_idx + 1] = y1
+            flipped_coords[4 * l_idx + 2] = 1.0 - x1
+            flipped_coords[4 * l_idx + 3] = y2
+            flipped_presence[l_idx] = presence[r_idx]
+            # left -> right
+            x1 = coords[4 * l_idx + 0]
+            y1 = coords[4 * l_idx + 1]
+            x2 = coords[4 * l_idx + 2]
+            y2 = coords[4 * l_idx + 3]
+            flipped_coords[4 * r_idx + 0] = 1.0 - x2    
+            flipped_coords[4 * r_idx + 1] = y1
+            flipped_coords[4 * r_idx + 2] = 1.0 - x1
+            flipped_coords[4 * r_idx + 3] = y2
+            flipped_presence[r_idx] = presence[l_idx]
+        flipped_bboxes[dicom_id] = {
+            'coords': flipped_coords,
+            'presence': flipped_presence,
+        }
+
+    print('  Saving horizontally flipped bboxes...')
+    save_to_pickle(flipped_bboxes, CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH)
+    print('  Done.')
+    return flipped_bboxes
+
 def load_gold_standard_dicom_ids():
     df = pd.read_csv(CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH)
     return df['dicom_id'].tolist()
@@ -103,8 +170,11 @@ def load_nongold_dicom_ids():
     save_to_pickle(dicom_ids, cache_path)
     return dicom_ids
 
-def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False):
-    bboxes = load_chest_imagenome_silver_bboxes()
+def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False):
+    if flipped:
+        bboxes = load_chest_imagenome_horizontally_flipped_silver_bboxes()
+    else:
+        bboxes = load_chest_imagenome_silver_bboxes()
     bbox_coords = np.empty((len(bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
     bbox_presence = np.empty((len(bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
     did2idx = {did: i for i, did in enumerate(bboxes.keys())}
@@ -118,9 +188,21 @@ def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=Fals
         bbox_coords.clip(0, 1, out=bbox_coords) # Clip to [0, 1] in-place
     return idxs, bbox_coords, bbox_presence
 
-def load_chest_imagenome_dicom_ids():
+def load_chest_imagenome_dicom_ids(decent_images_only=False, avg_coef=0.4, std_coef=0.5):
+    if decent_images_only:
+        cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, f'decent_chest_imagenome_dicom_ids(avg_coef={avg_coef},std_coef={std_coef}).pkl')
+    else:
+        cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'chest_imagenome_dicom_ids.pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
     chest_imagenome_bboxes = load_chest_imagenome_silver_bboxes()
-    return list(chest_imagenome_bboxes.keys())
+    dicom_ids = list(chest_imagenome_bboxes.keys())
+    if decent_images_only:
+        unfiltered_average = get_chest_imagenome_average_bbox_coords()
+        dicom_ids = [did for did in dicom_ids if determine_if_image_is_decent(
+            did, unfiltered_average, avg_coef=avg_coef, std_coef=std_coef)]
+    save_to_pickle(dicom_ids, cache_path)
+    return dicom_ids
 
 def load_chest_imagenome_gold_bboxes():
     cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'chest_imagenome_gold_bboxes.pkl')
@@ -174,24 +256,36 @@ def get_chest_imagenome_gold_bbox_names():
     save_to_pickle(bbox_names, cache_path)    
     return bbox_names
 
-def load_chest_imagenome_train_average_bbox_coords(mimiccxr_qa_adapted_reports_filename, clamp_bbox_coords=True):
+def get_chest_imagenome_train_average_bbox_coords(clamp_bbox_coords=True, use_decent_images_only=False, avg_coef=0.4, std_coef=0.5):
     # Define output path
-    output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
-        f'chest_imagenome_train_average_bbox_coords({mimiccxr_qa_adapted_reports_filename},{"clamped" if clamp_bbox_coords else "unclamped"}).pkl')    
+    if use_decent_images_only:
+        output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
+            (f'chest_imagenome_train_average_bbox_coords({"clamped" if clamp_bbox_coords else "unclamped"})'
+            f'_decent_images_only({"avg_coef_" + str(avg_coef) + "_std_coef_" + str(std_coef)}).pkl'))
+    else:
+        output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
+            f'chest_imagenome_train_average_bbox_coords({"clamped" if clamp_bbox_coords else "unclamped"}).pkl')    
     # Load from cache if possible
     if os.path.exists(output_path):
         print(f'Loading {output_path}...')
         return load_pickle(output_path)
     # Compute the average bbox for each class from the training set    
     bboxes_dict = load_chest_imagenome_silver_bboxes()
-    mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(mimiccxr_qa_adapted_reports_filename)
+    mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata()
     train_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'train']
     avg_bbox_coords = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES * 4)
     bbox_counts = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES * 4)
+    if use_decent_images_only:
+        unfiltered_average = get_chest_imagenome_train_average_bbox_coords(use_decent_images_only=False)
+        skipped = 0
     for idx in train_idxs:
         dicom_id_view_pairs = mimiccxr_detailed_metadata['dicom_id_view_pos_pairs'][idx]
         for dicom_id, _ in dicom_id_view_pairs:
             if dicom_id in bboxes_dict:
+                if use_decent_images_only:
+                    if not determine_if_image_is_decent(dicom_id, unfiltered_average, avg_coef=avg_coef, std_coef=std_coef):
+                        skipped += 1
+                        continue
                 bbox = bboxes_dict[dicom_id]
                 bbox_coords = bbox['coords']
                 if clamp_bbox_coords:
@@ -204,13 +298,15 @@ def load_chest_imagenome_train_average_bbox_coords(mimiccxr_qa_adapted_reports_f
                         avg_bbox_coords[s:e] += bbox_coords[s:e]
                         bbox_counts[s:e] += 1
     avg_bbox_coords /= bbox_counts
+    if use_decent_images_only:
+        print(f'Skipped {skipped} images')
     # Save the average bbox coords
     save_to_pickle(avg_bbox_coords, output_path)
     print(f'Saved {output_path}')
     # Return the average bbox coords
     return avg_bbox_coords
 
-def load_chest_imagenome_average_bbox_coords(clamp_bbox_coords=True):
+def get_chest_imagenome_average_bbox_coords(clamp_bbox_coords=True):
     # Define output path
     output_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR,
         f'chest_imagenome_train_average_bbox_coords({"clamped" if clamp_bbox_coords else "unclamped"}).pkl')
@@ -436,7 +532,7 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
     import matplotlib.patches as patches
     fig, ax = plt.subplots(1, figsize=figsize)
     ax.imshow(image)
-    print(f'Image path: {image_path}')
+    print(f'Image path: {image_path}')    
     for i in range(len(gt_presence)):
         if gt_presence[i] == 1:
             x1 = gt_coords[i * 4 + 0] * width
@@ -457,29 +553,20 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='blue', facecolor='none', linestyle='dashed')
             ax.add_patch(rect)
             ax.text(x1, y1-3, bbox_names[i], fontsize=16, color='blue')
+    print('Predicted bounding boxes are in ', end='')
+    print_blue('blue')
+    print('Ground truth bounding boxes are in ', end='')
+    print_red('red')
     plt.show()
 
 _RIGHT_LEFT_PAIRS = []
-for _reg_r, _reg_l in [
-    ('right lung', 'left lung'),
-    ('right upper lung zone', 'left upper lung zone'),
-    ('right mid lung zone', 'left mid lung zone'),
-    ('right lower lung zone', 'left lower lung zone'),
-    ('right hilar structures', 'left hilar structures'),
-    ('right apical zone', 'left apical zone'),
-    ('right costophrenic angle', 'left costophrenic angle'),
-    ('right cardiophrenic angle', 'left cardiophrenic angle'),
-    ('right hemidiaphragm', 'left hemidiaphragm'),
-    ('right clavicle', 'left clavicle'),
-    ('right cardiac silhouette', 'left cardiac silhouette'),
-    ('right upper abdomen', 'left upper abdomen'),
-]:
+for _reg_r, _reg_l in CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS:
     _RIGHT_LEFT_PAIRS.append((
         CHEST_IMAGENOME_BBOX_NAMES.index(_reg_r),
         CHEST_IMAGENOME_BBOX_NAMES.index(_reg_l),
     ))
 
-def determine_if_image_is_decent(dicom_id, average_bboxes, detailed_output=False, debug=False):
+def determine_if_image_is_decent(dicom_id, average_bboxes, avg_coef=0.4, std_coef=0.5, detailed_output=False, debug=False):
     bboxes_dict = load_chest_imagenome_silver_bboxes()
     bbox = bboxes_dict[dicom_id]
     coords = bbox['coords']
@@ -534,8 +621,8 @@ def determine_if_image_is_decent(dicom_id, average_bboxes, detailed_output=False
         if debug:
             print('avg_vector:', avg_vector)
             print('std_vector:', std_vector)
-        if abs(avg_vector[0]) * 0.4 > abs(avg_vector[1]) and avg_vector[0] > 0\
-            and std_vector[0] + std_vector[1] < 0.65:
+        if abs(avg_vector[0]) * avg_coef > abs(avg_vector[1]) and avg_vector[0] > 0\
+            and std_vector[0] + std_vector[1] < std_coef:
 
             if detailed_output:
                 return True, vector_list
@@ -546,14 +633,11 @@ def determine_if_image_is_decent(dicom_id, average_bboxes, detailed_output=False
     mean_iou = 0
     for i in range(len(presence)):
         if presence[i] == 1:
-            iou = compute_iou(coords[i * 4: i * 4 + 4], average_bboxes[i * 4: i * 4 + 4])
-            mean_iou += iou
-    den = sum(presence)
-    if den > 0:
-        mean_iou /= den
+            mean_iou += compute_iou(coords[i * 4: i * 4 + 4], average_bboxes[i * 4: i * 4 + 4])
+    mean_iou /= len(presence)
     if debug:
         print('mean_iou:', mean_iou)
-    if mean_iou > 0.75:
+    if mean_iou > 0.8:
         if detailed_output:
             return True, vector_list
         return True
@@ -589,8 +673,11 @@ def determine_if_image_is_rotated(dicom_id, average_bboxes, debug=False):
     # It probably is rotated
     return True
 
-def visualize_symmetric_ground_truth_bounding_boxes(dicom_id):
-    bboxes_dict = load_chest_imagenome_silver_bboxes()
+def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
+    if flipped:
+        bboxes_dict = load_chest_imagenome_horizontally_flipped_silver_bboxes()
+    else:
+        bboxes_dict = load_chest_imagenome_silver_bboxes()
     imageId2PartPatientStudy = get_imageId2PartPatientStudy()
     bbox = bboxes_dict[dicom_id]
     coords = bbox['coords']
@@ -602,6 +689,9 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id):
     image = image.convert('RGB')
     width = image.size[0]
     height = image.size[1]
+    if flipped:
+        print('Flipped image')
+        image = image.transpose(Image.FLIP_LEFT_RIGHT)
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     fig, ax = plt.subplots(1, figsize=(10, 10))

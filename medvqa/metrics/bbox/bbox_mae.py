@@ -15,22 +15,22 @@ class DatasetAwareBboxMAE(DatasetAwareMetric):
         self._count = 0
 
     def update(self, output):
-        pred_coords, gt_coords = output
-        n = pred_coords.shape[0]
+        pred_coords, gt_coords, gt_presence = output
+        n, m = gt_presence.shape
         if torch.is_tensor(pred_coords):
             for i in range(n):
-                pred = pred_coords[i]
-                gt = gt_coords[i]
-                score = torch.mean(torch.abs(pred - gt)).item()
-                self._acc_score += score
-        else:
+                ae = torch.abs(pred_coords[i] - gt_coords[i])
+                for j in range(m):
+                    if gt_presence[i, j] == 1:
+                        self._acc_score += ae[j*4:(j+1)*4].mean()
+                        self._count += 1
+        else: # numpy
             for i in range(n):
-                pred = pred_coords[i]
-                gt = gt_coords[i]
-                # use numpy to compute the mean absolute error
-                score = np.mean(np.abs(pred - gt))
-                self._acc_score += score
-        self._count += n
+                ae = np.abs(pred_coords[i] - gt_coords[i])
+                for j in range(m):
+                    if gt_presence[i, j] == 1:
+                        self._acc_score += ae[j*4:(j+1)*4].mean()
+                        self._count += 1
 
     def compute(self):
         if self._count == 0:

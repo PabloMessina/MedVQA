@@ -6,8 +6,9 @@ from tqdm import tqdm
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_BBOX_NAME_TO_SHORT,
     CHEST_IMAGENOME_BBOX_NAMES,
-    CHEST_IMAGENOME_GOLD_BBOX_NAMES,
+    CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED,
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
@@ -118,29 +119,69 @@ def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_VISUAL_MODU
     
     return pd.DataFrame(data=data, columns=columns)
 
+_thresholds = [0.5, 0.6, 0.7, 0.8, 0.9]
+_chest_imagenome_metric_names = []
+# IoU and MAE (per class and macro)
+for _bbox_name in CHEST_IMAGENOME_BBOX_NAMES:
+    _bbox_name = CHEST_IMAGENOME_BBOX_NAME_TO_SHORT[_bbox_name]
+    _chest_imagenome_metric_names.append(f'iou_{_bbox_name}')
+    _chest_imagenome_metric_names.append(f'mae_{_bbox_name}')
+_chest_imagenome_metric_names.append('mean_iou')
+_chest_imagenome_metric_names.append('mean_mae')
+# Precision, Recall, F1 (per class and macro, at different IoU thresholds)
+for _t in _thresholds:
+    for _bbox_name in CHEST_IMAGENOME_BBOX_NAMES:
+        _bbox_name = CHEST_IMAGENOME_BBOX_NAME_TO_SHORT[_bbox_name]
+        _chest_imagenome_metric_names.append(f'p@{_t}_{_bbox_name}')
+        _chest_imagenome_metric_names.append(f'r@{_t}_{_bbox_name}')
+        _chest_imagenome_metric_names.append(f'f1@{_t}_{_bbox_name}')
+    _chest_imagenome_metric_names.append(f'mean_p@{_t}')
+    _chest_imagenome_metric_names.append(f'mean_r@{_t}')
+    _chest_imagenome_metric_names.append(f'mean_f1@{_t}')
+_chest_imagenome_metric_names.append('mean_p')
+_chest_imagenome_metric_names.append('mean_r')
+_chest_imagenome_metric_names.append('mean_f1')
+
 def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
     assert type(metrics_paths) == list or type(metrics_paths) == str
     if type(metrics_paths) is str:
         metrics_paths  = [metrics_paths]    
     print(f'Loading {len(metrics_paths)} metrics files...')
-    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]
-    # Get all metric names
-    metric_names = set()
-    for metrics_dict in metrics_dict_list:
-        metric_names.update(metrics_dict.keys())
-    metric_names = list(metric_names)
-    metric_names.sort()
+    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]    
     # Create dataframe
     columns = ['metrics_path']
-    columns.extend(metric_names)
+    columns.extend(_chest_imagenome_metric_names)
     data = [[] for _ in range(len(metrics_paths))]
     for row_i, metrics_dict in tqdm(enumerate(metrics_dict_list)):
-        data[row_i].append(metrics_paths[row_i])
-        for mn in metric_names:            
-            met = metrics_dict.get(mn, None)
-            data[row_i].append(met)
+        row = [None] * len(columns)
+        row[0] = metrics_paths[row_i]
+        for key, value in metrics_dict.items():
+            if key.startswith('mean') and not key.startswith('mean_'):
+                key = 'mean_' + key[4:] # e.g. meanp -> mean_p (for backward compatibility)
+                idx = columns.index(key)
+                assert type(value) in [float, np.float32, np.float64]
+                row[idx] = value
+                continue
+            # if value is a numpy array or list, it means it's a per-class metric
+            if type(value) in [list, np.ndarray]:
+                assert len(value) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
+                    len(value) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
+                if len(value) == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
+                    bbox_names = CHEST_IMAGENOME_BBOX_NAMES
+                else:
+                    bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED
+                for i, v in enumerate(value):
+                    key_ = f'{key}_{CHEST_IMAGENOME_BBOX_NAME_TO_SHORT[bbox_names[i]]}'
+                    idx = columns.index(key_)
+                    row[idx] = v
+            else: # otherwise it's a single value
+                assert type(value) in [float, np.float32, np.float64], f'key={key}, value={value}, type(value)={type(value)}'
+                if not key.startswith('mean_'):
+                    key = 'mean_' + key # e.g. mae -> mean_mae (for backward compatibility)
+                idx = columns.index(key)
+                row[idx] = value
+        data[row_i] = row
     return pd.DataFrame(data=data, columns=columns)
-
 
 class ChestImagenomeBboxPredictionsVisualizer:
 
@@ -158,7 +199,7 @@ class ChestImagenomeBboxPredictionsVisualizer:
         if n_bbox_classes == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
             self.bbox_names = CHEST_IMAGENOME_BBOX_NAMES
         elif n_bbox_classes == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
-            self.bbox_names = [name for name in CHEST_IMAGENOME_BBOX_NAMES if name in CHEST_IMAGENOME_GOLD_BBOX_NAMES]
+            self.bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED
         else:
             raise ValueError(f'Unknown number of bbox classes: {n_bbox_classes}')
         iou_scores = [None] * len(self.dicom_ids)
@@ -170,12 +211,12 @@ class ChestImagenomeBboxPredictionsVisualizer:
             test_presences = self.test_bbox_presences[i]
             for j in range(n_bbox_classes):
                 if test_presences[j] == 1:
-                    if pred_presences[j] >= 0:
+                    if pred_presences[j] > 0:
                         scores[j] = compute_iou(pred_coords[j*4:(j+1)*4], test_coords[j*4:(j+1)*4])
                     else:
                         scores[j] = 0
                 else:
-                    scores[j] = 1 if pred_presences[j] < 0 else 0
+                    scores[j] = 1 if pred_presences[j] <= 0 else 0
             iou_scores[i] = scores.mean()
         self.iou_scores = np.array(iou_scores)
         self.iou_scores_mean = np.mean(self.iou_scores)
