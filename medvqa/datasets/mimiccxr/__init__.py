@@ -22,6 +22,7 @@ MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP']
+MIMICCXR_SPLIT_NAMES = ['train', 'validate', 'test']
 
 MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
 MIMICCXR_IMAGE_MEDIUM_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_MEDIUM_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
@@ -212,8 +213,9 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
         filename = f'{qa_adapted_reports_filename}__detailed_metadata.pkl'
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, filename)
     if os.path.exists(cache_path):
-        print(f'Loading cached detailed metadata from {cache_path}')
         return get_cached_pickle_file(cache_path)
+    
+    print('Computing detailed metadata...')
 
     if qa_adapted_reports_filename is not None:
         qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
@@ -274,6 +276,9 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
     save_to_pickle(report_metadata, cache_path)
     print(f'Saved detailed metadata to {cache_path}')
     return report_metadata
+
+def get_number_of_reports():
+    return len(load_mimiccxr_reports_detailed_metadata()['part_ids'])
 
 def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
     detailed_metadata = load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename)    

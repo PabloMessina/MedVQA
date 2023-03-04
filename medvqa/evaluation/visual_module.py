@@ -13,10 +13,11 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    load_postprocessed_label_names,
     visualize_ground_truth_bounding_boxes,
     visualize_predicted_bounding_boxes,
 )
-from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleEvaluator
+from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.metrics import (
     attach_chest_imagenome_labels_accuracy,
     attach_chest_imagenome_labels_prf1,
@@ -60,7 +61,7 @@ def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_VISUAL_MODU
         for mn in metric_names:            
             met = metrics_dict.get(mn, _empty_dict)
             
-            if mn == MetricNames.CHXLABEL_PRF1:                
+            if mn == MetricNames.CHXLABEL_PRF1:
                 data[row_i].append(met.get('f1_macro_avg', None))
                 if row_i == 0: columns.append('f1(macro)')
                 data[row_i].append(met.get('p_macro_avg', None))
@@ -156,6 +157,9 @@ def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
         row = [None] * len(columns)
         row[0] = metrics_paths[row_i]
         for key, value in metrics_dict.items():
+            if key == 'bbox_names':
+                assert type(value) == list
+                continue
             if key.startswith('mean') and not key.startswith('mean_'):
                 key = 'mean_' + key[4:] # e.g. meanp -> mean_p (for backward compatibility)
                 idx = columns.index(key)
@@ -165,11 +169,14 @@ def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
             # if value is a numpy array or list, it means it's a per-class metric
             if type(value) in [list, np.ndarray]:
                 assert len(value) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
-                    len(value) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
+                    len(value) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES or\
+                    'bbox_names' in metrics_dict
                 if len(value) == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
                     bbox_names = CHEST_IMAGENOME_BBOX_NAMES
-                else:
+                elif len(value) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
                     bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED
+                else:
+                    bbox_names = metrics_dict['bbox_names']
                 for i, v in enumerate(value):
                     key_ = f'{key}_{CHEST_IMAGENOME_BBOX_NAME_TO_SHORT[bbox_names[i]]}'
                     idx = columns.index(key_)
@@ -182,6 +189,117 @@ def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
                 row[idx] = value
         data[row_i] = row
     return pd.DataFrame(data=data, columns=columns)
+
+_CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES = [
+    MetricNames.CHESTIMAGENOMELABELACC,
+    MetricNames.CHESTIMAGENOMELABEL_PRF1,
+    MetricNames.CHESTIMAGENOMELABELROCAUC,
+]
+
+
+def get_chest_imagenome_multilabel_classification_metrics_dataframe(
+        metrics_paths, metric_names=_CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES):
+
+    assert type(metrics_paths) == list or type(metrics_paths) == str
+    if type(metrics_paths) is str:
+        metrics_paths  = [metrics_paths]
+    columns = ['metrics_path', 'num_labels']
+    data = [[] for _ in range(len(metrics_paths))]
+    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]
+    label_names_list = []
+    all_label_names = set()
+    for metrics_dict in metrics_dict_list:
+        if 'chest_imagenome_label_names' in metrics_dict:
+            label_names = metrics_dict['chest_imagenome_label_names']
+            print(f'len(label_names)={len(label_names)}')
+        else:
+            # TODO: remove this hack
+            if len(metrics_dict[MetricNames.CHESTIMAGENOMELABEL_PRF1]['p']) == 627:
+                label_names = load_postprocessed_label_names('labels(min_freq=100).pkl')
+            else:
+                assert False
+        label_names_list.append(label_names)
+        all_label_names.update(label_names)
+    all_label_names = sorted(list(all_label_names))
+    label_name_2_idx = {label_name: idx for idx, label_name in enumerate(all_label_names)}
+
+    def _label2str(label_name):
+        if len(label_name) == 2:
+            label_name = label_name[1]
+        else:
+            assert len(label_name) == 3, f'len(label_name)={len(label_name)}'
+            label_name = label_name[0] + ' ' + label_name[2]
+        return label_name
+
+    offset = 2
+    metric2offset = {}
+    for metric_name in metric_names:
+        if metric_name == MetricNames.CHESTIMAGENOMELABEL_PRF1:
+            metric2offset[metric_name] = offset
+            columns.append('f1(macro)')
+            columns.append('p(macro)')
+            columns.append('r(macro)')
+            columns.append('f1(micro)')
+            columns.append('p(micro)')
+            columns.append('r(micro)')
+            for label_name in all_label_names:
+                label_name = _label2str(label_name)
+                columns.append(f'f1({label_name})')
+                columns.append(f'p({label_name})')
+                columns.append(f'r({label_name})')
+            offset += 6 + 3 * len(all_label_names)
+        elif metric_name == MetricNames.CHESTIMAGENOMELABELACC:
+            metric2offset[metric_name] = offset
+            columns.append('acc')
+            offset += 1
+        elif metric_name == MetricNames.CHESTIMAGENOMELABELROCAUC:
+            metric2offset[metric_name] = offset
+            columns.append('rocauc(macro)')
+            columns.append('rocauc(micro)')
+            for label_name in all_label_names:
+                label_name = _label2str(label_name)
+                columns.append(f'rocauc({label_name})')
+            offset += 2 + len(all_label_names)
+        else:
+            assert False, f'unknown metric_name={metric_name}'
+
+    for row_i, metrics_path in enumerate(tqdm(metrics_paths)):
+        data[row_i] = [None] * len(columns)
+        data[row_i][0] = metrics_path
+        data[row_i][1] = len(label_names_list[row_i])
+        metrics_dict = metrics_dict_list[row_i]
+        
+        for mn in metric_names:
+            met = metrics_dict[mn]
+
+            if mn == MetricNames.CHESTIMAGENOMELABEL_PRF1:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met['f1_macro_avg']
+                data[row_i][offset + 1] = met['p_macro_avg']
+                data[row_i][offset + 2] = met['r_macro_avg']
+                data[row_i][offset + 3] = met['f1_micro_avg']
+                data[row_i][offset + 4] = met['p_micro_avg']
+                data[row_i][offset + 5] = met['r_micro_avg']
+                for i, label_name in enumerate(label_names_list[row_i]):
+                    label_idx = label_name_2_idx[label_name]
+                    data[row_i][offset + 6 + 3 * label_idx + 0] = met['f1'][i]
+                    data[row_i][offset + 6 + 3 * label_idx + 1] = met['p'][i]
+                    data[row_i][offset + 6 + 3 * label_idx + 2] = met['r'][i]
+
+            elif mn == MetricNames.CHESTIMAGENOMELABELACC:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met
+
+            elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met['macro_avg']
+                data[row_i][offset + 1] = met['micro_avg']
+                for i, label_name in enumerate(label_names_list[row_i]):
+                    label_idx = label_name_2_idx[label_name]
+                    data[row_i][offset + 2 + label_idx] = met['per_class'][i]
+            
+    return pd.DataFrame(data=data, columns=columns)
+    
 
 class ChestImagenomeBboxPredictionsVisualizer:
 
@@ -274,7 +392,6 @@ class ChestImagenomeBboxPredictionsVisualizer:
         visualize_predicted_bounding_boxes(dicom_id, pred_bbox_coords, pred_bbox_presences,
                                             test_bbox_coords, test_bbox_presences,
                                             bbox_names=self.bbox_names)
-
     
 def calibrate_thresholds_for_mimiccxr_test_set(
     model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
@@ -289,12 +406,12 @@ def calibrate_thresholds_for_mimiccxr_test_set(
     else: assert False, 'This should not happen'
 
     # Run model on MIMICCXR validation dataset to get predictions
-    assert mimiccxr_vision_evaluator_kwargs['use_validation_indices']
-    mimiccxr_vision_evaluator = MIMICCXR_VisualModuleEvaluator(**mimiccxr_vision_evaluator_kwargs)
-    evaluator = get_engine(model, classify_tags=False, classify_orientation=False, classify_questions=False,
-                           classify_chexpert=classify_chexpert,
-                           classify_chest_imagenome=classify_chest_imagenome,
-                           device=device, use_amp=use_amp, training=False)
+    assert mimiccxr_vision_evaluator_kwargs['use_val_set_only']
+    mimiccxr_vision_evaluator = MIMICCXR_VisualModuleTrainer(**mimiccxr_vision_evaluator_kwargs)
+    evaluator = get_engine(model=model, classify_tags=False, classify_orientation=False, classify_questions=False,
+                            classify_gender=False, predict_bboxes_chest_imagenome=False, 
+                            classify_chexpert=classify_chexpert, classify_chest_imagenome=classify_chest_imagenome,
+                            device=device, use_amp=use_amp, training=False)
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)
         attach_chexpert_labels_prf1(evaluator, device)
@@ -323,7 +440,7 @@ def calibrate_thresholds_for_mimiccxr_test_set(
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
     print('Running model on MIMICCXR validation dataset ...')
-    evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
+    evaluator.run(mimiccxr_vision_evaluator.val_dataloader)
     # Retrieve predictions and ground truth labels
     pred_probs = evaluator.state.metrics[f'pred_{labeler_name}_probs']
     pred_probs = torch.stack(pred_probs).numpy()

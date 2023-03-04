@@ -2,13 +2,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from medvqa.datasets.chest_imagenome import (
+    ANAXNET_BBOX_NAMES,
     CHEST_IMAGENOME_BBOX_NAMES,
-    CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED,
+    CHEST_IMAGENOME_GOLD_BBOX_NAMES,
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
 
 from medvqa.utils.files import get_cached_pickle_file
+from medvqa.utils.metrics import average_ignoring_nones
 
 def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
@@ -107,66 +109,100 @@ def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliase
     plt.show()
 
 def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_aliases, metric_name, metric_alias,
-        dataset_name, figsize=(8,6), horizontal=True):
+        dataset_name, figsize=(8,6), horizontal=True, bbox_class_names=None):
     assert type(metrics_paths) == list
     assert type(method_aliases) == list
     assert len(metrics_paths) == len(method_aliases)
     assert len(metrics_paths) > 0
     metrics_list = [get_cached_pickle_file(path) for path in metrics_paths]
     n = len(metrics_list)
-    
-    # Get the scores for each method and each bounding box class
-    scores_per_method = []
-    n_bboxes = None
-    bbox_names = None
-    for i in range(n):
-        scores_per_method.append([])
-        metrics_per_class = metrics_list[i][metric_name]
-        assert type(metrics_per_class) == list or type(metrics_per_class) == np.ndarray
-        assert len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
-            len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
-        if n_bboxes is None:
-            n_bboxes = len(metrics_per_class)
-            if n_bboxes == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
-                bbox_names = CHEST_IMAGENOME_BBOX_NAMES
-            elif n_bboxes == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
-                bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED
-            else:
-                assert False
-        else:
-            assert n_bboxes == len(metrics_per_class)
-        for j in range(n_bboxes):
-            scores_per_method[i].append(metrics_list[i][metric_name][j])
 
-    # Sort methods by the mean score
+    if bbox_class_names is None:
+        # Collect all bounding box names from all methods
+        all_bbox_names = set()
+        for i in range(n):
+            metrics_dict = metrics_list[i]
+            if 'bbox_names' in metrics_dict:
+                all_bbox_names.update(metrics_dict['bbox_names'])
+            else:
+                metrics_per_class = metrics_dict[metric_name]
+                assert type(metrics_per_class) == list or type(metrics_per_class) == np.ndarray
+                assert len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
+                        len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
+                if len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
+                    all_bbox_names.update(CHEST_IMAGENOME_BBOX_NAMES)
+                elif len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
+                    all_bbox_names.update(CHEST_IMAGENOME_GOLD_BBOX_NAMES)
+                else: assert False
+        all_bbox_names = list(all_bbox_names)
+        n_bboxes = len(all_bbox_names)
+    else:
+        all_bbox_names = bbox_class_names
+        n_bboxes = len(all_bbox_names)
+    
+    # Collect the scores for each method and bounding box class
+    scores_per_method = []
+    for i in range(n):
+        metrics_dict = metrics_list[i]
+        metrics_per_class = metrics_dict[metric_name]
+        if 'bbox_names' in metrics_dict:
+            bbox_names = metrics_dict['bbox_names']
+            assert len(metrics_per_class) == len(bbox_names)
+        elif len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
+            bbox_names = CHEST_IMAGENOME_BBOX_NAMES
+        elif len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
+            bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES
+        else: assert False
+        scores_per_method.append([None] * n_bboxes)
+        for j in range(len(bbox_names)):
+            try:
+                idx = all_bbox_names.index(bbox_names[j])
+                scores_per_method[i][idx] = metrics_per_class[j]
+            except ValueError:
+                pass
+
+    # Sort methods by the mean score (ignoring None values)
     method_idxs = list(range(n))
-    mean_scores = [sum(scores_per_method[i]) / len(scores_per_method[i]) for i in range(n)]
+    mean_scores = [average_ignoring_nones(scores_per_method[i]) for i in range(n)]
     method_idxs.sort(key=lambda i: mean_scores[i], reverse=True)
 
     # Sort bbox classes by the mean score
     bbox_idxs = list(range(n_bboxes))
-    mean_scores_per_bbox = [sum(scores_per_method[i][j] for i in range(n)) / n for j in range(n_bboxes)]
+    mean_scores_per_bbox = [average_ignoring_nones(scores_per_method[i][j] for i in range(n)) for j in range(n_bboxes)]
     bbox_idxs.sort(key=lambda i: mean_scores_per_bbox[i], reverse=horizontal)
     
     # Create a horizontal scatter plot, where each method has one point for each bounding box class
     # Each point is a pair of (score, bounding box class)
     # Each method is a different color
     plt.figure(figsize=figsize)
+    # Consider at least 20 different colors
+    colors = plt.cm.tab20(np.linspace(0, 1, 20))
     for i in range(n):
         label = f'{method_aliases[method_idxs[i]]} ({mean_scores[method_idxs[i]]:.3f})'
         sorted_scores = [scores_per_method[method_idxs[i]][bbox_idxs[j]] for j in range(n_bboxes)]
+        sorted_indices = [j + 1 for j in range(n_bboxes) if sorted_scores[j] is not None]
+        sorted_scores = [x for x in sorted_scores if x is not None]
+        assert len(sorted_scores) == len(sorted_indices)
         if horizontal:
-            plt.scatter(range(1, n_bboxes+1), sorted_scores, label=label)
+            plt.scatter(sorted_indices, sorted_scores, label=label, color=colors[i])
         else:
-            plt.scatter(sorted_scores, range(1, n_bboxes+1), label=label)
+            plt.scatter(sorted_scores, sorted_indices, label=label, color=colors[i])
     if horizontal:
         # Rotate the xticks by 45 degrees and move them to the right so they don't overlap
-        plt.xticks(range(1, n_bboxes+1), [bbox_names[i] for i in bbox_idxs], rotation=45, ha='right')
+        plt.xticks(range(1, n_bboxes+1), [all_bbox_names[i] for i in bbox_idxs], rotation=45, ha='right')
+        # Change xtick color to red if the bounding box class is in ANAXNET_BBOX_NAMES
+        for i in range(n_bboxes):
+            if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
+                plt.gca().get_xticklabels()[i].set_color('red')
         plt.ylabel(metric_alias)
         plt.xlabel('Bounding box class')
         plt.grid(axis='y')
     else:
-        plt.yticks(range(1, n_bboxes+1), [bbox_names[i] for i in bbox_idxs])
+        plt.yticks(range(1, n_bboxes+1), [all_bbox_names[i] for i in bbox_idxs])
+        # Change ytick color to red if the bounding box class is in ANAXNET_BBOX_NAMES
+        for i in range(n_bboxes):
+            if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
+                plt.gca().get_yticklabels()[i].set_color('red')
         plt.xlabel(metric_alias)
         plt.ylabel('Bounding box class')
         plt.grid(axis='x')

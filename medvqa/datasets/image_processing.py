@@ -8,6 +8,7 @@ from tqdm import tqdm
 import random
 import numpy as np
 import os
+import imagesize
 
 from transformers import ViTFeatureExtractor
 
@@ -19,6 +20,7 @@ from medvqa.models.vision.visual_modules import (
     CLIP_DEFAULT_IMAGE_MEAN_STD,
     CLIP_VERSION_2_IMAGE_MEAN_STD,
 )
+from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import (
@@ -36,6 +38,7 @@ _AUGMENTATION_MODES = [
     'random-color',
     'random-spatial',
     'random-color-and-spatial',
+    'horizontal-flip',
 ]
 
 def get_image_transform(
@@ -51,12 +54,16 @@ def get_image_transform(
     huggingface_vitmodel_name=None,
     use_bbox_aware_transform=False,
     horizontal_flip_prob=0,
+    use_detectron2_transform=False,
+    # detectron2_cfg=None,
 ):
     print('get_image_transform()')
+    assert 0 <= horizontal_flip_prob < 1
+    assert 0 <= default_prob <= 1
 
     # Only one of the following can be true
     assert sum([use_clip_transform, use_huggingface_vitmodel_transform, use_torchxrayvision_transform,
-                use_bbox_aware_transform]) <= 1
+                use_bbox_aware_transform, use_detectron2_transform]) <= 1
 
     if use_clip_transform:
         assert clip_version is not None
@@ -116,8 +123,22 @@ def get_image_transform(
         if augmentation_mode is None: # no augmentation
             print('    Returning default transform (no augmentation)')
             return _default_transform
+
+        if augmentation_mode == 'horizontal-flip':
+            assert horizontal_flip_prob > 0
+            print('    Returning horizontal flip transform')
+            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, _):
+                image = tf_load_image(image_path)
+                image = tf_resize(image)
+                if random.random() < horizontal_flip_prob:
+                    image = tf_hflip(image)
+                    bboxes = flipped_bboxes
+                    presence = flipped_presence
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                return image, bboxes, presence
+            return _transform
         
-        _augmented_bbox_transforms = []
         img_bbox_aug_transfoms = ImageBboxAugmentationTransforms(image_size)
         if augmentation_mode == 'random-color':
             aug_transforms = img_bbox_aug_transfoms.get_color_transforms_list()
@@ -137,7 +158,7 @@ def get_image_transform(
                 # image = tf_bgr2rgb(image)
                 image = tf_resize(image)
                 if flip_image:
-                    if random.random() < 0.5:
+                    if random.random() < horizontal_flip_prob:
                         # nonlocal DEBUG_COUNT, DEBUG
                         # if DEBUG:
                         #     print('(DEBUG) image_processing.py: flipping image')
@@ -159,8 +180,7 @@ def get_image_transform(
                 return image, bboxes, presence
             return _transform
 
-        for tf_img_bbox_aug in aug_transforms:
-            _augmented_bbox_transforms.append(_get_transform(tf_img_bbox_aug))
+        _augmented_bbox_transforms = [_get_transform(tf_img_bbox_aug) for tf_img_bbox_aug in aug_transforms]
         
         print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
         print('    augmentation_mode =', augmentation_mode)
@@ -175,6 +195,64 @@ def get_image_transform(
                 return img, bboxes, presence
             return random.choice(_augmented_bbox_transforms)(
                 img, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter)
+
+        print(f'    Returning augmented transforms with mode {augmentation_mode}')
+        return transform_fn
+
+    elif use_detectron2_transform:
+        print(f'  Using detectron2 aware transforms')
+        # assert detectron2_cfg is not None
+        tf_load_image = lambda x: cv2.imread(x)
+        # if detectron2_cfg.INPUT.FORMAT == 'BGR':
+        #     pass
+        # else:
+        #     raise ValueError(f'Unexpected detectron2_cfg.INPUT.FORMAT: {detectron2_cfg.INPUT.FORMAT}')
+        # tf_totensor = T.Lambda(lambda x: torch.from_numpy(x).permute(2, 0, 1).float())
+        tf_totensor = lambda x: torch.as_tensor(np.ascontiguousarray(x.transpose(2, 0, 1)))
+        
+        def _default_transform(image_path):
+            image = tf_load_image(image_path)
+            image = tf_totensor(image)
+            return image
+
+        img_bbox_aug_transfoms = ImageBboxAugmentationTransforms(image_size)
+        
+        if augmentation_mode is None: # no augmentation
+            print('    Returning default transform (no augmentation)')
+            return _default_transform                
+        elif augmentation_mode == 'horizontal-flip':
+            raise NotImplementedError('horizontal-flip not implemented for detectron2 transforms')        
+        elif augmentation_mode == 'random-color':
+            raise NotImplementedError('random-color not implemented for detectron2 transforms')        
+        elif augmentation_mode == 'random-color-and-spatial':
+            raise NotImplementedError('random-color-and-spatial not implemented for detectron2 transforms')
+        elif augmentation_mode == 'random-spatial':
+            aug_transforms = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list()
+        else:
+            raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
+
+        def _get_transform(tf_img_bbox_aug): # closure (needed to capture tf_img_bbox_aug)
+            def _transform(image_path, bboxes, presence, albumentation_adapter):
+                image = tf_load_image(image_path)
+                bboxes, category_ids = albumentation_adapter.encode(bboxes, presence)
+                augmented = tf_img_bbox_aug(image=image, bboxes=bboxes, category_ids=category_ids)
+                image = augmented['image']
+                image = tf_totensor(image)                
+                bboxes = augmented['bboxes']
+                category_ids = augmented['category_ids']
+                bboxes, presence = albumentation_adapter.decode(bboxes, category_ids)
+                assert len(image.shape) == 3 # (C, H, W)
+                return image, bboxes, presence
+            return _transform
+
+        _augmented_bbox_transforms = [_get_transform(tf_img_bbox_aug) for tf_img_bbox_aug in aug_transforms]
+
+        def transform_fn(img, bboxes, presence, albumentation_adapter):
+            # randomly choose between default transform and augmented transform
+            if random.random() < default_prob:
+                img = _default_transform(img)
+                return img, bboxes, presence
+            return random.choice(_augmented_bbox_transforms)(img, bboxes, presence, albumentation_adapter)
 
         print(f'    Returning augmented transforms with mode {augmentation_mode}')
         return transform_fn
@@ -402,3 +480,52 @@ def get_nearest_neighbors(target_images, reference_images, transform, pretrained
     save_to_pickle(nearest_neighbors, file_path)
     print('nearest_neighbors saved to', file_path)
     return nearest_neighbors
+
+
+class _ImageSizeCache():
+    def __init__(self):
+        self._image_size_dict = {}
+        self._image_size_cache_path = os.path.join(CACHE_DIR, 'image_size_cache.pkl')
+        self._dirty = False
+        self._loaded = False
+
+    def get_image_size(self, image_paths, update_cache_on_disk=False):
+        assert type(image_paths) == list or type(image_paths) == str
+
+        if not self._loaded:
+            self._image_size_dict = load_pickle(self._image_size_cache_path)
+            if self._image_size_dict is None:
+                self._image_size_dict = {}
+            else:
+                print('image_size_cache loaded from', self._image_size_cache_path)
+            self._loaded = True
+        
+        if type(image_paths) == str:
+            image_path = image_paths
+            try:
+                image_size = self._image_size_dict[image_path]
+            except KeyError:
+                image_size = self._image_size_dict[image_path] = imagesize.get(image_path)
+                self._dirty = True
+            output = image_size
+        else:
+            assert len(image_paths) > 0
+            image_size_list = [None] * len(image_paths)    
+            for i, image_path in enumerate(image_paths):
+                try:
+                    image_size_list[i] = self._image_size_dict[image_path]
+                except KeyError:
+                    image_size_list[i] = self._image_size_dict[image_path] = imagesize.get(image_path)
+                    self._dirty = True
+            output = image_size_list
+        if update_cache_on_disk:
+            self.update_cache_on_disk()
+        return output
+
+    def update_cache_on_disk(self):
+        if self._dirty:
+            save_to_pickle(self._image_size_dict, self._image_size_cache_path)
+            print('image size cache saved to', self._image_size_cache_path)
+            self._dirty = False
+
+image_size_cache = _ImageSizeCache()

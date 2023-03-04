@@ -20,6 +20,7 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR,
     CHEST_IMAGENOME_ATTRIBUTES_DICT,
+    get_anaxnet_bbox_sorted_indices,
 )
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
@@ -27,6 +28,7 @@ from medvqa.datasets.mimiccxr import (
     get_image_views_dict as get_mimiccxr_image_views_dict,    
     get_mimiccxr_large_image_path,
     get_mimiccxr_report_path,
+    get_number_of_reports,
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
@@ -170,7 +172,7 @@ def load_nongold_dicom_ids():
     save_to_pickle(dicom_ids, cache_path)
     return dicom_ids
 
-def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False):
+def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False, use_anaxnet_bbox_subset=False):
     if flipped:
         bboxes = load_chest_imagenome_horizontally_flipped_silver_bboxes()
     else:
@@ -186,6 +188,15 @@ def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=Fals
         bbox_presence[idx] = bbox['presence']
     if clamp:
         bbox_coords.clip(0, 1, out=bbox_coords) # Clip to [0, 1] in-place
+    if use_anaxnet_bbox_subset:
+        anaxnet_bbox_indices = get_anaxnet_bbox_sorted_indices()
+        print(f'  Using {len(anaxnet_bbox_indices)} of {CHEST_IMAGENOME_NUM_BBOX_CLASSES} bboxes (from AnaXNET paper)')
+        bbox_coords = bbox_coords.reshape(-1, CHEST_IMAGENOME_NUM_BBOX_CLASSES, 4) # (N, 36 * 4) -> (N, 36, 4)
+        bbox_coords = bbox_coords[:, anaxnet_bbox_indices] # (N, 36, 4) -> (N, 18, 4)
+        bbox_coords = bbox_coords.reshape(-1, 4 * len(anaxnet_bbox_indices)) # (N, 18, 4) -> (N, 18 * 4)
+        bbox_presence = bbox_presence[:, anaxnet_bbox_indices] # (N, 36) -> (N, 18)
+        assert bbox_coords.shape == (len(bboxes), 4 * len(anaxnet_bbox_indices))
+        assert bbox_presence.shape == (len(bboxes), len(anaxnet_bbox_indices))
     return idxs, bbox_coords, bbox_presence
 
 def load_chest_imagenome_dicom_ids(decent_images_only=False, avg_coef=0.4, std_coef=0.5):
@@ -359,33 +370,25 @@ def extract_labels_from_scene_graph(scene_graph):
                 labels.append((bbox_name, category, name, value))    
     return labels
 
-def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(
-        chest_imagenome_labels_filename,
-        qa_adapted_reports_filename,
-    ):    
+def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename):
     # Load chest_imagenome_labels    
     chest_imagenome_labels = load_postprocessed_labels(chest_imagenome_labels_filename)
-
     # Obtain dicom_ids
     dicom_ids = set(chest_imagenome_labels.keys())
-    
-    # Adapt chest_imagenome_labels so that they can be indexed by report_id            
-    mimiccxr_qa_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
-    n_reports = len(mimiccxr_qa_reports['reports'])
+    # Adapt chest_imagenome_labels so that they can be indexed by report_id    
+    n_reports = get_number_of_reports()
+    mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
     n_labels = len(next(iter(chest_imagenome_labels.values())))
     adapted_chest_imagenome_labels = np.zeros((n_reports, n_labels), dtype=np.int8)    
     # map dicom_id to report_id
-    image_views_dict = get_mimiccxr_image_views_dict()
     did2rid = {}
-    for i, report in enumerate(mimiccxr_qa_reports['reports']):
-        _, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report['filepath'])[0])            
-        views = image_views_dict[(subject_id, study_id)]
-        for view in views:
-            did2rid[view[0]] = i            
+    for i in range(n_reports):        
+        for view in mimiccxr_metadata['dicom_id_view_pos_pairs'][i]:
+            did2rid[view[0]] = i
     # use did2rid to map dicom_id to report_id to get the label
     for dicom_id, label in chest_imagenome_labels.items():
         adapted_chest_imagenome_labels[did2rid[dicom_id]] = label
-        
+    
     return dicom_ids, adapted_chest_imagenome_labels
 
 def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename):
@@ -409,6 +412,52 @@ def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_f
             1: positive_answer # anomaly observed
         }        
     return chest_imagenome_label_names, chest_imagenome_templates
+
+def get_labels_per_anatomy_and_anatomy_group(label_names_filename, for_training=False):
+    # Load label names
+    label_names = load_postprocessed_label_names(label_names_filename)
+    localized_label_names = [x for x in label_names if len(x) == 3]
+    global_label_names = [x for x in label_names if len(x) == 2]
+    assert len(localized_label_names) + len(global_label_names) == len(label_names)
+    # Obtain labels per individual anatomy
+    anatomy_to_localized_labels = {}
+    for label_name in localized_label_names:
+        anatomy = label_name[0]
+        if anatomy not in anatomy_to_localized_labels:
+            anatomy_to_localized_labels[anatomy] = []
+        anatomy_to_localized_labels[anatomy].append(label_names.index(label_name))
+    # Obtain labels per anatomy group
+    global_label_name_2_anatomy_group = { label_name : [] for label_name in global_label_names }
+    for label_name in localized_label_names:
+        global_label_name_2_anatomy_group[tuple(label_name[-2:])].append(label_name[0])
+    anatomy_group_to_global_labels = {}
+    for global_label_name, anatomy_group in global_label_name_2_anatomy_group.items():
+        anatomy_group = tuple(sorted(anatomy_group))
+        if anatomy_group not in anatomy_group_to_global_labels:
+            anatomy_group_to_global_labels[anatomy_group] = []
+        anatomy_group_to_global_labels[anatomy_group].append(label_names.index(global_label_name))
+
+    if for_training:
+        # 1) Use indices instead of anatomy names
+        # 2) Use only lists instead of dictionaries
+        # 3) Have a consinstent order of the labels
+        anatomy_names = CHEST_IMAGENOME_BBOX_NAMES
+        anatomy_names += sorted([x for x in anatomy_to_localized_labels if x not in anatomy_names])
+        anatomy_to_localized_labels = [[i, sorted(anatomy_to_localized_labels[x])]\
+                                       for i, x in enumerate(anatomy_names) if x in anatomy_to_localized_labels]
+        tmp = []
+        for group, labels in anatomy_group_to_global_labels.items():
+            group = sorted([anatomy_names.index(x) for x in group])
+            tmp.append([group, sorted(labels)])
+        tmp.sort()
+        anatomy_group_to_global_labels = tmp
+        return {
+            'anatomy_names': anatomy_names,
+            'anatomy_to_localized_labels': anatomy_to_localized_labels,
+            'anatomy_group_to_global_labels': anatomy_group_to_global_labels,
+        }
+    # Return
+    return label_names, anatomy_to_localized_labels, anatomy_group_to_global_labels
 
 # Visualize a scene graph
 def visualize_scene_graph(scene_graph, figsize=(10, 10)):
@@ -734,9 +783,9 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
             y2 = coords[idx * 4 + 3] * height
             # make the bbox a bit transparent unless it is the spine
             is_spine = CHEST_IMAGENOME_BBOX_NAMES[idx] == 'spine'
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, edgecolor='y', facecolor='none', alpha=1.0 if is_spine else 0.3)
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, edgecolor='y', facecolor='none', alpha=1.0 if is_spine else 0.5)
             ax.add_patch(rect)
-            ax.text(x1, y1, CHEST_IMAGENOME_BBOX_NAMES[idx], fontsize=16, color='y', alpha=1.0 if is_spine else 0.3)
+            ax.text(x1, y1, CHEST_IMAGENOME_BBOX_NAMES[idx], fontsize=16, color='y', alpha=1.0 if is_spine else 0.5)
     # Show
     plt.show()
 

@@ -6,9 +6,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
-    CHEST_IMAGENOME_GOLD_BBOX_NAMES,
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+    get_anaxnet_bbox_coords_and_presence_sorted_indices,
+    get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices,
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
@@ -67,7 +68,7 @@ def parse_args():
     return parser.parse_args()
 
 def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_bbox_coords, pred_bbox_presences,
-                                    n_classes, eval_mode, eval_dataset_name, results_folder_path, clamp_bbox_coords,
+                                    bbox_names, eval_mode, eval_dataset_name, results_folder_path, clamp_bbox_coords,
                                     save_predictions=False, dicom_ids=None):
 
     assert len(test_bbox_coords) == len(test_bbox_presences)
@@ -96,7 +97,7 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_b
         gt_presences=test_bbox_presences,
         iou_thresholds=iou_thresholds,
     )
-    assert scores.shape == (len(iou_thresholds), n_classes, 3)
+    assert scores.shape == (len(iou_thresholds), len(bbox_names), 3)
     mean_p = 0
     mean_r = 0
     mean_f1 = 0
@@ -116,6 +117,7 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_b
     metrics['mean_p'] = mean_p
     metrics['mean_r'] = mean_r
     metrics['mean_f1'] = mean_f1
+    metrics['bbox_names'] = bbox_names
     
     # Save metrics    
     save_path = os.path.join(results_folder_path,
@@ -133,7 +135,8 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, pred_b
             'pred_bbox_coords': pred_bbox_coords,
             'pred_bbox_presences': pred_bbox_presences,
             'test_bbox_coords': test_bbox_coords,
-            'test_bbox_presences': test_bbox_presences,            
+            'test_bbox_presences': test_bbox_presences,
+            'bbox_names': bbox_names,
         }, save_path)
         print(f'Saved bbox predictions to {save_path}')
 
@@ -148,15 +151,25 @@ def _evaluate_model(
     clamp_bbox_coords=False,
     save_predictions=False,
 ):
-
-    if eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
-        coord_indices = []
-        presence_indices = []
-        for i, bbox_name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
-            if bbox_name in CHEST_IMAGENOME_GOLD_BBOX_NAMES:
-                for j in range(4):
-                    coord_indices.append(i*4 + j)
-                presence_indices.append(i)
+    # Check if we need to filter out labels
+    use_anaxnet_bbox_subset = (model_kwargs is not None and model_kwargs['use_anaxnet_bbox_subset'])
+    use_gold_bbox_subset = eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD
+    filter_bbox_classes = False
+    if use_anaxnet_bbox_subset:
+        filter_bbox_classes = True
+        gt_coord_indices, gt_presence_indices = get_anaxnet_bbox_coords_and_presence_sorted_indices(use_gold_bbox_subset)
+        model_coord_indices, model_presence_indices = get_anaxnet_bbox_coords_and_presence_sorted_indices(
+                use_gold_bbox_subset, for_model_output=True)
+    elif use_gold_bbox_subset:
+        filter_bbox_classes = True
+        gt_coord_indices, gt_presence_indices = get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices()
+        model_coord_indices = gt_coord_indices
+        model_presence_indices = gt_presence_indices
+    if filter_bbox_classes:
+        bbox_names = [CHEST_IMAGENOME_BBOX_NAMES[i] for i in gt_presence_indices]
+    else:
+        bbox_names = CHEST_IMAGENOME_BBOX_NAMES
+    print(f'len(bbox_names) = {len(bbox_names)}')
 
     if eval_mode == EvalMode.CHEST_IMAGENOME__AVERAGE_BBOX:
                 
@@ -181,17 +194,15 @@ def _evaluate_model(
                         test_bbox_presences.append(bbox['presence'])
                         if save_predictions:
                             dicom_ids.append(dicom_id)
-            n_bbox_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
         elif eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
             test_bbox_coords = []
             test_bbox_presences = []
             gold_bboxes = load_chest_imagenome_gold_bboxes()
             for dicom_id, bbox in gold_bboxes.items():
-                test_bbox_coords.append(bbox['coords'][coord_indices])
-                test_bbox_presences.append(bbox['presence'][presence_indices])
+                test_bbox_coords.append(bbox['coords'])
+                test_bbox_presences.append(bbox['presence'])
                 if save_predictions:
                     dicom_ids.append(dicom_id)
-            n_bbox_classes = CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
         else:
             raise ValueError(f'Invalid eval_dataset_name: {eval_dataset_name}')
         
@@ -203,19 +214,25 @@ def _evaluate_model(
         if clamp_bbox_coords:
             test_bbox_coords.clip(0, 1, out=test_bbox_coords)
 
+        # Filter out bboxes if required
+        if filter_bbox_classes:
+            test_bbox_coords = test_bbox_coords[:, gt_coord_indices]
+            test_bbox_presences = test_bbox_presences[:, gt_presence_indices]
+
         # Prepare predictions
         pred_bbox_coords = np.tile(avg_bbox_coords, (len(test_bbox_coords), 1))
         pred_bbox_presences = np.ones((len(test_bbox_coords), CHEST_IMAGENOME_NUM_BBOX_CLASSES))
+        if filter_bbox_classes:            
+            pred_bbox_coords = pred_bbox_coords[:, model_coord_indices]
+            pred_bbox_presences = pred_bbox_presences[:, model_presence_indices]
 
-        if eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
-            # Filter out the bboxes that are not in the gold set
-            pred_bbox_coords = pred_bbox_coords[:, coord_indices]
-            pred_bbox_presences = pred_bbox_presences[:, presence_indices]
-
+        assert pred_bbox_coords.shape == test_bbox_coords.shape
+        assert pred_bbox_presences.shape == test_bbox_presences.shape
+        
         print(f'pred_bbox_coords.shape: {pred_bbox_coords.shape}')
         print(f'pred_bbox_presences.shape: {pred_bbox_presences.shape}')
-        print(f'test_bbox_coords[0].shape: {test_bbox_coords[0].shape}')
-        print(f'test_bbox_presences[0].shape: {test_bbox_presences[0].shape}')
+        print(f'test_bbox_coords.shape: {test_bbox_coords.shape}')
+        print(f'test_bbox_presences.shape: {test_bbox_presences.shape}')
         
         results_folder_path = get_results_folder_path(get_checkpoint_folder_path('bbox', 'chest-imagenome', 'average'))
         _compute_and_save_bbox_metrics(
@@ -223,7 +240,7 @@ def _evaluate_model(
             test_bbox_presences=test_bbox_presences,
             pred_bbox_coords=pred_bbox_coords,
             pred_bbox_presences=pred_bbox_presences,
-            n_classes=n_bbox_classes,
+            bbox_names=bbox_names,
             eval_mode=eval_mode,
             eval_dataset_name=eval_dataset_name,
             results_folder_path=results_folder_path,
@@ -263,7 +280,6 @@ def _evaluate_model(
                         test_bbox_presences.append(bbox['presence'])
                         if save_predictions:
                             dicom_ids.append(dicom_id)
-            n_bbox_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
         elif eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
             gold_bboxes = load_chest_imagenome_gold_bboxes()
             imageId2PartPatientStudy = get_imageId2PartPatientStudy()
@@ -271,11 +287,10 @@ def _evaluate_model(
                 part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
                 image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
                 test_image_paths.append(image_path)
-                test_bbox_coords.append(bbox['coords'][coord_indices])
-                test_bbox_presences.append(bbox['presence'][presence_indices])
+                test_bbox_coords.append(bbox['coords'])
+                test_bbox_presences.append(bbox['presence'])
                 if save_predictions:
                     dicom_ids.append(dicom_id)
-            n_bbox_classes = CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
         else:
             raise ValueError(f'Invalid eval_dataset_name: {eval_dataset_name}')
 
@@ -340,10 +355,19 @@ def _evaluate_model(
         if clamp_bbox_coords:
             test_bbox_coords.clip(0, 1, out=test_bbox_coords)
 
-        if eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
-            # Filter out the bboxes that are not in the gold set
-            pred_bbox_coords = pred_bbox_coords[:, coord_indices]
-            pred_bbox_presences = pred_bbox_presences[:, presence_indices]
+        # Filter out bboxes if required
+        if filter_bbox_classes:
+            test_bbox_coords = test_bbox_coords[:, gt_coord_indices]
+            test_bbox_presences = test_bbox_presences[:, gt_presence_indices]
+            pred_bbox_coords = pred_bbox_coords[:, model_coord_indices]
+            pred_bbox_presences = pred_bbox_presences[:, model_presence_indices]
+
+        assert test_bbox_coords.shape == pred_bbox_coords.shape
+        assert test_bbox_presences.shape == pred_bbox_presences.shape
+        print(f'pred_bbox_coords.shape: {pred_bbox_coords.shape}')
+        print(f'pred_bbox_presences.shape: {pred_bbox_presences.shape}')
+        print(f'test_bbox_coords.shape: {test_bbox_coords.shape}')
+        print(f'test_bbox_presences.shape: {test_bbox_presences.shape}')
         
         # Compute and save metrics
         _compute_and_save_bbox_metrics(
@@ -351,7 +375,7 @@ def _evaluate_model(
             test_bbox_presences=test_bbox_presences,
             pred_bbox_coords=pred_bbox_coords,
             pred_bbox_presences=pred_bbox_presences,
-            n_classes=n_bbox_classes,
+            bbox_names=bbox_names,
             eval_mode=eval_mode,
             eval_dataset_name=eval_dataset_name,
             results_folder_path=get_results_folder_path(checkpoint_folder_path),

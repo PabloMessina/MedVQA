@@ -14,6 +14,7 @@ CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH = os.path.join(CHEST
 
 CHEST_IMAGENOME_NUM_BBOX_CLASSES = 36
 CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES = 26
+CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES = 18
 
 CHEST_IMAGENOME_BBOX_NAMES = [
     'right lung',
@@ -128,6 +129,69 @@ CHEST_IMAGENOME_GOLD_BBOX_NAMES = [
     'trachea',
     'upper mediastinum',
 ]
+
+# from AnaXNET paper: https://arxiv.org/pdf/2105.09937.pdf
+ANAXNET_BBOX_NAMES = [
+    'right lung',
+    'right apical zone',
+    'right upper lung zone',
+    'right mid lung zone',
+    'right lower lung zone',
+    'right hilar structures',
+    'right costophrenic angle',
+    'left lung',
+    'left apical zone',
+    'left upper lung zone',
+    'left mid lung zone',
+    'left lower lung zone',
+    'left hilar structures',
+    'left costophrenic angle',
+    'mediastinum',
+    'upper mediastinum',
+    'cardiac silhouette',
+    'trachea',
+]
+assert len(set(ANAXNET_BBOX_NAMES)) == len(ANAXNET_BBOX_NAMES) # no duplicates
+assert all(name in CHEST_IMAGENOME_BBOX_NAMES for name in ANAXNET_BBOX_NAMES) # all names are in the original list
+assert len(ANAXNET_BBOX_NAMES) == CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES # same number of classes
+
+def get_anaxnet_bbox_sorted_indices():
+    indices = [i for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES) if name in ANAXNET_BBOX_NAMES]
+    return indices
+
+def get_anaxnet_bbox_coords_and_presence_sorted_indices(check_intersection_with_gold=False, for_model_output=False):
+    coords_indices = []
+    presence_indices = []
+    if for_model_output:
+        for i, idx in enumerate(get_anaxnet_bbox_sorted_indices()):
+            if check_intersection_with_gold:
+                bbox_name = CHEST_IMAGENOME_BBOX_NAMES[idx]
+                assert bbox_name in ANAXNET_BBOX_NAMES
+                if bbox_name not in CHEST_IMAGENOME_GOLD_BBOX_NAMES:
+                    continue
+            presence_indices.append(i)
+            for j in range(4):
+                coords_indices.append(i*4 + j)
+    else:
+        for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+            if check_intersection_with_gold:
+                if name not in CHEST_IMAGENOME_GOLD_BBOX_NAMES:
+                    continue
+            if name in ANAXNET_BBOX_NAMES:            
+                presence_indices.append(i)
+                for j in range(4):
+                    coords_indices.append(i*4 + j)
+    return coords_indices, presence_indices
+
+def get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices():
+    coords_indices = []
+    presence_indices = []
+    for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+        if name in CHEST_IMAGENOME_GOLD_BBOX_NAMES:            
+            presence_indices.append(i)
+            for j in range(4):
+                coords_indices.append(i*4 + j)
+    return coords_indices, presence_indices
 
 CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED = []
 for name in CHEST_IMAGENOME_BBOX_NAMES:

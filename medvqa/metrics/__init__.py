@@ -248,25 +248,41 @@ def attach_dataset_aware_chest_imagenome_labels_roc_auc(engine, allowed_dataset_
                                   device=device)
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
 
-def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids):
-    met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
-                                                                        'chest_imagenome_bbox_coords',
-                                                                        'chest_imagenome_bbox_presence'),
-                                allowed_dataset_ids=allowed_dataset_ids)
+def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids, use_detectron2=False):
+    if use_detectron2:
+        met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
+                                                                        'bbox_coords', 'bbox_presence'),
+                                allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True)
+    else:        
+        met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
+                                                                            'chest_imagenome_bbox_coords',
+                                                                            'chest_imagenome_bbox_presence'),
+                                    allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMAE)
 
-def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids):
-    met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
-                                                                        'chest_imagenome_bbox_coords',
-                                                                        'chest_imagenome_bbox_presence'),
-                                allowed_dataset_ids=allowed_dataset_ids)
+def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, use_detectron2=False):
+    if use_detectron2:
+        met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
+                                                                        'bbox_coords', 'bbox_presence'),
+                                allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True)
+    else:
+        met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
+                                                                            'chest_imagenome_bbox_coords',
+                                                                            'chest_imagenome_bbox_presence'),
+                                    allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
-def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids):
-    met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform(
-                                'pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords',
-                                'pred_chest_imagenome_bbox_presence', 'chest_imagenome_bbox_presence',
-                                ), allowed_dataset_ids=allowed_dataset_ids, n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
+def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids, use_detectron2=False):
+    if use_detectron2:
+        met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
+                                                                            'bbox_coords', 'bbox_presence'),
+                                    allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True,
+                                    n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
+    else:
+        met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform(
+                                    'pred_chest_imagenome_bbox_coords', 'chest_imagenome_bbox_coords',
+                                    'pred_chest_imagenome_bbox_presence', 'chest_imagenome_bbox_presence',
+                                    ), allowed_dataset_ids=allowed_dataset_ids, n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMEANF1)
 
 

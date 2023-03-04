@@ -90,18 +90,19 @@ class COLOR_TRANSFORMS__BBOX:
 
 class ImageBboxAugmentationTransforms:
 
-    def __init__(self, image_size,
-                crop=0.8, shift=0.1, scale=0.1, rotate=15, contrast=0.2, brightness=0.2, gaussian_noise_var=(10, 50)):
+    def __init__(self, image_size=None, crop=0.8, shift=0.1, scale=0.1, rotate=15, contrast=0.2,
+                brightness=0.2, gaussian_noise_var=(10, 50)):
         
         self._transform_fns = dict()
 
-        if isinstance(image_size, int):
-            image_size = (image_size, image_size)
-        else:
-            assert len(image_size) == 2
-        width, height = image_size
-
         if crop is not None:
+            assert image_size is not None
+            if isinstance(image_size, int):
+                width = image_size
+                height = image_size
+            else:
+                assert len(image_size) == 2
+                width, height = image_size
             self._transform_fns[SPATIAL_TRANSFORMS__BBOX.CROP] = A.RandomResizedCrop(
                 width=width,
                 height=height,

@@ -5,6 +5,7 @@ class BBoxRegressorVersion:
     V1 = 'v1'
     V2 = 'v2'
     V3 = 'v3'
+    V4 = 'v4'
 
 class BoundingBoxRegressor_v1(nn.Module):
 
@@ -182,7 +183,107 @@ class BoundingBoxRegressor_v3(nn.Module):
         bbox_coords = bbox_coords + self.train_average_bbox_coords.view(1, -1) # (batch_size, 4 * num_classes)
         return bbox_coords, bbox_presence
 
+class BoundingBoxRegressorAndMultiLabelClassifier_v4(nn.Module):
 
+    def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_bboxes, num_bboxes_to_supervise,
+                 num_regions, train_average_bbox_coords, bbox_to_labels, bbox_group_to_labels):
+        super().__init__()
+        print('BoundingBoxRegressorAndMultiLabelClassifier_v4:')
+        print(f'  local_feat_dim: {local_feat_dim}')
+        print(f'  global_feat_dim: {global_feat_dim}')
+        print(f'  hidden_dim: {hidden_dim}')
+        print(f'  num_bboxes: {num_bboxes}')
+        print(f'  num_regions: {num_regions}')
+        self.local_feat_dim = local_feat_dim
+        self.global_feat_dim = global_feat_dim
+        self.hidden_dim = hidden_dim
+        self.num_bboxes = num_bboxes
+        self.num_bboxs_to_supervise = num_bboxes_to_supervise # because not all bboxes are supervised due to lack of annotations
+        self.bbox_to_labels = bbox_to_labels
+        self.bbox_group_to_labels = bbox_group_to_labels
+        assert len(bbox_to_labels) <= num_bboxes
+        assert type(bbox_to_labels) == list # list of [idx, labels]
+        assert type(bbox_to_labels[0]) == list 
+        assert type(bbox_group_to_labels) == list # list of [idxs, labels]
+        assert type(bbox_group_to_labels[0]) == list
+        assert num_bboxes_to_supervise <= num_bboxes
+        # create projection layers for bbox prediction
+        self.loc_projs = nn.ModuleList([nn.Linear(local_feat_dim, hidden_dim) for _ in range(num_bboxes)])
+        self.glob_projs = nn.ModuleList([nn.Linear(global_feat_dim, hidden_dim) for _ in range(num_bboxes)])
+        self.bbox_mid_layer = nn.ModuleList([nn.Linear((num_regions + 1) * hidden_dim, hidden_dim) for _ in range(num_bboxes)]) # +1 for global feature
+        self.bbox_coords_fc = nn.ModuleList([nn.Linear(hidden_dim, 4) for _ in range(num_bboxes)]) 
+        self.bbox_presence_fc = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(num_bboxes)])
+        # create parameters for the average coordinates of the training set
+        self.train_average_bbox_coords = nn.parameter.Parameter(torch.zeros(4 * num_bboxes_to_supervise), requires_grad=False)
+        if type(train_average_bbox_coords) == list:
+            train_average_bbox_coords = torch.tensor(train_average_bbox_coords)
+        self.train_average_bbox_coords.data.copy_(train_average_bbox_coords)
+        # create layers for the multi-label classification
+        self.loc_mlc_fc = nn.ModuleList([nn.Linear(hidden_dim, len(labels)) for _, labels in bbox_to_labels])
+        self.glob_mlc_fc = nn.ModuleList([nn.Linear(hidden_dim * len(bbox_group), len(labels)) \
+                                            for bbox_group, labels in bbox_group_to_labels])
+
+    def forward(self, local_features, global_average_pool):
+        # local_features: (batch_size, num_regions, local_feat_dim)
+        # global_average_pool: (batch_size, global_feat_dim)
+        # return: bbox_coords (batch_size, num_bboxes * 4)
+        #         bbox_presence (batch_size, num_bboxes)
+        #         mlc_scores (batch_size, num_classes)
+
+        batch_size = local_features.size(0)       
+        
+        # 1) Bbox feature extraction and prediction
+        bbox_features = []
+        pred_bbox_coords = []
+        pred_bbox_presence = []
+        for i in range(self.num_bboxes):
+            # 1.1) Project global features
+            xg = self.glob_projs[i](global_average_pool) # (batch_size, hidden_dim)
+            xg = xg.unsqueeze(1) # (batch_size, 1, hidden_dim)
+            # 1.2) Project local features
+            xl = self.loc_projs[i](local_features) # (batch_size, num_regions, hidden_dim)
+            # 1.3) Concatenate global and local features
+            x = torch.cat([xg, xl], dim=1) # (batch_size, num_regions + 1, hidden_dim)
+            x = x.view(batch_size, -1) # (batch_size, (num_regions + 1) * hidden_dim)
+            x = torch.relu(x) # (batch_size, (num_regions + 1) * hidden_dim)
+            # 1.4) Apply mid layer
+            x = self.bbox_mid_layer[i](x) # (batch_size, hidden_dim)
+            x = torch.relu(x) # (batch_size, hidden_dim)
+            bbox_features.append(x)
+            # 1.5) Compute the bounding box coordinates and presence
+            # but only for the first num_bboxs_to_supervise bboxes
+            if i < self.num_bboxs_to_supervise:
+                bbox_coords = self.bbox_coords_fc[i](x) # (batch_size, 4)
+                bbox_presence = self.bbox_presence_fc[i](x) # (batch_size, 1)
+                pred_bbox_coords.append(bbox_coords)
+                pred_bbox_presence.append(bbox_presence)
+        # 1.6) Concatenate the bounding box coordinates and presence for all classes
+        pred_bbox_coords = torch.stack(pred_bbox_coords, dim=1) # (batch_size, num_bboxs_to_supervise, 4)
+        pred_bbox_coords = pred_bbox_coords.view(batch_size, -1) # (batch_size, num_bboxs_to_supervise * 4)
+        pred_bbox_coords = pred_bbox_coords + self.train_average_bbox_coords.view(1, -1) # (batch_size, num_bboxs_to_supervise * 4)
+        pred_bbox_presence = torch.stack(pred_bbox_presence, dim=1) # (batch_size, num_bboxs_to_supervise, 1)
+        pred_bbox_presence = pred_bbox_presence.squeeze(-1) # (batch_size, num_bboxs_to_supervise)
+
+        # 2) Multi-label classification
+        mlc_scores = []
+        # 2.1) Compute the multi-label classification for each bounding box
+        for i, (idx, _) in enumerate(self.bbox_to_labels):
+            loc_label_logits = self.loc_mlc_fc[i](bbox_features[idx]) # (batch_size, num_labels)
+            mlc_scores.append(loc_label_logits)
+        # 2.2) Compute the multi-label classification for each bounding box group
+        for i, (bbox_group, _) in enumerate(self.bbox_group_to_labels):
+            # 2.2.1) Get the features for the bounding boxes in the group
+            group_features = [bbox_features[i] for i in bbox_group]
+            group_features = torch.stack(group_features, dim=1) # (batch_size, num_bboxes, hidden_dim)
+            group_features = group_features.view(batch_size, -1) # (batch_size, num_bboxes * hidden_dim)
+            # 2.2.2) Apply the global multi-label classification layer
+            glob_label_logits = self.glob_mlc_fc[i](group_features) # (batch_size, num_labels)
+            mlc_scores.append(glob_label_logits)
+        # 2.3) Concatenate the local and global logits
+        mlc_scores = torch.concat(mlc_scores, dim=1) # (batch_size, (num_bboxes + num_bbox_groups) * num_labels)
+
+        # 3) Return the predicted bounding box coordinates and presence, and the multi-label classification scores
+        return pred_bbox_coords, pred_bbox_presence, mlc_scores
 
 
 

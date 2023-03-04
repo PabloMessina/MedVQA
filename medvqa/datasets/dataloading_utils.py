@@ -11,6 +11,7 @@ from medvqa.utils.constants import (
     IUXRAY_DATASET_ID__CHEXPERT_MODE,
     MIMICCXR_DATASET_ID,
     IUXRAY_DATASET_ID,
+    MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE,
     MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
@@ -204,8 +205,17 @@ def get_vqa_collate_batch_fn(
         if not verbose_question:
             if one_hot_question_offset is None:
                 one_hot_question_offset = one_hot_question_offsets[str(dataset_id)]
-            print(f'get_vqa_collate_batch_fn(): dataset_id={dataset_id}, one_hot_question_offset={one_hot_question_offset}')
-
+            print(f'get_vqa_collate_batch_fn(): dataset_id={dataset_id}, one_hot_question_offset={one_hot_question_offset}')  
+    
+    if dataset_id == MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE:
+        def collate_batch_fn(batch):
+            batch_dict = {
+                'dataset_id': dataset_id,
+                'batch': batch,
+            }
+            return batch_dict
+        return collate_batch_fn
+    
     if dataset_id in [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID,
                     IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
                     MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]:
@@ -236,8 +246,14 @@ def get_vqa_collate_batch_fn(
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([batch[i]['chest_imagenome'] for i in indexes])
             if predict_bboxes_chest_imagenome:
-                batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
-                batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([batch[i]['chest_imagenome_bbox_presence'] for i in indexes])
+                try:
+                    batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
+                    batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([batch[i]['chest_imagenome_bbox_presence'] for i in indexes])
+                except ValueError:
+                    for i in range(len(batch)):
+                        print(f'batch[{i}]["chest_imagenome_bbox_coords"].shape={batch[i]["chest_imagenome_bbox_coords"].shape}')
+                        print(f'batch[{i}]["chest_imagenome_bbox_presence"].shape={batch[i]["chest_imagenome_bbox_presence"].shape}')
+                    raise
             
             if not use_visual_module_only:
                 if verbose_question:

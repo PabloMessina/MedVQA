@@ -231,6 +231,10 @@ class MetricNames:
     PADCHEST_LOCALIZATION_LOSS = 'padchest_loc_loss'
     CHEST_IMAGENOME_LABEL_LOSS = 'chestimagenome_label_loss'
     CHEST_IMAGENOME_BBOX_LOSS = 'chestimagenome_bbox_loss'
+    DETECTRON2_CLS_LOSS = 'detectron2_cls_loss'
+    DETECTRON2_BOX_REG_LOSS = 'detectron2_box_reg_loss'
+    DETECTRON2_RPN_CLS_LOSS = 'detectron2_rpn_cls_loss'
+    DETECTRON2_RPN_LOC_LOSS = 'detectron2_rpn_loc_loss'
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
@@ -290,6 +294,10 @@ METRIC2SHORT = {
     'chestimagenome_bbox_mae': 'chestimgbbmae',
     'chestimagenome_bbox_meanf1': 'chestimgbbmf1',
     'chestimagenome_bbox_loss': 'chestimgbb_loss',
+    'detectron2_cls_loss': 'd2cls_loss',
+    'detectron2_box_reg_loss': 'd2box_loss',
+    'detectron2_rpn_cls_loss': 'd2rpncls_loss',
+    'detectron2_rpn_loc_loss': 'd2rpnloc_loss',
     'question_loss': 'q_loss',
     'answer_loss': 'a_loss',
     'background_loss': 'bg_loss',
@@ -311,6 +319,7 @@ VINBIG_DATASET_ID = 5
 CXR14_DATASET_ID = 6
 PADCHEST_DATASET_ID = 7
 MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE = 8
+MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE = 9
 
 class DATASET_NAMES:
     IUXRAY = 'iuxray'
@@ -322,6 +331,7 @@ class DATASET_NAMES:
     CXR14 = 'cxr14'
     PADCHEST = 'padchest'
     MIMICCXR_CHEST_IMAGENOME_MODE = 'mimic-cxr-chest-imagenome-mode'
+    MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE = 'mimic-cxr-chest-imagenome-detectron2-mode'
 
 DATASET_NAME_TO_SHORT = {
     DATASET_NAMES.IUXRAY: 'iux',
@@ -333,6 +343,7 @@ DATASET_NAME_TO_SHORT = {
     DATASET_NAMES.CXR14: 'cxr14',
     DATASET_NAMES.PADCHEST: 'padch',
     DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME_MODE: 'mim-chestimg',
+    DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE: 'mim-chestimg-d2',
 }
 
 class ReportEvalMode:

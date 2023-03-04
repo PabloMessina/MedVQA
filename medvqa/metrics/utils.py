@@ -13,16 +13,25 @@ def _weighted_average(metrics_dict, metric_names, metric_weights, metric_getter)
 def get_merge_metrics_fn(train_metric_names, val_metric_names, metric_weights, w_train, w_val,
         metric_getter=_default_metric_getter):
 
-    def merge_metrics_fn(train_metrics, val_metrics):
-        # print('train_metric_names =', train_metric_names)
-        # print('val_metric_names =', val_metric_names)
-        # print('train_metrics =', train_metrics)
-        # print('val_metrics =', val_metrics)
-        train_score = _weighted_average(train_metrics, train_metric_names, metric_weights, metric_getter)
-        val_score = _weighted_average(val_metrics, val_metric_names, metric_weights, metric_getter)
-        score =  (train_score * w_train + val_score * w_val) / (w_train + w_val)
-        assert isinstance(score, numbers.Number), type(score)
-        return score
+    assert val_metric_names is not None and len(val_metric_names) > 0 and w_val > 0, \
+        f'val_metric_names = {val_metric_names}, w_val = {w_val}'
+
+    if train_metric_names is None or len(train_metric_names) == 0 or w_train == 0:
+        print('NOTE: Using only validation metrics')
+        # Only use validation metrics
+        def merge_metrics_fn(val_metrics):
+            return _weighted_average(val_metrics, val_metric_names, metric_weights, metric_getter)
+    else:
+        def merge_metrics_fn(train_metrics, val_metrics):
+            # print('train_metric_names =', train_metric_names)
+            # print('val_metric_names =', val_metric_names)
+            # print('train_metrics =', train_metrics)
+            # print('val_metrics =', val_metrics)
+            train_score = _weighted_average(train_metrics, train_metric_names, metric_weights, metric_getter)
+            val_score = _weighted_average(val_metrics, val_metric_names, metric_weights, metric_getter)
+            score =  (train_score * w_train + val_score * w_val) / (w_train + w_val)
+            assert isinstance(score, numbers.Number), type(score)
+            return score
 
     return merge_metrics_fn
 

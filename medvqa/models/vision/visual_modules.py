@@ -3,7 +3,10 @@ import torch.nn as nn
 import torchvision.models as models
 import torchxrayvision as xrv
 import clip
-from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
+from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+)
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.models.common import freeze_parameters, load_model_state_dict
@@ -13,6 +16,7 @@ from medvqa.models.vision.bbox_regression import (
     BoundingBoxRegressor_v1,
     BoundingBoxRegressor_v2,
     BoundingBoxRegressor_v3,
+    BoundingBoxRegressorAndMultiLabelClassifier_v4,
 )
 from medvqa.utils.constants import (
     CHEXPERT_LABELS,
@@ -25,6 +29,10 @@ from medvqa.utils.constants import (
     VINBIG_DISEASES,
 )
 from transformers import AutoModel, ViTModel
+from detectron2.modeling import build_model as build_detectron2_model
+from detectron2.config import get_cfg as get_detectron2_cfg
+from detectron2 import model_zoo as detectron2_model_zoo
+from detectron2.checkpoint import DetectionCheckpointer
 import re
 
 class RawImageEncoding:
@@ -39,6 +47,7 @@ class RawImageEncoding:
     CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
     VITMODEL__HUGGINGFACE = 'vitmodel-huggingface'
     VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
+    DETECTRON2 = 'detectron2'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -69,6 +78,9 @@ class MultiPurposeVisualModule(nn.Module):
                 num_regions=None,
                 huggingface_model_name=None,
                 torchxrayvision_weights_name=None,
+                detectron2_model_yaml=None,
+                roi_heads_batch_size_per_image=None,
+                rpn_batch_size_per_image=None,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -84,22 +96,68 @@ class MultiPurposeVisualModule(nn.Module):
                 classify_chest_imagenome=False,
                 predict_bboxes_chest_imagenome=False,
                 chest_imagenome_train_average_bbox_coords=None,
+                predict_labels_and_bboxes_chest_imagenome=False,
+                chest_imagenome_anatomy_to_labels=None,
+                chest_imagenome_anatomy_group_to_labels=None,
                 n_medical_tags=None,
                 n_questions_aux_task=None,
                 n_chest_imagenome_labels=None,
+                n_chest_imagenome_bboxes=None,
                 chest_imagenome_bbox_hidden_size=None,
                 chest_imagenome_bbox_regressor_version=None,
+                use_anaxnet_bbox_subset=False,
                 merge_findings=False,
                 n_findings=None,
                 # Other kwargs
                 **unused_kwargs,
                 ): 
         super().__init__()
+
+        print(f'MultiPurposeVisualModule()')
         
         self.visual_input_mode = visual_input_mode
+        self.raw_image_encoding = raw_image_encoding
         self.clip_version = clip_version
         self.huggingface_model_name = huggingface_model_name
         self.torchxrayvision_weights_name = torchxrayvision_weights_name
+        self.detectron2_model_yaml = detectron2_model_yaml
+        self.classify_chexpert = classify_chexpert
+        self.classify_questions = classify_questions
+        self.classify_tags = classify_tags
+        self.classify_orientation = classify_orientation
+        self.classify_gender = classify_gender
+        self.classify_chest_imagenome = classify_chest_imagenome
+        self.use_mimiccxr = use_mimiccxr
+        self.use_iuxray = use_iuxray
+        self.use_chexpert = use_chexpert
+        self.use_cxr14 = use_cxr14
+        self.use_vinbig = use_vinbig
+        self.use_padchest = use_padchest
+        self.n_medical_tags = n_medical_tags
+        self.n_questions_aux_task = n_questions_aux_task
+        self.merge_findings = merge_findings
+        self.n_findings = n_findings
+        self.n_chest_imagenome_labels = n_chest_imagenome_labels
+        self.n_chest_imagenome_bboxes = n_chest_imagenome_bboxes
+        self.image_encoder_pretrained_weights_path = image_encoder_pretrained_weights_path
+        self.imagenet_pretrained = imagenet_pretrained
+        self.freeze_image_encoder = freeze_image_encoder
+        self.image_local_feat_size = image_local_feat_size
+        self.mlp_in_dim = mlp_in_dim
+        self.mlp_out_dim = mlp_out_dim
+        self.mlp_hidden_dims = mlp_hidden_dims
+        self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
+        self.chest_imagenome_bbox_hidden_size = chest_imagenome_bbox_hidden_size
+        self.chest_imagenome_bbox_regressor_version = chest_imagenome_bbox_regressor_version
+        self.chest_imagenome_train_average_bbox_coords = chest_imagenome_train_average_bbox_coords
+        self.predict_labels_and_bboxes_chest_imagenome = predict_labels_and_bboxes_chest_imagenome
+        self.chest_imagenome_anatomy_to_labels = chest_imagenome_anatomy_to_labels
+        self.chest_imagenome_anatomy_group_to_labels = chest_imagenome_anatomy_group_to_labels
+        self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
+        self.num_regions = num_regions
+        self.roi_heads_batch_size_per_image = roi_heads_batch_size_per_image
+        self.rpn_batch_size_per_image = rpn_batch_size_per_image
+        
         if raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
             assert huggingface_model_name is not None
         if raw_image_encoding in [
@@ -108,74 +166,51 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
         ]:
             assert torchxrayvision_weights_name is not None
+
+        if use_anaxnet_bbox_subset:
+            assert predict_bboxes_chest_imagenome
+            if raw_image_encoding != RawImageEncoding.DETECTRON2:
+                assert chest_imagenome_train_average_bbox_coords is not None
+                assert len(chest_imagenome_train_average_bbox_coords) == 4 * CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
         
-        # Init visual backbone
-        self._init_visual_backbone(
-            visual_input_mode=visual_input_mode,
-            raw_image_encoding=raw_image_encoding,
-            image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,
-            imagenet_pretrained=imagenet_pretrained,
-            image_local_feat_size=image_local_feat_size,
-            mlp_in_dim=mlp_in_dim,
-            mlp_out_dim=mlp_out_dim,
-            mlp_hidden_dims=mlp_hidden_dims,
-            freeze_image_encoder=freeze_image_encoder,
-        )
-            
-        # Init auxiliary tasks
-        self._init_auxiliary_tasks(
-            use_mimiccxr=use_mimiccxr,
-            use_iuxray=use_iuxray,
-            use_chexpert=use_chexpert,
-            use_cxr14=use_cxr14,
-            use_vinbig=use_vinbig,
-            use_padchest=use_padchest,
-            classify_tags=classify_tags,
-            classify_orientation=classify_orientation,
-            classify_gender=classify_gender,
-            classify_chexpert=classify_chexpert,
-            classify_questions=classify_questions,
-            classify_chest_imagenome=classify_chest_imagenome,
-            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
-            n_medical_tags=n_medical_tags,
-            n_questions_aux_task=n_questions_aux_task,
-            n_chest_imagenome_labels=n_chest_imagenome_labels,
-            chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
-            chest_imagenome_train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-            chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
-            num_regions=num_regions,
-            merge_findings=merge_findings,
-            n_findings=n_findings,
-        )
+        self._init_visual_backbone()
+        self._init_auxiliary_tasks()
 
         print(f'MultiPurposeVisualModule: self.name={self.get_name()}')
 
-    def _init_visual_backbone(self, visual_input_mode, raw_image_encoding, image_encoder_pretrained_weights_path,
-                            imagenet_pretrained, image_local_feat_size, mlp_in_dim, mlp_out_dim, mlp_hidden_dims,
-                            freeze_image_encoder):
-        global_feat_size = 0
+    def _init_visual_backbone(self):
         
-        if does_include_image(visual_input_mode):
+        using_detectron2 = self.raw_image_encoding == RawImageEncoding.DETECTRON2
+
+        if not using_detectron2:
+            global_feat_size = 0
+        
+        if does_include_image(self.visual_input_mode):
             if self.clip_version is not None:
                 model_name = self.clip_version
             elif self.huggingface_model_name is not None:
                 model_name = self.huggingface_model_name
             elif self.torchxrayvision_weights_name is not None:
                 model_name = self.torchxrayvision_weights_name
+            elif self.detectron2_model_yaml is not None:
+                model_name = self.detectron2_model_yaml
             else:
                 model_name = None
-            self._init_raw_image_encoder(raw_image_encoding, image_encoder_pretrained_weights_path,
-                                         imagenet_pretrained, model_name, freeze_image_encoder)
-            global_feat_size += self._get_raw_image_encoder_global_feat_size(image_local_feat_size)
+            self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
+                                         self.imagenet_pretrained, model_name, self.freeze_image_encoder)
+            if not using_detectron2:
+                global_feat_size += self._get_raw_image_encoder_global_feat_size(self.image_local_feat_size)
         
-        if does_include_visual_features(visual_input_mode):
-            self._init_mlp_visual_feat_encoder(mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder)
-            global_feat_size += mlp_out_dim
+        if does_include_visual_features(self.visual_input_mode):
+            self._init_mlp_visual_feat_encoder(self.mlp_in_dim, self.mlp_out_dim, self.mlp_hidden_dims, self.freeze_image_encoder)
+            global_feat_size += self.mlp_out_dim
         
-        assert global_feat_size > 0
-        self.local_feat_size = image_local_feat_size
-        self.global_feat_size = global_feat_size
-        print('  self.global_feat_size =', self.global_feat_size)
+        if not using_detectron2:
+            assert global_feat_size > 0
+            self.local_feat_size = self.image_local_feat_size
+            self.global_feat_size = global_feat_size
+            print('  self.global_feat_size =', self.global_feat_size)
+            print('  self.local_feat_size =', self.local_feat_size)
 
     def _get_raw_image_encoder_global_feat_size(self, image_local_feat_size):
         if self.raw_image_encoding in [
@@ -201,136 +236,174 @@ class MultiPurposeVisualModule(nn.Module):
             return HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE
         raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
-    def _init_raw_image_encoder(self, raw_image_encoding, pretrained_weights_path,
-                                imagenet_pretrained, model_name, freeze_image_encoder):
-        self.raw_image_encoding = raw_image_encoding
+    def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder):
+        print(f'  Initializing raw_image_encoder: {self.raw_image_encoding}')
         ignore_name_regex = None
-        if raw_image_encoding == RawImageEncoding.DENSENET_121:
+        if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
             self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
-        elif raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
+        elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
             self.raw_image_encoder = create_torchxrayvision_densenet121_feature_extractor(model_name)
-        elif raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
+        elif self.raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
             self.raw_image_encoder = create_torchxrayvision_resnet_feature_extractor(model_name)
-        elif raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
+        elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
             self.raw_image_encoder = create_torchxrayvision_resnet_autoencoder_feature_extractor(model_name)
-        elif raw_image_encoding == RawImageEncoding.CLIP_RESNET:
+        elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             self.raw_image_encoder = create_clip_resnet_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT:
+        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
             self.raw_image_encoder = create_clip_vit_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
-                raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
+        elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
+                self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(model_name, pretrained_weights_path)
-        elif raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
-                raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
+        elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
+                self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
             ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
-        else: raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
+        elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
+            if self.predict_bboxes_chest_imagenome:
+                if self.use_anaxnet_bbox_subset:
+                    num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+                else:
+                    num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
+            else:
+                assert False, 'We only support predicting bboxes for chest_imagenome at the moment'
+            assert self.rpn_batch_size_per_image is not None
+            self.raw_image_encoder = create_detectron2_model(model_name, num_classes=num_classes,
+                                                             roi_heads_batch_size_per_image=self.roi_heads_batch_size_per_image,
+                                                             rpn_batch_size_per_image=self.rpn_batch_size_per_image)
+        else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
     def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
+        print(f'  Initializing mlp_visual_feat_encoder: {mlp_in_dim} -> {mlp_out_dim}, hidden_dims={mlp_hidden_dims}')
         self.mlp_vf_encoder = MLP(in_dim=mlp_in_dim, out_dim=mlp_out_dim, hidden_dims=mlp_hidden_dims)
         if freeze_image_encoder: freeze_parameters(self.mlp_vf_encoder)
 
-    def _init_auxiliary_tasks(self, use_mimiccxr, use_iuxray, use_chexpert, use_cxr14, use_vinbig, use_padchest,
-                              classify_tags, classify_orientation, classify_gender, classify_chexpert, classify_questions,
-                              classify_chest_imagenome, predict_bboxes_chest_imagenome,
-                              n_medical_tags, n_questions_aux_task, n_chest_imagenome_labels,
-                              chest_imagenome_bbox_hidden_size, chest_imagenome_train_average_bbox_coords,
-                              chest_imagenome_bbox_regressor_version, num_regions=None,
-                              merge_findings=False, n_findings=None):
+    def _init_auxiliary_tasks(self):
         
+        print('  Initializing auxiliary tasks')
         # Optional auxiliary tasks
         
-        self.merge_findings = merge_findings
-        
         # 1) medical tags classification
-        self.classify_tags = classify_tags
-        if classify_tags:
-            assert n_medical_tags is not None
-            self.W_tags = nn.Linear(self.global_feat_size, n_medical_tags)
+        if self.classify_tags:
+            print(f'    Initializing medical tags classification task (n_medical_tags={self.n_medical_tags})')
+            assert self.n_medical_tags is not None
+            self.W_tags = nn.Linear(self.global_feat_size, self.n_medical_tags)
         
         # 2) orientation classifiction
-        self.classify_orientation = classify_orientation
-        if classify_orientation:
-            if use_mimiccxr:
+        if self.classify_orientation:
+            print(f'    Initializing orientation classification task')
+            if self.use_mimiccxr:
                 self.W_ori_mimiccxr = nn.Linear(self.global_feat_size, len(MIMICCXR_IMAGE_ORIENTATIONS))
-            if use_iuxray:
+            if self.use_iuxray:
                 self.W_ori_iuxray = nn.Linear(self.global_feat_size, len(IUXRAY_IMAGE_ORIENTATIONS))
-            if use_chexpert or use_cxr14: # weight sharing among chexpert & CRX14
+            if self.use_chexpert or self.use_cxr14: # weight sharing among chexpert & CRX14
                 self.W_ori_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_ORIENTATIONS))
 
         # 3) questions classification
-        self.classify_questions = classify_questions
-        if classify_questions:
-            self.W_q = nn.Linear(self.global_feat_size, n_questions_aux_task)
+        if self.classify_questions:
+            print(f'    Initializing questions classification task (n_questions_aux_task={self.n_questions_aux_task})')
+            self.W_q = nn.Linear(self.global_feat_size, self.n_questions_aux_task)
 
         # 4) gender classification
-        self.classify_gender = classify_gender
-        if classify_gender:
+        if self.classify_gender:
+            print(f'    Initializing gender classification task')   
             self.W_gender = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
 
-        if merge_findings:
-            assert n_findings is not None
-            self.W_findings = nn.Linear(self.global_feat_size, n_findings)
+        if self.merge_findings:
+            print(f'    Initializing merged findings classification task (n_findings={self.n_findings})')
+            assert self.n_findings is not None
+            self.W_findings = nn.Linear(self.global_feat_size, self.n_findings)
         else:        
             # 6) chexpert classifiction
-            self.classify_chexpert = classify_chexpert
-            if classify_chexpert:
+            if self.classify_chexpert:
+                print(f'    Initializing chexpert classification task')
                 self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
 
             # 7) CXR14 specific labels
-            if use_cxr14:
+            if self.use_cxr14:
+                print(f'    Initializing CXR14 classification task')
                 self.W_cxr14 = nn.Linear(self.global_feat_size, len(CXR14_LABELS))
 
             # 8) VinBig specific labels
-            if use_vinbig:
+            if self.use_vinbig:
+                print(f'    Initializing VinBig classification task')
                 self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
 
         # 9) PadChest specific tasks
-        if use_padchest:
+        if self.use_padchest:
+            print(f'    Initializing PadChest classification tasks')
             self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
             self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
             self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
 
         # 10) Chest ImaGenome specific tasks
-        self.classify_chest_imagenome = classify_chest_imagenome
-        if classify_chest_imagenome:
-            assert n_chest_imagenome_labels is not None
-            self.W_chst_imgn = nn.Linear(self.global_feat_size, n_chest_imagenome_labels)
-        self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
-        if predict_bboxes_chest_imagenome:
-            assert chest_imagenome_bbox_hidden_size is not None
-            assert chest_imagenome_bbox_regressor_version is not None
-            if chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V1:
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v1(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                )
-            elif chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V2:
-                assert num_regions is not None
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v2(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                    num_regions=num_regions,
-                )
-            elif chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V3:
-                assert num_regions is not None
-                self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v3(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=chest_imagenome_bbox_hidden_size,
-                    num_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                    train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
-                    num_regions=num_regions,                    
-                )
-            else:
-                raise ValueError(f'Unknown bbox regressor version: {chest_imagenome_bbox_regressor_version}')
+        if self.predict_labels_and_bboxes_chest_imagenome:
+            # We predict both labels and bboxes for Chest ImaGenome using a combined approach
+            assert self.classify_chest_imagenome
+            assert self.predict_bboxes_chest_imagenome
+            assert not self.use_anaxnet_bbox_subset # Not supported yet for this combined approach
+            assert self.chest_imagenome_anatomy_to_labels is not None
+            assert self.chest_imagenome_anatomy_group_to_labels is not None
+            assert len(self.chest_imagenome_anatomy_to_labels) == CHEST_IMAGENOME_NUM_BBOX_CLASSES
+            assert self.n_chest_imagenome_bboxes is not None
+            print(f'    Initializing Chest ImaGenome classification and bounding box regression'
+                  f' tasks (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
+            self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v4(
+                local_feat_dim=self.local_feat_size,
+                global_feat_dim=self.global_feat_size,
+                hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                num_bboxes=self.n_chest_imagenome_bboxes,
+                num_bboxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                num_regions=self.num_regions,
+                train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
+                bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,                
+            )
+            
+        else:
+            if self.classify_chest_imagenome:
+                print(f'    Initializing Chest ImaGenome classification task (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
+                assert self.n_chest_imagenome_labels is not None
+                self.W_chst_imgn = nn.Linear(self.global_feat_size, self.n_chest_imagenome_labels)
+            if self.predict_bboxes_chest_imagenome and not self.raw_image_encoding == RawImageEncoding.DETECTRON2:
+                print(f'    Initializing Chest ImaGenome bounding box regression task')
+                # Don't need to initialize these custom bbox regressors if using Detectron2
+                assert self.chest_imagenome_bbox_hidden_size is not None
+                assert self.chest_imagenome_bbox_regressor_version is not None
+                if self.use_anaxnet_bbox_subset:
+                    num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+                else:
+                    num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
+                if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V1:
+                    self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v1(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                        num_classes=num_classes,
+                        train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
+                    )
+                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V2:
+                    assert self.num_regions is not None
+                    self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v2(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                        num_classes=num_classes,
+                        train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
+                        num_regions=self.num_regions,
+                    )
+                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V3:
+                    assert self.num_regions is not None
+                    self.bbox_regressor_chst_imgn = BoundingBoxRegressor_v3(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                        num_classes=num_classes,
+                        train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
+                        num_regions=self.num_regions,                    
+                    )
+                else:
+                    raise ValueError(f'Unknown bbox regressor version: {self.chest_imagenome_bbox_regressor_version}')
 
     def get_name(self):
         if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
@@ -350,6 +423,8 @@ class MultiPurposeVisualModule(nn.Module):
         elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
                 self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             img_str = HUGGINGFACE_VITMODEL_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
+            img_str = DETECTRON2_YAML_2_SHORT[self.detectron2_model_yaml]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -371,8 +446,17 @@ class MultiPurposeVisualModule(nn.Module):
         cxr14_forward=False,
         vinbig_forward=False,
         padchest_forward=False,
+        detectron2_forward=False,
+        detectron2_input=None,
         **unused_kwargs,
     ):
+
+        # Detectron2-specific forward pass
+        if detectron2_forward:
+            assert detectron2_input is not None
+            return self.raw_image_encoder(detectron2_input)
+
+        # General forward pass
         assert (raw_images is not None) or (visual_features is not None)
         local_feat = None
         global_list = []        
@@ -506,13 +590,20 @@ class MultiPurposeVisualModule(nn.Module):
             if not self.merge_findings and self.classify_chexpert:
                 output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-            if self.classify_chest_imagenome:
-                output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+            if self.predict_labels_and_bboxes_chest_imagenome:
+                pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(local_feat, global_feat)
+                output['pred_chest_imagenome'] = mlc_scores
                 output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-            if self.predict_bboxes_chest_imagenome:
-                pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
                 output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                 output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+            else:
+                if self.classify_chest_imagenome:
+                    output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                if self.predict_bboxes_chest_imagenome:
+                    pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
+                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
 
         return output
 
@@ -784,6 +875,10 @@ HUGGINGFACE_VITMODEL_NAMES_2_SHORT = {
     'CenIA/vit-mae-large-finetuned-mimic': 'CenIA/vit-mae-large-ft-mimic',
 }
 
+DETECTRON2_YAML_2_SHORT = {
+    'COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml': 'D2-CocoDet-faster-rcnn-R-50-FPN-3x',
+}
+
 def _get_clip_vit_modified_forward(dtype):    
     def forward(self, x: torch.Tensor, return_local_features=False):
         x = x.type(dtype)
@@ -870,4 +965,39 @@ def create_huggingface_vitmodel_feature_extractor(vitmodel_version, pretrained_w
     assert vitmodel_version in _HUGGINGFACE_VITMODEL_VERSIONS, f'Unknown Hugginface ViTModel version {vitmodel_version}'
     model = ViTModel.from_pretrained(vitmodel_version, use_auth_token=True)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model
+
+def create_detectron2_model(
+        model_yaml, num_classes=None,
+        roi_heads_batch_size_per_image=None,
+        rpn_batch_size_per_image=None,
+        verbose=False
+    ):
+    assert model_yaml is not None
+    assert model_yaml.endswith('.yaml')
+    cfg = get_detectron2_cfg()
+    cfg.merge_from_file(detectron2_model_zoo.get_config_file(model_yaml))
+    # Relevant reading on how to update the config:
+    # https://detectron2.readthedocs.io/en/latest/tutorials/datasets.html#update-the-config-for-new-datasets
+    print('Building Detectron2 model')
+    if num_classes is not None:
+        cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
+        cfg.MODEL.RETINANET.NUM_CLASSES = num_classes
+        print(f'cfg.MODEL.ROI_HEADS.NUM_CLASSES overriden to {num_classes}')
+        print(f'cfg.MODEL.RETINANET.NUM_CLASSES overriden to {num_classes}')
+    if roi_heads_batch_size_per_image is not None:
+        cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = roi_heads_batch_size_per_image
+        print(f'cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE overriden to {roi_heads_batch_size_per_image}')
+    if rpn_batch_size_per_image is not None:
+        cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE = rpn_batch_size_per_image
+        print(f'cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE overriden to {rpn_batch_size_per_image}')
+    if verbose:
+        print(cfg)
+        
+    model = build_detectron2_model(cfg)
+    # Load weights from the official Detectron2 model zoo
+    checkpoint_url = detectron2_model_zoo.get_checkpoint_url(model_yaml)
+    print(f'Loading weights from {checkpoint_url}')
+    DetectionCheckpointer(model).load(checkpoint_url)
+    print('Detectron2 model successfully built')
     return model

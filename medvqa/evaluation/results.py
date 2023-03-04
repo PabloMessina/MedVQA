@@ -48,6 +48,19 @@ def collect_chexpert_based_output_results():
                 results.append((kind, exp_name, filename))
     return results
 
+def collect_chest_imagenome_multilabel_classification_results(dataset_name):
+    vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
+    vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
+    results = []
+    for dirs, kind in zip([vqa_dirs, vm_dirs], ['vqa', 'visual_module']):
+        for exp_name in dirs:
+            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
+                                    if dataset_name in x and 'multilabel_classification_metrics' in x and\
+                                        ('chest-imagenome' in x or 'chest-imagenome' in x)]
+            for filename in exp_result_filenames:
+                results.append((kind, exp_name, filename))
+    return results
+
 def collect_chest_imagenome_bbox_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
     bbox_dirs = os.listdir(os.path.join(RESULTS_DIR,'bbox'))
@@ -383,6 +396,13 @@ def get_chexpert_based_output_metrics_dataframe():
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = report_generation.get_chexpert_based_outputs_dataframe(metrics_paths)
     _append_method_columns__report_level(df, results)
+    return df
+
+def get_chest_imagenome_multilabel_classification_metrics_dataframe(dataset_name):
+    results = collect_chest_imagenome_multilabel_classification_results(dataset_name)
+    metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
+    df = visual_module.get_chest_imagenome_multilabel_classification_metrics_dataframe(metrics_paths)
+    _append_method_columns__chest_imagenome_bbox(df, results)
     return df
 
 def get_chest_imagenome_bbox_metrics_dataframe(dataset_name):

@@ -9,9 +9,11 @@ import warnings
 
 class LRSchedulerNames:
     ReduceLROnPlateau = 'reduce-lr-on-plateau'
-    WarmUpPlusDecay = 'warmup+decay'
-    WarmUpPlusCyclicDecay = 'warmup+cyclicdecay'
-    WarmUpPlusCosineAnnealing = 'warmup+cosine'
+    ExponentialWarmUpPlusDecay = 'exp-warmup+decay'
+    ExponentialWarmUpPlusCyclicDecay = 'exp-warmup+cyclicdecay'
+    ExponentialWarmUpPlusCyclicDecayBatchwise = 'exp-warmup+cyclicdecay-batchwise'
+    ExponentialWarmUpPlusCosineAnnealing = 'exp-warmup+cosine'
+    ExponentialWarmUpPlusDecayPlusCyclicDecay = 'exp-warmup+decay+cyclicdecay'
 
 class SequentialLR(_LRScheduler):
     def __init__(self, schedulers, milestones, last_epoch=-1):
@@ -163,15 +165,36 @@ def parse_warmup_and_cosine_args_string(string):
     assert len(args) == 5
     return float(args[0]), int(args[1]), float(args[2]), int(args[3]), float(args[4])
 
+def parse_warmup_decay_and_cyclic_decay_args_string(string):
+    args = string.split(',')
+    assert len(args) == 8
+    lr0 = float(args[0])
+    steps01 = int(args[1])
+    lr1 = float(args[2])
+    steps12 = int(args[3])
+    lr2 = float(args[4])
+    lr3 = float(args[5])
+    restart_steps = int(args[6])
+    lr4 = float(args[7])
+    assert lr0 < lr1
+    assert steps01 > 1
+    assert lr1 > lr2
+    assert steps12 > 1
+    assert lr2 < lr3
+    assert restart_steps > 1
+    assert lr3 > lr4
+    return lr0, steps01, lr1, steps12, lr2, lr3, restart_steps, lr4
+
 def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_decay_args=None,
-                        warmup_and_cosine_args=None, n_batches_per_epoch=None):
+                        warmup_decay_and_cyclic_decay_args=None, warmup_and_cosine_args=None,
+                        n_batches_per_epoch=None):
     if name == LRSchedulerNames.ReduceLROnPlateau:
         assert factor is not None
         assert patience is not None
         scheduler = ReduceLROnPlateau(optimizer, mode='max', verbose=True,
                                         factor=factor, patience=patience)
         update_batchwise = False
-    elif name == LRSchedulerNames.WarmUpPlusDecay:
+    elif name == LRSchedulerNames.ExponentialWarmUpPlusDecay:
         assert warmup_and_decay_args is not None
         print(f'Using {name} scheduler: {warmup_and_decay_args}')
         lr0, steps01, lr1, steps12, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
@@ -180,21 +203,32 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
         scheduler2 = ExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, steps12), verbose=True)
         scheduler = SequentialLR(schedulers=[scheduler1, scheduler2], milestones=[steps01+1])
         update_batchwise = False
-    elif name == LRSchedulerNames.WarmUpPlusCyclicDecay:
+    elif name == LRSchedulerNames.ExponentialWarmUpPlusCyclicDecayBatchwise:
         assert warmup_and_decay_args is not None
         assert n_batches_per_epoch is not None
         print(f'Using {name} scheduler: {warmup_and_decay_args}')
         lr0, warmup_epochs, lr1, restart_epochs, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
         print(lr0, warmup_epochs, lr1, restart_epochs, lr2)
         warmup_steps = warmup_epochs * n_batches_per_epoch
-        restart_steps = warmup_epochs * n_batches_per_epoch
+        restart_steps = restart_epochs * n_batches_per_epoch
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, warmup_steps))
         scheduler2 = CyclicExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, restart_steps),
                                          steps_to_restart=restart_steps, initial_lr=lr1)
         scheduler = SequentialLR(schedulers=[scheduler1, scheduler2], milestones=[warmup_steps+1])
         for param_group in optimizer.param_groups: param_group['lr'] = lr0
         update_batchwise = True
-    elif name == LRSchedulerNames.WarmUpPlusCosineAnnealing:
+    elif name == LRSchedulerNames.ExponentialWarmUpPlusCyclicDecay:
+        assert warmup_and_decay_args is not None
+        print(f'Using {name} scheduler: {warmup_and_decay_args}')
+        lr0, warmup_epochs, lr1, restart_epochs, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
+        print(lr0, warmup_epochs, lr1, restart_epochs, lr2)
+        scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, warmup_epochs))
+        scheduler2 = CyclicExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, restart_epochs),
+                                         steps_to_restart=restart_epochs, initial_lr=lr1)
+        scheduler = SequentialLR(schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs+1])
+        for param_group in optimizer.param_groups: param_group['lr'] = lr0
+        update_batchwise = False
+    elif name == LRSchedulerNames.ExponentialWarmUpPlusCosineAnnealing:
         assert warmup_and_cosine_args is not None
         assert n_batches_per_epoch is not None
         print(f'Using {name} scheduler: {warmup_and_cosine_args}')
@@ -207,6 +241,20 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
         scheduler = SequentialLR(schedulers=[scheduler1, scheduler2], milestones=[warmup_steps+1])
         for param_group in optimizer.param_groups: param_group['lr'] = lr0
         update_batchwise = True
+    elif name == LRSchedulerNames.ExponentialWarmUpPlusDecayPlusCyclicDecay:
+        assert warmup_decay_and_cyclic_decay_args is not None
+        print(f'Using {name} scheduler: {warmup_decay_and_cyclic_decay_args}')
+        lr0, epochs01, lr1, epochs12, lr2, lr3, restart_epochs, lr4 = \
+            parse_warmup_decay_and_cyclic_decay_args_string(warmup_decay_and_cyclic_decay_args)
+        print(lr0, epochs01, lr1, epochs12, lr2, lr3, restart_epochs, lr4)
+        scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, epochs01))
+        scheduler2 = ExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, epochs12))
+        scheduler3 = CyclicExponentialLR(optimizer, gamma=calc_gamma(lr3, lr4, restart_epochs-1),
+                                            steps_to_restart=restart_epochs, initial_lr=lr3)
+        scheduler = SequentialLR(schedulers=[scheduler1, scheduler2, scheduler3],
+                                    milestones=[epochs01+1, epochs01+epochs12+1])
+        for param_group in optimizer.param_groups: param_group['lr'] = lr0
+        update_batchwise = False
     else:
-        assert False, f'Unknown schduler name {name}'
+        assert False, f'Unknown LR scheduler name: {name}'
     return scheduler, update_batchwise

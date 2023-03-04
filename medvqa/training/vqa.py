@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
+from detectron2.utils.events import EventStorage
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.models.common import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
@@ -14,6 +15,7 @@ from medvqa.utils.constants import (
     IUXRAY_DATASET_ID__CHEXPERT_MODE,
     MIMICCXR_DATASET_ID,
     CHEXPERT_DATASET_ID,
+    MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE,
     MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE,
     MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
@@ -96,6 +98,67 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
     if predict_bboxes_chest_imagenome:
         print('chest_imagenome_bbox_loss_weight: ', chest_imagenome_bbox_loss_weight)
+
+    # DEBUG = True
+
+    def step_fn__mimiccxr_chest_imagenome_detectron2(batch):
+        # Extract elements from batch
+        dataset_id = batch['dataset_id']
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'detectron2_forward': True,
+                'detectron2_input': batch['batch'],
+            }
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                with EventStorage() as storage:
+                    model_output = model(**model_kwargs)
+
+                if training: 
+                    # Compute losses
+                    loss_cls = model_output['loss_cls']
+                    loss_box_reg = model_output['loss_box_reg']
+                    loss_rpn_cls = model_output['loss_rpn_cls']
+                    loss_rpn_loc = model_output['loss_rpn_loc']
+                    batch_loss = loss_cls + loss_box_reg + loss_rpn_cls + loss_rpn_loc
+
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss)
+
+        # Prepare output
+        output = {
+            'dataset_id': dataset_id,
+        }
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+            output[MetricNames.DETECTRON2_CLS_LOSS] = loss_cls.detach()
+            output[MetricNames.DETECTRON2_BOX_REG_LOSS] = loss_box_reg.detach()
+            output[MetricNames.DETECTRON2_RPN_CLS_LOSS] = loss_rpn_cls.detach()
+            output[MetricNames.DETECTRON2_RPN_LOC_LOSS] = loss_rpn_loc.detach()
+        else:
+            # print('model_output: ', model_output)
+            output['pred_boxes'] = [x['instances'].pred_boxes.tensor.detach().cpu() for x in model_output]
+            output['pred_classes'] = [x['instances'].pred_classes.detach().cpu() for x in model_output]
+            output['scores'] = [x['instances'].scores.detach().cpu() for x in model_output]
+            output['bbox_coords'] = [x['bbox_coords'] for x in batch['batch']]
+            output['bbox_presence'] = [x['bbox_presence'] for x in batch['batch']]
+
+            # nonlocal DEBUG
+            # if DEBUG:
+            #     print('output[bbox_coords]: ', output['bbox_coords'])
+            #     print('output[bbox_presence]: ', output['bbox_presence'])
+            #     print('output[pred_boxes]: ', output['pred_boxes'])
+            #     print('output[pred_classes]: ', output['pred_classes'])
+            #     print('output[scores]: ', output['scores'])
+            #     DEBUG = False
+
+        return output
     
     def step_fn__mimiccxr_iuxray(batch):
 
@@ -173,7 +236,6 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
-                
                 model_output = model(**model_kwargs)
                 
                 if classify_tags:
@@ -204,9 +266,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     if verbose_question:
                         pred_question_logits = model_output['pred_questions']
 
-                if training:                    
+                if training:
                     # Compute losses
-                    losses = []                    
+                    losses = []
                     if classify_tags:
                         tags_loss = tags_criterion(pred_tags_logits, tags.float())
                         losses.append(tags_loss)
@@ -260,7 +322,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         }
 
         if training and batch_loss is not None:
-            output['loss'] = batch_loss.detach()        
+            output['loss'] = batch_loss.detach()
         if classify_tags:
             output['tags'] = tags.detach().cpu()
             output['pred_tags'] = (pred_tags_logits.detach() > 0).cpu()
@@ -704,6 +766,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output = step_fn__vinbig(batch)
         elif dataset_id == PADCHEST_DATASET_ID:
             output = step_fn__padchest(batch)
+        elif dataset_id == MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE:
+            output = step_fn__mimiccxr_chest_imagenome_detectron2(batch)
         else: assert False, f'Unknown dataset_id {dataset_id}'
         # update learning rate batchwise
         if update_lr_batchwise:
