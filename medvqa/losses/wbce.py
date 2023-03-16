@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-class WeigthedBCEByClassLoss(nn.Module):
+class WeigthedByClassBCELoss(nn.Module):
     def __init__(self, classes_mask=None):
         super().__init__()
         self.bce = nn.BCEWithLogitsLoss(reduction='none')

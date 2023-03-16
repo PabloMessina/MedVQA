@@ -1,10 +1,10 @@
 import os
 import re
 import pandas as pd
-from medvqa.models.checkpoint import get_checkpoint_filepath
+from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_training_history
 from medvqa.utils.common import RESULTS_DIR, WORKSPACE_DIR
 from medvqa.utils.constants import DATASET_NAME_TO_SHORT
-from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file
 from medvqa.evaluation import report_generation, visual_module
 
 def collect_report_level_results(dataset_name):
@@ -237,6 +237,40 @@ def _append_checkpoint_epoch_column(df, results):
         column.append(epoch)
     df['epoch'] = column
 
+def _append_training_history_column(df, results):
+    column = []
+    for i, r in enumerate(results):
+        try:
+            checkpoint_folder_path = os.path.join(WORKSPACE_DIR, 'models', r[0], r[1])
+            history = get_model_training_history(checkpoint_folder_path)
+            assert len(history) > 0
+            assert history[-1].timestamp == df['timestamp'][i], f'{history[-1].timestamp} != {df["timestamp"][i]}' # sanity check
+            num_training_examples = 0
+            for instance in history:
+                num_training_examples += instance.batches_per_epoch * instance.batch_size * instance.best_epoch
+            history_text = f'hlen={len(history)} nte={num_training_examples}'
+            if len(history) > 1:
+                history_text += f' ft_from={history[-2].timestamp}'
+        except FileNotFoundError:
+            history_text = None
+        column.append(history_text)
+    df['history'] = column
+
+def _append_ensemble_cheating_column(df, results):
+    column = ['cheat' in r[2] for r in results]
+    df['escheat'] = column
+
+def _append_num_ensembled_models_column(df, metrics_paths):
+    column = []
+    for mp in metrics_paths:
+        metrics = get_cached_pickle_file(mp)
+        try:
+            num_models = len(metrics['ensemble_model_names'])
+        except KeyError:
+            num_models = None
+        column.append(num_models)
+    df['num_ens'] = column
+
 def _append_pretrained_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
@@ -310,11 +344,32 @@ def _append_chest_imagenome_bbox_regressor_version_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
         try:
-            version = metadata['model_kwargs']['chest_imagenome_bbox_regressor_version']
+            if metadata['model_kwargs'].get('predict_bboxes_chest_imagenome', False):
+                if metadata['model_kwargs'].get('predict_labels_and_bboxes_chest_imagenome', False):
+                    version = 'v4'
+                else:
+                    version = metadata['model_kwargs']['chest_imagenome_bbox_regressor_version']
+            else:
+                version = None
         except KeyError:
             version = None
         column.append(version)
     df['chstimgn_bbox_model'] = column
+
+def _append_chest_imagenome_mlc_version_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            if metadata['model_kwargs'].get('predict_labels_and_bboxes_chest_imagenome', False):
+                version = 'v4'
+            elif metadata['model_kwargs'].get('classify_chest_imagenome', False):
+                version = 'gf->labels'
+            else:
+                version = None
+        except KeyError:
+            version = None
+        column.append(version)
+    df['chstimgn_mlc_model'] = column
 
 def _append_image_size_column(df, results):
     column = []
@@ -332,6 +387,26 @@ def _append_decent_images_column(df, results):
             use_decent_images = None
         column.append(use_decent_images)
     df['decent_images'] = column
+
+def _append_binary_loss_name_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            loss_name = metadata['trainer_engine_kwargs']['binary_loss_name']
+        except KeyError:
+            loss_name = None
+        column.append(loss_name)
+    df['binary_loss'] = column
+
+def _append_mimiccxr_balanced_sampling_mode_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            mode = metadata['mimiccxr_trainer_kwargs']['balanced_sampling_mode']
+        except KeyError:
+            mode = None
+        column.append(mode)
+    df['mimiccxr_balanced_sampling'] = column
 
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
@@ -365,6 +440,21 @@ def _append_method_columns__visual_module(df, results):
     _append_batch_size_column(df, results)
     _append_gradient_accumulation_column(df, results)
     _append_checkpoint_epoch_column(df, results)
+
+def _append_method_columns__chest_imagenome_multilabel_classification(df, results, metrics_paths):
+    df['folder'] = [x[0] for x in results]
+    df['timestamp'] = [x[1][:15] for x in results]
+    _append_datasets_column(df, results)
+    _append_model_column(df, results)
+    _append_chest_imagenome_bbox_regressor_version_column(df, results)
+    _append_chest_imagenome_mlc_version_column(df, results)
+    _append_data_augmentation_column(df, results)
+    _append_decent_images_column(df, results)
+    _append_binary_loss_name_column(df, results)
+    _append_mimiccxr_balanced_sampling_mode_column(df, results)
+    _append_training_history_column(df, results)
+    _append_ensemble_cheating_column(df, results)
+    _append_num_ensembled_models_column(df, metrics_paths)
 
 def _append_method_columns__chest_imagenome_bbox(df, results):
     df['folder'] = [x[0] for x in results]
@@ -402,7 +492,7 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(dataset_name
     results = collect_chest_imagenome_multilabel_classification_results(dataset_name)
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = visual_module.get_chest_imagenome_multilabel_classification_metrics_dataframe(metrics_paths)
-    _append_method_columns__chest_imagenome_bbox(df, results)
+    _append_method_columns__chest_imagenome_multilabel_classification(df, results, metrics_paths)
     return df
 
 def get_chest_imagenome_bbox_metrics_dataframe(dataset_name):

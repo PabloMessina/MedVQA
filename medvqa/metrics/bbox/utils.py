@@ -52,6 +52,29 @@ def compute_mean_iou_per_class(pred_coords, gt_coords, gt_presences, num_workers
         mean_ious = p.map(_compute_mean_iou, task_args)
     return mean_ious
 
+def compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, valid_classes=None):
+    assert len(gt_coords.shape) == 3
+    assert len(gt_presences.shape) == 2
+    assert gt_coords.shape[-1] == 4 # each bounding box is represented by 4 coordinates
+    m = gt_coords.shape[1]
+    mean_ious = np.zeros((m,), dtype=np.float32)
+    counts = np.zeros((m,), dtype=np.int32)
+    n = len(gt_presences)
+    for i in range(n):
+        for j in range(len(pred_boxes[i])):
+            if scores[i][j] < 0.5:
+                continue
+            cls = pred_classes[i][j].item()
+            if gt_presences[i][cls] == 1:
+                mean_ious[cls] += compute_iou(pred_boxes[i][j], gt_coords[i][cls])
+                counts[cls] += 1
+    for i in range(m):
+        if counts[i] > 0:
+            mean_ious[i] /= counts[i]
+    if valid_classes is not None:
+        mean_ious = mean_ious[valid_classes]
+    return mean_ious
+
 def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
     m = pred_coords.shape[1] // 4
     assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
@@ -59,6 +82,30 @@ def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
     for i in range(m):
         if gt_presences[:, i].sum() > 0:
             mae[i] = np.abs(pred_coords[:, i*4:(i+1)*4] - gt_coords[:, i*4:(i+1)*4])[gt_presences[:, i] == 1].mean()
+    return mae
+
+def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, valid_classes=None):
+    assert len(gt_coords.shape) == 3
+    assert len(gt_presences.shape) == 2
+    assert gt_coords.shape[-1] == 4 # each bounding box is represented by 4 coordinates
+    m = gt_coords.shape[1]
+    mae = np.zeros((m,), dtype=np.float32)
+    counts = np.zeros((m,), dtype=np.int32)
+    n = len(gt_presences)
+    for i in range(n):
+        for j in range(len(pred_boxes[i])):
+            if scores[i][j] < 0.5:
+                continue
+            cls = pred_classes[i][j].item()
+            if gt_presences[i][cls] == 1:
+                ae = torch.abs(pred_boxes[i][j] - gt_coords[i][cls])
+                mae[cls] += ae.mean()
+                counts[cls] += 1
+    for i in range(m):
+        if counts[i] > 0:
+            mae[i] /= counts[i]
+    if valid_classes is not None:
+        mae = mae[valid_classes]
     return mae
 
 def _compute_score(task, metric_fn):
@@ -196,7 +243,7 @@ def _compute_prf1__detectron2(task):
     return _compute_score__detectron2(task, _prf1_scores)
 
 def _compute_multiple_scores__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds,
-                                         num_workers, metric_fn):
+                                         valid_classes, num_workers, metric_fn):
     global _shared_pred_boxes, _shared_pred_classes, _shared_scores, _shared_gt_coords, _shared_gt_presences
     _shared_pred_boxes = pred_boxes
     _shared_pred_classes = pred_classes
@@ -208,13 +255,19 @@ def _compute_multiple_scores__detectron2(pred_boxes, pred_classes, scores, gt_co
     task_args = []
     for iou_thr in iou_thresholds:
         for c in range(num_classes):
+            if valid_classes is not None and valid_classes[c] == 0:
+                continue
             task_args.append((iou_thr, c, num_samples))
     with Pool(num_workers) as p:
         scores = p.map(metric_fn, task_args)
-    if type(scores[0]) == tuple:
-        scores = np.array(scores).reshape((len(iou_thresholds), num_classes, len(scores[0])))
+    if valid_classes is not None:
+        actual_num_classes = np.sum(valid_classes)
     else:
-        scores = np.array(scores).reshape((len(iou_thresholds), num_classes))
+        actual_num_classes = num_classes
+    if type(scores[0]) == tuple:
+        scores = np.array(scores).reshape((len(iou_thresholds), actual_num_classes, len(scores[0])))
+    else:
+        scores = np.array(scores).reshape((len(iou_thresholds), actual_num_classes))
     return scores
 
 def compute_multiple_f1_scores__detectron2(
@@ -233,6 +286,6 @@ def compute_multiple_recall_scores__detectron2(
         pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers, _compute_recall__detectron2)
 
 def compute_multiple_prf1_scores__detectron2(
-    pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
     return _compute_multiple_scores__detectron2(
-        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers, _compute_prf1__detectron2)
+        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, valid_classes, num_workers, _compute_prf1__detectron2)

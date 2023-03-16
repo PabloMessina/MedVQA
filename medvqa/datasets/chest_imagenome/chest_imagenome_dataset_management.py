@@ -23,18 +23,20 @@ from medvqa.datasets.chest_imagenome import (
     get_anaxnet_bbox_sorted_indices,
 )
 from medvqa.datasets.mimiccxr import (
-    MIMICCXR_CACHE_DIR,
-    MIMICCXR_STUDY_REGEX,
-    get_image_views_dict as get_mimiccxr_image_views_dict,    
     get_mimiccxr_large_image_path,
     get_mimiccxr_report_path,
+    get_mimiccxr_test_dicom_ids,
+    get_mimiccxr_train_dicom_ids,
+    get_mimiccxr_val_dicom_ids,
     get_number_of_reports,
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_json_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_json_file, load_pickle, save_to_pickle
 from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.utils.logging import print_blue, print_red
+
+_CACHE = {}
 
 def _load_scene_graph(scene_graph_path):
     return load_json_file(scene_graph_path)
@@ -165,7 +167,7 @@ def load_gold_standard_dicom_ids():
 def load_nongold_dicom_ids():
     cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'nongold_dicom_ids.pkl')
     if os.path.exists(cache_path):
-        return load_pickle(cache_path)
+        return get_cached_pickle_file(cache_path)
     dicom_ids_set = set(load_chest_imagenome_silver_bboxes().keys())
     gold_ids_set = set(load_gold_standard_dicom_ids())
     dicom_ids = list(dicom_ids_set - gold_ids_set)
@@ -788,6 +790,72 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
             ax.text(x1, y1, CHEST_IMAGENOME_BBOX_NAMES[idx], fontsize=16, color='y', alpha=1.0 if is_spine else 0.5)
     # Show
     plt.show()
+
+_TRAIN_VAL_TEST_CACHE = {}
+def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename):
+    if label in _TRAIN_VAL_TEST_CACHE:
+        return _TRAIN_VAL_TEST_CACHE[label]
+    
+    key = 'get_train_val_test_summary_text_for_label'
+    if key in _CACHE:
+        tmp = _CACHE[key]
+        actual_train_dicom_ids = tmp['actual_train_dicom_ids']
+        actual_val_dicom_ids = tmp['actual_val_dicom_ids']
+        actual_test_dicom_ids = tmp['actual_test_dicom_ids']
+    else:
+        mimiccxr_train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
+        mimiccxr_val_dicom_ids = set(get_mimiccxr_val_dicom_ids())
+        mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
+        decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
+        nongold_dicom_ids = set(load_nongold_dicom_ids())
+        allowed_train_val_dicom_ids = decent_dicom_ids & nongold_dicom_ids
+        actual_train_dicom_ids = mimiccxr_train_dicom_ids & allowed_train_val_dicom_ids
+        actual_val_dicom_ids = mimiccxr_val_dicom_ids & allowed_train_val_dicom_ids
+        actual_test_dicom_ids = mimiccxr_test_dicom_ids & decent_dicom_ids
+        _CACHE[key] = {
+            'actual_train_dicom_ids': actual_train_dicom_ids,
+            'actual_val_dicom_ids': actual_val_dicom_ids,
+            'actual_test_dicom_ids': actual_test_dicom_ids,
+        }
+    # Load ground truth labels and label names
+    label_names = load_postprocessed_label_names(label_names_filename)
+    dicom_id_to_labels = load_postprocessed_labels(labels_filename)
+    # Get label index
+    label_idx = -1
+    if type(label) == str:
+        for idx, label_name in enumerate(label_names):
+            if len(label_name) == 2 and label_name[1] == label:
+                label_idx = idx
+                print(f'Found label {label} at index {idx} ({label_name})')
+                break
+    else:
+        assert type(label) == tuple
+        assert len(label) == 2
+        for idx, label_name in enumerate(label_names):
+            if len(label_name) == 3 and label_name[0] == label[0] and label_name[2] == label[1]:
+                label_idx = idx
+                print(f'Found label {label} at index {idx} ({label_name})')
+                break
+    assert label_idx != -1, f'Could not find label {label} in {label_names_filename}'
+    # Count number of times the label appears in each set    
+    train_count = 0
+    val_count = 0
+    test_count = 0
+    for dicom_id, labels in dicom_id_to_labels.items():
+        if labels[label_idx] == 1:
+            if dicom_id in actual_train_dicom_ids:
+                train_count += 1
+            elif dicom_id in actual_val_dicom_ids:
+                val_count += 1
+            elif dicom_id in actual_test_dicom_ids:
+                test_count += 1
+    # Return summary text
+    summary_text = (f'Label: {label}\n'
+                    f'Train: {train_count} ({train_count / len(actual_train_dicom_ids):.2%})\n'
+                    f'Val: {val_count} ({val_count / len(actual_val_dicom_ids):.2%})\n'
+                    f'Test: {test_count} ({test_count / len(actual_test_dicom_ids):.2%})')
+    _TRAIN_VAL_TEST_CACHE[label] = summary_text
+    return summary_text
 
 class ChestImagenomeBboxDataset(Dataset):
     def __init__(self, image_paths, image_transform, bbox_coords, bbox_presences):

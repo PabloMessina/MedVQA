@@ -1,10 +1,17 @@
 import torch.nn as nn
-from .wbce import WeigthedBCEByClassLoss
+from .wbce import WeigthedByClassBCELoss
+from .focal_wbce import FocalWeigthedByClassBCELoss
 from .dataset_aware_loss import DatasetAwareLoss
+
+__all__ = [
+    'get_binary_multilabel_loss',
+    'DatasetAwareLoss',
+]
 
 _BINARY_MULTILABEL_LOSSES = {
     'bce': nn.BCEWithLogitsLoss,
-    'wbce-c': WeigthedBCEByClassLoss,
+    'wbce-c': WeigthedByClassBCELoss,
+    'focal-wbce-c': FocalWeigthedByClassBCELoss,
 }
 
 def get_binary_multilabel_loss(loss_name, **kwargs):

@@ -1,5 +1,6 @@
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, DatasetAwareBboxMeanF1
+from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMacroAvgF1,
@@ -247,6 +248,13 @@ def attach_dataset_aware_chest_imagenome_labels_roc_auc(engine, allowed_dataset_
                                   allowed_dataset_ids=allowed_dataset_ids,
                                   device=device)
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELROCAUC)
+
+def attach_dataset_aware_chest_imagenome_labels_auc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=auc_fn,
+                                  output_transform=_get_output_transform('pred_chest_imagenome_probs', 'chest_imagenome'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELAUC)
 
 def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids, use_detectron2=False):
     if use_detectron2:

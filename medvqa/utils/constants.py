@@ -197,6 +197,9 @@ class MetricNames:
     CHXLABEL_ROCAUC = 'chxlabel_rocauc'
     CHXLABEL_ROCAUC_MICRO = 'chxlabel_rocauc_micro'
     CHXLABEL_ROCAUC_MACRO = 'chxlabel_rocauc_macro'
+    CHXLABEL_AUC = 'chxlabel_auc'
+    CHXLABEL_AUC_MICRO = 'chxlabel_auc_micro'
+    CHXLABEL_AUC_MACRO = 'chxlabel_auc_macro'
     CHXLABEL_PRF1 = 'chxlabel_prf1'
     QLABELSF1 = 'qlabelsf1'
     QLABELS_PRF1 = 'qlabels_prf1'
@@ -216,6 +219,9 @@ class MetricNames:
     CHESTIMAGENOMELABELROCAUC = 'chestimagenome_label_rocauc'
     CHESTIMAGENOMELABELROCAUC_MICRO = 'chestimagenome_label_rocauc_micro'
     CHESTIMAGENOMELABELROCAUC_MACRO = 'chestimagenome_label_rocauc_macro'
+    CHESTIMAGENOMELABELAUC = 'chestimagenome_label_auc'
+    CHESTIMAGENOMELABELAUC_MICRO = 'chestimagenome_label_auc_micro'
+    CHESTIMAGENOMELABELAUC_MACRO = 'chestimagenome_label_auc_macro'
     CHESTIMAGENOMELABEL_PRF1 = 'chestimagenome_label_prf1'
     CHESTIMAGENOMEBBOXIOU = 'chestimagenome_bbox_iou'
     CHESTIMAGENOMEBBOXMAE = 'chestimagenome_bbox_mae'
@@ -267,6 +273,9 @@ METRIC2SHORT = {
     'chxlabel_rocauc': 'chxlrocauc',
     'chxlabel_rocauc_micro': 'chxlrocaucmic',
     'chxlabel_rocauc_macro': 'chxlrocaucmac',
+    'chxlabel_auc': 'chxlauc',
+    'chxlabel_auc_micro': 'chxlaucmic',
+    'chxlabel_auc_macro': 'chxlaucmac',
     'chxlabel_prf1': 'chxlprf1',
     'qlabelsf1': 'qlf1',
     'qlabels_prf1': 'qlprf1',
@@ -289,6 +298,9 @@ METRIC2SHORT = {
     'chestimagenome_label_rocauc': 'chestimglrocauc',
     'chestimagenome_label_rocauc_micro': 'chestimglrocaucmic',
     'chestimagenome_label_rocauc_macro': 'chestimglrocaucmac',
+    'chestimagenome_label_auc': 'chestimglauc',
+    'chestimagenome_label_auc_micro': 'chestimglaucmic',
+    'chestimagenome_label_auc_macro': 'chestimglaucmac',
     'chestimagenome_label_prf1': 'chestimglprf1',
     'chestimagenome_bbox_iou': 'chestimgbbiou',
     'chestimagenome_bbox_mae': 'chestimgbbmae',

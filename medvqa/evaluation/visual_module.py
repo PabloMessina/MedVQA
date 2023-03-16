@@ -1,3 +1,4 @@
+import os
 import torch
 import pandas as pd
 import numpy as np
@@ -35,8 +36,12 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import load_pickle
-from medvqa.utils.handlers import attach_accumulator, get_log_iteration_handler, get_log_metrics_handlers
+from medvqa.utils.files import get_cached_pickle_file, save_to_pickle
+from medvqa.utils.handlers import (
+    attach_accumulator,
+    get_log_iteration_handler,
+    get_log_metrics_handler,
+)
 
 _VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,
@@ -56,7 +61,7 @@ def get_visual_module_metrics_dataframe(metrics_paths, metric_names=_VISUAL_MODU
     data = [[] for _ in range(len(metrics_paths))]
     for row_i, metrics_path in tqdm(enumerate(metrics_paths)):
         data[row_i].append(metrics_path)
-        metrics_dict = load_pickle(metrics_path)
+        metrics_dict = get_cached_pickle_file(metrics_path)
         
         for mn in metric_names:            
             met = metrics_dict.get(mn, _empty_dict)
@@ -148,7 +153,7 @@ def get_chest_imagenome_bbox_metrics_dataframe(metrics_paths):
     if type(metrics_paths) is str:
         metrics_paths  = [metrics_paths]    
     print(f'Loading {len(metrics_paths)} metrics files...')
-    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]    
+    metrics_dict_list = [get_cached_pickle_file(metrics_path) for metrics_path in tqdm(metrics_paths)]    
     # Create dataframe
     columns = ['metrics_path']
     columns.extend(_chest_imagenome_metric_names)
@@ -194,8 +199,8 @@ _CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES = [
     MetricNames.CHESTIMAGENOMELABELACC,
     MetricNames.CHESTIMAGENOMELABEL_PRF1,
     MetricNames.CHESTIMAGENOMELABELROCAUC,
+    MetricNames.CHESTIMAGENOMELABELAUC,
 ]
-
 
 def get_chest_imagenome_multilabel_classification_metrics_dataframe(
         metrics_paths, metric_names=_CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES):
@@ -205,13 +210,13 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
         metrics_paths  = [metrics_paths]
     columns = ['metrics_path', 'num_labels']
     data = [[] for _ in range(len(metrics_paths))]
-    metrics_dict_list = [load_pickle(metrics_path) for metrics_path in tqdm(metrics_paths)]
+    metrics_dict_list = [get_cached_pickle_file(metrics_path) for metrics_path in tqdm(metrics_paths)]
     label_names_list = []
     all_label_names = set()
     for metrics_dict in metrics_dict_list:
         if 'chest_imagenome_label_names' in metrics_dict:
             label_names = metrics_dict['chest_imagenome_label_names']
-            print(f'len(label_names)={len(label_names)}')
+            # print(f'len(label_names)={len(label_names)}')
         else:
             # TODO: remove this hack
             if len(metrics_dict[MetricNames.CHESTIMAGENOMELABEL_PRF1]['p']) == 627:
@@ -260,6 +265,14 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
                 label_name = _label2str(label_name)
                 columns.append(f'rocauc({label_name})')
             offset += 2 + len(all_label_names)
+        elif metric_name == MetricNames.CHESTIMAGENOMELABELAUC:
+            metric2offset[metric_name] = offset
+            columns.append('auc(macro)')
+            columns.append('auc(micro)')
+            for label_name in all_label_names:
+                label_name = _label2str(label_name)
+                columns.append(f'auc({label_name})')
+            offset += 2 + len(all_label_names)
         else:
             assert False, f'unknown metric_name={metric_name}'
 
@@ -290,7 +303,7 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
                 offset = metric2offset[mn]
                 data[row_i][offset + 0] = met
 
-            elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC:
+            elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC or mn == MetricNames.CHESTIMAGENOMELABELAUC:
                 offset = metric2offset[mn]
                 data[row_i][offset + 0] = met['macro_avg']
                 data[row_i][offset + 1] = met['micro_avg']
@@ -305,7 +318,7 @@ class ChestImagenomeBboxPredictionsVisualizer:
 
     def __init__(self, predictions_path=None, data=None):
         if predictions_path is not None:
-            data = load_pickle(predictions_path)
+            data = get_cached_pickle_file(predictions_path)
         elif data is None:
             raise ValueError('Either predictions_path or data must be provided')
         self.dicom_ids = data['dicom_ids']
@@ -393,9 +406,9 @@ class ChestImagenomeBboxPredictionsVisualizer:
                                             test_bbox_coords, test_bbox_presences,
                                             bbox_names=self.bbox_names)
     
-def calibrate_thresholds_for_mimiccxr_test_set(
+def calibrate_thresholds_on_mimiccxr_validation_set(
     model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-    classify_chexpert, classify_chest_imagenome, max_iterations=10):
+    classify_chexpert, classify_chest_imagenome, save_probs=False, results_folder_path=None):
     
     assert classify_chexpert != classify_chest_imagenome # Only one of them can be True
     
@@ -435,7 +448,7 @@ def calibrate_thresholds_for_mimiccxr_test_set(
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
     else: assert False
-    log_metrics_handler = get_log_metrics_handlers(timer, metrics_to_print=metrics_to_print)
+    log_metrics_handler = get_log_metrics_handler(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()    
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
@@ -452,23 +465,103 @@ def calibrate_thresholds_for_mimiccxr_test_set(
     # Search optimal thresholds
     print('Searching optimal thresholds ...')
     mloes = MultilabelOptimalEnsembleSearcher(probs=pred_probs, gt=gt_labels)
-    mloes.sample_weights(n_tries=100)
-    prev_score = mloes.evaluate_best_predictions()
-    for _ in range(max_iterations):
-        mloes.sample_weights_from_previous_ones(n_tries=100, noise_coef=0.05)
-        score = mloes.evaluate_best_predictions()
-        if abs(score - prev_score) < 1e-3:
-            break
-        prev_score = score
+    mloes.sample_weights(n_tries=1)
     thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
     print('thresholds.shape:', thresholds.shape)
     if classify_chexpert: # Only print thresholds for CheXpert
         print('thresholds:', thresholds)
     print('Done!')
+    # Save probabilities
+    if save_probs:
+        assert results_folder_path is not None
+        print('Saving probabilities on MIMICCXR validation set ...')
+        dicom_id_to_pred_probs = {}
+        pred_probs = pred_probs[0] # remove extra dimension
+        assert len(mimiccxr_vision_evaluator.val_indices) == len(pred_probs)
+        for i, idx in enumerate(mimiccxr_vision_evaluator.val_indices):
+            dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
+            dicom_id_to_pred_probs[dicom_id] = pred_probs[i]
+        save_path = os.path.join(results_folder_path, f'dicom_id_to_pred_probs__mimiccxr_val__{labeler_name}.pkl')
+        save_to_pickle(dicom_id_to_pred_probs, save_path)
+        print('Probabilities saved to:', save_path)
     return thresholds
+
+def _prepare_data_for_ensemble(dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names):
+    # Determine the intersection of dicom_ids
+    dicom_ids = None
+    for dicom_id_2_probs in dicom_id_2_probs_list:
+        print(f'   num_dicom_ids: {len(dicom_id_2_probs)}')
+        if dicom_ids is None:
+            dicom_ids = set(dicom_id_2_probs.keys())
+        else:
+            dicom_ids = dicom_ids.intersection(set(dicom_id_2_probs.keys()))
+    dicom_ids = list(dicom_ids)
+    dicom_ids.sort()
+    print('Number of dicom_ids after intersection:', len(dicom_ids))
+    # Determine the intersection of label_names
+    label_names = set(gt_label_names)
+    for x in label_names_list:
+        print(f'   num_labels: {len(x)}')
+        label_names = label_names.intersection(set(x))
+    label_names = list(label_names)
+    label_names.sort()
+    print('Number of label_names after intersection:', len(label_names))
+    # Create numpy arrays
+    n_methods = len(dicom_id_2_probs_list)
+    probs_matrix = np.zeros((n_methods, len(dicom_ids), len(label_names)))
+    gt = np.zeros((len(dicom_ids), len(label_names)))
+    for i, dicom_id_2_probs in enumerate(dicom_id_2_probs_list):
+        label_idxs = [label_names_list[i].index(x) for x in label_names]
+        for j, dicom_id in enumerate(dicom_ids):
+            probs = dicom_id_2_probs[dicom_id]
+            probs = probs[label_idxs]
+            probs_matrix[i, j, :] = probs
+    gt_label_idxs = [gt_label_names.index(x) for x in label_names]
+    for i, dicom_id in enumerate(dicom_ids):
+        gt_labels = dicom_id_2_gt_labels[dicom_id]
+        gt_labels = gt_labels[gt_label_idxs]
+        gt[i, :] = gt_labels
+    # Return
+    return probs_matrix, gt, label_names
     
+def calibrate_weights_and_thresholds_for_ensemble(
+        dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names, max_num_runs=5):
+    # Prepare data
+    probs_matrix, gt, _ = _prepare_data_for_ensemble(
+        dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names)
+    # Search optimal weights and thresholds
+    print('Searching optimal thresholds ...')
+    print(f'probs_matrix.shape: {probs_matrix.shape}')
+    print(f'gt.shape: {gt.shape}')
+    mloes = MultilabelOptimalEnsembleSearcher(probs=probs_matrix, gt=gt)
+    mloes.try_basic_weight_heuristics()
+    score = mloes.evaluate_best_predictions()
+    mloes.sample_weights(n_tries=100)
+    score = mloes.evaluate_best_predictions()
+    for _ in range(max_num_runs):
+        mloes.sample_weights_from_previous_ones(n_tries=50, noise_coef=0.1)
+        new_score = mloes.evaluate_best_predictions()
+        if abs(new_score - score) < 0.001:
+            break
+        score = new_score
+    output = mloes.compute_best_merged_probs_and_thresholds()
+    weights = output['weights']
+    thresholds = output['thresholds']
+    print(f'weights.shape: {weights.shape}')
+    print(f'thresholds.shape: {thresholds.shape}')
+    return weights, thresholds
 
-        
+def merge_probabilities(dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names, weights, thresholds):
+    # Prepare data
+    probs_matrix, gt, label_names = _prepare_data_for_ensemble(
+        dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names)
+    # Merge probabilities
+    print('Merging probabilities ...')
+    merged_probs = np.zeros_like(probs_matrix[0])
+    for i in range(probs_matrix.shape[1]):
+        for j in range(probs_matrix.shape[2]):
+            merged_probs[i, j] = np.sum(weights[j] * probs_matrix[:, i, j])
+    pred_labels = (merged_probs > thresholds).astype(np.int)
+    # Return
+    return merged_probs, pred_labels, gt, label_names
 
-
-    

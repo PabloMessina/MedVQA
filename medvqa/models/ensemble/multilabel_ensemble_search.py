@@ -1,17 +1,21 @@
 import numpy as np
 import heapq
 import random
+import itertools
 from tqdm import tqdm
-from sklearn.metrics import f1_score
 
 from medvqa.utils.files import load_json_file, load_pickle
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.utils.logging import print_blue
 
 def _apply_noise(weights, coef):
-    if type(weights) is np.float64:
-        return weights * (1 + 2 * (np.random.rand() - 0.5) * coef)
-    return [w * (1 + 2 * (np.random.rand() - 0.5) * coef) for w in weights]
+    # coef is the standard deviation of the noise
+    weights = weights + np.random.normal(0, coef, weights.shape)
+    w_min = weights.min()
+    if w_min <= 0:
+        weights = weights - w_min + 1e-3
+    return weights
+
 
 class _Item:
     def __init__(self, weights, threshold, score):
@@ -20,7 +24,28 @@ class _Item:
         self.score = score
     
     def __lt__(self, other):
-        return self.score < other.score        
+        return self.score < other.score
+
+def best_threshold_and_f1_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    fp = len(gt) - tp
+    fn = 0
+    best_f1 = 2 * tp / (2 * tp + fp + fn)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+            fn += 1
+        else:
+            fp -= 1
+        if tp == 0:
+            break
+        f1 = 2 * tp / (2 * tp + fp + fn)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_thrs = probs[i]
+    return best_thrs, best_f1
 
 class MultilabelOptimalEnsembleSearcher:
     def __init__(self, probs, gt, topk=10):
@@ -45,34 +70,62 @@ class MultilabelOptimalEnsembleSearcher:
         else:
             heapq.heappushpop(h, item)
         
+    def try_basic_weight_heuristics(self):
+        print('Trying basic weight heuristics...')
+        # For each model, try 1 for that model and 0 for the others
+        # This is equivalent to trying the model alone
+        print('  1) Try each model alone')
+        for i in tqdm(range(self.k)):
+            weights = np.zeros(self.k)
+            weights[i] = 1
+            merged_probs = np.average(self.probs, 0, weights=weights)
+            for j in range(self.m):
+                threshold, score = best_threshold_and_f1_score(merged_probs.T[j], self.gt.T[j])
+                self._update_minheap(j, weights, threshold, score)
+        # Try 1 for two models and 0 for the others, for each pair of models
+        print('  2) Try each pair of models together')
+        for (i, j) in tqdm(itertools.combinations(range(self.k), 2)):
+            weights = np.zeros(self.k)
+            weights[i] = 1
+            weights[j] = 1
+            weights /= weights.sum()
+            merged_probs = np.average(self.probs, 0, weights=weights)
+            for k in range(self.m):
+                threshold, score = best_threshold_and_f1_score(merged_probs.T[k], self.gt.T[k])
+                self._update_minheap(k, weights, threshold, score)
+        # Try the average of all models
+        print('  3) Try the average of all models')
+        weights = np.ones(self.k)
+        weights /= weights.sum()
+        merged_probs = np.average(self.probs, 0, weights=weights)
+        for j in range(self.m):
+            threshold, score = best_threshold_and_f1_score(merged_probs.T[j], self.gt.T[j])
+            self._update_minheap(j, weights, threshold, score)
+        print('  Done')
+    
     def sample_weights(self, n_tries):
         for _ in tqdm(range(n_tries)):
             weights = np.random.rand(self.k)
             weights /= weights.sum()
             merged_probs = np.average(self.probs, 0, weights=weights)
-            threshold = np.random.rand(self.m)
-            pred = merged_probs >= threshold
             for i in range(self.m):
-                score = f1_score(self.gt.T[i], pred.T[i])
-                self._update_minheap(i, weights, threshold[i], score)
+                threshold, score = best_threshold_and_f1_score(merged_probs.T[i], self.gt.T[i])
+                self._update_minheap(i, weights, threshold, score)
                 
-    def sample_weights_from_previous_ones(self, n_tries, noise_coef):        
+    def sample_weights_from_previous_ones(self, n_tries, noise_coef=0.05):
         probs = self.probs.transpose(1, 2, 0)
         for _ in tqdm(range(n_tries)):
             weights_array = np.empty((self.m, self.k))
-            threshold_array = np.empty((self.m))
             for i in range(self.m):
                 item = random.choice(self.minheaps[i])
                 weights_array[i] = _apply_noise(item.weights, noise_coef)
-                weights_array[i] /= weights_array[i].sum()
-                threshold_array[i] = _apply_noise(item.threshold, noise_coef)
-            merged_probs = (probs * weights_array).sum(-1)
-            pred = merged_probs >= threshold_array
+                weights_array[i] /= weights_array[i].sum()                
+            merged_probs = (probs * weights_array).sum(-1)            
             for i in range(self.m):
-                score = f1_score(self.gt.T[i], pred.T[i])
-                self._update_minheap(i, weights_array[i], threshold_array[i], score)
+                threshold, score = best_threshold_and_f1_score(merged_probs.T[i], self.gt.T[i])
+                self._update_minheap(i, weights_array[i], threshold, score)
                 
-    def _compute_best_merged_probs_and_thresholds(self):        
+    def _compute_best_merged_probs_and_thresholds(self):
         probs = self.probs.transpose(1, 2, 0)
         weights_array = np.empty((self.m, self.k))
         threshold_array = np.empty((self.m))
@@ -81,10 +134,10 @@ class MultilabelOptimalEnsembleSearcher:
             weights_array[i] = item.weights
             threshold_array[i] = item.threshold
         merged_probs = (probs * weights_array).sum(-1)
-        return merged_probs, threshold_array
+        return merged_probs, threshold_array, weights_array
 
     def _evaluate(self, merged_probs, thresholds):
-        pred = merged_probs >= thresholds
+        pred = merged_probs > thresholds
         met = MultiLabelPRF1(device='cpu')
         met.update((pred, self.gt))
         res = met.compute()
@@ -95,16 +148,17 @@ class MultilabelOptimalEnsembleSearcher:
         return score
 
     def compute_best_merged_probs_and_thresholds(self):
-        merged_probs, thresholds = self._compute_best_merged_probs_and_thresholds()
+        merged_probs, thresholds, weights = self._compute_best_merged_probs_and_thresholds()
         score = self._evaluate(merged_probs, thresholds)
         return dict(
             merged_probs=merged_probs,
             thresholds=thresholds,
+            weights=weights,
             score=score,
         )
 
     def evaluate_best_predictions(self):
-        merged_probs, thresholds = self._compute_best_merged_probs_and_thresholds()        
+        merged_probs, thresholds, _ = self._compute_best_merged_probs_and_thresholds()
         return self._evaluate(merged_probs, thresholds)
 
 class QuestionClassificationEnsembleSearcher(MultilabelOptimalEnsembleSearcher):

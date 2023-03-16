@@ -41,6 +41,8 @@ MIMICCXR_BROKEN_IMAGES = set([
     'p19/p19839145/s54889255/f674e474-817bb713-8f16c90c-608cf869-2829cae7.jpg',
 ])
 
+_cache = {}
+
 class MIMICCXR_ImageSizeModes:
     SMALL_256x256 = 'small_256x256'
     MEDIUM_512 = 'medium_512'
@@ -144,11 +146,14 @@ def get_broken_images():
     return broken_images
 
 def get_split_dict():
+    if 'get_split_dict()' in _cache:
+        return _cache['get_split_dict()']
     mimiccxr_split = pd.read_csv(MIMICCXR_SPLIT_CSV_PATH)        
     split_dict = { (sub_id, stud_id, dicom_id) : split for sub_id, stud_id, dicom_id, split in zip(mimiccxr_split['subject_id'],
                                                                                                     mimiccxr_split['study_id'],
                                                                                                     mimiccxr_split['dicom_id'],
                                                                                                     mimiccxr_split['split']) }
+    _cache['get_split_dict()'] = split_dict
     return split_dict
 
 def get_mimiccxr_image_paths(report):
@@ -300,5 +305,15 @@ def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
                 })
     return output
 
-def get_mimimiccxr_test_dicom_ids():
-    return [x[0][2] for x in get_split_dict().items() if x[1] == 'test']
+def _get_mimiccxr_split_dicom_ids(split_name):
+    key = f'get_mimiccxr_{split_name}_dicom_ids()'
+    if key in _cache: return _cache[key]
+    output = [x[0][2] for x in get_split_dict().items() if x[1] == split_name]
+    _cache[key] = output
+    return output
+def get_mimiccxr_test_dicom_ids():
+    return _get_mimiccxr_split_dicom_ids('test')
+def get_mimiccxr_train_dicom_ids():
+    return _get_mimiccxr_split_dicom_ids('train')
+def get_mimiccxr_val_dicom_ids():
+    return _get_mimiccxr_split_dicom_ids('validate')

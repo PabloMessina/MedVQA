@@ -1,6 +1,7 @@
 from collections import namedtuple
 import os
 import re
+from pprint import pprint
 
 from medvqa.utils.files import load_json_file, save_to_json
 
@@ -55,16 +56,71 @@ def get_model_name_from_checkpoint_path(checkpoint_path):
     assert x in checkpoint_path
     return checkpoint_path.split(x)[1].split(os.path.sep)[0]
 
-def load_metadata(folder):
+def load_metadata(folder, verbose=True):
     fpath = os.path.join(folder, 'metadata.json')    
     data = load_json_file(fpath)
-    print ('metadata loaded from', fpath)
+    if verbose:
+        print('metadata loaded from', fpath)
     return data
 
-def save_metadata(folder, **kwargs):
+def save_metadata(folder, verbose=True, **kwargs):
     data = dict(kwargs)
     fpath = os.path.join(folder, 'metadata.json')
     save_to_json(data, fpath)
-    print ('metadata saved to', fpath)
+    if verbose:
+        print('metadata saved to', fpath)
 
+# define named tuple for model training history
+ModelTrainingInstance = namedtuple('ModelTrainingInstance', ('timestamp', 'model_dir', 'datasets',
+                                                             'best_epoch', 'batches_per_epoch', 'batch_size'))
+_training_history_cache = {}
 
+def get_model_training_history(model_checkpoint_folder_path):
+    if model_checkpoint_folder_path[-1] == os.path.sep:
+        model_checkpoint_folder_path = model_checkpoint_folder_path[:-1]
+    if model_checkpoint_folder_path in _training_history_cache:
+        return _training_history_cache[model_checkpoint_folder_path]
+    
+    checkpoint_path = get_checkpoint_filepath(model_checkpoint_folder_path, verbose=False)
+    metadata = load_metadata(model_checkpoint_folder_path, verbose=False)
+    best_epoch = split_checkpoint_name(os.path.basename(checkpoint_path)).epoch
+    batch_size = metadata['dataloading_kwargs']['batch_size']
+    folder = os.path.basename(model_checkpoint_folder_path)
+    model_dir = os.path.basename(os.path.dirname(model_checkpoint_folder_path))
+    timestamp = folder[:15]
+    try:
+        datasets = folder[16:folder.index('_',16)]
+    except ValueError:
+        print(f'WARNING: could not parse datasets from {folder} (model_dir={model_dir})')
+        raise
+    datasets = f'{len(datasets.split("+"))}:{datasets}'
+    training_instance = ModelTrainingInstance(
+        timestamp=timestamp,
+        model_dir=model_dir,
+        datasets=datasets,
+        best_epoch=best_epoch,
+        batches_per_epoch=metadata['lr_scheduler_kwargs']['n_batches_per_epoch'],
+        batch_size=batch_size,
+    )
+    pretrained_checkpoint_folder_path = metadata['model_kwargs']['pretrained_checkpoint_folder_path']
+    if pretrained_checkpoint_folder_path is None:
+        training_history = [training_instance]
+    else:
+        training_history = get_model_training_history(pretrained_checkpoint_folder_path) + [training_instance]
+    _training_history_cache[model_checkpoint_folder_path] = training_history
+    return training_history
+    
+def print_model_training_history_summary(model_checkpoint_folder_path, show_details=False):
+    training_history = get_model_training_history(model_checkpoint_folder_path)
+    num_training_runs = len(training_history)
+    print(f'Number of training runs: {num_training_runs}')
+    num_training_examples = 0
+    for instance in training_history:
+        num_training_examples += instance.batches_per_epoch * instance.batch_size * instance.best_epoch
+    print(f'Number of training examples: {num_training_examples}')
+    if show_details:
+        print('--' * 30)
+        for instance in training_history[::-1]:
+            for k,v in instance._asdict().items():
+                print(f'{k}: {v}')
+            print('--' * 15)

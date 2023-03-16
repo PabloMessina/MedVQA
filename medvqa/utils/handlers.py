@@ -28,7 +28,7 @@ def get_log_iteration_handler(log_every=25):
 
     return handler
 
-def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpoint_folder=None):
+def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoint_folder=None):
 
     if log_to_disk:
         assert checkpoint_folder is not None
@@ -40,67 +40,111 @@ def get_log_metrics_handlers(timer, metrics_to_print, log_to_disk=False, checkpo
         metric_names = []
         for m in metrics_to_print:
             score = metrics.get(m, None)
-            if score is None:
-                scores.append(None)
-                continue
             if m == MetricNames.BLEU:
-                assert len(score) == 4 or (len(score) == 2 and len(score[0]) == 4)
-                if len(score) == 2:
-                    score = score[0]
                 for k in range(0, 4):
-                    score_k = score[k]
                     name_k = f'bleu-{k+1}'
-                    scores.append(score_k)
                     metric_names.append(name_k)
+                    if score is None:
+                        scores.append(None)
+                if score is not None:
+                    assert len(score) == 4 or (len(score) == 2 and len(score[0]) == 4)
+                    if len(score) == 2:
+                        score = score[0]
+                    for k in range(0, 4):
+                        score_k = score[k]
+                        scores.append(score_k)
             elif m == MetricNames.CIDER_D:
-                if type(score) is tuple:
-                    assert len(score) == 2
-                    score = score[0]
-                scores.append(score)
                 metric_names.append(m)
+                if score is not None:
+                    if type(score) is tuple:
+                        assert len(score) == 2
+                        score = score[0]
+                scores.append(score)
             elif m == MetricNames.CHXLABEL_PRF1:
-                scores.append(score['f1_macro_avg'])
                 metric_names.append(MetricNames.CHXLABELMACROAVGF1)
-                scores.append(score['f1_micro_avg'])
                 metric_names.append(MetricNames.CHXLABELMICROAVGF1)
+                if score is not None:
+                    scores.append(score['f1_macro_avg'])
+                    scores.append(score['f1_micro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             elif m == MetricNames.CHESTIMAGENOMELABEL_PRF1:
-                scores.append(score['f1_macro_avg'])
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
-                scores.append(score['f1_micro_avg'])
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
+                if score is not None:
+                    scores.append(score['f1_macro_avg'])
+                    scores.append(score['f1_micro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             elif m == MetricNames.QLABELS_PRF1:
-                scores.append(score['f1_macro_avg'])
                 metric_names.append(MetricNames.QLABELS_MACROAVGF1)
-                scores.append(score['f1_micro_avg'])
-                metric_names.append(MetricNames.QLABELS_MICROAVGF1)            
+                metric_names.append(MetricNames.QLABELS_MICROAVGF1)
+                if score is not None:
+                    scores.append(score['f1_macro_avg'])
+                    scores.append(score['f1_micro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             elif m == MetricNames.CHXLABEL_ROCAUC:
-                scores.append(score['micro_avg'])
                 metric_names.append(MetricNames.CHXLABEL_ROCAUC_MICRO)
-                scores.append(score['macro_avg'])
                 metric_names.append(MetricNames.CHXLABEL_ROCAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
+            elif m == MetricNames.CHXLABEL_AUC:
+                metric_names.append(MetricNames.CHXLABEL_AUC_MICRO)
+                metric_names.append(MetricNames.CHXLABEL_AUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             elif m == MetricNames.CHESTIMAGENOMELABELROCAUC:
-                scores.append(score['micro_avg'])
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MICRO)
-                scores.append(score['macro_avg'])
                 metric_names.append(MetricNames.CHESTIMAGENOMELABELROCAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
+            elif m == MetricNames.CHESTIMAGENOMELABELAUC:
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELAUC_MICRO)
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             # elif m == MetricNames.CHESTIMAGENOMEBBOXMAP:
             #     scores.append(score['map'])
             #     metric_names.append(MetricNames.CHESTIMAGENOMEBBOXMAP)
             else:
-                if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
-                    try:
-                        score = average_ignoring_nones(score)
-                    except TypeError:
-                        print(f'm = {m}, score = {score}, type(score) = {type(score)}')
-                        raise
-                scores.append(score)
                 metric_names.append(m)
+                if score is not None:
+                    if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
+                        try:
+                            score = average_ignoring_nones(score)
+                        except TypeError:
+                            print(f'm = {m}, score = {score}, type(score) = {type(score)}')
+                            raise
+                    scores.append(score)
+                else:
+                    scores.append(None)
         
         # print(metric_names, scores)
 
+        assert len(metric_names) == len(scores)
         nonnull_scores = [s for s in scores if s is not None]
-        assert len(metric_names) == len(nonnull_scores)
-        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(metric_names, nonnull_scores))
+        nonnull_metric_names = [m for m, s in zip(metric_names, scores) if s is not None]
+        metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(nonnull_metric_names, nonnull_scores))
         duration = timer._elapsed()
         print(f'{metrics_str}, {duration:.2f} secs')
 

@@ -2,9 +2,8 @@ from collections import Counter
 import os
 import numpy as np
 from tqdm import tqdm
-from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, load_gold_standard_dicom_ids
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_chest_imagenome_silver_bboxes,
+    load_gold_standard_dicom_ids,
     load_chest_imagenome_label_names_and_templates,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
     load_chest_imagenome_silver_bboxes_as_numpy_array,

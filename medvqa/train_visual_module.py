@@ -44,9 +44,9 @@ from medvqa.metrics import (
     attach_dataset_aware_chest_imagenome_bbox_mae,
     attach_dataset_aware_chest_imagenome_bbox_iou,
     attach_dataset_aware_chest_imagenome_labels_accuracy,
+    attach_dataset_aware_chest_imagenome_labels_auc,
     attach_dataset_aware_chest_imagenome_labels_macroavgf1,
     attach_dataset_aware_chest_imagenome_labels_microavgf1,
-    attach_dataset_aware_chest_imagenome_labels_roc_auc,
     attach_dataset_aware_chest_imagenome_bbox_meanf1,    
     attach_dataset_aware_vinbig_labels_macroavgf1,
     attach_dataset_aware_vinbig_labels_microavgf1,
@@ -76,7 +76,7 @@ from medvqa.models.checkpoint import (
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.handlers import (
-    get_log_metrics_handlers,
+    get_log_metrics_handler,
     get_log_iteration_handler,
     get_log_epoch_started_handler,
     get_lr_sch_handler,
@@ -135,7 +135,7 @@ def parse_args(args=None):
     parser.add_argument('--clip-version', type=str, default=None)
     parser.add_argument('--huggingface-model-name', type=str, default=None)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
-    parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default='v1')
+    parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default=None)
     parser.add_argument('--torchxrayvision-weights-name', type=str, default=None)
     parser.add_argument('--detectron2-model-yaml', type=str, default=None)
     parser.add_argument('--num-regions', type=int, default=None)
@@ -174,6 +174,7 @@ def parse_args(args=None):
     parser.add_argument('--padchest-weight', type=float, default=0.4)  
 
     parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single')    
+    parser.add_argument('--mimiccxr-balanced-sampling-mode', type=str, default=None)
     
     parser.add_argument('--chest-imagenome-labels-filename', type=str, default=None)
     parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
@@ -287,8 +288,9 @@ _METRIC_WEIGHTS = {
     MetricNames.PADCHEST_LABEL_MICROAVGF1: 0.5,
     MetricNames.PADCHEST_LOC_MACROAVGF1: 0.5,
     MetricNames.PADCHEST_LOC_MICROAVGF1: 0.5,
-    MetricNames.CHESTIMAGENOMELABELMACROAVGF1: 1,
-    MetricNames.CHESTIMAGENOMELABELMICROAVGF1: 1,
+    MetricNames.CHESTIMAGENOMELABELMACROAVGF1: 0.5,
+    MetricNames.CHESTIMAGENOMELABELMICROAVGF1: 0.5,
+    MetricNames.CHESTIMAGENOMELABELAUC: 1,
     MetricNames.CHESTIMAGENOMEBBOXMEANF1: 1,
 }
 
@@ -297,6 +299,9 @@ def _metric_getter(metrics_dict, key):
         scores = metrics_dict[key]
         assert len(scores) == 4
         return sum(scores) / len(scores)
+    if key == MetricNames.CHESTIMAGENOMELABELAUC:
+        scores = metrics_dict[key]
+        return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
     return metrics_dict[key]
 
 def train_model(
@@ -346,7 +351,6 @@ def train_model(
 
     # auxiliary task: medical tags prediction
     classify_tags = auxiliary_tasks_kwargs['classify_tags']
-    n_medical_tags = auxiliary_tasks_kwargs['n_medical_tags']
     # auxiliary task: orientation classification
     classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
     # auxiliary task: gender classification
@@ -404,7 +408,7 @@ def train_model(
     count_print('Creating trainer and validator engines ...')
     trainer_engine = get_engine(model=model, optimizer=optimizer, device=device, 
         update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
-    validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)    
+    validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -640,15 +644,15 @@ def train_model(
         attach_dataset_aware_chest_imagenome_labels_macroavgf1(validator_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_labels_microavgf1(trainer_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_labels_microavgf1(validator_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_roc_auc(trainer_engine, _mim_datasets, 'cpu')
-        attach_dataset_aware_chest_imagenome_labels_roc_auc(validator_engine, _mim_datasets, 'cpu')
+        attach_dataset_aware_chest_imagenome_labels_auc(trainer_engine, _mim_datasets, 'cpu')
+        attach_dataset_aware_chest_imagenome_labels_auc(validator_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, _mim_datasets)
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
 
     if predict_bboxes_chest_imagenome and not use_detectron2:
         attach_dataset_aware_chest_imagenome_bbox_mae(trainer_engine, _mim_datasets)
@@ -802,7 +806,7 @@ def train_model(
     # Logging
     count_print('Defining log_metrics_handler ...')
 
-    log_metrics_handler = get_log_metrics_handlers(timer,
+    log_metrics_handler = get_log_metrics_handler(timer,
                                                    metrics_to_print=metrics_to_print,
                                                    log_to_disk=save,
                                                    checkpoint_folder=checkpoint_folder_path)
@@ -886,6 +890,7 @@ def train_from_scratch(
     padchest_weight,
     img_aug_mode,
     horizontal_flip_prob,
+    mimiccxr_balanced_sampling_mode,
     # Fixed traning args
     train_mimiccxr,
     train_iuxray,
@@ -1049,36 +1054,6 @@ def train_from_scratch(
         padchest_weight=padchest_weight,
     )
 
-    _kwargs = dict(
-        include_image=include_image,
-        include_visual_features=include_visual_features,
-        classify_tags=classify_tags,
-        n_tags=n_medical_tags,
-        classify_orientation=classify_orientation,
-        classify_gender=classify_gender,
-        classify_chexpert=classify_chexpert,
-        classify_questions=classify_questions,
-        classify_chest_imagenome=classify_chest_imagenome,
-        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
-    )
-    collate_batch_fn_kwargs = {}
-    if train_mimiccxr:
-        if use_detectron2: # special case for detectron2
-            collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE] = \
-                { 'dataset_id': MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE, **_kwargs }
-        else:
-            collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR] = { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs }
-    if train_iuxray:
-        collate_batch_fn_kwargs[DATASET_NAMES.IUXRAY] = { 'dataset_id': IUXRAY_DATASET_ID, **_kwargs }
-    if train_chexpert:
-        collate_batch_fn_kwargs[DATASET_NAMES.CHEXPERT] = { 'dataset_id': CHEXPERT_DATASET_ID, **_kwargs }        
-    if train_cxr14:
-        collate_batch_fn_kwargs[DATASET_NAMES.CXR14] = { 'dataset_id': CXR14_DATASET_ID, **_kwargs }
-    if train_vinbig:
-        collate_batch_fn_kwargs[DATASET_NAMES.VINBIG] = { 'dataset_id': VINBIG_DATASET_ID, **_kwargs }
-    if train_padchest:
-        collate_batch_fn_kwargs[DATASET_NAMES.PADCHEST] = { 'dataset_id': PADCHEST_DATASET_ID, **_kwargs }
-
     if merge_findings:
         _merged_findings_kwargs = dict(
             use_merged_findings=True,
@@ -1112,6 +1087,36 @@ def train_from_scratch(
         if train_iuxray: assert iuxray_precomputed_visual_features_path is not None
         if train_chexpert: assert chexpert_precomputed_visual_features_path is not None
         if train_vinbig: assert vinbig_precomputed_visual_features_path is not None
+
+    _kwargs = dict(
+        include_image=include_image,
+        include_visual_features=include_visual_features,
+        classify_tags=classify_tags,
+        n_tags=n_medical_tags,
+        classify_orientation=classify_orientation,
+        classify_gender=classify_gender,
+        classify_chexpert=classify_chexpert,
+        classify_questions=classify_questions,
+        classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+    )
+    collate_batch_fn_kwargs = {}
+    if train_mimiccxr:
+        if use_detectron2: # special case for detectron2
+            collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE] = \
+                { 'dataset_id': MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE, **_kwargs }
+        else:
+            collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR] = { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs }
+    if train_iuxray:
+        collate_batch_fn_kwargs[DATASET_NAMES.IUXRAY] = { 'dataset_id': IUXRAY_DATASET_ID, **_kwargs }
+    if train_chexpert:
+        collate_batch_fn_kwargs[DATASET_NAMES.CHEXPERT] = { 'dataset_id': CHEXPERT_DATASET_ID, **_kwargs }        
+    if train_cxr14:
+        collate_batch_fn_kwargs[DATASET_NAMES.CXR14] = { 'dataset_id': CXR14_DATASET_ID, **_kwargs }
+    if train_vinbig:
+        collate_batch_fn_kwargs[DATASET_NAMES.VINBIG] = { 'dataset_id': VINBIG_DATASET_ID, **_kwargs }
+    if train_padchest:
+        collate_batch_fn_kwargs[DATASET_NAMES.PADCHEST] = { 'dataset_id': PADCHEST_DATASET_ID, **_kwargs }
     
     if train_mimiccxr:
         x = image_size if type(image_size) is int else image_size[0]
@@ -1143,6 +1148,7 @@ def train_from_scratch(
             question_labels_filename=mimiccxr_question_labels_filename,
             data_augmentation_enabled=img_aug_mode is not None,
             use_detectron2=use_detectron2,
+            balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
         )
         if merge_findings:
             mimiccxr_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1336,6 +1342,7 @@ def resume_training(
     vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
     padchest_trainer_kwargs = metadata['padchest_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
+    collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
     train_image_transform_kwargs = metadata['train_image_transform_kwargs']
     val_image_transform_kwargs = metadata['val_image_transform_kwargs']
     training_kwargs = metadata['training_kwargs']
@@ -1368,6 +1375,7 @@ def resume_training(
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
                 padchest_trainer_kwargs=padchest_trainer_kwargs,
                 dataloading_kwargs=dataloading_kwargs,
+                collate_batch_fn_kwargs=collate_batch_fn_kwargs,
                 train_image_transform_kwargs=train_image_transform_kwargs,
                 val_image_transform_kwargs=val_image_transform_kwargs,
                 training_kwargs=training_kwargs,
@@ -1382,7 +1390,6 @@ def resume_training(
                 save=save,
                 override_lr=override_lr,
                 debug=debug)
-                
 
 def debug_main(args):
     args = parse_args(args)

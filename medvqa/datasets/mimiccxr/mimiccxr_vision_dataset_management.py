@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import random
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from detectron2.structures import BoxMode
@@ -9,17 +10,19 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_labels_per_anatomy_and_anatomy_group,
     load_chest_imagenome_dicom_ids,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
+    load_chest_imagenome_gold_bboxes,
     load_chest_imagenome_silver_bboxes,
     load_chest_imagenome_silver_bboxes_as_numpy_array,
+    load_gold_standard_dicom_ids,
     load_nongold_dicom_ids,
     load_postprocessed_label_names,
 )
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
 from medvqa.datasets.image_processing import image_size_cache
 from medvqa.datasets.utils import adapt_label_matrix_as_merged_findings
 from medvqa.datasets.visual_module import (
     BasicImageDataset,
     MAETrainerBase,
-    VM_Evaluator,
 )
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
@@ -38,7 +41,10 @@ from medvqa.datasets.mimiccxr import (
 )
 from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
+
+class _BalancedSamplingMode:
+    BALANCED_CHEST_IMAGENOME_LABELS = 'balanced_chest_imagenome_labels'
 
 class _AlbumentationAdapter:
 
@@ -82,6 +88,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 image_paths=None,
                 image_transform=None,
                 data_augmentation_enabled=False,
+                shuffle=False,
+                infinite=False,
                 # aux task: medical tags
                 classify_tags=False,
                 rid2tags=None,
@@ -144,11 +152,20 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 self.albumentation_adapter = _AlbumentationAdapter(num_bbox_classes)
                 self.flipped_bbox_coords = flipped_bbox_coords
                 self.flipped_bbox_presence = flipped_bbox_presence
+        if shuffle:
+            random.shuffle(self.indices) # shuffle in place            
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
     
     def __len__(self):
         return len(self.indices)
 
     def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
         idx = self.indices[i]
         rid = self.report_ids[idx]
         output = { 'idx': idx }
@@ -194,6 +211,7 @@ class MIMICCXR_VisualModuleTrainer():
                 train_image_transform=None,
                 val_image_transform=None, 
                 use_test_set=False,
+                use_chest_imagenome_gold_set=False,
                 use_val_set_only=False,
                 test_image_transform=None,
                 data_augmentation_enabled=False,
@@ -222,11 +240,12 @@ class MIMICCXR_VisualModuleTrainer():
                 n_findings=None,
                 use_detectron2=False,
                 detectron2_cfg=None,
+                balanced_sampling_mode=None,
                 **unused_kwargs,
             ):
         # Sanity checks
-        assert sum([use_test_set, use_val_set_only]) <= 1 # at most one of these can be true        
-        if use_test_set:
+        assert sum([use_test_set, use_val_set_only, use_chest_imagenome_gold_set]) <= 1 # at most one of these can be true
+        if use_test_set or use_chest_imagenome_gold_set:
             assert test_image_transform is not None
             assert not data_augmentation_enabled
         else:
@@ -255,6 +274,25 @@ class MIMICCXR_VisualModuleTrainer():
                 # Create test dataset and dataloader
                 self.test_dataset = Detectron2AdaptedDataset(
                     split_name='test',
+                    transform=test_image_transform,
+                    source_image_size_mode=source_image_size_mode,
+                    use_decent_images_only=use_decent_images_only,
+                    clamp_bboxes_chest_imagenome=clamp_bboxes_chest_imagenome,
+                    data_augmentation_enabled=False,
+                    use_anaxnet_bbox_subset=use_anaxnet_bbox_subset,
+                )
+                self.test_dataloader = DataLoader(
+                    dataset=self.test_dataset,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    collate_fn=collate_batch_fn,
+                    shuffle=False,
+                )
+            elif use_chest_imagenome_gold_set:
+                # Create test dataset and dataloader using chest imagenome gold set
+                self.test_dataset = Detectron2AdaptedDataset(
+                    split_name=None,
+                    use_chest_imagenome_gold_set=True,
                     transform=test_image_transform,
                     source_image_size_mode=source_image_size_mode,
                     use_decent_images_only=use_decent_images_only,
@@ -320,13 +358,6 @@ class MIMICCXR_VisualModuleTrainer():
             self.batch_size = batch_size
             self.collate_batch_fn = collate_batch_fn
             self.num_workers = num_workers
-            
-            if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                chest_imagenome_nongold_dicom_ids = load_nongold_dicom_ids()
-                chest_imagenome_nongold_dicom_ids = set(chest_imagenome_nongold_dicom_ids)
-                print(f'Loaded {len(chest_imagenome_nongold_dicom_ids)} non-gold DICOM IDs from Chest Imagenome')
-            else:
-                chest_imagenome_nongold_dicom_ids = None
 
             BIG_ENOGUGH = 1000000
             dicom_ids = [None] * BIG_ENOGUGH
@@ -348,13 +379,27 @@ class MIMICCXR_VisualModuleTrainer():
                 raise ValueError(f'Unknown source image size mode: {source_image_size_mode}')
             print(f'Using source image size mode: {source_image_size_mode}')
 
-            if use_decent_images_only:
-                decent_dicom_ids = load_chest_imagenome_dicom_ids(decent_images_only=True)
-                decent_dicom_ids = set(decent_dicom_ids)
-                print(f'Loaded {len(decent_dicom_ids)} decent image IDs')
-                skipped = 0
+
+            if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+                chest_imagenome_nongold_dicom_ids = load_nongold_dicom_ids()
+                chest_imagenome_nongold_dicom_ids = set(chest_imagenome_nongold_dicom_ids)
+                print(f'Loaded {len(chest_imagenome_nongold_dicom_ids)} non-gold DICOM IDs from Chest Imagenome')
+                if use_decent_images_only:
+                    decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
+                    allowed_train_val_dicom_ids = (decent_dicom_ids & chest_imagenome_nongold_dicom_ids)
+                    allowed_test_dicom_ids = decent_dicom_ids - chest_imagenome_nongold_dicom_ids
+                else:
+                    allowed_train_val_dicom_ids = chest_imagenome_nongold_dicom_ids
+                    allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
+            else:
+                assert use_decent_images_only is False
+                allowed_train_val_dicom_ids = None
+                allowed_test_dicom_ids = None
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+
+            max_idx_count = 0
+            actual_idx_count = 0
 
             for rid, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
@@ -363,15 +408,19 @@ class MIMICCXR_VisualModuleTrainer():
                     mimiccxr_metadata['dicom_id_view_pos_pairs'],
                     mimiccxr_metadata['splits']))):
 
-                for dicom_id, view in get_dicom_id_and_orientation_list(
-                        dicom_id_view_pairs, view_mode, chest_imagenome_nongold_dicom_ids):
-                    if use_decent_images_only and dicom_id not in decent_dicom_ids:
-                        skipped += 1
-                        continue
+                if split == 'test':
+                    allowed_dicom_ids = allowed_test_dicom_ids
+                else:
+                    allowed_dicom_ids = allowed_train_val_dicom_ids
+
+                max_idx_count += len(dicom_id_view_pairs)
+
+                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, view_mode, allowed_dicom_ids):
                     dicom_ids[idx] = dicom_id
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                     report_ids[idx] = rid
                     orientations[idx] = MIMICCXR_IMAGE_ORIENTATIONS.index(view)
+                    actual_idx_count += 1
                     if use_test_set:
                         if split == 'test':
                             test_indices.append(idx)
@@ -388,8 +437,10 @@ class MIMICCXR_VisualModuleTrainer():
                             raise ValueError(f'Unknown split {split}')
                     idx += 1
 
-            if use_decent_images_only:
-                print(f'Skipped {skipped} non-decent images')
+            print('max_idx_count =', max_idx_count)
+            print('actual_idx_count =', actual_idx_count)
+            if actual_idx_count < max_idx_count:
+                print(f'** NOTE: {max_idx_count - actual_idx_count} images were skipped because they were not in the allowed DICOM IDs')
             
             self.dicom_ids = np.array(dicom_ids[:idx])
             self.image_paths = np.array(image_paths[:idx])
@@ -519,20 +570,22 @@ class MIMICCXR_VisualModuleTrainer():
                     self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
                         self.train_indices, train_image_transform,
                         data_augmentation_enabled=self.data_augmentation_enabled,
-                        shuffle=True)
+                        shuffle=True, balanced_sampling_mode=balanced_sampling_mode)
 
                 # Create validation dataset and dataloader
                 self.val_dataset, self.val_dataloader = self._create_dataset_and_dataloader(
                     self.val_indices, val_image_transform)
 
-    def _create_dataset_and_dataloader(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False):
-        dataset = MIMICCXR_Visual_Dataset(
+    def _create_dataset(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False, infinite=False):
+        return MIMICCXR_Visual_Dataset(
             indices=indices,
             report_ids=self.report_ids,
             include_image=self.include_image,
             image_paths=self.image_paths,
             image_transform=image_transform,
             data_augmentation_enabled=data_augmentation_enabled,
+            shuffle=shuffle,
+            infinite=infinite,
             classify_tags=self.classify_tags,
             rid2tags=self.rid2tags,
             classify_orientation=self.classify_orientation,
@@ -554,10 +607,55 @@ class MIMICCXR_VisualModuleTrainer():
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx=self.idx2visfeatidx,
         )
+    
+    def _create_dataset_and_dataloader(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False, balanced_sampling_mode=None):
+        if balanced_sampling_mode is not None:
+            datasets = []
+            if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_LABELS:
+                assert self.classify_chest_imagenome
+                assert self.chest_imagenome_labels is not None
+                assert self.chest_imagenome_label_names is not None
+                anatomy2idxs = {}
+                global2idxs = {}
+                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
+                for i in tqdm(indices):
+                    rid = self.report_ids[i]
+                    labels = self.chest_imagenome_labels[rid]
+                    for j, label in enumerate(labels):
+                        if label == 1:
+                            label_name = self.chest_imagenome_label_names[j]
+                            if len(label_name) == 3:                                
+                                anatomy = label_name[0]
+                                try:
+                                    anatomy2idxs[anatomy].append(i)
+                                except KeyError:
+                                    anatomy2idxs[anatomy] = [i]
+                            elif len(label_name) == 2:
+                                global_name = label_name[-1]
+                                try:
+                                    global2idxs[global_name].append(i)
+                                except KeyError:
+                                    global2idxs[global_name] = [i]
+                            else:
+                                raise ValueError('Unexpected label name: {}'.format(label_name))
+                for anatomy, idxs in anatomy2idxs.items():
+                    print(f'Anatomy: {anatomy}, # images: {len(idxs)}')
+                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    datasets.append(dataset)
+                for global_name, idxs in global2idxs.items():
+                    print(f'Global: {global_name}, # images: {len(idxs)}')
+                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    datasets.append(dataset)
+                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
+            else:
+                raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')
+        else:
+            dataset = self._create_dataset(indices, image_transform, data_augmentation_enabled)
+
         dataloader = DataLoader(
             dataset,
             batch_size=self.batch_size,
-            shuffle=shuffle,
+            shuffle=shuffle and balanced_sampling_mode is None,
             num_workers=self.num_workers,
             collate_fn=self.collate_batch_fn,
             pin_memory=True,
@@ -630,20 +728,17 @@ _detectron2_cache = {}
 
 def get_detectron2_adapted_data(split_name,
     source_image_size_mode=MIMICCXR_ImageSizeModes.MEDIUM_512,
+    use_chest_imagenome_gold_set=False,
     use_decent_images_only=True,
     clamp_bboxes_chest_imagenome=True,
     use_anaxnet_bbox_subset=False,
 ):
-    assert split_name in MIMICCXR_SPLIT_NAMES
+    if not use_chest_imagenome_gold_set:
+        assert split_name in MIMICCXR_SPLIT_NAMES
 
-    cache_name = f'{split_name}_{source_image_size_mode}_{use_decent_images_only}_{clamp_bboxes_chest_imagenome}'
+    cache_name = f'{split_name}_{source_image_size_mode}_{use_chest_imagenome_gold_set}_{use_decent_images_only}_{clamp_bboxes_chest_imagenome}'
     if cache_name in _detectron2_cache:
         return _detectron2_cache[cache_name]
-    
-    mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-    chest_imagenome_nongold_dicom_ids = load_nongold_dicom_ids()
-    chest_imagenome_nongold_dicom_ids = set(chest_imagenome_nongold_dicom_ids)
-    print(f'Loaded {len(chest_imagenome_nongold_dicom_ids)} non-gold DICOM IDs from Chest Imagenome')
 
     if source_image_size_mode == MIMICCXR_ImageSizeModes.SMALL_256x256:
         image_path_getter = get_mimiccxr_small_image_path
@@ -653,13 +748,24 @@ def get_detectron2_adapted_data(split_name,
         raise ValueError(f'Unknown source image size mode: {source_image_size_mode}')
     print(f'Using source image size mode: {source_image_size_mode}')
 
-    if use_decent_images_only:
-        decent_dicom_ids = load_chest_imagenome_dicom_ids(decent_images_only=True)
-        decent_dicom_ids = set(decent_dicom_ids)
-        print(f'Loaded {len(decent_dicom_ids)} decent image IDs')
-        skipped = 0
+    if use_chest_imagenome_gold_set:
+        bboxes_dict = load_chest_imagenome_gold_bboxes()
+    else:
+        bboxes_dict = load_chest_imagenome_silver_bboxes()
 
-    bboxes_dict = load_chest_imagenome_silver_bboxes()
+    if use_chest_imagenome_gold_set:
+        print('decent_images_only:', use_decent_images_only)
+        allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
+        print('len(allowed_dicom_ids) (before filtering by gold set):', len(allowed_dicom_ids))
+        allowed_dicom_ids &= set(bboxes_dict.keys())
+        print('len(allowed_dicom_ids) (after filtering by gold set):', len(allowed_dicom_ids))
+    elif split_name == 'train' or split_name == 'validate':
+        allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
+        allowed_dicom_ids -= set(load_gold_standard_dicom_ids()) # remove gold standard images
+    else:
+        assert split_name == 'test'
+        allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
+
     BIG_ENOUGH = 300000
     dataset_dicts = [None] * BIG_ENOUGH
 
@@ -667,6 +773,9 @@ def get_detectron2_adapted_data(split_name,
         anaxnet_bbox_indices = get_anaxnet_bbox_sorted_indices()
 
     idx = 0
+    max_idx_count = 0    
+    mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+
     for part_id, subject_id, study_id, dicom_id_view_pairs, split in \
         tqdm(zip(mimiccxr_metadata['part_ids'],
             mimiccxr_metadata['subject_ids'],
@@ -674,13 +783,14 @@ def get_detectron2_adapted_data(split_name,
             mimiccxr_metadata['dicom_id_view_pos_pairs'],
             mimiccxr_metadata['splits']), mininterval=1, total=len(mimiccxr_metadata['part_ids'])):
 
+        if not use_chest_imagenome_gold_set and split != split_name:
+            continue
+
+        max_idx_count += len(dicom_id_view_pairs)
+
         for dicom_id, _ in get_dicom_id_and_orientation_list(
-                dicom_id_view_pairs, MIMICCXR_ViewModes.CHEST_IMAGENOME, chest_imagenome_nongold_dicom_ids):            
-            if split != split_name:
-                continue
-            if use_decent_images_only and dicom_id not in decent_dicom_ids:
-                skipped += 1
-                continue
+                dicom_id_view_pairs, MIMICCXR_ViewModes.CHEST_IMAGENOME, allowed_dicom_ids):
+            
             image_path = image_path_getter(part_id, subject_id, study_id, dicom_id)
             width, height = image_size_cache.get_image_size(image_path)
             bboxes = bboxes_dict[dicom_id]
@@ -707,8 +817,10 @@ def get_detectron2_adapted_data(split_name,
 
     image_size_cache.update_cache_on_disk()
 
-    if use_decent_images_only:
-        print(f'Skipped {skipped} images')
+    print(f'max_idx_count: {max_idx_count}')
+    print(f'idx: {idx}')
+    if idx < max_idx_count:
+        print(f'** NOTE: {max_idx_count - idx} images were skipped because they were not in the allowed DICOM IDs')
 
     _detectron2_cache[cache_name] = dataset_dicts
 
@@ -719,6 +831,7 @@ def get_detectron2_adapted_data(split_name,
 class Detectron2AdaptedDataset(Dataset):
     def __init__(self, split_name, transform,
                 source_image_size_mode=MIMICCXR_ImageSizeModes.MEDIUM_512,
+                use_chest_imagenome_gold_set=False,
                 use_decent_images_only=True,
                 clamp_bboxes_chest_imagenome=True,
                 data_augmentation_enabled=False,
@@ -726,14 +839,15 @@ class Detectron2AdaptedDataset(Dataset):
                 ):
         self.split_name = split_name
         self.source_image_size_mode = source_image_size_mode
+        self.use_chest_imagenome_gold_set = use_chest_imagenome_gold_set
         self.use_decent_images_only = use_decent_images_only
         self.clamp_bboxes_chest_imagenome = clamp_bboxes_chest_imagenome
         self.transform = transform
         self.data_augmentation_enabled = data_augmentation_enabled
         self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
         self.dataset_dicts = get_detectron2_adapted_data(
-            split_name, source_image_size_mode, use_decent_images_only, clamp_bboxes_chest_imagenome,
-            use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
+            split_name, source_image_size_mode, use_chest_imagenome_gold_set, use_decent_images_only,
+            clamp_bboxes_chest_imagenome, use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
         if self.data_augmentation_enabled:
             if use_anaxnet_bbox_subset:
                 num_bbox_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
