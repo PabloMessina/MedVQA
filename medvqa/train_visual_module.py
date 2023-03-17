@@ -21,7 +21,7 @@ from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModule
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
-from medvqa.models.vision.visual_modules import MultiPurposeVisualModule, does_include_visual_features
+from medvqa.models.vision.visual_modules import DETECTRON2_HAS_RPN, MultiPurposeVisualModule, does_include_visual_features
 
 from medvqa.models.vqa.open_ended_vqa import (
     RawImageEncoding,
@@ -675,14 +675,16 @@ def train_model(
         attach_dataset_aware_chest_imagenome_bbox_meanf1(validator_engine, _d2_datasets, use_detectron2=True)
         attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_BOX_REG_LOSS, _d2_datasets)
         attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_CLS_LOSS, _d2_datasets)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_RPN_CLS_LOSS, _d2_datasets)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_RPN_LOC_LOSS, _d2_datasets)
+        if trainer_engine_kwargs['detectron2_includes_rpn']:
+            attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_RPN_CLS_LOSS, _d2_datasets)
+            attach_dataset_aware_loss(trainer_engine, MetricNames.DETECTRON2_RPN_LOC_LOSS, _d2_datasets)
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXMEANF1)
         metrics_to_print.append(MetricNames.DETECTRON2_BOX_REG_LOSS)
         metrics_to_print.append(MetricNames.DETECTRON2_CLS_LOSS)
-        metrics_to_print.append(MetricNames.DETECTRON2_RPN_CLS_LOSS)
-        metrics_to_print.append(MetricNames.DETECTRON2_RPN_LOC_LOSS)
+        if trainer_engine_kwargs['detectron2_includes_rpn']:
+            metrics_to_print.append(MetricNames.DETECTRON2_RPN_CLS_LOSS)
+            metrics_to_print.append(MetricNames.DETECTRON2_RPN_LOC_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
 
@@ -1229,8 +1231,10 @@ def train_from_scratch(
         use_vinbig_dataset=train_vinbig,
         use_padchest_dataset=train_padchest,        
         iters_to_accumulate=iters_to_accumulate,
-        chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
+        chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,        
     )
+    if use_detectron2:
+        trainer_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]
     if merge_findings:
         trainer_engine_kwargs.update(_merged_findings_kwargs)
 
@@ -1249,6 +1253,8 @@ def train_from_scratch(
         use_padchest_dataset=train_padchest,
         use_merged_findings=merge_findings,
     )
+    if use_detectron2:
+        validator_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]
     
     training_kwargs = dict(
         use_amp=use_amp,

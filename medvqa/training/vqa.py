@@ -69,6 +69,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         chest_imagenome_bbox_coords_criterion=None,
         chest_imagenome_bbox_presence_criterion=None,
         chest_imagenome_bbox_loss_weight=1.0,
+        # detectron2
+        detectron2_includes_rpn=False,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -124,9 +126,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     # Compute losses
                     loss_cls = model_output['loss_cls']
                     loss_box_reg = model_output['loss_box_reg']
-                    loss_rpn_cls = model_output['loss_rpn_cls']
-                    loss_rpn_loc = model_output['loss_rpn_loc']
-                    batch_loss = loss_cls + loss_box_reg + loss_rpn_cls + loss_rpn_loc
+                    batch_loss = loss_cls + loss_box_reg
+                    if detectron2_includes_rpn:
+                        loss_rpn_cls = model_output['loss_rpn_cls']
+                        loss_rpn_loc = model_output['loss_rpn_loc']
+                        batch_loss += loss_rpn_cls + loss_rpn_loc
 
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss)
@@ -139,8 +143,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['loss'] = batch_loss.detach()
             output[MetricNames.DETECTRON2_CLS_LOSS] = loss_cls.detach()
             output[MetricNames.DETECTRON2_BOX_REG_LOSS] = loss_box_reg.detach()
-            output[MetricNames.DETECTRON2_RPN_CLS_LOSS] = loss_rpn_cls.detach()
-            output[MetricNames.DETECTRON2_RPN_LOC_LOSS] = loss_rpn_loc.detach()
+            if detectron2_includes_rpn:
+                output[MetricNames.DETECTRON2_RPN_CLS_LOSS] = loss_rpn_cls.detach()
+                output[MetricNames.DETECTRON2_RPN_LOC_LOSS] = loss_rpn_loc.detach()
         else:
             # print('model_output: ', model_output)
             output['pred_boxes'] = [x['instances'].pred_boxes.tensor.detach().cpu() for x in model_output]
@@ -807,6 +812,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 update_lr_batchwise=False, lr_scheduler=None,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
                 use_visual_module_only=False,
+                detectron2_includes_rpn=False,
             ):
     
     print(f'get_engine(): shift_answer={shift_answer}')
@@ -938,6 +944,8 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             chest_imagenome_bbox_coords_criterion=chest_imagenome_bbox_coords_criterion,
                             chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
                             chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
+                            # detectron2
+                            detectron2_includes_rpn=detectron2_includes_rpn,
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,

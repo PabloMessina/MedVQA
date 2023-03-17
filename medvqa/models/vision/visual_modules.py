@@ -877,6 +877,12 @@ HUGGINGFACE_VITMODEL_NAMES_2_SHORT = {
 
 DETECTRON2_YAML_2_SHORT = {
     'COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml': 'D2-CocoDet-faster-rcnn-R-50-FPN-3x',
+    'COCO-Detection/retinanet_R_50_FPN_1x.yaml': 'D2-CocoDet-retinanet-R-50-FPN-1x',
+}
+
+DETECTRON2_HAS_RPN = {
+    'COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml': True,
+    'COCO-Detection/retinanet_R_50_FPN_1x.yaml': False,
 }
 
 def _get_clip_vit_modified_forward(dtype):    
@@ -971,7 +977,8 @@ def create_detectron2_model(
         model_yaml, num_classes=None,
         roi_heads_batch_size_per_image=None,
         rpn_batch_size_per_image=None,
-        verbose=False
+        load_model_zoo_weights=True,
+        verbose=False,
     ):
     assert model_yaml is not None
     assert model_yaml.endswith('.yaml')
@@ -995,9 +1002,11 @@ def create_detectron2_model(
         print(cfg)
         
     model = build_detectron2_model(cfg)
-    # Load weights from the official Detectron2 model zoo
-    checkpoint_url = detectron2_model_zoo.get_checkpoint_url(model_yaml)
-    print(f'Loading weights from {checkpoint_url}')
-    DetectionCheckpointer(model).load(checkpoint_url)
     print('Detectron2 model successfully built')
+    # Load weights from the official Detectron2 model zoo
+    if load_model_zoo_weights:
+        checkpoint_url = detectron2_model_zoo.get_checkpoint_url(model_yaml)
+        print(f'Loading weights from {checkpoint_url}')
+        DetectionCheckpointer(model).load(checkpoint_url)
+        print('Weights successfully loaded')
     return model

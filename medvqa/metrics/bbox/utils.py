@@ -214,19 +214,19 @@ def _compute_score__detectron2(task, metric_fn):
             if _shared_pred_classes[i][j] == c:
                 if _shared_scores[i][j] > 0.5:
                     if _shared_gt_presences[i][c] == 1:
-                        try:
-                            if compute_iou(_shared_pred_boxes[i][j], _shared_gt_coords[i][c]) >= iou_thr:
-                                tp += 1
-                                match_found = True
-                            else:
-                                fp += 1
-                        except RuntimeError:
-                            print('_shared_pred_boxes[i]', _shared_pred_boxes[i])
-                            print('_shared_gt_coords[i][a:b]', _shared_gt_coords[i][c])
-                            print('_shared_pred_classes[i]', _shared_pred_classes[i])
-                            print('_shared_scores[i]', _shared_scores[i])
-                            print('_shared_gt_presences[i]', _shared_gt_presences[i])
-                            raise
+                        # try:
+                        if compute_iou(_shared_pred_boxes[i][j], _shared_gt_coords[i][c]) >= iou_thr:
+                            tp += 1
+                            match_found = True
+                        else:
+                            fp += 1
+                        # except RuntimeError:
+                        #     print('_shared_pred_boxes[i]', _shared_pred_boxes[i])
+                        #     print('_shared_gt_coords[i][a:b]', _shared_gt_coords[i][c])
+                        #     print('_shared_pred_classes[i]', _shared_pred_classes[i])
+                        #     print('_shared_scores[i]', _shared_scores[i])
+                        #     print('_shared_gt_presences[i]', _shared_gt_presences[i])
+                        #     raise
                     else:
                         fp += 1
         if _shared_gt_presences[i][c] == 1 and not match_found:
@@ -273,17 +273,17 @@ def _compute_multiple_scores__detectron2(pred_boxes, pred_classes, scores, gt_co
 def compute_multiple_f1_scores__detectron2(
     pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers=5):
     return _compute_multiple_scores__detectron2(
-        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers, _compute_f1__detectron2)
+        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, None, num_workers, _compute_f1__detectron2)
 
 def compute_multiple_precision_scores__detectron2(
     pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers=5):
     return _compute_multiple_scores__detectron2(
-        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers, _compute_precision__detectron2)
+        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, None, num_workers, _compute_precision__detectron2)
 
 def compute_multiple_recall_scores__detectron2(
     pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers=5):
     return _compute_multiple_scores__detectron2(
-        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, num_workers, _compute_recall__detectron2)
+        pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, None, num_workers, _compute_recall__detectron2)
 
 def compute_multiple_prf1_scores__detectron2(
     pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
