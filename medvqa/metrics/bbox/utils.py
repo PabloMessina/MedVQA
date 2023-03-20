@@ -62,7 +62,7 @@ def compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, scores, gt_
     n = len(gt_presences)
     for i in range(n):
         for j in range(len(pred_boxes[i])):
-            if scores[i][j] < 0.5:
+            if scores is not None and scores[i][j] < 0.5:
                 continue
             cls = pred_classes[i][j].item()
             if gt_presences[i][cls] == 1:
@@ -75,6 +75,9 @@ def compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, scores, gt_
         mean_ious = mean_ious[valid_classes]
     return mean_ious
 
+def compute_mean_iou_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None):
+    return compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes)
+
 def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
     m = pred_coords.shape[1] // 4
     assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
@@ -84,7 +87,8 @@ def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
             mae[i] = np.abs(pred_coords[:, i*4:(i+1)*4] - gt_coords[:, i*4:(i+1)*4])[gt_presences[:, i] == 1].mean()
     return mae
 
-def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, valid_classes=None):
+def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, valid_classes=None,
+                                      abs_fn=torch.abs):
     assert len(gt_coords.shape) == 3
     assert len(gt_presences.shape) == 2
     assert gt_coords.shape[-1] == 4 # each bounding box is represented by 4 coordinates
@@ -94,11 +98,11 @@ def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coord
     n = len(gt_presences)
     for i in range(n):
         for j in range(len(pred_boxes[i])):
-            if scores[i][j] < 0.5:
+            if scores is not None and scores[i][j] < 0.5:
                 continue
             cls = pred_classes[i][j].item()
             if gt_presences[i][cls] == 1:
-                ae = torch.abs(pred_boxes[i][j] - gt_coords[i][cls])
+                ae = abs_fn(pred_boxes[i][j] - gt_coords[i][cls])
                 mae[cls] += ae.mean()
                 counts[cls] += 1
     for i in range(m):
@@ -107,6 +111,9 @@ def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coord
     if valid_classes is not None:
         mae = mae[valid_classes]
     return mae
+
+def compute_mae_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None, abs_fn=np.abs):
+    return compute_mae_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes, abs_fn)
 
 def _compute_score(task, metric_fn):
     iou_thrs, c, n = task
@@ -212,7 +219,7 @@ def _compute_score__detectron2(task, metric_fn):
         match_found = False
         for j in range(len(_shared_pred_classes[i])):
             if _shared_pred_classes[i][j] == c:
-                if _shared_scores[i][j] > 0.5:
+                if _shared_scores is None or _shared_scores[i][j] > 0.5:
                     if _shared_gt_presences[i][c] == 1:
                         # try:
                         if compute_iou(_shared_pred_boxes[i][j], _shared_gt_coords[i][c]) >= iou_thr:
@@ -289,3 +296,8 @@ def compute_multiple_prf1_scores__detectron2(
     pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
     return _compute_multiple_scores__detectron2(
         pred_boxes, pred_classes, scores, gt_coords, gt_presences, iou_thresholds, valid_classes, num_workers, _compute_prf1__detectron2)
+
+def compute_multiple_prf1_scores__yolov5(
+    pred_boxes, pred_classes, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
+    return compute_multiple_prf1_scores__detectron2(
+        pred_boxes, pred_classes, None, gt_coords, gt_presences, iou_thresholds, valid_classes, num_workers)

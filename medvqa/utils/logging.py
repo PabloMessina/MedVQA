@@ -2,11 +2,20 @@ import os
 from medvqa.utils.files import make_dirs_in_filepath
 from termcolor import colored
 
-def print_blue(*args):
-    print(*[colored(x, 'blue') for x in args])
+def print_blue(*args, bold=False):
+    if bold:
+        print(*[colored(x, 'blue', attrs=['bold']) for x in args])
+    else:
+        print(*[colored(x, 'blue') for x in args])
 
-def print_red(*args):
-    print(*[colored(x, 'red') for x in args])
+def print_red(*args, bold=False):
+    if bold:
+        print(*[colored(x, 'red', attrs=['bold']) for x in args])
+    else:
+        print(*[colored(x, 'red') for x in args])
+
+def print_bold(*args):
+    print(*[colored(x, attrs=['bold']) for x in args])
 
 class CountPrinter:
     def __init__(self, color='blue'):

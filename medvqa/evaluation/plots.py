@@ -286,3 +286,30 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     # Plot horizontal lines of grid
     plt.grid(axis='x')
     plt.show()
+
+def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_aliases, metric_names, label_frequencies,
+                                                     title, ylabel, figsize=(10, 8)):
+    n = len(dataframe_rows)
+    assert n == len(method_aliases)
+    assert n > 0
+    m = len(metric_names)
+    assert m == len(label_frequencies)
+    assert m > 0
+
+    scores_per_method = [[dataframe_rows[i][k] for k in metric_names] for i in range(n)]
+    mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
+    method_idxs = list(range(n))
+    method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=True)
+
+    # Create a scatter plot per method, where each point is a pair (class frequency, metric score)
+    colors = plt.cm.tab20(np.linspace(0, 1, 20))
+    plt.figure(figsize=figsize)
+    for i in range(n-1, -1, -1):
+        label = f'{method_aliases[method_idxs[i]]} ({mean_score_per_method[method_idxs[i]]:.3f})'
+        plt.scatter(label_frequencies, scores_per_method[method_idxs[i]], label=label, color=colors[i])
+    plt.xlabel('Class frequency')
+    plt.ylabel(ylabel)
+    plt.title(title)
+    # Plot legend outside the plot
+    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    plt.show()

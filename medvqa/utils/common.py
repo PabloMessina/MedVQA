@@ -7,9 +7,19 @@ import os
 
 SOURCE_DIR = os.environ['MEDVQA_SOURCE_DIR']
 WORKSPACE_DIR = os.environ['MEDVQA_WORKSPACE_DIR']
+FAST_WORKSPACE_DIR = os.environ['MEDVQA_FAST_WORKSPACE_DIR']
 CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
+FAST_CACHE_DIR = os.path.join(FAST_WORKSPACE_DIR, 'cache')
 TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
 RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
+
+# NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem
+# and have set the YOLOv5_PYTHON_PATH environment variable to an appropriate python executable.
+# yolov5 is available at https://github.com/ultralytics/yolov5
+YOLOv5_PYTHON_PATH = os.environ['YOLOv5_PYTHON_PATH']
+YOLOv5_TRAIN_SCRIPT_PATH = os.environ['YOLOv5_TRAIN_SCRIPT_PATH']
+YOLOv5_DETECT_SCRIPT_PATH = os.environ['YOLOv5_DETECT_SCRIPT_PATH']
+YOLOv5_RUNS_DETECT_DIR = os.environ['YOLOv5_RUNS_DETECT_DIR']
 
 def get_timestamp():
     return datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')

@@ -2,12 +2,16 @@ import os
 import time
 import numpy as np
 import pandas as pd
+import random
 from tqdm import tqdm
 from multiprocessing import Pool
 from torch.utils.data import Dataset
 from PIL import Image
 import imagesize
 import torch
+import multiprocessing as mp
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
@@ -463,8 +467,6 @@ def get_labels_per_anatomy_and_anatomy_group(label_names_filename, for_training=
 
 # Visualize a scene graph
 def visualize_scene_graph(scene_graph, figsize=(10, 10)):
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     from PIL import Image
 
     imageId2partId = get_imageId2partId()
@@ -544,8 +546,6 @@ def visualize_ground_truth_bounding_boxes(dicom_id):
     image = image.convert('RGB')
     width = image.size[0]
     height = image.size[1]
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     fig, ax = plt.subplots(1, figsize=(10, 10))
     ax.imshow(image)
     print(f'Image path: {image_path}')
@@ -579,8 +579,6 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
     image = image.convert('RGB')
     width = image.size[0]
     height = image.size[1]
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     fig, ax = plt.subplots(1, figsize=figsize)
     ax.imshow(image)
     print(f'Image path: {image_path}')    
@@ -604,6 +602,61 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='blue', facecolor='none', linestyle='dashed')
             ax.add_patch(rect)
             ax.text(x1, y1-3, bbox_names[i], fontsize=16, color='blue')
+    print('Predicted bounding boxes are in ', end='')
+    print_blue('blue')
+    print('Ground truth bounding boxes are in ', end='')
+    print_red('red')
+    plt.show()
+
+def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, figsize=(10, 10)):
+    if dicom_id is None:
+        # Find a random dicom_id from the results folder
+        dicom_ids = os.listdir(os.path.join(results_folder, 'labels'))
+        dicom_id = random.choice(dicom_ids)
+        dicom_id = dicom_id[:-4]
+
+    predicted_labels_txt_path = os.path.join(results_folder, 'labels', f'{dicom_id}.txt')
+    print(f'Predicted labels path: {predicted_labels_txt_path}')
+    if not os.path.exists(predicted_labels_txt_path):
+        print(f'No prediction for {dicom_id}')
+        return
+    imageId2PartPatientStudy = get_imageId2PartPatientStudy()    
+    part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]        
+    image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+    fig, ax = plt.subplots(1, figsize=figsize)
+    # Image
+    ax.imshow(image)    
+    # Ground truth bounding boxes
+    bboxes_dict = load_chest_imagenome_silver_bboxes()
+    bbox = bboxes_dict[dicom_id]
+    gt_coords = bbox['coords']
+    gt_presence = bbox['presence']
+    for i in range(len(gt_presence)):
+        if gt_presence[i] == 1:
+            x1 = gt_coords[i * 4 + 0] * width
+            y1 = gt_coords[i * 4 + 1] * height
+            x2 = gt_coords[i * 4 + 2] * width
+            y2 = gt_coords[i * 4 + 3] * height
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='red', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color='red')
+    # Predicted bounding boxes
+    predicted_labels = np.loadtxt(predicted_labels_txt_path)
+    pred_coords = predicted_labels[:, 1:]
+    pred_classes = predicted_labels[:, 0].astype(np.int)    
+    for i in range(len(pred_classes)):
+        x_mid = pred_coords[i, 0] * width
+        y_mid = pred_coords[i, 1] * height
+        w = pred_coords[i, 2] * width
+        h = pred_coords[i, 3] * height
+        x1, y1, x2, y2 = x_mid - w / 2, y_mid - h / 2, x_mid + w / 2, y_mid + h / 2
+        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='blue', facecolor='none', linestyle='dashed')
+        ax.add_patch(rect)
+        ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[pred_classes[i]], fontsize=16, color='blue')
     print('Predicted bounding boxes are in ', end='')
     print_blue('blue')
     print('Ground truth bounding boxes are in ', end='')
@@ -743,8 +796,6 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
     if flipped:
         print('Flipped image')
         image = image.transpose(Image.FLIP_LEFT_RIGHT)
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     fig, ax = plt.subplots(1, figsize=(10, 10))
     ax.imshow(image)
     print(f'Image path: {image_path}')
@@ -791,42 +842,83 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
     # Show
     plt.show()
 
-_TRAIN_VAL_TEST_CACHE = {}
-def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename):
-    if label in _TRAIN_VAL_TEST_CACHE:
-        return _TRAIN_VAL_TEST_CACHE[label]
+_shared_actual_train_dicom_ids = None
+_shared_actual_val_dicom_ids = None
+_shared_actual_test_dicom_ids = None
+_shared_label_names = None
+_shared_dicom_id_to_labels = None
+
+def get_train_val_test_stats_per_label(label_names_filename, labels_filename, num_workers=8):
+    cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, f'train_val_test_stats_per_label({label_names_filename},{labels_filename}).pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
     
-    key = 'get_train_val_test_summary_text_for_label'
-    if key in _CACHE:
-        tmp = _CACHE[key]
-        actual_train_dicom_ids = tmp['actual_train_dicom_ids']
-        actual_val_dicom_ids = tmp['actual_val_dicom_ids']
-        actual_test_dicom_ids = tmp['actual_test_dicom_ids']
-    else:
-        mimiccxr_train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
-        mimiccxr_val_dicom_ids = set(get_mimiccxr_val_dicom_ids())
-        mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
-        decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
-        nongold_dicom_ids = set(load_nongold_dicom_ids())
-        allowed_train_val_dicom_ids = decent_dicom_ids & nongold_dicom_ids
-        actual_train_dicom_ids = mimiccxr_train_dicom_ids & allowed_train_val_dicom_ids
-        actual_val_dicom_ids = mimiccxr_val_dicom_ids & allowed_train_val_dicom_ids
-        actual_test_dicom_ids = mimiccxr_test_dicom_ids & decent_dicom_ids
-        _CACHE[key] = {
-            'actual_train_dicom_ids': actual_train_dicom_ids,
-            'actual_val_dicom_ids': actual_val_dicom_ids,
-            'actual_test_dicom_ids': actual_test_dicom_ids,
-        }
-    # Load ground truth labels and label names
     label_names = load_postprocessed_label_names(label_names_filename)
     dicom_id_to_labels = load_postprocessed_labels(labels_filename)
+
+    mimiccxr_train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
+    mimiccxr_val_dicom_ids = set(get_mimiccxr_val_dicom_ids())
+    mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
+    decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
+    nongold_dicom_ids = set(load_nongold_dicom_ids())
+    allowed_train_val_dicom_ids = decent_dicom_ids & nongold_dicom_ids
+    actual_train_dicom_ids = mimiccxr_train_dicom_ids & allowed_train_val_dicom_ids
+    actual_val_dicom_ids = mimiccxr_val_dicom_ids & allowed_train_val_dicom_ids
+    actual_test_dicom_ids = mimiccxr_test_dicom_ids & decent_dicom_ids
+    
+    global _shared_actual_train_dicom_ids
+    global _shared_actual_val_dicom_ids
+    global _shared_actual_test_dicom_ids
+    global _shared_label_names
+    global _shared_dicom_id_to_labels
+    
+    _shared_actual_train_dicom_ids = actual_train_dicom_ids
+    _shared_actual_val_dicom_ids = actual_val_dicom_ids
+    _shared_actual_test_dicom_ids = actual_test_dicom_ids
+    _shared_label_names = label_names
+    _shared_dicom_id_to_labels = dicom_id_to_labels
+
+    with mp.Pool(processes=num_workers) as pool:
+        stats = pool.map(_get_train_val_test_summary_stats_for_label, label_names)
+    
+    label2stats = {name:stat for name, stat in zip(label_names, stats)}
+    save_to_pickle(label2stats, cache_path)
+    return label2stats
+
+def _get_train_val_test_summary_stats_for_label(label):
     # Get label index
+    label_idx = _shared_label_names.index(label)
+    # Count number of times the label appears in each set
+    train_count = 0
+    val_count = 0
+    test_count = 0
+    for dicom_id, labels in _shared_dicom_id_to_labels.items():
+        if labels[label_idx] == 1:
+            if dicom_id in _shared_actual_train_dicom_ids:
+                train_count += 1
+            elif dicom_id in _shared_actual_val_dicom_ids:
+                val_count += 1
+            elif dicom_id in _shared_actual_test_dicom_ids:
+                test_count += 1
+    # Summary statistics
+    return {
+        'train_count': train_count,
+        'train_fraction': train_count / len(_shared_actual_train_dicom_ids),
+        'val_count': val_count,
+        'val_fraction': val_count / len(_shared_actual_val_dicom_ids),
+        'test_count': test_count,
+        'test_fraction': test_count / len(_shared_actual_test_dicom_ids),
+    }
+
+def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename):
+    label2stats = get_train_val_test_stats_per_label(label_names_filename, labels_filename)
+    label_names = load_postprocessed_label_names(label_names_filename)
+    # Get actual label
     label_idx = -1
     if type(label) == str:
         for idx, label_name in enumerate(label_names):
             if len(label_name) == 2 and label_name[1] == label:
                 label_idx = idx
-                print(f'Found label {label} at index {idx} ({label_name})')
                 break
     else:
         assert type(label) == tuple
@@ -834,27 +926,16 @@ def get_train_val_test_summary_text_for_label(label, label_names_filename, label
         for idx, label_name in enumerate(label_names):
             if len(label_name) == 3 and label_name[0] == label[0] and label_name[2] == label[1]:
                 label_idx = idx
-                print(f'Found label {label} at index {idx} ({label_name})')
                 break
     assert label_idx != -1, f'Could not find label {label} in {label_names_filename}'
-    # Count number of times the label appears in each set    
-    train_count = 0
-    val_count = 0
-    test_count = 0
-    for dicom_id, labels in dicom_id_to_labels.items():
-        if labels[label_idx] == 1:
-            if dicom_id in actual_train_dicom_ids:
-                train_count += 1
-            elif dicom_id in actual_val_dicom_ids:
-                val_count += 1
-            elif dicom_id in actual_test_dicom_ids:
-                test_count += 1
+    actual_label = label_names[label_idx]
+    # Retrieve summary statistics
+    stats = label2stats[actual_label]
     # Return summary text
-    summary_text = (f'Label: {label}\n'
-                    f'Train: {train_count} ({train_count / len(actual_train_dicom_ids):.2%})\n'
-                    f'Val: {val_count} ({val_count / len(actual_val_dicom_ids):.2%})\n'
-                    f'Test: {test_count} ({test_count / len(actual_test_dicom_ids):.2%})')
-    _TRAIN_VAL_TEST_CACHE[label] = summary_text
+    summary_text = (f'Label: {actual_label}\n'
+                    f'Train: {stats["train_count"]} ({stats["train_fraction"]:.2%})\n'
+                    f'Val: {stats["val_count"]} ({stats["val_fraction"]:.2%})\n'
+                    f'Test: {stats["test_count"]} ({stats["test_fraction"]:.2%})')
     return summary_text
 
 class ChestImagenomeBboxDataset(Dataset):
