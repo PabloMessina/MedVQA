@@ -12,6 +12,9 @@ from medvqa.datasets.chest_imagenome import (
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.metrics import average_ignoring_nones
 
+# Consider 20 different colors
+_COLORS = plt.cm.tab20(np.linspace(0, 1, 20))
+
 def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
 
@@ -97,7 +100,8 @@ def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliase
     width = 0.8 / n
     for i in range(n):
         label = f'{method_aliases[method_idxs[i]]} ({mean_scores[method_idxs[i]]:.3f})'
-        plt.bar([j + i*width for j in range(1, len(thresholds)+1)], scores_per_method[method_idxs[i]], width=width, label=label)
+        plt.bar([j + i*width for j in range(1, len(thresholds)+1)], scores_per_method[method_idxs[i]],
+                 width=width, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
     plt.xticks([width * (n/2-0.5)+ i for i in range(1, len(thresholds)+1)], thresholds)
     plt.xlabel('Threshold')
     plt.ylabel(metric_alias)
@@ -109,7 +113,7 @@ def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliase
     plt.show()
 
 def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_aliases, metric_name, metric_alias,
-        dataset_name, figsize=(8,6), horizontal=True, bbox_class_names=None):
+        dataset_name, figsize=(8,6), horizontal=True, bbox_class_names=None, make_anaxnet_ticks_red=False):
     assert type(metrics_paths) == list
     assert type(method_aliases) == list
     assert len(metrics_paths) == len(method_aliases)
@@ -175,8 +179,7 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
     # Each point is a pair of (score, bounding box class)
     # Each method is a different color
     plt.figure(figsize=figsize)
-    # Consider at least 20 different colors
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
+    
     for i in range(n):
         label = f'{method_aliases[method_idxs[i]]} ({mean_scores[method_idxs[i]]:.3f})'
         sorted_scores = [scores_per_method[method_idxs[i]][bbox_idxs[j]] for j in range(n_bboxes)]
@@ -184,25 +187,27 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
         sorted_scores = [x for x in sorted_scores if x is not None]
         assert len(sorted_scores) == len(sorted_indices)
         if horizontal:
-            plt.scatter(sorted_indices, sorted_scores, label=label, color=colors[i])
+            plt.scatter(sorted_indices, sorted_scores, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
         else:
-            plt.scatter(sorted_scores, sorted_indices, label=label, color=colors[i])
+            plt.scatter(sorted_scores, sorted_indices, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
     if horizontal:
         # Rotate the xticks by 45 degrees and move them to the right so they don't overlap
         plt.xticks(range(1, n_bboxes+1), [all_bbox_names[i] for i in bbox_idxs], rotation=45, ha='right')
         # Change xtick color to red if the bounding box class is in ANAXNET_BBOX_NAMES
-        for i in range(n_bboxes):
-            if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
-                plt.gca().get_xticklabels()[i].set_color('red')
+        if make_anaxnet_ticks_red:
+            for i in range(n_bboxes):
+                if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
+                    plt.gca().get_xticklabels()[i].set_color('red')
         plt.ylabel(metric_alias)
         plt.xlabel('Bounding box class')
         plt.grid(axis='y')
     else:
         plt.yticks(range(1, n_bboxes+1), [all_bbox_names[i] for i in bbox_idxs])
         # Change ytick color to red if the bounding box class is in ANAXNET_BBOX_NAMES
-        for i in range(n_bboxes):
-            if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
-                plt.gca().get_yticklabels()[i].set_color('red')
+        if make_anaxnet_ticks_red:
+            for i in range(n_bboxes):
+                if all_bbox_names[bbox_idxs[i]] in ANAXNET_BBOX_NAMES:
+                    plt.gca().get_yticklabels()[i].set_color('red')
         plt.xlabel(metric_alias)
         plt.ylabel('Bounding box class')
         plt.grid(axis='x')
@@ -225,15 +230,13 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
 
     # Create a single plot with multiple vertical bar charts, one bar for each method and metric    
     # The height of the bar is the metric score
-    # Each method is a different color    
-    # Consider at least 20 different colors
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
+    # Each method is a different color
     plt.figure(figsize=figsize)
     width = 0.8 / n
     for i in range(n):
         label = method_aliases[method_idxs[i]]
         plt.bar([j + (n-1-i)*width for j in range(1, m+1)], [mg(metrics_list[method_idxs[i]]) for mg in metric_getters],
-                 width=width, label=label, color=colors[i])
+                 width=width, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
     plt.xticks([width * (n/2-0.5) + i for i in range(1, m+1)], metric_aliases)
     plt.xlabel('Metric')
     plt.ylabel('Score')
@@ -261,19 +264,16 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     method_idxs = list(range(n))
     method_idxs.sort(key=lambda i: mean_score_per_method[i])
 
-
     # Create a single plot with multiple horizontal bar charts, one bar for each method and metric    
     # The height of the bar is the metric score
     # Each method is a different color    
-    # Consider at least 20 different colors
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
     plt.figure(figsize=figsize)
     height = 0.9 / n
     for i in range(n):
         label = method_aliases[method_idxs[n-1-i]]
         positions = [j + (n-1-i)*height for j in range(1, m+1)]
         scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-        plt.barh(positions, scores, height=height, label=label, color=colors[i])
+        plt.barh(positions, scores, height=height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
         # plot the scores as text on top of the bars
         for j in range(m):
             plt.text(scores[j] + height/n*0.2, positions[j], f'{scores[j]:.2f}', ha='left', va='center', fontsize=fontsize)
@@ -302,11 +302,10 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=True)
 
     # Create a scatter plot per method, where each point is a pair (class frequency, metric score)
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
     plt.figure(figsize=figsize)
     for i in range(n-1, -1, -1):
         label = f'{method_aliases[method_idxs[i]]} ({mean_score_per_method[method_idxs[i]]:.3f})'
-        plt.scatter(label_frequencies, scores_per_method[method_idxs[i]], label=label, color=colors[i])
+        plt.scatter(label_frequencies, scores_per_method[method_idxs[i]], label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
     plt.xlabel('Class frequency')
     plt.ylabel(ylabel)
     plt.title(title)

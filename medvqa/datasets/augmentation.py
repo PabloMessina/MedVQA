@@ -170,32 +170,67 @@ class ImageBboxAugmentationTransforms:
             if key in self._transform_fns:
                 self._color_transforms.append(self._transform_fns[key])
     
-    def get_transform(self, name):
-        return A.Compose(
-            [self._transform_fns[name]],
-            bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids']),
-        )
+    def get_transform(self, name, additional_bboxes=None):
+        if additional_bboxes is None:
+            return A.Compose(
+                [self._transform_fns[name]],
+                bbox_params=A.BboxParams(format='albumentations'),
+            )
+        else:
+            assert isinstance(additional_bboxes, list)
+            additional_targets = { key: 'bboxes' for key in additional_bboxes }
+            return A.Compose(
+                [self._transform_fns[name]],
+                bbox_params=A.BboxParams(format='albumentations'),
+                additional_targets=additional_targets,
+            )
 
-    def get_color_transforms_list(self):
+    def get_color_transforms_list(self, additional_bboxes=None):
         assert len(self._color_transforms) > 0, 'At least one color transform must be specified'
-        return [
-            A.Compose([transform], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])) \
-            for transform in self._color_transforms
-        ]
+        if additional_bboxes is None:
+            return [
+                A.Compose([transform], bbox_params=A.BboxParams(format='albumentations')) \
+                for transform in self._color_transforms
+            ]
+        else:
+            assert isinstance(additional_bboxes, list)
+            additional_targets = { key: 'bboxes' for key in additional_bboxes }
+            return [
+                A.Compose([transform], bbox_params=A.BboxParams(format='albumentations'),
+                          additional_targets=additional_targets) \
+                for transform in self._color_transforms
+            ]
     
-    def get_spatial_transforms_list(self):
+    def get_spatial_transforms_list(self, additional_bboxes=None):
         assert len(self._spatial_transforms) > 0, 'At least one spatial transform must be specified'
-        return [
-            A.Compose([transform], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])) \
-            for transform in self._spatial_transforms
-        ]
+        if additional_bboxes is None:
+            return [
+                A.Compose([transform], bbox_params=A.BboxParams(format='albumentations')) \
+                for transform in self._spatial_transforms
+            ]
+        else:
+            assert isinstance(additional_bboxes, list)
+            additional_targets = { key: 'bboxes' for key in additional_bboxes }
+            return [
+                A.Compose([transform], bbox_params=A.BboxParams(format='albumentations'),
+                          additional_targets=additional_targets) \
+                for transform in self._spatial_transforms
+            ]
 
-    def get_merged_spatial_color_transforms_list(self):
+    def get_merged_spatial_color_transforms_list(self, additional_bboxes=None):
         """Returns a list of transforms, each of which is a composition of spatial and color transforms."""
         assert len(self._spatial_transforms) > 0 and len(self._color_transforms) > 0,\
             'At least one spatial and color transform must be specified'
         output = []
-        for color_tf in self._color_transforms:
-            for spatial_tf in self._spatial_transforms:
-                output.append(A.Compose([spatial_tf, color_tf], bbox_params=A.BboxParams(format='albumentations', label_fields=['category_ids'])))
+        if additional_bboxes is None:
+            for color_tf in self._color_transforms:
+                for spatial_tf in self._spatial_transforms:
+                    output.append(A.Compose([spatial_tf, color_tf], bbox_params=A.BboxParams(format='albumentations')))
+        else:
+            assert isinstance(additional_bboxes, list)
+            additional_targets = { key: 'bboxes' for key in additional_bboxes }
+            for color_tf in self._color_transforms:
+                for spatial_tf in self._spatial_transforms:
+                    output.append(A.Compose([spatial_tf, color_tf], bbox_params=A.BboxParams(format='albumentations'),
+                                            additional_targets=additional_targets))
         return output

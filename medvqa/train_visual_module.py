@@ -105,10 +105,8 @@ def parse_args(args=None):
     
     # --- Required arguments
 
-    parser.add_argument('--epochs', type=int, required=True,
-                        help='Number of epochs the model will be trained')
-    parser.add_argument('--batches-per-epoch', type=int, required=True,
-                        help='Number of batches per epoch')
+    parser.add_argument('--epochs', type=int, required=True, help='Number of epochs the model will be trained')
+    parser.add_argument('--batches-per-epoch', type=int, required=True, help='Number of batches per epoch')
 
     # --- Optional arguments
 
@@ -141,11 +139,11 @@ def parse_args(args=None):
     parser.add_argument('--num-regions', type=int, default=None)
     parser.add_argument('--roi-heads-batch-size-per-image', type=int, default=128)
     parser.add_argument('--rpn-batch-size-per-image', type=int, default=128)
+    parser.add_argument('--roi-align-output-size', type=int, default=None)
     
     parser.add_argument('--optimizer-name', type=str, default='adam')
     
-    parser.add_argument('--lr', type=float, default=1e-3,
-                        help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-3,help='Learning rate')
     parser.add_argument('--scheduler', type=str, default='reduce-lr-on-plateau')
     parser.add_argument('--lr-decay', type=float, default=0.76, help='Learning rate decay')
     parser.add_argument('--lr-decay-patience', type=int, default=2, help='Learning rate decay patience')
@@ -153,15 +151,11 @@ def parse_args(args=None):
     parser.add_argument('--warmup-and-cosine-args', type=str, default=None)
     parser.add_argument('--warmup-decay-and-cyclic-decay-args', type=str, default=None)
     
-    parser.add_argument('--batch-size', type=int, default=45,
-                        help='Batch size')
+    parser.add_argument('--batch-size', type=int, default=45, help='Batch size')
     parser.add_argument('--iters-to-accumulate', type=int, default=1, help='For gradient accumulation')
-    parser.add_argument('--num-workers', type=int, default=0,
-                        help='Number of workers for parallel dataloading')    
-    parser.add_argument('--device', type=str, default='GPU',
-                        help='Device to use (GPU or CPU)')    
-    parser.add_argument('--img-aug-mode', type=str, default=None,
-                        help='Mode of data augmentation used for images')
+    parser.add_argument('--num-workers', type=int, default=0, help='Number of workers for parallel dataloading')    
+    parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')    
+    parser.add_argument('--img-aug-mode', type=str, default=None, help='Mode of data augmentation used for images')
     parser.add_argument('--image-size', nargs='+', type=int, default=(256,256))
     parser.add_argument('--horizontal-flip-prob', type=float, default=0)
 
@@ -178,11 +172,9 @@ def parse_args(args=None):
     
     parser.add_argument('--chest-imagenome-labels-filename', type=str, default=None)
     parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
-    parser.add_argument('--use-chest-imagenome-decent-images-only', dest='use_chest_imagenome_decent_images_only', action='store_true')
-    parser.set_defaults(use_chest_imagenome_decent_images_only=False)
+    parser.add_argument('--use-chest-imagenome-decent-images-only', action='store_true', default=False)
 
-    parser.add_argument('--use-amp', dest='use_amp', action='store_true')
-    parser.set_defaults(use_amp=False)    
+    parser.add_argument('--use-amp', action='store_true', default=False)
     
     parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
 
@@ -190,80 +182,63 @@ def parse_args(args=None):
     parser.add_argument('--no-save', dest='save', action='store_false')
     parser.set_defaults(save=True)
 
-    parser.add_argument('--override-lr', dest='override_lr', action='store_true')
-    parser.set_defaults(override_lr=False)
+    parser.add_argument('--override-lr', action='store_true', default=False)
 
-    parser.add_argument('--use-mimiccxr', dest='train_mimiccxr', action='store_true')
-    parser.set_defaults(train_mimiccxr=False)
-
-    parser.add_argument('--use-iuxray', dest='train_iuxray', action='store_true')
-    parser.set_defaults(train_iuxray=False)
-
-    parser.add_argument('--use-chexpert', dest='train_chexpert', action='store_true')
-    parser.set_defaults(train_chexpert=False)    
-
-    parser.add_argument('--use-cxr14', dest='train_cxr14', action='store_true')
-    parser.set_defaults(train_cxr14=False)
+    parser.add_argument('--use-mimiccxr', dest='train_mimiccxr', action='store_true', default=False)
+    parser.add_argument('--use-iuxray', dest='train_iuxray', action='store_true', default=False)
+    parser.add_argument('--use-chexpert', dest='train_chexpert', action='store_true', default=False)
+    parser.add_argument('--use-cxr14', dest='train_cxr14', action='store_true', default=False)
     
     # VinBigData arguments
-    parser.add_argument('--use-vinbig', dest='train_vinbig', action='store_true')
-    parser.set_defaults(train_vinbig=False)
+    parser.add_argument('--use-vinbig', dest='train_vinbig', action='store_true', default=False)
     parser.add_argument('--vinbig-training-data-mode', type=str, default='all')
-    parser.add_argument('--vinbig-use-validation', dest='vinbig_use_validation', action='store_true')
-    parser.set_defaults(vinbig_use_validation=False)
+    parser.add_argument('--vinbig-use-validation', action='store_true', default=False)
 
     # PadChest arguments
-    parser.add_argument('--use-padchest', dest='train_padchest', action='store_true')
-    parser.set_defaults(train_padchest=False)
+    parser.add_argument('--use-padchest', dest='train_padchest', action='store_true', default=False)
     parser.add_argument('--padchest-training-data-mode', type=str, default='train')
-    parser.add_argument('--padchest-use-validation', dest='padchest_use_validation', action='store_true')
-    parser.set_defaults(padchest_use_validation=False)
+    parser.add_argument('--padchest-use-validation', action='store_true', default=False)
     parser.add_argument('--padchest-train-study-ids-path', type=str, default=None)
     parser.add_argument('--padchest-val-study-ids-path', type=str, default=None)
     parser.add_argument('--padchest-test-study-ids-path', type=str, default=None)
 
     parser.add_argument('--binary-loss-name', type=str, default='bce')
+    parser.add_argument('--focal-loss-weight', type=float, default=1)
+    parser.add_argument('--bce-loss-weight', type=float, default=1)
+    parser.add_argument('--wbce-loss-weight', type=float, default=1)
 
     # Auxiliary tasks arguments
     
     # medical tags
-    parser.add_argument('--classify-tags', dest='classify_tags', action='store_true')
-    parser.set_defaults(classify_tags=False)
-    parser.add_argument('--n-medical-tags', type=int, default=None,
-                        help='Number of medical tags (for tag prediction auxiliary task)')
+    parser.add_argument('--classify-tags', action='store_true', default=False)
+    parser.add_argument('--n-medical-tags', type=int, default=None, help='Number of medical tags (for tag prediction auxiliary task)')
     parser.add_argument('--iuxray-medical-tags-per-report-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-medical-tags-per-report-filename', type=str, default=None)
     # orientation
-    parser.add_argument('--classify-orientation', dest='classify_orientation', action='store_true')
-    parser.set_defaults(classify_orientation=False)
+    parser.add_argument('--classify-orientation', action='store_true', default=False)
     # gender
-    parser.add_argument('--classify-gender', dest='classify_gender', action='store_true')
-    parser.set_defaults(classify_gender=False)
+    parser.add_argument('--classify-gender', action='store_true', default=False)
     # chexpert labels
-    parser.add_argument('--classify-chexpert', dest='classify_chexpert', action='store_true')
-    parser.set_defaults(classify_chexpert=False)
+    parser.add_argument('--classify-chexpert', action='store_true', default=False)
     parser.add_argument('--iuxray-chexpert-labels-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-chexpert-labels-filename', type=str, default=None)
     # chest imagenome labels
-    parser.add_argument('--classify-chest-imagenome', dest='classify_chest_imagenome', action='store_true')
-    parser.set_defaults(classify_chest_imagenome=False)
-    parser.add_argument('--predict-bboxes-chest-imagenome', dest='predict_bboxes_chest_imagenome', action='store_true')
-    parser.set_defaults(predict_bboxes_chest_imagenome=False)
-    parser.add_argument('--predict-labels-and-bboxes-chest-imagenome', dest='predict_labels_and_bboxes_chest_imagenome', action='store_true')
-    parser.set_defaults(predict_labels_and_bboxes_chest_imagenome=False)
-    parser.add_argument('--clamp-bboxes-chest-imagenome', dest='clamp_bboxes_chest_imagenome', action='store_true')
-    parser.add_argument('--use-anaxnet-bbox-subset', dest='use_anaxnet_bbox_subset', action='store_true')
-    parser.set_defaults(use_anaxnet_bbox_subset=False)
+    parser.add_argument('--classify-chest-imagenome', action='store_true', default=False)
+    parser.add_argument('--predict-bboxes-chest-imagenome', action='store_true', default=False)
+    parser.add_argument('--predict-labels-and-bboxes-chest-imagenome', action='store_true', default=False)
+    parser.add_argument('--clamp-bboxes-chest-imagenome', action='store_true', default=False)
+    parser.add_argument('--use-anaxnet-bbox-subset', action='store_true', default=False)
     parser.add_argument('--chest-imagenome-bbox-loss-weight', type=float, default=1.0)
+    parser.add_argument('--pass-pred-bbox-coords-as-input', action='store_true', default=False)
+    parser.add_argument('--use-gt-bboxes-as-predictions', action='store_true', default=False)
+
     # question classification
-    parser.add_argument('--classify-questions', dest='classify_questions', action='store_true')
-    parser.set_defaults(classify_questions=False)
+    parser.add_argument('--classify-questions', action='store_true', default=False)
     parser.add_argument('--n-mined-questions', type=int, default=None)
     parser.add_argument('--iuxray-question-labels-filename', type=str, default=None)
     parser.add_argument('--mimiccxr-question-labels-filename', type=str, default=None)
 
-    parser.add_argument('--merge-findings', dest='merge_findings', action='store_true')
-    parser.set_defaults(merge_findings=False)
+    parser.add_argument('--merge-findings', action='store_true', default=False)
     
     return parser.parse_args(args=args)
 
@@ -648,11 +623,11 @@ def train_model(
         attach_dataset_aware_chest_imagenome_labels_auc(validator_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, _mim_datasets)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC)        
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
 
     if predict_bboxes_chest_imagenome and not use_detectron2:
         attach_dataset_aware_chest_imagenome_bbox_mae(trainer_engine, _mim_datasets)
@@ -857,6 +832,7 @@ def train_from_scratch(
     detectron2_model_yaml,
     roi_heads_batch_size_per_image,
     rpn_batch_size_per_image,
+    roi_align_output_size,
     # Optimizer args
     optimizer_name,
     lr,
@@ -905,6 +881,9 @@ def train_from_scratch(
     padchest_training_data_mode,
     padchest_use_validation,
     binary_loss_name,
+    focal_loss_weight,
+    bce_loss_weight,
+    wbce_loss_weight,
     use_amp,
     iters_to_accumulate,
     # Variable traning args
@@ -927,6 +906,8 @@ def train_from_scratch(
     classify_chest_imagenome,
     predict_bboxes_chest_imagenome,
     predict_labels_and_bboxes_chest_imagenome,
+    pass_pred_bbox_coords_as_input,
+    use_gt_bboxes_as_predictions,
     clamp_bboxes_chest_imagenome,
     chest_imagenome_bbox_loss_weight,
     use_anaxnet_bbox_subset,
@@ -937,7 +918,7 @@ def train_from_scratch(
     save,
     debug = False,
 ):
-    print_blue('----- Training model from scratch ------')
+    print_blue('----- Training model from scratch ------', bold=True)
 
     assert train_mimiccxr or train_iuxray or train_chexpert or\
            train_cxr14 or train_vinbig or train_padchest, 'No dataset selected for training'
@@ -954,7 +935,8 @@ def train_from_scratch(
         RawImageEncoding.RESNET__TORCHXRAYVISION,
         RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
     )
-    use_bbox_aware_transform = predict_bboxes_chest_imagenome and img_aug_mode is not None
+    use_bbox_aware_transform = (predict_bboxes_chest_imagenome or pass_pred_bbox_coords_as_input)\
+                                and img_aug_mode is not None
     use_detectron2 = raw_image_encoding == RawImageEncoding.DETECTRON2
     
     if use_clip or use_huggingface_vitmodel:
@@ -995,6 +977,7 @@ def train_from_scratch(
         num_regions=num_regions,
         roi_heads_batch_size_per_image=roi_heads_batch_size_per_image,
         rpn_batch_size_per_image=rpn_batch_size_per_image,
+        roi_align_output_size=roi_align_output_size,
         # Aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
@@ -1101,6 +1084,7 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
     )
     collate_batch_fn_kwargs = {}
     if train_mimiccxr:
@@ -1151,6 +1135,8 @@ def train_from_scratch(
             data_augmentation_enabled=img_aug_mode is not None,
             use_detectron2=use_detectron2,
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
+            pass_pred_bbox_coords_to_model=pass_pred_bbox_coords_as_input,
+            use_gt_bboxes_as_pred=use_gt_bboxes_as_predictions,
         )
         if merge_findings:
             mimiccxr_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1221,7 +1207,11 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
         binary_loss_name=binary_loss_name,
+        focal_loss_weight=focal_loss_weight,
+        bce_loss_weight=bce_loss_weight,
+        wbce_loss_weight=wbce_loss_weight,
         include_image=include_image,
         include_visual_features=include_visual_features,        
         use_amp=use_amp,
@@ -1246,6 +1236,7 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
         include_image=include_image,
         include_visual_features=include_visual_features,        
         training=False,
@@ -1334,7 +1325,7 @@ def resume_training(
     debug = False,
     **unused_kwargs,
 ):
-    print_blue('----- Resuming training ------')
+    print_blue('----- Resuming training ------', bold=True)
 
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)

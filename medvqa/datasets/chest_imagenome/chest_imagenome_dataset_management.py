@@ -178,31 +178,34 @@ def load_nongold_dicom_ids():
     save_to_pickle(dicom_ids, cache_path)
     return dicom_ids
 
-def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False, use_anaxnet_bbox_subset=False):
+def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False, use_anaxnet_bbox_subset=False,
+                                                      flatten=False, set_missing_bboxes_to_full_image=True):
     if flipped:
         bboxes = load_chest_imagenome_horizontally_flipped_silver_bboxes()
     else:
         bboxes = load_chest_imagenome_silver_bboxes()
-    bbox_coords = np.empty((len(bboxes), 4 * CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
+    bbox_coords = np.empty((len(bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES, 4), dtype=float)
     bbox_presence = np.empty((len(bboxes), CHEST_IMAGENOME_NUM_BBOX_CLASSES), dtype=float)
     did2idx = {did: i for i, did in enumerate(bboxes.keys())}
     idxs = np.array([did2idx[did] for did in dicom_ids_list], dtype=int)
     for did in bboxes.keys():
         idx = did2idx[did]
         bbox = bboxes[did]
-        bbox_coords[idx] = bbox['coords']
+        bbox_coords[idx] = bbox['coords'].reshape(-1, 4)
         bbox_presence[idx] = bbox['presence']
     if clamp:
         bbox_coords.clip(0, 1, out=bbox_coords) # Clip to [0, 1] in-place
     if use_anaxnet_bbox_subset:
         anaxnet_bbox_indices = get_anaxnet_bbox_sorted_indices()
         print(f'  Using {len(anaxnet_bbox_indices)} of {CHEST_IMAGENOME_NUM_BBOX_CLASSES} bboxes (from AnaXNET paper)')
-        bbox_coords = bbox_coords.reshape(-1, CHEST_IMAGENOME_NUM_BBOX_CLASSES, 4) # (N, 36 * 4) -> (N, 36, 4)
         bbox_coords = bbox_coords[:, anaxnet_bbox_indices] # (N, 36, 4) -> (N, 18, 4)
-        bbox_coords = bbox_coords.reshape(-1, 4 * len(anaxnet_bbox_indices)) # (N, 18, 4) -> (N, 18 * 4)
         bbox_presence = bbox_presence[:, anaxnet_bbox_indices] # (N, 36) -> (N, 18)
-        assert bbox_coords.shape == (len(bboxes), 4 * len(anaxnet_bbox_indices))
+        assert bbox_coords.shape == (len(bboxes), len(anaxnet_bbox_indices), 4)
         assert bbox_presence.shape == (len(bboxes), len(anaxnet_bbox_indices))
+    if set_missing_bboxes_to_full_image:
+        bbox_coords[bbox_presence==0, :] = [0, 0, 1, 1]
+    if flatten:
+        bbox_coords = bbox_coords.reshape(len(bboxes), -1)
     return idxs, bbox_coords, bbox_presence
 
 def load_chest_imagenome_dicom_ids(decent_images_only=False, avg_coef=0.4, std_coef=0.5):
@@ -634,6 +637,7 @@ def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, fi
     bboxes_dict = load_chest_imagenome_silver_bboxes()
     bbox = bboxes_dict[dicom_id]
     gt_coords = bbox['coords']
+    gt_coords = np.clip(gt_coords, 0, 1)
     gt_presence = bbox['presence']
     for i in range(len(gt_presence)):
         if gt_presence[i] == 1:

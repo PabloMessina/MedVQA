@@ -195,7 +195,7 @@ def get_vqa_collate_batch_fn(
         include_image=True, include_visual_features=False, include_answer=True, use_visual_module_only=False,
         classify_tags=False, n_tags=None, classify_orientation=False, classify_gender=False,
         classify_chexpert=False, classify_questions=False, classify_chest_imagenome=False,
-        predict_bboxes_chest_imagenome=False,
+        predict_bboxes_chest_imagenome=False, pass_pred_bbox_coords_as_input=False,
     ):
 
     if classify_tags:
@@ -246,14 +246,10 @@ def get_vqa_collate_batch_fn(
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([batch[i]['chest_imagenome'] for i in indexes])
             if predict_bboxes_chest_imagenome:
-                try:
-                    batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
-                    batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([batch[i]['chest_imagenome_bbox_presence'] for i in indexes])
-                except ValueError:
-                    for i in range(len(batch)):
-                        print(f'batch[{i}]["chest_imagenome_bbox_coords"].shape={batch[i]["chest_imagenome_bbox_coords"].shape}')
-                        print(f'batch[{i}]["chest_imagenome_bbox_presence"].shape={batch[i]["chest_imagenome_bbox_presence"].shape}')
-                    raise
+                batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
+                batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([batch[i]['chest_imagenome_bbox_presence'] for i in indexes])
+            if pass_pred_bbox_coords_as_input:
+                batch_dict['pred_bbox_coords'] = torch.tensor([batch[i]['pred_bbox_coords'] for i in indexes])
             
             if not use_visual_module_only:
                 if verbose_question:

@@ -424,6 +424,7 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
     evaluator = get_engine(model=model, classify_tags=False, classify_orientation=False, classify_questions=False,
                             classify_gender=False, predict_bboxes_chest_imagenome=False, 
                             classify_chexpert=classify_chexpert, classify_chest_imagenome=classify_chest_imagenome,
+                            pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs['pass_pred_bbox_coords_to_model'],
                             device=device, use_amp=use_amp, training=False)
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)
@@ -522,6 +523,8 @@ def _prepare_data_for_ensemble(dicom_id_2_probs_list, label_names_list, dicom_id
         gt_labels = gt_labels[gt_label_idxs]
         gt[i, :] = gt_labels
     # Return
+    print(f'probs_matrix.shape: {probs_matrix.shape}')
+    print(f'gt.shape: {gt.shape}')
     return probs_matrix, gt, label_names
     
 def calibrate_weights_and_thresholds_for_ensemble(
@@ -536,7 +539,7 @@ def calibrate_weights_and_thresholds_for_ensemble(
     mloes = MultilabelOptimalEnsembleSearcher(probs=probs_matrix, gt=gt)
     mloes.try_basic_weight_heuristics()
     score = mloes.evaluate_best_predictions()
-    mloes.sample_weights(n_tries=100)
+    mloes.sample_weights(n_tries=50)
     score = mloes.evaluate_best_predictions()
     for _ in range(max_num_runs):
         mloes.sample_weights_from_previous_ones(n_tries=50, noise_coef=0.1)

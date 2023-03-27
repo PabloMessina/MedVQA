@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -17,6 +18,7 @@ from medvqa.models.vision.bbox_regression import (
     BoundingBoxRegressor_v2,
     BoundingBoxRegressor_v3,
     BoundingBoxRegressorAndMultiLabelClassifier_v4,
+    BoundingBoxRegressorAndMultiLabelClassifier_v5,
 )
 from medvqa.utils.constants import (
     CHEXPERT_LABELS,
@@ -81,6 +83,7 @@ class MultiPurposeVisualModule(nn.Module):
                 detectron2_model_yaml=None,
                 roi_heads_batch_size_per_image=None,
                 rpn_batch_size_per_image=None,
+                roi_align_output_size=None,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -157,6 +160,12 @@ class MultiPurposeVisualModule(nn.Module):
         self.num_regions = num_regions
         self.roi_heads_batch_size_per_image = roi_heads_batch_size_per_image
         self.rpn_batch_size_per_image = rpn_batch_size_per_image
+        self.roi_align_output_size = roi_align_output_size
+
+        # Check that num_regions is a square number
+        if self.num_regions is not None:
+            assert int(np.sqrt(self.num_regions)) ** 2 == self.num_regions
+            self.num_regions_sqrt = int(np.sqrt(self.num_regions))
         
         if raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
             assert huggingface_model_name is not None
@@ -340,7 +349,6 @@ class MultiPurposeVisualModule(nn.Module):
         if self.predict_labels_and_bboxes_chest_imagenome:
             # We predict both labels and bboxes for Chest ImaGenome using a combined approach
             assert self.classify_chest_imagenome
-            assert self.predict_bboxes_chest_imagenome
             assert not self.use_anaxnet_bbox_subset # Not supported yet for this combined approach
             assert self.chest_imagenome_anatomy_to_labels is not None
             assert self.chest_imagenome_anatomy_group_to_labels is not None
@@ -348,18 +356,33 @@ class MultiPurposeVisualModule(nn.Module):
             assert self.n_chest_imagenome_bboxes is not None
             print(f'    Initializing Chest ImaGenome classification and bounding box regression'
                   f' tasks (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
-            self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v4(
-                local_feat_dim=self.local_feat_size,
-                global_feat_dim=self.global_feat_size,
-                hidden_dim=self.chest_imagenome_bbox_hidden_size,
-                num_bboxes=self.n_chest_imagenome_bboxes,
-                num_bboxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-                num_regions=self.num_regions,
-                train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
-                bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
-                bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,                
-            )
-            
+            if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
+                self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v4(
+                    local_feat_dim=self.local_feat_size,
+                    global_feat_dim=self.global_feat_size,
+                    hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                    num_bboxes=self.n_chest_imagenome_bboxes,
+                    num_bboxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                    num_regions=self.num_regions,
+                    train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
+                    bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                    bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                )
+            elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
+                assert self.roi_align_output_size is not None
+                self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v5(
+                    local_feat_dim=self.local_feat_size,                    
+                    input_size=self.num_regions_sqrt,
+                    roi_align_output_size=self.roi_align_output_size,
+                    roi_align_spatial_scale=self.num_regions_sqrt, # [0, 1] -> [0, num_regions_sqrt]
+                    hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                    num_boxes=self.n_chest_imagenome_bboxes,
+                    num_boxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                    bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                    bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                )
+            else:
+                raise NotImplementedError(f'Unsupported Chest ImaGenome bbox regressor version: {self.chest_imagenome_bbox_regressor_version}')
         else:
             if self.classify_chest_imagenome:
                 print(f'    Initializing Chest ImaGenome classification task (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
@@ -448,6 +471,10 @@ class MultiPurposeVisualModule(nn.Module):
         padchest_forward=False,
         detectron2_forward=False,
         detectron2_input=None,
+        pred_bbox_coords=None,
+        refine_bbox_coords=False,
+        return_local_features=False,
+        return_global_features=False,
         **unused_kwargs,
     ):
 
@@ -458,81 +485,112 @@ class MultiPurposeVisualModule(nn.Module):
 
         # General forward pass
         assert (raw_images is not None) or (visual_features is not None)
-        local_feat = None
-        global_list = []        
+
+        permute_and_flatten_local_feat = False
+        compute_global_features = False
+
+        if return_global_features:
+            compute_global_features = True
+        if return_local_features:
+            permute_and_flatten_local_feat = True
+
+        if self.predict_labels_and_bboxes_chest_imagenome:
+            if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
+                compute_global_features = True
+                permute_and_flatten_local_feat = True
+
+        if compute_global_features:
+            global_list = []
         
         if raw_images is not None:
 
             if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
                 # compute local features
-                local_feat = self.raw_image_encoder(raw_images)
+                local_feat_NxCxHxW = self.raw_image_encoder(raw_images)
                 batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                feat_size = local_feat_NxCxHxW.size(1)
+                if permute_and_flatten_local_feat:
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 # compute global features
-                global_avg_pool = local_feat.mean(1)
-                global_max_pool = local_feat.max(1)[0]
-                global_list.append(global_avg_pool)
-                global_list.append(global_max_pool)
+                if compute_global_features:
+                    aux = local_feat_NxCxHxW.view(batch_size, feat_size, -1)
+                    global_avg_pool = aux.mean(2)
+                    global_max_pool = aux.max(2)[0]
+                    global_list.append(global_avg_pool)
+                    global_list.append(global_max_pool)
 
             elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
                 # compute local features
-                local_feat = self.raw_image_encoder.features(raw_images)
+                local_feat_NxCxHxW = self.raw_image_encoder.features(raw_images)
                 batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                feat_size = local_feat_NxCxHxW.size(1)
+                if permute_and_flatten_local_feat:
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 # compute global features
-                global_avg_pool = local_feat.mean(1)
-                global_max_pool = local_feat.max(1)[0]
-                global_list.append(global_avg_pool)
-                global_list.append(global_max_pool)
+                if compute_global_features:
+                    aux = local_feat_NxCxHxW.view(batch_size, feat_size, -1)
+                    global_avg_pool = aux.mean(2)
+                    global_max_pool = aux.max(2)[0]
+                    global_list.append(global_avg_pool)
+                    global_list.append(global_max_pool)
             
             elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
                 # compute local features
-                local_feat = self.raw_image_encoder.encode(raw_images)
+                local_feat_NxCxHxW = self.raw_image_encoder.encode(raw_images)
                 batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                feat_size = local_feat_NxCxHxW.size(1)
+                if permute_and_flatten_local_feat:
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 # compute global features
-                global_avg_pool = local_feat.mean(1)
-                global_max_pool = local_feat.max(1)[0]
-                global_list.append(global_avg_pool)
-                global_list.append(global_max_pool)
+                if compute_global_features:
+                    aux = local_feat_NxCxHxW.view(batch_size, feat_size, -1)
+                    global_avg_pool = aux.mean(2)
+                    global_max_pool = aux.max(2)[0]
+                    global_list.append(global_avg_pool)
+                    global_list.append(global_max_pool)
 
             elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
-                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
+                global_feat, local_feat_NxCxHxW = self.raw_image_encoder(raw_images, return_local_features=True)
                 batch_size = raw_images.size(0)
-                feat_size = local_feat.size(1)
-                local_feat = local_feat.permute(0,2,3,1).view(batch_size, -1, feat_size)                
-                global_list.append(global_feat)
+                feat_size = local_feat_NxCxHxW.size(1)
+                if permute_and_flatten_local_feat:
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
+                if compute_global_features:
+                    global_list.append(global_feat)
             
             elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
-                global_feat, local_feat = self.raw_image_encoder(raw_images, return_local_features=True)
-                global_list.append(global_feat)
+                global_feat, local_feat_NxRxC = self.raw_image_encoder(raw_images, return_local_features=True)
+                if compute_global_features:
+                    global_list.append(global_feat)
             
             elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
                     self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE or \
                     self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
                     self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
                 tmp = self.raw_image_encoder(raw_images)
-                global_feat, local_feat = tmp.pooler_output, tmp.last_hidden_state
-                global_list.append(global_feat)
+                global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state
+                if compute_global_features:
+                    global_list.append(global_feat)
             
             else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
 
         if visual_features is not None:
-            global_vf  = self.mlp_vf_encoder(visual_features)
-            global_list.append(global_vf)
+            if compute_global_features:
+                global_vf  = self.mlp_vf_encoder(visual_features)
+                global_list.append(global_vf)
 
-        if len(global_list) > 1:
-            global_feat = torch.cat(global_list, 1)
-        else:
-            global_feat = global_list[0]
+        if compute_global_features:
+            if len(global_list) > 1:
+                global_feat = torch.cat(global_list, 1)
+            else:
+                global_feat = global_list[0]
 
-        output = {
-            'global_feat': global_feat,
-            'local_feat': local_feat,
-        }
+        output = {}
+
+        if return_global_features:
+            output['global_feat'] = global_feat
+        if return_local_features:
+            output['local_feat'] = local_feat_NxRxC
 
         if self.merge_findings:
             output['pred_findings'] = self.W_findings(global_feat)
@@ -591,17 +649,32 @@ class MultiPurposeVisualModule(nn.Module):
                 output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
             if self.predict_labels_and_bboxes_chest_imagenome:
-                pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(local_feat, global_feat)
-                output['pred_chest_imagenome'] = mlc_scores
-                output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
-                output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
+                    pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC, global_feat)
+                    output['pred_chest_imagenome'] = mlc_scores
+                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
+                    assert pred_bbox_coords is not None
+                    if refine_bbox_coords:
+                        pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
+                            local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+                        output['pred_chest_imagenome'] = mlc_scores
+                        output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                        output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                        output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                    else:
+                        mlc_scores  = self.bbox_regressor_and_classifier(
+                            local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+                        output['pred_chest_imagenome'] = mlc_scores
+                        output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
             else:
                 if self.classify_chest_imagenome:
                     output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
                     output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                 if self.predict_bboxes_chest_imagenome:
-                    pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat, global_feat)
+                    pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
                     output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                     output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
 

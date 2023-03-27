@@ -5,7 +5,11 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from detectron2.structures import BoxMode
 from detectron2.data.detection_utils import annotations_to_instances
-from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES, CHEST_IMAGENOME_NUM_BBOX_CLASSES, get_anaxnet_bbox_sorted_indices
+from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    get_anaxnet_bbox_sorted_indices,
+)
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_labels_per_anatomy_and_anatomy_group,
     load_chest_imagenome_dicom_ids,
@@ -17,7 +21,11 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_nongold_dicom_ids,
     load_postprocessed_label_names,
 )
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
+from medvqa.datasets.dataloading_utils import (
+    INFINITE_DATASET_LENGTH,
+    BatchedCompositeInfiniteDataset,
+    CompositeInfiniteDataset,
+)
 from medvqa.datasets.image_processing import image_size_cache
 from medvqa.datasets.utils import adapt_label_matrix_as_merged_findings
 from medvqa.datasets.visual_module import (
@@ -43,44 +51,55 @@ from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
 
+_DEBUG = False
+
 class _BalancedSamplingMode:
-    BALANCED_CHEST_IMAGENOME_LABELS = 'balanced_chest_imagenome_labels'
+    BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS = 'balanced_chest_imagenome_global_labels'
+    BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE = 'balanced_chest_imagenome_global_labels_batchwise'
 
 class _AlbumentationAdapter:
 
     def __init__(self, num_bbox_classes):
         self.num_bbox_classes = num_bbox_classes
     
-    def encode(self, bbox_coords, bbox_presence):
+    def encode(self, bbox_coords, bbox_presence=None):
+        assert len(bbox_coords.shape) == 2
         albumentation_bbox_coords = []
-        albumentation_category_ids = []
-        for i in range(len(bbox_presence)):
-            if bbox_presence[i] == 1:
-                x_min = bbox_coords[i * 4 + 0]
-                y_min = bbox_coords[i * 4 + 1]
-                x_max = bbox_coords[i * 4 + 2]
-                y_max = bbox_coords[i * 4 + 3]
+        for i in range(bbox_coords.shape[0]):
+            if bbox_presence is None or bbox_presence[i] == 1:
+                x_min = bbox_coords[i, 0]
+                y_min = bbox_coords[i, 1]
+                x_max = bbox_coords[i, 2]
+                y_max = bbox_coords[i, 3]
                 assert x_min <= x_max
                 assert y_min <= y_max
                 if x_min < x_max and y_min < y_max: # ignore invalid bboxes
                     albumentation_bbox_coords.append([
-                        bbox_coords[i * 4 + 0],
-                        bbox_coords[i * 4 + 1],
-                        bbox_coords[i * 4 + 2],
-                        bbox_coords[i * 4 + 3],
+                        bbox_coords[i, 0],
+                        bbox_coords[i, 1],
+                        bbox_coords[i, 2],
+                        bbox_coords[i, 3],
+                        i, # category id
                     ])
-                    albumentation_category_ids.append(i)
-        return albumentation_bbox_coords, albumentation_category_ids
+        return albumentation_bbox_coords
     
-    def decode(self, albumentation_bbox_coords, albumentation_category_ids):
-        bbox_coords = np.zeros(self.num_bbox_classes * 4, dtype=np.float32)
-        bbox_presence = np.zeros(self.num_bbox_classes, dtype=np.float32)
-        for i in range(len(albumentation_category_ids)):
-            cid = albumentation_category_ids[i]
-            bbox_presence[cid] = 1
-            for j in range(4):
-                bbox_coords[cid * 4 + j] = albumentation_bbox_coords[i][j]
-        return bbox_coords, bbox_presence
+    def decode(self, albumentation_bbox_coords, only_boxes=False):
+        bbox_coords = np.zeros((self.num_bbox_classes, 4), dtype=np.float32)
+        # set all bbox coordinates to [0, 0, 1, 1] by default
+        bbox_coords[:, 2] = 1
+        bbox_coords[:, 3] = 1        
+        if not only_boxes:
+            bbox_presence = np.zeros(self.num_bbox_classes, dtype=np.float32)
+        for bbox in albumentation_bbox_coords:
+            cls = bbox[4]
+            for i in range(4):
+                bbox_coords[cls, i] = bbox[i]
+            if not only_boxes:
+                bbox_presence[cls] = 1
+        if only_boxes:
+            return bbox_coords
+        else:
+            return bbox_coords, bbox_presence
 
 class MIMICCXR_Visual_Dataset(Dataset):
     def __init__(self, indices, report_ids,
@@ -108,11 +127,15 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 # aux task: chest imagenome bboxes
                 predict_bboxes_chest_imagenome=False,
                 dicom_idxs=None,
-                bbox_coords=None,
-                bbox_presence=None,
-                flipped_bbox_coords=None, # for data augmentation
-                flipped_bbox_presence=None, # for data augmentation
-                use_anaxnet_bbox_subset=False,
+                gt_bbox_coords=None,
+                gt_bbox_presence=None,
+                flipped_gt_bbox_coords=None, # for data augmentation
+                flipped_gt_bbox_presence=None, # for data augmentation
+                use_anaxnet_bbox_subset=False,    
+                pass_pred_bbox_coords_to_model=False,
+                pred_bbox_coords=None,
+                flipped_pred_bbox_coords=None, # for data augmentation
+                horizontal_flip=False,
                 # precomputed visual features
                 use_precomputed_visual_features=False,
                 precomputed_visual_features=None,
@@ -136,22 +159,39 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.chest_imagenome_labels = chest_imagenome_labels
         self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
         self.dicom_idxs = dicom_idxs
-        self.bbox_coords = bbox_coords
-        self.bbox_presence = bbox_presence
+        self.gt_bbox_coords = gt_bbox_coords
+        self.gt_bbox_presence = gt_bbox_presence
+        self.pass_pred_bbox_coords_to_model = pass_pred_bbox_coords_to_model
+        self.pred_bbox_coords = pred_bbox_coords
         self.use_precomputed_visual_features = use_precomputed_visual_features
         self.precomputed_visual_features = precomputed_visual_features
         self.idx2visfeatidx = idx2visfeatidx
+        self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
+        self.horizontal_flip = horizontal_flip
+        self.flipped_gt_bbox_coords = flipped_gt_bbox_coords
+        self.flipped_gt_bbox_presence = flipped_gt_bbox_presence
+        self.flipped_pred_bbox_coords = flipped_pred_bbox_coords
+
+        if self.pass_pred_bbox_coords_to_model:
+            assert self.pred_bbox_coords is not None
+
         if self.predict_bboxes_chest_imagenome:
+            assert self.gt_bbox_coords is not None
+            assert self.gt_bbox_presence is not None
+
+        if self.predict_bboxes_chest_imagenome or self.pass_pred_bbox_coords_to_model:
             if self.data_augmentation_enabled:
-                assert flipped_bbox_coords is not None
-                assert flipped_bbox_presence is not None
+                if horizontal_flip:
+                    if self.predict_bboxes_chest_imagenome:
+                        assert flipped_gt_bbox_coords is not None
+                        assert flipped_gt_bbox_presence is not None
+                    if self.pass_pred_bbox_coords_to_model:
+                        assert flipped_pred_bbox_coords is not None
                 if use_anaxnet_bbox_subset:
                     num_bbox_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
                 else:
                     num_bbox_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
                 self.albumentation_adapter = _AlbumentationAdapter(num_bbox_classes)
-                self.flipped_bbox_coords = flipped_bbox_coords
-                self.flipped_bbox_presence = flipped_bbox_presence
         if shuffle:
             random.shuffle(self.indices) # shuffle in place            
         self.infinite = infinite
@@ -170,24 +210,98 @@ class MIMICCXR_Visual_Dataset(Dataset):
         rid = self.report_ids[idx]
         output = { 'idx': idx }
         if self.include_image:
+            global _DEBUG
             image_path = self.image_paths[idx]
-            if self.predict_bboxes_chest_imagenome: # handle transform differently for chest imagenome bboxes
+            # handle transform differently for chest imagenome bboxes
+            if self.predict_bboxes_chest_imagenome and not self.pass_pred_bbox_coords_to_model: 
                 dicom_idx = self.dicom_idxs[idx]
-                bbox_coords = self.bbox_coords[dicom_idx]
-                bbox_presence = self.bbox_presence[dicom_idx]                
+                gt_bbox_coords = self.gt_bbox_coords[dicom_idx]
+                gt_bbox_presence = self.gt_bbox_presence[dicom_idx]
                 if self.data_augmentation_enabled: # data augmentation with albumentations
-                    flipped_bbox_coords = self.flipped_bbox_coords[dicom_idx]
-                    flipped_bbox_presence = self.flipped_bbox_presence[dicom_idx]
-                    image, bbox_coords, bbox_presence = self.image_transform(
-                        image_path, bbox_coords, bbox_presence,
-                        flipped_bbox_coords, flipped_bbox_presence, self.albumentation_adapter)
+                    if self.horizontal_flip:
+                        image, gt_bbox_coords, gt_bbox_presence = self.image_transform(
+                            image_path=image_path,
+                            bboxes=gt_bbox_coords,
+                            presence=gt_bbox_presence,
+                            albumentation_adapter=self.albumentation_adapter,
+                            flipped_bboxes=self.flipped_gt_bbox_coords[dicom_idx],
+                            flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
+                        )
+                    else:
+                        image, gt_bbox_coords, gt_bbox_presence = self.image_transform(
+                            image_path=image_path,
+                            bboxes=gt_bbox_coords,
+                            presence=gt_bbox_presence,
+                            albumentation_adapter=self.albumentation_adapter,
+                        )
                 else: # no data augmentation
                     image = self.image_transform(image_path)
-                output['chest_imagenome_bbox_coords'] = bbox_coords
-                output['chest_imagenome_bbox_presence'] = bbox_presence
+                assert len(gt_bbox_coords.shape) == 2
+                output['chest_imagenome_bbox_coords'] = gt_bbox_coords.reshape(-1)
+                output['chest_imagenome_bbox_presence'] = gt_bbox_presence
+                if _DEBUG:
+                    print('Case 1: A and not B')
+            elif not self.predict_bboxes_chest_imagenome and self.pass_pred_bbox_coords_to_model:
+                dicom_idx = self.dicom_idxs[idx]
+                pred_bbox_coords = self.pred_bbox_coords[dicom_idx]
+                if self.data_augmentation_enabled:
+                    if self.horizontal_flip:
+                        image, pred_bbox_coords, _ = self.image_transform(
+                            image_path=image_path,
+                            bboxes=pred_bbox_coords,
+                            albumentation_adapter=self.albumentation_adapter,
+                            flipped_bboxes=self.flipped_pred_bbox_coords[dicom_idx],
+                        )
+                    else:
+                        image, pred_bbox_coords, _ = self.image_transform(
+                            image_path=image_path,
+                            bboxes=pred_bbox_coords,
+                            albumentation_adapter=self.albumentation_adapter,
+                        )
+                else:
+                    image = self.image_transform(image_path)                
+                output['pred_bbox_coords'] = pred_bbox_coords
+                if _DEBUG:
+                    print('Case 2: not A and B')
+            elif self.predict_bboxes_chest_imagenome and self.pass_pred_bbox_coords_to_model:
+                dicom_idx = self.dicom_idxs[idx]
+                gt_bbox_coords = self.gt_bbox_coords[dicom_idx]
+                gt_bbox_presence = self.gt_bbox_presence[dicom_idx]
+                pred_bbox_coords = self.pred_bbox_coords[dicom_idx]
+                if self.data_augmentation_enabled:
+                    if self.horizontal_flip:
+                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = self.image_transform(
+                            image_path=image_path,
+                            bboxes=gt_bbox_coords,
+                            presence=gt_bbox_presence,
+                            albumentation_adapter=self.albumentation_adapter,
+                            flipped_bboxes=self.flipped_gt_bbox_coords[dicom_idx],
+                            flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
+                            pred_bboxes=pred_bbox_coords,
+                            flipped_pred_bboxes=self.flipped_pred_bbox_coords[dicom_idx],
+                        )
+                    else:
+                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = self.image_transform(
+                            image_path=image_path,
+                            bboxes=gt_bbox_coords,
+                            presence=gt_bbox_presence,
+                            albumentation_adapter=self.albumentation_adapter,
+                            pred_bboxes=pred_bbox_coords,
+                        )
+                else:
+                    image = self.image_transform(image_path)
+                assert len(gt_bbox_coords.shape) == 2
+                output['chest_imagenome_bbox_coords'] = gt_bbox_coords.reshape(-1)
+                output['chest_imagenome_bbox_presence'] = gt_bbox_presence
+                output['pred_bbox_coords'] = pred_bbox_coords
+                if _DEBUG:
+                    print('Case 3: A and B')
             else:
                 image = self.image_transform(image_path)
+                if _DEBUG:
+                    print('Case 4: not A and not B')
             output['i'] = image
+            _DEBUG = False
         if self.use_precomputed_visual_features:
             visfeat_idx = self.idx2visfeatidx[idx]
             visfeat = self.precomputed_visual_features[visfeat_idx]
@@ -215,6 +329,7 @@ class MIMICCXR_VisualModuleTrainer():
                 use_val_set_only=False,
                 test_image_transform=None,
                 data_augmentation_enabled=False,
+                horizontal_flip=False,
                 include_image=True,
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 view_mode=MIMICCXR_ViewModes.ANY_SINGLE,
@@ -241,8 +356,13 @@ class MIMICCXR_VisualModuleTrainer():
                 use_detectron2=False,
                 detectron2_cfg=None,
                 balanced_sampling_mode=None,
+                pass_pred_bbox_coords_to_model=False,
+                use_gt_bboxes_as_pred=False,
                 **unused_kwargs,
             ):
+        if len(unused_kwargs) > 0:
+            # Print warning in orange and bold
+            print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
         # Sanity checks
         assert sum([use_test_set, use_val_set_only, use_chest_imagenome_gold_set]) <= 1 # at most one of these can be true
         if use_test_set or use_chest_imagenome_gold_set:
@@ -354,6 +474,7 @@ class MIMICCXR_VisualModuleTrainer():
             self.val_image_transform = val_image_transform
             self.test_image_transform = test_image_transform
             self.data_augmentation_enabled = data_augmentation_enabled
+            self.horizontal_flip = horizontal_flip
             self.include_image = include_image
             self.batch_size = batch_size
             self.collate_batch_fn = collate_batch_fn
@@ -381,13 +502,12 @@ class MIMICCXR_VisualModuleTrainer():
 
 
             if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                chest_imagenome_nongold_dicom_ids = load_nongold_dicom_ids()
-                chest_imagenome_nongold_dicom_ids = set(chest_imagenome_nongold_dicom_ids)
+                chest_imagenome_nongold_dicom_ids = set(load_nongold_dicom_ids())
                 print(f'Loaded {len(chest_imagenome_nongold_dicom_ids)} non-gold DICOM IDs from Chest Imagenome')
                 if use_decent_images_only:
                     decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
                     allowed_train_val_dicom_ids = (decent_dicom_ids & chest_imagenome_nongold_dicom_ids)
-                    allowed_test_dicom_ids = decent_dicom_ids - chest_imagenome_nongold_dicom_ids
+                    allowed_test_dicom_ids = decent_dicom_ids
                 else:
                     allowed_train_val_dicom_ids = chest_imagenome_nongold_dicom_ids
                     allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
@@ -464,6 +584,10 @@ class MIMICCXR_VisualModuleTrainer():
             self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
             self.use_precomputed_visual_features = use_precomputed_visual_features
             self.use_merged_findings = use_merged_findings
+            self.pass_pred_bbox_coords_to_model = pass_pred_bbox_coords_to_model
+            self.use_gt_bboxes_as_pred = use_gt_bboxes_as_pred
+            if pass_pred_bbox_coords_to_model:
+                assert use_gt_bboxes_as_pred, 'Non-gt bboxes are not supported yet'
             
             if classify_tags:
                 print('Loading medical tags per report...')
@@ -498,30 +622,43 @@ class MIMICCXR_VisualModuleTrainer():
             else:
                 self.chest_imagenome_labels = None
             
-            if predict_bboxes_chest_imagenome:
+            if predict_bboxes_chest_imagenome or (pass_pred_bbox_coords_to_model and use_gt_bboxes_as_pred):
                 print('Loading Chest Imagenome bounding boxes...')
                 self.dicom_idxs, self.bbox_coords, self.bbox_presence =\
                     load_chest_imagenome_silver_bboxes_as_numpy_array(
                         self.dicom_ids, clamp_bboxes_chest_imagenome,
                         use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
-            else:
+                if horizontal_flip:
+                    assert data_augmentation_enabled
+                    print('Loading Chest Imagenome bounding boxes (flipped)...')
+                    _, self.flipped_bbox_coords, self.flipped_bbox_presence =\
+                        load_chest_imagenome_silver_bboxes_as_numpy_array(
+                            self.dicom_ids, clamp_bboxes_chest_imagenome, flipped=True,
+                            use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
+                else:
+                    self.flipped_bbox_coords = None
+                    self.flipped_bbox_presence = None
+                if pass_pred_bbox_coords_to_model and use_gt_bboxes_as_pred:
+                    self.pred_bbox_coords = self.bbox_coords
+                    if horizontal_flip:
+                        self.flipped_pred_bbox_coords = self.flipped_bbox_coords
+                    else:
+                        self.flipped_pred_bbox_coords = None
+                else:
+                    self.pred_bbox_coords = None
+                    self.flipped_pred_bbox_coords = None
+            else:                
                 self.dicom_idxs = None
                 self.bbox_coords = None
                 self.bbox_presence = None
-            if predict_bboxes_chest_imagenome and data_augmentation_enabled:
-                print('Loading Chest Imagenome bounding boxes (flipped)...')
-                _, self.flipped_bbox_coords, self.flipped_bbox_presence =\
-                    load_chest_imagenome_silver_bboxes_as_numpy_array(
-                        self.dicom_ids, clamp_bboxes_chest_imagenome, flipped=True,
-                        use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
-            else:
+                self.pred_bbox_coords = None
                 self.flipped_bbox_coords = None
                 self.flipped_bbox_presence = None
+                self.flipped_pred_bbox_coords = None            
 
             if predict_labels_and_bboxes_chest_imagenome:
                 assert chest_imagenome_label_names_filename is not None
                 assert classify_chest_imagenome
-                assert predict_bboxes_chest_imagenome
                 assert not use_anaxnet_bbox_subset # Not supported in this mode yet
                 # We need to rearrange the labeels to match the order in which the model will predict them
                 print('Reordering Chest Imagenome labels for combined label/bbox prediction...')
@@ -598,11 +735,15 @@ class MIMICCXR_VisualModuleTrainer():
             chest_imagenome_labels=self.chest_imagenome_labels,
             predict_bboxes_chest_imagenome=self.predict_bboxes_chest_imagenome,
             dicom_idxs=self.dicom_idxs,
-            bbox_coords=self.bbox_coords,
-            bbox_presence=self.bbox_presence,
-            flipped_bbox_coords=self.flipped_bbox_coords,
-            flipped_bbox_presence=self.flipped_bbox_presence,
+            gt_bbox_coords=self.bbox_coords,
+            gt_bbox_presence=self.bbox_presence,
+            flipped_gt_bbox_coords=self.flipped_bbox_coords,
+            flipped_gt_bbox_presence=self.flipped_bbox_presence,
             use_anaxnet_bbox_subset=self.use_anaxnet_bbox_subset,
+            pass_pred_bbox_coords_to_model=self.pass_pred_bbox_coords_to_model,
+            pred_bbox_coords=self.pred_bbox_coords,
+            flipped_pred_bbox_coords=self.flipped_pred_bbox_coords,
+            horizontal_flip=self.horizontal_flip,
             use_precomputed_visual_features=self.use_precomputed_visual_features,
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx=self.idx2visfeatidx,
@@ -610,12 +751,48 @@ class MIMICCXR_VisualModuleTrainer():
     
     def _create_dataset_and_dataloader(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False, balanced_sampling_mode=None):
         if balanced_sampling_mode is not None:
+            print(f'Balanced sampling mode: {balanced_sampling_mode}')
             datasets = []
-            if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_LABELS:
+            if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS:
                 assert self.classify_chest_imagenome
                 assert self.chest_imagenome_labels is not None
                 assert self.chest_imagenome_label_names is not None
-                anatomy2idxs = {}
+                global2idxs = {}
+                without_global = []
+                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
+                for i in tqdm(indices):
+                    rid = self.report_ids[i]
+                    labels = self.chest_imagenome_labels[rid]
+                    has_global = False
+                    for j, label in enumerate(labels):
+                        if label == 1:
+                            label_name = self.chest_imagenome_label_names[j]
+                            if len(label_name) == 2:
+                                global_name = label_name[-1]
+                                try:
+                                    global2idxs[global_name].append(i)
+                                except KeyError:
+                                    global2idxs[global_name] = [i]
+                                has_global = True
+                            elif len(label_name) == 3:
+                                pass
+                            else:
+                                raise ValueError('Unexpected label name: {}'.format(label_name))
+                    if not has_global:
+                        without_global.append(i)
+                for global_name, idxs in global2idxs.items():
+                    print(f'Global: {global_name}, # images: {len(idxs)}')
+                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    datasets.append(dataset)
+                print(f'# images without global: {len(without_global)}')
+                if len(without_global) > 0:
+                    dataset = self._create_dataset(without_global, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    datasets.append(dataset)
+                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
+            elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE:
+                assert self.classify_chest_imagenome
+                assert self.chest_imagenome_labels is not None
+                assert self.chest_imagenome_label_names is not None
                 global2idxs = {}
                 print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
                 for i in tqdm(indices):
@@ -624,29 +801,27 @@ class MIMICCXR_VisualModuleTrainer():
                     for j, label in enumerate(labels):
                         if label == 1:
                             label_name = self.chest_imagenome_label_names[j]
-                            if len(label_name) == 3:                                
-                                anatomy = label_name[0]
-                                try:
-                                    anatomy2idxs[anatomy].append(i)
-                                except KeyError:
-                                    anatomy2idxs[anatomy] = [i]
-                            elif len(label_name) == 2:
+                            if len(label_name) == 2:
                                 global_name = label_name[-1]
                                 try:
                                     global2idxs[global_name].append(i)
                                 except KeyError:
                                     global2idxs[global_name] = [i]
+                            elif len(label_name) == 3:
+                                pass
                             else:
                                 raise ValueError('Unexpected label name: {}'.format(label_name))
-                for anatomy, idxs in anatomy2idxs.items():
-                    print(f'Anatomy: {anatomy}, # images: {len(idxs)}')
-                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
                 for global_name, idxs in global2idxs.items():
-                    print(f'Global: {global_name}, # images: {len(idxs)}')
-                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
+                    idxs_set = set(idxs)
+                    other_idxs = [i for i in indices if i not in idxs_set]
+                    print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
+                    assert len(idxs) > 0
+                    assert len(other_idxs) > 0
+                    dataset_pos = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    dataset_neg = self._create_dataset(other_idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
+                    dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.7, 0.3])
+                    datasets.append(dataset_pos_neg)
+                dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.batch_size)
             else:
                 raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')
         else:

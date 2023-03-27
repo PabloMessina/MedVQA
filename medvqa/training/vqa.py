@@ -69,6 +69,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         chest_imagenome_bbox_coords_criterion=None,
         chest_imagenome_bbox_presence_criterion=None,
         chest_imagenome_bbox_loss_weight=1.0,
+        pass_pred_bbox_coords_as_input=False,
         # detectron2
         detectron2_includes_rpn=False,
         # batchwise learning rate updates
@@ -201,6 +202,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if predict_bboxes_chest_imagenome:
             chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
             chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
+        if pass_pred_bbox_coords_as_input:
+            predicted_bbox_coords = batch['pred_bbox_coords'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -221,6 +224,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 model_kwargs['mimiccxr_forward'] = True
             else:
                 model_kwargs['iuxray_forward'] = True
+            if pass_pred_bbox_coords_as_input:
+                model_kwargs['pred_bbox_coords'] = predicted_bbox_coords
+                model_kwargs['refine_bbox_coords'] = predict_bboxes_chest_imagenome
 
             if not use_visual_module_only:
                 model_kwargs['questions'] = questions
@@ -791,12 +797,16 @@ def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
 
 def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 classify_chexpert, classify_questions, classify_chest_imagenome,
-                predict_bboxes_chest_imagenome, device,
+                predict_bboxes_chest_imagenome, pass_pred_bbox_coords_as_input,
+                device,
                 tokenizer=None,
                 question_encoding=None,
                 answer_decoding=None,
                 iters_to_accumulate=1,
                 binary_loss_name='bce',
+                focal_loss_weight=None,
+                bce_loss_weight=None,
+                wbce_loss_weight=None,
                 include_image=True, include_visual_features=False,
                 shift_answer=False, include_answer=True,
                 beam_search_k=None, max_answer_length=None,
@@ -828,9 +838,23 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
         assert findings_remapper is not None
         assert n_findings is not None
     
+    if binary_loss_name == 'focal+bce+wbce-c':
+        assert focal_loss_weight is not None
+        assert bce_loss_weight is not None
+        assert wbce_loss_weight is not None
+        binary_loss_kwargs = {
+            'focal_weight': focal_loss_weight,
+            'bce_weight': bce_loss_weight,
+            'wbce_weight': wbce_loss_weight,
+        }
+        print('Using focal+bce+wbce-c loss')
+        print('binary_loss_kwargs:', binary_loss_kwargs)
+    else:
+        binary_loss_kwargs = {}
+    
     # Auxiliary tasks
     if training and classify_tags:
-        tags_criterion = get_binary_multilabel_loss(binary_loss_name)
+        tags_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         tags_criterion = None
     
@@ -842,7 +866,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
         mimiccxr_orientation_criterion = None
     
     if training and classify_questions:
-        question_criterion = get_binary_multilabel_loss(binary_loss_name)
+        question_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         question_criterion = None
 
@@ -855,39 +879,39 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
     if training and classify_chexpert:
         if use_merged_findings:
             chexpert_mask = _get_dataset_masks(CHEXPERT_DATASET_ID, findings_remapper, n_findings, device)
-            chexpert_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=chexpert_mask)
+            chexpert_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=chexpert_mask, **binary_loss_kwargs)
         else:
-            chexpert_criterion = get_binary_multilabel_loss(binary_loss_name)
+            chexpert_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         chexpert_criterion = None
 
     if training and use_cxr14_dataset:
         if use_merged_findings:
             cxr14_mask = _get_dataset_masks(CXR14_DATASET_ID, findings_remapper, n_findings, device)
-            cxr14_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=cxr14_mask)
+            cxr14_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=cxr14_mask, **binary_loss_kwargs)
         else:
-            cxr14_criterion = get_binary_multilabel_loss(binary_loss_name)
+            cxr14_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         cxr14_criterion = None
     
     if training and use_vinbig_dataset:
         if use_merged_findings:
             vinbig_mask = _get_dataset_masks(VINBIG_DATASET_ID, findings_remapper, n_findings, device)
-            vinbig_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=vinbig_mask)
+            vinbig_criterion = get_binary_multilabel_loss(binary_loss_name, classes_mask=vinbig_mask, **binary_loss_kwargs)
         else:
-            vinbig_criterion = get_binary_multilabel_loss(binary_loss_name)
+            vinbig_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         vinbig_criterion = None
 
     if training and use_padchest_dataset:
-        padchest_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name)
+        padchest_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
         padchest_singlelabel_criterion = nn.CrossEntropyLoss()
     else:
         padchest_multilabel_criterion = None
         padchest_singlelabel_criterion = None
 
     if training and classify_chest_imagenome:
-        chest_imagenome_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name)
+        chest_imagenome_multilabel_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         chest_imagenome_multilabel_criterion = None
 
@@ -944,6 +968,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             chest_imagenome_bbox_coords_criterion=chest_imagenome_bbox_coords_criterion,
                             chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
                             chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
+                            pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
                             # detectron2
                             detectron2_includes_rpn=detectron2_includes_rpn,
                             # batchwise learning rate updates

@@ -18,13 +18,19 @@ def print_bold(*args):
     print(*[colored(x, attrs=['bold']) for x in args])
 
 class CountPrinter:
-    def __init__(self, color='blue'):
+    def __init__(self, color='blue', bold=True):
         self.count = 1
         self.color = color
+        self.bold = bold
     def __call__(self, *args):
-        print(colored('-' * 50, self.color))
-        print(colored(f'{self.count}) ', self.color), end='')
-        print(*[colored(x, self.color) for x in args])
+        if self.bold:
+            print(colored('-' * 50, self.color, attrs=['bold']))
+            print(colored(f'{self.count}) ', self.color, attrs=['bold']), end='')
+            print(*[colored(x, self.color, attrs=['bold']) for x in args])
+        else:
+            print(colored('-' * 50, self.color))
+            print(colored(f'{self.count}) ', self.color), end='')
+            print(*[colored(x, self.color) for x in args])
         self.count += 1
 
 class MetricsLogger:

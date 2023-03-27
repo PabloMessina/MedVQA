@@ -142,22 +142,30 @@ def get_image_transform(
         img_bbox_aug_transfoms = ImageBboxAugmentationTransforms(image_size)
         if augmentation_mode == 'random-color':
             aug_transforms = img_bbox_aug_transfoms.get_color_transforms_list()
+            aug_transforms_2 = img_bbox_aug_transfoms.get_color_transforms_list(additional_bboxes=['bboxes2'])
         elif augmentation_mode == 'random-spatial':
             aug_transforms = img_bbox_aug_transfoms.get_spatial_transforms_list()
+            aug_transforms_2 = img_bbox_aug_transfoms.get_spatial_transforms_list(additional_bboxes=['bboxes2'])
         elif augmentation_mode == 'random-color-and-spatial':
             aug_transforms = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list()
+            aug_transforms_2 = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list(additional_bboxes=['bboxes2'])
         else:
             raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
 
         flip_image = 'spatial' in augmentation_mode and horizontal_flip_prob > 0        
         # DEBUG = True
         # DEBUG_COUNT = 0
-        def _get_transform(tf_img_bbox_aug): # closure (needed to capture tf_img_bbox_aug)
-            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter):
+        def _get_transform(tf_img_bbox_aug, tf_img_bbox_aug_2): # closure (needed to capture tf_img_bbox_aug)
+            def _transform(image_path, bboxes, albumentation_adapter, presence=None,
+                            flipped_bboxes=None, flipped_presence=None,
+                            pred_bboxes=None, flipped_pred_bboxes=None):
                 image = tf_load_image(image_path)
                 # image = tf_bgr2rgb(image)
                 image = tf_resize(image)
                 if flip_image:
+                    assert flipped_bboxes is not None
+                    if presence is not None:
+                        assert flipped_presence is not None
                     if random.random() < horizontal_flip_prob:
                         # nonlocal DEBUG_COUNT, DEBUG
                         # if DEBUG:
@@ -168,19 +176,30 @@ def get_image_transform(
                         image = tf_hflip(image)
                         bboxes = flipped_bboxes
                         presence = flipped_presence
-                bboxes, category_ids = albumentation_adapter.encode(bboxes, presence)
-                augmented = tf_img_bbox_aug(image=image, bboxes=bboxes, category_ids=category_ids)
+                        if pred_bboxes is not None:
+                            assert flipped_pred_bboxes is not None
+                            pred_bboxes = flipped_pred_bboxes
+                bboxes = albumentation_adapter.encode(bboxes, presence)
+                if pred_bboxes is not None:
+                    pred_bboxes = albumentation_adapter.encode(pred_bboxes)
+                    augmented = tf_img_bbox_aug_2(image=image, bboxes=bboxes, bboxes2=pred_bboxes)
+                else:
+                    augmented = tf_img_bbox_aug(image=image, bboxes=bboxes)
                 image = augmented['image']
                 image = tf_totensor(image)
                 image = tf_normalize(image)
+                # assert len(image.shape) == 3 # (C, H, W)
                 bboxes = augmented['bboxes']
-                category_ids = augmented['category_ids']
-                bboxes, presence = albumentation_adapter.decode(bboxes, category_ids)
-                assert len(image.shape) == 3 # (C, H, W)
-                return image, bboxes, presence
+                bboxes, presence = albumentation_adapter.decode(bboxes)
+                if pred_bboxes is not None:
+                    pred_bboxes = augmented['bboxes2']
+                    pred_bboxes = albumentation_adapter.decode(pred_bboxes, only_boxes=True)
+                    return image, bboxes, presence, pred_bboxes
+                else:
+                    return image, bboxes, presence
             return _transform
 
-        _augmented_bbox_transforms = [_get_transform(tf_img_bbox_aug) for tf_img_bbox_aug in aug_transforms]
+        _augmented_bbox_transforms = [_get_transform(tf, tf2) for tf, tf2 in zip(aug_transforms, aug_transforms_2)]
         
         print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
         print('    augmentation_mode =', augmentation_mode)
@@ -188,20 +207,29 @@ def get_image_transform(
         print('    horizontal_flip_prob =', horizontal_flip_prob)
         print('    flip_image =', flip_image)
 
-        def transform_fn(img, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter):
+        def transform_fn(image_path, bboxes, albumentation_adapter, presence=None, flipped_bboxes=None, flipped_presence=None,
+                         pred_bboxes=None, flipped_pred_bboxes=None):
             # randomly choose between default transform and augmented transform
             if random.random() < default_prob:
-                img = _default_transform(img)
+                img = _default_transform(image_path)
                 return img, bboxes, presence
             return random.choice(_augmented_bbox_transforms)(
-                img, bboxes, presence, flipped_bboxes, flipped_presence, albumentation_adapter)
+                image_path=image_path,
+                albumentation_adapter=albumentation_adapter,
+                bboxes=bboxes,
+                presence=presence,
+                flipped_bboxes=flipped_bboxes,
+                flipped_presence=flipped_presence,
+                pred_bboxes=pred_bboxes,
+                flipped_pred_bboxes=flipped_pred_bboxes,
+            )
 
         print(f'    Returning augmented transforms with mode {augmentation_mode}')
         return transform_fn
 
     elif use_detectron2_transform:
         print(f'  Using detectron2 aware transforms')
-        # assert detectron2_cfg is not None
+        # assert detectr on2_cfg is not None
         tf_load_image = lambda x: cv2.imread(x)
         # if detectron2_cfg.INPUT.FORMAT == 'BGR':
         #     pass

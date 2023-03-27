@@ -83,8 +83,11 @@ class MultilabelOptimalEnsembleSearcher:
                 threshold, score = best_threshold_and_f1_score(merged_probs.T[j], self.gt.T[j])
                 self._update_minheap(j, weights, threshold, score)
         # Try 1 for two models and 0 for the others, for each pair of models
-        print('  2) Try each pair of models together')
-        for (i, j) in tqdm(itertools.combinations(range(self.k), 2)):
+        print('  2) Try pairs of models')
+        pairs = list(itertools.combinations(range(self.k), 2))
+        if len(pairs) > 50:
+            pairs = random.sample(pairs, 50)
+        for (i, j) in tqdm(pairs):
             weights = np.zeros(self.k)
             weights[i] = 1
             weights[j] = 1

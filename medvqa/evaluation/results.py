@@ -361,7 +361,7 @@ def _append_chest_imagenome_mlc_version_column(df, results):
     for metadata in _get_metadata_generator(results):
         try:
             if metadata['model_kwargs'].get('predict_labels_and_bboxes_chest_imagenome', False):
-                version = 'v4'
+                version = metadata['model_kwargs'].get('chest_imagenome_bbox_regressor_version', None) or 'v4'
             elif metadata['model_kwargs'].get('classify_chest_imagenome', False):
                 version = 'gf->labels'
             else:

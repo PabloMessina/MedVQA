@@ -2,6 +2,7 @@ import  os
 import glob
 import argparse
 from copy import deepcopy
+from tqdm import tqdm
 
 import torch
 
@@ -168,6 +169,8 @@ def _compute_and_save_metrics__ensemble__chest_imagenome(
     metrics = {}
     # compute chest imagenome accuracy
     met = MultiLabelAccuracy(device='cpu')
+    assert len(pred_labels) == len(gt_labels)
+    assert len(pred_labels) > 0
     met.update((pred_labels, gt_labels))
     metrics[MetricNames.CHESTIMAGENOMELABELACC] = met.compute()
     # compute chest imagenome prf1
@@ -312,21 +315,21 @@ def _evaluate_model(
                 # Collect validation set probabilities
                 print('Collecting validation set probabilities')
                 val_probs_list = []
-                for model_name in model_names_for_ensemble:
+                for model_name in tqdm(model_names_for_ensemble):
                     val_probs_path = os.path.join(RESULTS_DIR, model_name, f'dicom_id_to_pred_probs__mimiccxr_val__{label_name_for_ensemble}.pkl')
                     assert os.path.exists(val_probs_path), f'Could not find {val_probs_path}'
                     val_probs_list.append(load_pickle(val_probs_path))
             # Collect test set probabilities
             print('Collecting test set probabilities')
             test_probs_list = []
-            for model_name in model_names_for_ensemble:
+            for model_name in tqdm(model_names_for_ensemble):
                 test_probs_path = os.path.join(RESULTS_DIR, model_name, f'dicom_id_to_pred_{label_name_for_ensemble}_probs__miminiccxr_test_set.pkl')
                 assert os.path.exists(test_probs_path), f'Could not find {test_probs_path}'
                 test_probs_list.append(load_pickle(test_probs_path))
             # Collect label names used by each model (we will ensemble only the labels that are common to all models)
             print('Collecting label names used by each model')
             label_names_list = []
-            for model_name in model_names_for_ensemble:
+            for model_name in tqdm(model_names_for_ensemble):
                 results_folder_path = os.path.join(RESULTS_DIR, model_name)
                 assert os.path.exists(results_folder_path), f'Could not find {results_folder_path}'
                 # find all files containing "_multilabel_classification_metrics"
@@ -444,6 +447,7 @@ def _evaluate_model(
                             classify_questions=classify_questions,
                             classify_chest_imagenome=classify_chest_imagenome,
                             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+                            pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs['pass_pred_bbox_coords_to_model'],
                             device=device, use_amp=use_amp, training=False)
     
     # Create MIMIC-CXR visual module evaluator
