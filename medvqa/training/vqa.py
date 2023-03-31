@@ -70,6 +70,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         chest_imagenome_bbox_presence_criterion=None,
         chest_imagenome_bbox_loss_weight=1.0,
         pass_pred_bbox_coords_as_input=False,
+        valid_chest_imagenome_label_indices=None,
         # detectron2
         detectron2_includes_rpn=False,
         # batchwise learning rate updates
@@ -264,6 +265,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if classify_chest_imagenome:
                     pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
                     pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
+                    if valid_chest_imagenome_label_indices is not None:
+                        pred_chest_imagenome_logits = pred_chest_imagenome_logits[:, valid_chest_imagenome_label_indices]
+                        pred_chest_imagenome_probs = pred_chest_imagenome_probs[:, valid_chest_imagenome_label_indices]
                 if predict_bboxes_chest_imagenome:
                     pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
                     pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
@@ -818,6 +822,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 use_vinbig_dataset=False,
                 use_padchest_dataset=False,
                 chest_imagenome_bbox_loss_weight=1.0,
+                valid_chest_imagenome_label_indices=None,
                 optimizer=None,
                 update_lr_batchwise=False, lr_scheduler=None,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
@@ -969,6 +974,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
                             chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
                             pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
+                            valid_chest_imagenome_label_indices=valid_chest_imagenome_label_indices,
                             # detectron2
                             detectron2_includes_rpn=detectron2_includes_rpn,
                             # batchwise learning rate updates

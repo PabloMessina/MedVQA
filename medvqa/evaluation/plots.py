@@ -215,7 +215,8 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.show()
     
-def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric_getters, metric_aliases, dataset_name, figsize=(10, 8)):
+def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric_getters, metric_aliases, dataset_name,
+                                            figsize=(10, 8), rotate_xticks=False):
     n = len(metrics_paths)
     m = len(metric_getters)
     assert n == len(method_aliases)
@@ -237,7 +238,11 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
         label = method_aliases[method_idxs[i]]
         plt.bar([j + (n-1-i)*width for j in range(1, m+1)], [mg(metrics_list[method_idxs[i]]) for mg in metric_getters],
                  width=width, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
-    plt.xticks([width * (n/2-0.5) + i for i in range(1, m+1)], metric_aliases)
+    if rotate_xticks:
+        # Rotate the xticks by 45 degrees and move them to the right so they don't overlap
+        plt.xticks([width * (n/2-0.5) + i for i in range(1, m+1)], metric_aliases, rotation=45, ha='right')
+    else:
+        plt.xticks([width * (n/2-0.5) + i for i in range(1, m+1)], metric_aliases)
     plt.xlabel('Metric')
     plt.ylabel('Score')
     plt.title(f'Metrics on {dataset_name}')
@@ -263,6 +268,8 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     method_idxs.sort(key=lambda i: mean_score_per_method[i])
+    min_score = min(min(scores_per_method[i]) for i in range(n))
+    max_score = max(max(scores_per_method[i]) for i in range(n))
 
     # Create a single plot with multiple horizontal bar charts, one bar for each method and metric    
     # The height of the bar is the metric score
@@ -276,7 +283,7 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
         plt.barh(positions, scores, height=height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
         # plot the scores as text on top of the bars
         for j in range(m):
-            plt.text(scores[j] + height/n*0.2, positions[j], f'{scores[j]:.2f}', ha='left', va='center', fontsize=fontsize)
+            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.2f}', ha='left', va='center', fontsize=fontsize)
     plt.yticks([height * (n/2-0.5)+ i for i in range(1, m+1)], [metric_aliases[i] for i in metric_idxs])
     plt.ylabel('Metric')
     plt.xlabel('Score')
@@ -297,7 +304,7 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     assert m > 0
 
     scores_per_method = [[dataframe_rows[i][k] for k in metric_names] for i in range(n)]
-    mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
+    mean_score_per_method = [average_ignoring_nones(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=True)
 

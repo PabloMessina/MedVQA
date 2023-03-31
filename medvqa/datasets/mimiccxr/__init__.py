@@ -202,13 +202,13 @@ def get_imageId2PartPatientStudy():
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2PartPatientStudy.pkl')
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
-    imageId2partId = {}
+    imageId2partpatstud = {}
     for image_path in tqdm(image_paths_generator()):
         image_path = str(image_path)
         partId, patientId, studyId, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
-        imageId2partId[imageId] = (partId, patientId, studyId)
-    save_to_pickle(imageId2partId, cache_path)
-    return imageId2partId
+        imageId2partpatstud[imageId] = (partId, patientId, studyId)
+    save_to_pickle(imageId2partpatstud, cache_path)
+    return imageId2partpatstud
 
 def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
 

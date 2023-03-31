@@ -123,6 +123,15 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
                 else:
                     scores.append(None)
                     scores.append(None)
+            elif m == MetricNames.CHESTIMAGENOMELABELPRCAUC:
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELPRCAUC_MICRO)
+                metric_names.append(MetricNames.CHESTIMAGENOMELABELPRCAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             # elif m == MetricNames.CHESTIMAGENOMEBBOXMAP:
             #     scores.append(score['map'])
             #     metric_names.append(MetricNames.CHESTIMAGENOMEBBOXMAP)

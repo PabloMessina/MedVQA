@@ -16,6 +16,7 @@ import matplotlib.patches as patches
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
     CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS,
+    CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH,
     CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH,
     CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH,
     CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH,
@@ -40,10 +41,12 @@ from medvqa.utils.files import get_cached_pickle_file, load_json_file, load_pick
 from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.utils.logging import print_blue, print_red
 
-_CACHE = {}
-
 def _load_scene_graph(scene_graph_path):
     return load_json_file(scene_graph_path)
+
+def load_scene_graph(dicom_id):
+    scene_graph_path = os.path.join(CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR, f'{dicom_id}_SceneGraph.json')
+    return _load_scene_graph(scene_graph_path)
 
 def _load_scene_graphs(scene_graphs_dir, k=None, offset=0):    
     filenames = os.listdir(scene_graphs_dir)
@@ -164,16 +167,40 @@ def load_chest_imagenome_horizontally_flipped_silver_bboxes():
     print('  Done.')
     return flipped_bboxes
 
-def load_gold_standard_dicom_ids():
+def load_gold_standard_related_dicom_ids():
+    """
+    Returns a list of dicom_ids that are in the gold standard dataset or belong to patients that
+    are in the gold standard dataset.
+    """
     df = pd.read_csv(CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH)
     return df['dicom_id'].tolist()
+
+_gold_attributes_relations_dicom_ids = None
+def load_gold_attributes_relations_dicom_ids():
+    global _gold_attributes_relations_dicom_ids
+    if _gold_attributes_relations_dicom_ids is not None:
+        return _gold_attributes_relations_dicom_ids
+    df = pd.read_csv(CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH, sep='\t')
+    dicom_ids = list(set(x[:-4] for x in df['image_id'])) # remove .dcm extension
+    _gold_attributes_relations_dicom_ids = dicom_ids
+    return dicom_ids
+
+_gold_bbox_dicom_ids = None
+def load_gold_bbox_dicom_ids():
+    global _gold_bbox_dicom_ids
+    if _gold_bbox_dicom_ids is not None:
+        return _gold_bbox_dicom_ids
+    df = pd.read_csv(CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH)
+    dicom_ids = list(set(x[:-4] for x in df['image_id'])) # remove .dcm extension
+    _gold_bbox_dicom_ids = dicom_ids
+    return dicom_ids
 
 def load_nongold_dicom_ids():
     cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'nongold_dicom_ids.pkl')
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
     dicom_ids_set = set(load_chest_imagenome_silver_bboxes().keys())
-    gold_ids_set = set(load_gold_standard_dicom_ids())
+    gold_ids_set = set(load_gold_standard_related_dicom_ids())
     dicom_ids = list(dicom_ids_set - gold_ids_set)
     save_to_pickle(dicom_ids, cache_path)
     return dicom_ids
@@ -611,18 +638,7 @@ def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,
     print_red('red')
     plt.show()
 
-def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, figsize=(10, 10)):
-    if dicom_id is None:
-        # Find a random dicom_id from the results folder
-        dicom_ids = os.listdir(os.path.join(results_folder, 'labels'))
-        dicom_id = random.choice(dicom_ids)
-        dicom_id = dicom_id[:-4]
-
-    predicted_labels_txt_path = os.path.join(results_folder, 'labels', f'{dicom_id}.txt')
-    print(f'Predicted labels path: {predicted_labels_txt_path}')
-    if not os.path.exists(predicted_labels_txt_path):
-        print(f'No prediction for {dicom_id}')
-        return
+def _visualize_predicted_bounding_boxes__yolo(dicom_id, pred_coords, pred_classes, figsize, format='xywh'):
     imageId2PartPatientStudy = get_imageId2PartPatientStudy()    
     part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]        
     image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
@@ -649,15 +665,20 @@ def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, fi
             ax.add_patch(rect)
             ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color='red')
     # Predicted bounding boxes
-    predicted_labels = np.loadtxt(predicted_labels_txt_path)
-    pred_coords = predicted_labels[:, 1:]
-    pred_classes = predicted_labels[:, 0].astype(np.int)    
     for i in range(len(pred_classes)):
-        x_mid = pred_coords[i, 0] * width
-        y_mid = pred_coords[i, 1] * height
-        w = pred_coords[i, 2] * width
-        h = pred_coords[i, 3] * height
-        x1, y1, x2, y2 = x_mid - w / 2, y_mid - h / 2, x_mid + w / 2, y_mid + h / 2
+        if format == 'xywh':
+            x_mid = pred_coords[i, 0] * width
+            y_mid = pred_coords[i, 1] * height
+            w = pred_coords[i, 2] * width
+            h = pred_coords[i, 3] * height
+            x1, y1, x2, y2 = x_mid - w / 2, y_mid - h / 2, x_mid + w / 2, y_mid + h / 2
+        elif format == 'xyxy':
+            x1 = pred_coords[i, 0] * width
+            y1 = pred_coords[i, 1] * height
+            x2 = pred_coords[i, 2] * width
+            y2 = pred_coords[i, 3] * height
+        else:
+            raise ValueError(f'Unknown format {format}')
         rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='blue', facecolor='none', linestyle='dashed')
         ax.add_patch(rect)
         ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[pred_classes[i]], fontsize=16, color='blue')
@@ -666,6 +687,38 @@ def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, fi
     print('Ground truth bounding boxes are in ', end='')
     print_red('red')
     plt.show()
+
+def visualize_predicted_bounding_boxes__yolov8(predictions_path, dicom_id=None, figsize=(10, 10)):
+    predictions = get_cached_pickle_file(predictions_path)
+    if dicom_id is None:
+        # Find a random dicom_id from predictions
+        dicom_id = random.choice(predictions['dicom_ids'])
+    idx = predictions['dicom_ids'].index(dicom_id)
+    pred_coords = predictions['pred_boxes'][idx]
+    pred_classes = predictions['pred_classes'][idx]
+
+    print(f'Predicted bounding boxes for {dicom_id}:')
+
+    _visualize_predicted_bounding_boxes__yolo(dicom_id, pred_coords, pred_classes, figsize, format='xyxy')
+
+def visualize_predicted_bounding_boxes__yolov5(results_folder, dicom_id=None, figsize=(10, 10)):
+    if dicom_id is None:
+        # Find a random dicom_id from the results folder
+        dicom_ids = os.listdir(os.path.join(results_folder, 'labels'))
+        dicom_id = random.choice(dicom_ids)
+        dicom_id = dicom_id[:-4]
+
+    predicted_labels_txt_path = os.path.join(results_folder, 'labels', f'{dicom_id}.txt')
+    print(f'Predicted labels path: {predicted_labels_txt_path}')
+    if not os.path.exists(predicted_labels_txt_path):
+        print(f'No prediction for {dicom_id}')
+        return
+    
+    predicted_labels = np.loadtxt(predicted_labels_txt_path)
+    pred_coords = predicted_labels[:, 1:]
+    pred_classes = predicted_labels[:, 0].astype(np.int)    
+
+    _visualize_predicted_bounding_boxes__yolo(dicom_id, pred_coords, pred_classes, figsize, format='xywh')
 
 _RIGHT_LEFT_PAIRS = []
 for _reg_r, _reg_l in CHEST_IMAGENOME_BBOX_SYMMETRY_PAIRS:
@@ -849,20 +902,33 @@ def visualize_symmetric_ground_truth_bounding_boxes(dicom_id, flipped=False):
 _shared_actual_train_dicom_ids = None
 _shared_actual_val_dicom_ids = None
 _shared_actual_test_dicom_ids = None
-_shared_label_names = None
-_shared_dicom_id_to_labels = None
+_shared_train_val_label_names = None
+_shared_test_label_names = None
+_shared_train_val_dicom_id_to_labels = None
+_shared_test_dicom_id_to_labels = None
 
-def get_train_val_test_stats_per_label(label_names_filename, labels_filename, num_workers=8):
-    cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, f'train_val_test_stats_per_label({label_names_filename},{labels_filename}).pkl')
+def get_train_val_test_stats_per_label(label_names_filename, labels_filename, num_workers=8, use_gold_in_test=False):
+    cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 
+                              f'train_val_test_stats_per_label({label_names_filename},{labels_filename}'
+                              f'{",gold" if use_gold_in_test else ""}).pkl')
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
     
-    label_names = load_postprocessed_label_names(label_names_filename)
-    dicom_id_to_labels = load_postprocessed_labels(labels_filename)
+    train_val_label_names = load_postprocessed_label_names(label_names_filename)
+    train_val_dicom_id_to_labels = load_postprocessed_labels(labels_filename)
+    if use_gold_in_test:
+        test_dicom_id_to_labels = load_postprocessed_label_names('gold_imageId2binaryLabels.pkl')
+        test_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+    else:
+        test_dicom_id_to_labels = train_val_dicom_id_to_labels
+        test_label_names = train_val_label_names
 
     mimiccxr_train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
     mimiccxr_val_dicom_ids = set(get_mimiccxr_val_dicom_ids())
-    mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
+    if use_gold_in_test:
+        mimiccxr_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
+    else:
+        mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
     decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
     nongold_dicom_ids = set(load_nongold_dicom_ids())
     allowed_train_val_dicom_ids = decent_dicom_ids & nongold_dicom_ids
@@ -873,37 +939,50 @@ def get_train_val_test_stats_per_label(label_names_filename, labels_filename, nu
     global _shared_actual_train_dicom_ids
     global _shared_actual_val_dicom_ids
     global _shared_actual_test_dicom_ids
-    global _shared_label_names
-    global _shared_dicom_id_to_labels
+    global _shared_train_val_label_names
+    global _shared_test_label_names
+    global _shared_train_val_dicom_id_to_labels
+    global _shared_test_dicom_id_to_labels
     
     _shared_actual_train_dicom_ids = actual_train_dicom_ids
     _shared_actual_val_dicom_ids = actual_val_dicom_ids
     _shared_actual_test_dicom_ids = actual_test_dicom_ids
-    _shared_label_names = label_names
-    _shared_dicom_id_to_labels = dicom_id_to_labels
+    _shared_train_val_label_names = train_val_label_names
+    _shared_test_label_names = test_label_names
+    _shared_train_val_dicom_id_to_labels = train_val_dicom_id_to_labels
+    _shared_test_dicom_id_to_labels = test_dicom_id_to_labels
 
     with mp.Pool(processes=num_workers) as pool:
-        stats = pool.map(_get_train_val_test_summary_stats_for_label, label_names)
+        stats = pool.map(_get_train_val_test_summary_stats_for_label, train_val_label_names)
     
-    label2stats = {name:stat for name, stat in zip(label_names, stats)}
+    label2stats = {name:stat for name, stat in zip(train_val_label_names, stats)}
     save_to_pickle(label2stats, cache_path)
     return label2stats
 
 def _get_train_val_test_summary_stats_for_label(label):
     # Get label index
-    label_idx = _shared_label_names.index(label)
+    label_idx = _shared_train_val_label_names.index(label)
     # Count number of times the label appears in each set
     train_count = 0
     val_count = 0
     test_count = 0
-    for dicom_id, labels in _shared_dicom_id_to_labels.items():
-        if labels[label_idx] == 1:
-            if dicom_id in _shared_actual_train_dicom_ids:
-                train_count += 1
-            elif dicom_id in _shared_actual_val_dicom_ids:
-                val_count += 1
-            elif dicom_id in _shared_actual_test_dicom_ids:
+    for dicom_id in _shared_actual_train_dicom_ids:
+        if _shared_train_val_dicom_id_to_labels[dicom_id][label_idx] == 1:
+            train_count += 1
+    for dicom_id in _shared_actual_val_dicom_ids:
+        if _shared_train_val_dicom_id_to_labels[dicom_id][label_idx] == 1:
+            val_count += 1
+    for dicom_id in _shared_actual_test_dicom_ids:
+        if _shared_test_dicom_id_to_labels[dicom_id][label_idx] == 1:
+            test_count += 1
+    try:
+        test_label_idx = _shared_test_label_names.index(label)
+        for dicom_id in _shared_actual_test_dicom_ids:
+            if _shared_test_dicom_id_to_labels[dicom_id][test_label_idx] == 1:
                 test_count += 1
+    except ValueError:
+        pass
+
     # Summary statistics
     return {
         'train_count': train_count,
@@ -914,8 +993,8 @@ def _get_train_val_test_summary_stats_for_label(label):
         'test_fraction': test_count / len(_shared_actual_test_dicom_ids),
     }
 
-def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename):
-    label2stats = get_train_val_test_stats_per_label(label_names_filename, labels_filename)
+def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename, use_gold_in_test=False):
+    label2stats = get_train_val_test_stats_per_label(label_names_filename, labels_filename, use_gold_in_test=use_gold_in_test)
     label_names = load_postprocessed_label_names(label_names_filename)
     # Get actual label
     label_idx = -1

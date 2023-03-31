@@ -18,7 +18,9 @@ from medvqa.models.vision.bbox_regression import (
     BoundingBoxRegressor_v2,
     BoundingBoxRegressor_v3,
     BoundingBoxRegressorAndMultiLabelClassifier_v4,
+    BoundingBoxRegressorAndMultiLabelClassifier_v4_1,
     BoundingBoxRegressorAndMultiLabelClassifier_v5,
+    BoundingBoxRegressorAndMultiLabelClassifier_v6,
 )
 from medvqa.utils.constants import (
     CHEXPERT_LABELS,
@@ -368,6 +370,15 @@ class MultiPurposeVisualModule(nn.Module):
                     bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
                     bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
                 )
+            elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4_1:
+                self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v4_1(
+                    local_feat_dim=self.local_feat_size,
+                    hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                    num_bboxes=self.n_chest_imagenome_bboxes,
+                    num_regions=self.num_regions,
+                    bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                    bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                )
             elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
                 assert self.roi_align_output_size is not None
                 self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v5(
@@ -380,6 +391,21 @@ class MultiPurposeVisualModule(nn.Module):
                     num_boxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
                     bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
                     bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                )
+            elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
+                assert self.chest_imagenome_train_average_bbox_coords is not None
+                self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v6(
+                    global_feat_dim=self.global_feat_size,
+                    local_feat_dim=self.local_feat_size,
+                    input_size=self.num_regions_sqrt,
+                    roi_align_output_size=self.roi_align_output_size,
+                    roi_align_spatial_scale=self.num_regions_sqrt, # [0, 1] -> [0, num_regions_sqrt]
+                    hidden_dim=self.chest_imagenome_bbox_hidden_size,
+                    num_boxes=self.n_chest_imagenome_bboxes,
+                    num_boxes_to_supervise=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                    bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                    bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                    train_average_bbox_coords=self.chest_imagenome_train_average_bbox_coords,
                 )
             else:
                 raise NotImplementedError(f'Unsupported Chest ImaGenome bbox regressor version: {self.chest_imagenome_bbox_regressor_version}')
@@ -498,6 +524,10 @@ class MultiPurposeVisualModule(nn.Module):
             if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
                 compute_global_features = True
                 permute_and_flatten_local_feat = True
+            elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4_1:
+                permute_and_flatten_local_feat = True
+            elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
+                compute_global_features = True
 
         if compute_global_features:
             global_list = []
@@ -655,6 +685,10 @@ class MultiPurposeVisualModule(nn.Module):
                     output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                     output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                     output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4_1:
+                    mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC)
+                    output['pred_chest_imagenome'] = mlc_scores
+                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                 elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
                     assert pred_bbox_coords is not None
                     if refine_bbox_coords:
@@ -669,6 +703,14 @@ class MultiPurposeVisualModule(nn.Module):
                             local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
                         output['pred_chest_imagenome'] = mlc_scores
                         output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
+                    assert pred_bbox_coords is not None
+                    pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
+                        global_feat, local_feat_NxCxHxW, pred_bbox_coords)
+                    output['pred_chest_imagenome'] = mlc_scores
+                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
             else:
                 if self.classify_chest_imagenome:
                     output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)

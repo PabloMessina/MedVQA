@@ -1,4 +1,10 @@
 import os
+import random
+from sklearn.metrics import (
+    auc, f1_score, precision_recall_curve, precision_score,
+    recall_score, roc_auc_score, confusion_matrix,
+)
+import seaborn as sns
 import torch
 import pandas as pd
 import numpy as np
@@ -14,9 +20,13 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    get_train_val_test_stats_per_label,
     load_postprocessed_label_names,
+    load_postprocessed_labels,
+    load_scene_graph,
     visualize_ground_truth_bounding_boxes,
     visualize_predicted_bounding_boxes,
+    visualize_scene_graph,
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.metrics import (
@@ -200,6 +210,7 @@ _CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES = [
     MetricNames.CHESTIMAGENOMELABEL_PRF1,
     MetricNames.CHESTIMAGENOMELABELROCAUC,
     MetricNames.CHESTIMAGENOMELABELAUC,
+    MetricNames.CHESTIMAGENOMELABELPRCAUC,
 ]
 
 def get_chest_imagenome_multilabel_classification_metrics_dataframe(
@@ -273,6 +284,14 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
                 label_name = _label2str(label_name)
                 columns.append(f'auc({label_name})')
             offset += 2 + len(all_label_names)
+        elif metric_name == MetricNames.CHESTIMAGENOMELABELPRCAUC:
+            metric2offset[metric_name] = offset
+            columns.append('prcauc(macro)')
+            columns.append('prcauc(micro)')
+            for label_name in all_label_names:
+                label_name = _label2str(label_name)
+                columns.append(f'prcauc({label_name})')
+            offset += 2 + len(all_label_names)
         else:
             assert False, f'unknown metric_name={metric_name}'
 
@@ -283,36 +302,37 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
         metrics_dict = metrics_dict_list[row_i]
         
         for mn in metric_names:
-            met = metrics_dict[mn]
+            met = metrics_dict.get(mn, None)
 
             if mn == MetricNames.CHESTIMAGENOMELABEL_PRF1:
                 offset = metric2offset[mn]
-                data[row_i][offset + 0] = met['f1_macro_avg']
-                data[row_i][offset + 1] = met['p_macro_avg']
-                data[row_i][offset + 2] = met['r_macro_avg']
-                data[row_i][offset + 3] = met['f1_micro_avg']
-                data[row_i][offset + 4] = met['p_micro_avg']
-                data[row_i][offset + 5] = met['r_micro_avg']
+                data[row_i][offset + 0] = met['f1_macro_avg'] if met is not None else None
+                data[row_i][offset + 1] = met['p_macro_avg'] if met is not None else None
+                data[row_i][offset + 2] = met['r_macro_avg'] if met is not None else None
+                data[row_i][offset + 3] = met['f1_micro_avg'] if met is not None else None
+                data[row_i][offset + 4] = met['p_micro_avg'] if met is not None else None
+                data[row_i][offset + 5] = met['r_micro_avg'] if met is not None else None
                 for i, label_name in enumerate(label_names_list[row_i]):
                     label_idx = label_name_2_idx[label_name]
-                    data[row_i][offset + 6 + 3 * label_idx + 0] = met['f1'][i]
-                    data[row_i][offset + 6 + 3 * label_idx + 1] = met['p'][i]
-                    data[row_i][offset + 6 + 3 * label_idx + 2] = met['r'][i]
+                    data[row_i][offset + 6 + 3 * label_idx + 0] = met['f1'][i] if met is not None else None
+                    data[row_i][offset + 6 + 3 * label_idx + 1] = met['p'][i] if met is not None else None
+                    data[row_i][offset + 6 + 3 * label_idx + 2] = met['r'][i] if met is not None else None
 
             elif mn == MetricNames.CHESTIMAGENOMELABELACC:
                 offset = metric2offset[mn]
-                data[row_i][offset + 0] = met
+                data[row_i][offset + 0] = met if met is not None else None
 
-            elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC or mn == MetricNames.CHESTIMAGENOMELABELAUC:
+            elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC or\
+                    mn == MetricNames.CHESTIMAGENOMELABELAUC or\
+                    mn == MetricNames.CHESTIMAGENOMELABELPRCAUC:
                 offset = metric2offset[mn]
-                data[row_i][offset + 0] = met['macro_avg']
-                data[row_i][offset + 1] = met['micro_avg']
+                data[row_i][offset + 0] = met['macro_avg'] if met is not None else None
+                data[row_i][offset + 1] = met['micro_avg'] if met is not None else None
                 for i, label_name in enumerate(label_names_list[row_i]):
                     label_idx = label_name_2_idx[label_name]
-                    data[row_i][offset + 2 + label_idx] = met['per_class'][i]
+                    data[row_i][offset + 2 + label_idx] = met['per_class'][i] if met is not None else None
             
     return pd.DataFrame(data=data, columns=columns)
-    
 
 class ChestImagenomeBboxPredictionsVisualizer:
 
@@ -405,6 +425,140 @@ class ChestImagenomeBboxPredictionsVisualizer:
         visualize_predicted_bounding_boxes(dicom_id, pred_bbox_coords, pred_bbox_presences,
                                             test_bbox_coords, test_bbox_presences,
                                             bbox_names=self.bbox_names)
+
+class ChestImaGenomeMLCVisualizer:
+
+    def __init__(self, mlc_metrics_path, dicom_id_to_probs_path, 
+                 test_label_names_filename='labels(min_freq=1000).pkl',
+                 test_labels_filename='imageId2labels(min_freq=1000).pkl',
+                 use_gold_in_test=False):
+
+        self.metrics = get_cached_pickle_file(mlc_metrics_path)
+        self.dicom_id_to_probs = get_cached_pickle_file(dicom_id_to_probs_path)
+        self.dicom_ids = list(self.dicom_id_to_probs.keys())
+        self.label_names = self.metrics['chest_imagenome_label_names']
+        self.stats_per_label = get_train_val_test_stats_per_label('labels(min_freq=1000).pkl',
+                                                                   'imageId2labels(min_freq=1000).pkl', 
+                                                                   use_gold_in_test=use_gold_in_test)
+        self.gt_labels = load_postprocessed_labels(test_labels_filename)
+        self.gt_label_names = load_postprocessed_label_names(test_label_names_filename)
+
+    def print_auc_per_class(self):
+        set_completer_delims = self.metrics[MetricNames.CHESTIMAGENOMELABELAUC]['per_class']
+        idxs = np.argsort(set_completer_delims)
+        for i in idxs:
+            print(f'{i}: {self.label_names[i]}: {set_completer_delims[i]:.4f}')
+    
+    def print_f1_per_class(self):
+        scores = self.metrics[MetricNames.CHESTIMAGENOMELABEL_PRF1]['f1']
+        idxs = np.argsort(scores)
+        for i in idxs:
+            print(f'{i}: {self.label_names[i]}: {scores[i]:.4f}')
+
+    def plot_label_frequency_vs_metric(self, metric):
+        if metric in ['p', 'r', 'f1']:
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABEL_PRF1][metric]
+        elif metric == 'auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELAUC]['per_class']
+        elif metric == 'roc_auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELROCAUC]['per_class']
+        elif metric == 'prc_auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC]['per_class']
+        else:
+            raise ValueError(f'Unknown metric: {metric}')
+        label_freqs = [self.stats_per_label[k]['train_fraction'] for k in self.label_names]
+        plt.figure(figsize=(10, 10))
+        plt.scatter(label_freqs, scores)
+        plt.xlabel('Label frequency')
+        plt.ylabel(metric)
+        plt.show()
+
+    def print_labels_in_range(self, metric, min_val=0, max_val=1, min_freq=0, max_freq=1):
+        if metric in ['p', 'r', 'f1']:
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABEL_PRF1][metric]
+        elif metric == 'auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELAUC]['per_class']
+        elif metric == 'roc_auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELROCAUC]['per_class']
+        elif metric == 'prc_auc':
+            scores = self.metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC]['per_class']
+        else:
+            raise ValueError(f'Unknown metric: {metric}')
+        label_freqs = [self.stats_per_label[k]['train_fraction'] for k in self.label_names]
+        # sort indices by score, ignoring None values
+        idxs = [i for i in range(len(scores)) if scores[i] is not None]
+        idxs = sorted(idxs, key=lambda i: scores[i])
+        for i in idxs:
+            if min_val <= scores[i] <= max_val and min_freq <= label_freqs[i] <= max_freq:
+                print(f'score: {scores[i]:.4f}, freq: {label_freqs[i]:.4f}, label: {self.label_names[i]}')
+
+    def compute_metrics_from_probs(self, label_name):
+        label_idx = self.label_names.index(label_name)
+        gt_label_idx = self.gt_label_names.index(label_name)
+        probs = []
+        gt = []
+        for dicom_id in self.dicom_ids:
+            probs.append(self.dicom_id_to_probs[dicom_id][label_idx])
+            gt.append(self.gt_labels[dicom_id][gt_label_idx])
+        probs = np.array(probs)
+        gt = np.array(gt)
+        
+        # plot precision recall curve
+        precision, recall, _ = precision_recall_curve(gt, probs)
+        no_skill = len(gt[gt==1]) / len(gt)
+        plt.plot([0, 1], [no_skill, no_skill], linestyle='--', label='No Skill')
+        plt.plot(recall, precision, marker='.', label='Logistic')
+        plt.title(f'Precision-Recall Curve for {label_name}')
+        # axis labels
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        # show the legend
+        plt.legend()
+        # show the plot
+        plt.show()
+        
+        # plot confusion matrix
+        cm = confusion_matrix(gt, probs > 0.5)
+        sns.heatmap(cm, annot=True, fmt='d')
+        plt.title(f'Confusion matrix for {label_name}')
+        plt.ylabel('Actual')
+        plt.xlabel('Predicted')
+        plt.show()
+        
+        # p, r, f1
+        p = precision_score(gt, probs > 0.5)
+        r = recall_score(gt, probs > 0.5)
+        f1 = f1_score(gt, probs > 0.5)
+        # roc-auc
+        roc_auc = roc_auc_score(gt, probs)
+        # pr auc
+        pr_auc = auc(recall, precision)
+        print(f'p: {p:.4f}, r: {r:.4f}, f1: {f1:.4f}, roc_auc: {roc_auc:.4f}, pr_auc: {pr_auc:.4f}')
+
+    def _plot_example_for_label(self, label_name, pos=True):
+        label_idx = self.label_names.index(label_name)
+        gt_label_idx = self.gt_label_names.index(label_name)
+        idxs = []
+        for i, dicom_id in enumerate(self.dicom_ids):
+             if (self.gt_labels[dicom_id][gt_label_idx] == 1) == pos:
+                idxs.append(i)
+        idx = random.choice(idxs)
+        dicom_id = self.dicom_ids[idx]
+        label_prob = self.dicom_id_to_probs[dicom_id][label_idx]
+        if pos:
+            print('Positive example:')
+        else:
+            print('Negative example:')
+        print(f'dicom_id: {dicom_id}')
+        print(f'Label: {label_name}, prob: {label_prob:.4f}')
+        print('-' * 50)
+        visualize_scene_graph(load_scene_graph(dicom_id))
+
+    def plot_positive_example_for_label(self, label_name):
+        self._plot_example_for_label(label_name, pos=True)
+
+    def plot_negative_example_for_label(self, label_name):
+        self._plot_example_for_label(label_name, pos=False)
     
 def calibrate_thresholds_on_mimiccxr_validation_set(
     model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
@@ -424,7 +578,7 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
     evaluator = get_engine(model=model, classify_tags=False, classify_orientation=False, classify_questions=False,
                             classify_gender=False, predict_bboxes_chest_imagenome=False, 
                             classify_chexpert=classify_chexpert, classify_chest_imagenome=classify_chest_imagenome,
-                            pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs['pass_pred_bbox_coords_to_model'],
+                            pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
                             device=device, use_amp=use_amp, training=False)
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)

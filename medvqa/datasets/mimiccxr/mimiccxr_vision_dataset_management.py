@@ -17,7 +17,9 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
     load_chest_imagenome_silver_bboxes,
     load_chest_imagenome_silver_bboxes_as_numpy_array,
-    load_gold_standard_dicom_ids,
+    load_gold_attributes_relations_dicom_ids,
+    load_gold_bbox_dicom_ids,
+    load_gold_standard_related_dicom_ids,
     load_nongold_dicom_ids,
     load_postprocessed_label_names,
 )
@@ -325,7 +327,8 @@ class MIMICCXR_VisualModuleTrainer():
                 train_image_transform=None,
                 val_image_transform=None, 
                 use_test_set=False,
-                use_chest_imagenome_gold_set=False,
+                use_chest_imagenome_bbox_gold_set=False,
+                use_chest_imagenome_label_gold_set=False,
                 use_val_set_only=False,
                 test_image_transform=None,
                 data_augmentation_enabled=False,
@@ -364,8 +367,10 @@ class MIMICCXR_VisualModuleTrainer():
             # Print warning in orange and bold
             print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
         # Sanity checks
-        assert sum([use_test_set, use_val_set_only, use_chest_imagenome_gold_set]) <= 1 # at most one of these can be true
-        if use_test_set or use_chest_imagenome_gold_set:
+        assert sum([use_test_set, use_val_set_only,
+                    use_chest_imagenome_bbox_gold_set,
+                    use_chest_imagenome_label_gold_set]) <= 1 # at most one of these can be true
+        if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
             assert test_image_transform is not None
             assert not data_augmentation_enabled
         else:
@@ -408,7 +413,7 @@ class MIMICCXR_VisualModuleTrainer():
                     collate_fn=collate_batch_fn,
                     shuffle=False,
                 )
-            elif use_chest_imagenome_gold_set:
+            elif use_chest_imagenome_bbox_gold_set:
                 # Create test dataset and dataloader using chest imagenome gold set
                 self.test_dataset = Detectron2AdaptedDataset(
                     split_name=None,
@@ -428,6 +433,7 @@ class MIMICCXR_VisualModuleTrainer():
                     shuffle=False,
                 )
             else:
+                assert not use_chest_imagenome_label_gold_set, 'Not implemented'
                 # Create train dataset and dataloader
                 if not use_val_set_only:
                     self.train_dataset = Detectron2AdaptedDataset(
@@ -485,7 +491,7 @@ class MIMICCXR_VisualModuleTrainer():
             image_paths = [None] * BIG_ENOGUGH
             report_ids = [None] * BIG_ENOGUGH
             orientations = [None] * BIG_ENOGUGH
-            if use_test_set:
+            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 test_indices = []
             else:
                 train_indices = []
@@ -502,24 +508,38 @@ class MIMICCXR_VisualModuleTrainer():
 
 
             if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                chest_imagenome_nongold_dicom_ids = set(load_nongold_dicom_ids())
-                print(f'Loaded {len(chest_imagenome_nongold_dicom_ids)} non-gold DICOM IDs from Chest Imagenome')
+                allowed_train_val_dicom_ids = None
                 if use_decent_images_only:
                     decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
-                    allowed_train_val_dicom_ids = (decent_dicom_ids & chest_imagenome_nongold_dicom_ids)
-                    allowed_test_dicom_ids = decent_dicom_ids
+                if use_test_set:
+                    if use_decent_images_only:
+                        allowed_test_dicom_ids = decent_dicom_ids
+                    else:
+                        allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
+                elif use_chest_imagenome_bbox_gold_set:
+                    allowed_test_dicom_ids = set(load_gold_bbox_dicom_ids())
+                    if use_decent_images_only:
+                        allowed_test_dicom_ids &= decent_dicom_ids
+                elif use_chest_imagenome_label_gold_set:
+                    allowed_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
+                    if use_decent_images_only:
+                        allowed_test_dicom_ids &= decent_dicom_ids
                 else:
-                    allowed_train_val_dicom_ids = chest_imagenome_nongold_dicom_ids
-                    allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
+                    allowed_train_val_dicom_ids = set(load_nongold_dicom_ids())
+                    if use_decent_images_only:
+                        allowed_train_val_dicom_ids &= decent_dicom_ids
             else:
                 assert use_decent_images_only is False
+                assert use_chest_imagenome_bbox_gold_set is False
+                assert use_chest_imagenome_label_gold_set is False
                 allowed_train_val_dicom_ids = None
                 allowed_test_dicom_ids = None
+
+            allowed_dicom_ids = allowed_train_val_dicom_ids or allowed_test_dicom_ids
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
             max_idx_count = 0
-            actual_idx_count = 0
 
             for rid, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
@@ -528,11 +548,6 @@ class MIMICCXR_VisualModuleTrainer():
                     mimiccxr_metadata['dicom_id_view_pos_pairs'],
                     mimiccxr_metadata['splits']))):
 
-                if split == 'test':
-                    allowed_dicom_ids = allowed_test_dicom_ids
-                else:
-                    allowed_dicom_ids = allowed_train_val_dicom_ids
-
                 max_idx_count += len(dicom_id_view_pairs)
 
                 for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, view_mode, allowed_dicom_ids):
@@ -540,12 +555,12 @@ class MIMICCXR_VisualModuleTrainer():
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                     report_ids[idx] = rid
                     orientations[idx] = MIMICCXR_IMAGE_ORIENTATIONS.index(view)
-                    actual_idx_count += 1
-                    if use_test_set:
-                        if split == 'test':
-                            test_indices.append(idx)
+                    if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+                        if use_test_set:
+                            if split == 'test':
+                                test_indices.append(idx)
                         else:
-                            pass
+                            test_indices.append(idx)
                     else:
                         if split == 'train':
                             train_indices.append(idx)
@@ -558,15 +573,15 @@ class MIMICCXR_VisualModuleTrainer():
                     idx += 1
 
             print('max_idx_count =', max_idx_count)
-            print('actual_idx_count =', actual_idx_count)
-            if actual_idx_count < max_idx_count:
-                print(f'** NOTE: {max_idx_count - actual_idx_count} images were skipped because they were not in the allowed DICOM IDs')
+            print('actual_idx_count =', idx)
+            if idx < max_idx_count:
+                print(f'** NOTE: {max_idx_count - idx} images were skipped because they were not in the allowed DICOM IDs')
             
             self.dicom_ids = np.array(dicom_ids[:idx])
             self.image_paths = np.array(image_paths[:idx])
             self.report_ids = np.array(report_ids[:idx])
             self.orientations = np.array(orientations[:idx])
-            if use_test_set:
+            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 self.test_indices = np.array(test_indices)
                 print(f'len(self.test_indices) = {len(self.test_indices)}')
             else:
@@ -617,12 +632,42 @@ class MIMICCXR_VisualModuleTrainer():
             if classify_chest_imagenome:
                 print('Loading Chest Imagenome labels...')
                 assert chest_imagenome_labels_filename is not None
-                _, self.chest_imagenome_labels = \
-                    load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
+                assert chest_imagenome_labels_filename != 'gold_imageId2binaryLabels.pkl', \
+                    'This should be file used for training, not testing'
+                if use_chest_imagenome_label_gold_set:
+                    _, self.chest_imagenome_labels = \
+                        load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix('gold_imageId2binaryLabels.pkl')
+                    print('Using gold labels for Chest Imagenome (not the labels used for training)')
+                    print(f'\tFile used in training: {chest_imagenome_labels_filename}')
+                    print('\tFile used for testing (right now): gold_imageId2binaryLabels.pkl')
+                    print(f'self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
+                    # sanity check
+                    used_rid_set = set()
+                    _hc, _unhc = 0, 0
+                    for i in self.test_indices:
+                        rid = self.report_ids[i]
+                        used_rid_set.add(rid)
+                        if self.chest_imagenome_labels[rid].max() == 1:
+                            _unhc += 1
+                        else:
+                            _hc += 1
+                    print('Sanity check: _hc =', _hc, '_unhc =', _unhc)
+                    assert _unhc > 0, 'No abnormal reports found in gold labels'
+                    # choose 100 report_ids not in used_rid_set
+                    for _ in range(100):
+                        while True:
+                            rid = random.randint(0, self.chest_imagenome_labels.shape[0] - 1)
+                            if rid not in used_rid_set:
+                                break
+                        assert self.chest_imagenome_labels[rid].max() == 0
+                else:
+                    _, self.chest_imagenome_labels = \
+                        load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
             else:
                 self.chest_imagenome_labels = None
             
             if predict_bboxes_chest_imagenome or (pass_pred_bbox_coords_to_model and use_gt_bboxes_as_pred):
+                assert not use_chest_imagenome_bbox_gold_set, 'Not supported yet'
                 print('Loading Chest Imagenome bounding boxes...')
                 self.dicom_idxs, self.bbox_coords, self.bbox_presence =\
                     load_chest_imagenome_silver_bboxes_as_numpy_array(
@@ -660,7 +705,8 @@ class MIMICCXR_VisualModuleTrainer():
                 assert chest_imagenome_label_names_filename is not None
                 assert classify_chest_imagenome
                 assert not use_anaxnet_bbox_subset # Not supported in this mode yet
-                # We need to rearrange the labeels to match the order in which the model will predict them
+                assert not use_chest_imagenome_bbox_gold_set # Not supported in this mode yet
+                # We need to rearrange the labels to match the order in which the model will predict them
                 print('Reordering Chest Imagenome labels for combined label/bbox prediction...')
                 tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
                 label_order = []
@@ -668,11 +714,32 @@ class MIMICCXR_VisualModuleTrainer():
                     label_order.extend(labels)
                 for _, labels in tmp['anatomy_group_to_global_labels']:
                     label_order.extend(labels)
-                assert self.chest_imagenome_labels.shape[1] == len(label_order)
-                assert set(label_order) == set(range(len(label_order)))
                 assert len(label_order) == len(self.chest_imagenome_label_names)
-                self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
-                self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
+                if use_chest_imagenome_label_gold_set:
+                    print('  Using gold labels for Chest Imagenome (not the labels used for training)')
+                    gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+                    common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
+                    assert len(common_label_names) > 0
+                    _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
+                                                        if self.chest_imagenome_label_names[idx] in common_label_names]
+                    _valid_label_indices__gold_pov = [gold_label_names.index(self.chest_imagenome_label_names[idx]) for idx in label_order\
+                                                       if self.chest_imagenome_label_names[idx] in common_label_names]
+                    self.valid_chest_imagenome_label_indices = _valid_label_indices__model_pov
+                    self.chest_imagenome_labels = self.chest_imagenome_labels[:, _valid_label_indices__gold_pov]
+                    self.chest_imagenome_label_names = [gold_label_names[i] for i in _valid_label_indices__gold_pov]
+                    assert set(self.chest_imagenome_label_names) == set(common_label_names)
+                    print(f'  len(gold_label_names) = {len(gold_label_names)}')
+                    print(f'  len(label_order) = {len(label_order)}')
+                    print(f'  len(common_label_names) = {len(common_label_names)}')
+                    print(f'  len(self.valid_chest_imagenome_label_indices) = {len(self.valid_chest_imagenome_label_indices)}')
+                else:
+                    assert self.chest_imagenome_labels.shape[1] == len(label_order)
+                    assert set(label_order) == set(range(len(label_order)))
+                    assert len(label_order) == len(self.chest_imagenome_label_names)
+                    self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
+                    self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
+                print(f'  len(self.chest_imagenome_label_names) = {len(self.chest_imagenome_label_names)}')
+                print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
             
             if use_precomputed_visual_features:
                 print('Loading precomputed visual features...')
@@ -697,7 +764,7 @@ class MIMICCXR_VisualModuleTrainer():
                 self.labels2mergedfindings = None
                 self.finding_labels = None
 
-            if use_test_set:
+            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 # Create test dataset and dataloader
                 self.test_dataset, self.test_dataloader = self._create_dataset_and_dataloader(
                     self.test_indices, test_image_transform)
@@ -811,9 +878,11 @@ class MIMICCXR_VisualModuleTrainer():
                                 pass
                             else:
                                 raise ValueError('Unexpected label name: {}'.format(label_name))
+                max_name_len = max(len(global_name) for global_name in global2idxs.keys())
                 for global_name, idxs in global2idxs.items():
                     idxs_set = set(idxs)
                     other_idxs = [i for i in indices if i not in idxs_set]
+                    global_name = global_name.ljust(max_name_len)
                     print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
                     assert len(idxs) > 0
                     assert len(other_idxs) > 0
@@ -936,7 +1005,7 @@ def get_detectron2_adapted_data(split_name,
         print('len(allowed_dicom_ids) (after filtering by gold set):', len(allowed_dicom_ids))
     elif split_name == 'train' or split_name == 'validate':
         allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
-        allowed_dicom_ids -= set(load_gold_standard_dicom_ids()) # remove gold standard images
+        allowed_dicom_ids -= set(load_gold_standard_related_dicom_ids()) # remove gold standard images
     else:
         assert split_name == 'test'
         allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))

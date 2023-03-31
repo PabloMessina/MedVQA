@@ -8,6 +8,7 @@ CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCE
 CHEST_IMAGENOME_SILVER_DATASET_DIR = os.environ['CHEST_IMAGENOME_SILVER_DATASET_DIR']
 CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH = os.environ['CHEST_IMAGENOME_IMAGES_TO_AVOID_CSV_PATH']
 CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH = os.environ['CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH']
+CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH = os.environ['CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH']
 CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'bboxes.pkl')
@@ -55,6 +56,18 @@ CHEST_IMAGENOME_BBOX_NAMES = [
     'right upper abdomen',
     'abdomen',
     'left cardiophrenic angle',
+]
+
+CHEST_IMAGENOME_OTHER_REGIONS = [ # these do not come with bounding boxes
+    'neck',
+    'left chest wall',
+    'right chest wall',
+    'left shoulder',
+    'right shoulder',
+    'left arm',
+    'right arm',
+    'left breast',
+    'right breast',
 ]
 
 CHEST_IMAGENOME_BBOX_NAME_TO_SHORT = {

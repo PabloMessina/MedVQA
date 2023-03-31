@@ -14,11 +14,16 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 )
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.evaluation.visual_module import calibrate_thresholds_on_mimiccxr_validation_set, calibrate_weights_and_thresholds_for_ensemble, merge_probabilities
+from medvqa.evaluation.visual_module import (
+    calibrate_thresholds_on_mimiccxr_validation_set,
+    calibrate_weights_and_thresholds_for_ensemble,
+    merge_probabilities,
+)
 from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import MultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.metrics.classification.roc_auc import roc_auc_fn
+from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
 
@@ -66,12 +71,14 @@ from medvqa.utils.logging import CountPrinter, print_blue
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'mimiccxr_test_set'
+    CHEST_IMAGENOME_GOLD = 'chest_imagenome_gold'
 
 def parse_args():
     parser = argparse.ArgumentParser()
     
     # required arguments
-    parser.add_argument('--eval-dataset-name', type=str, required=True)
+    parser.add_argument('--eval-dataset-name', type=str, required=True, choices=[
+        EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD])
 
     # optional arguments
     parser.add_argument('--checkpoint-folder', type=str, default=None)
@@ -130,6 +137,9 @@ def _compute_and_save_metrics(
         # compute chexpert auc
         metrics[MetricNames.CHXLABEL_AUC] = auc_fn(
             pred_chexpert_probs, gt_chexpert_labels)
+        # compute chexpert prc auc
+        metrics[MetricNames.CHXLABEL_PRCAUC] = prc_auc_fn(
+            pred_chexpert_probs, gt_chexpert_labels)
 
     if chest_imagenome_thresholds is not None:
         assert chest_imagenome_label_names is not None
@@ -152,6 +162,9 @@ def _compute_and_save_metrics(
             pred_chest_imagenome_probs, gt_chest_imagenome_labels)
         # compute chest imagenome auc
         metrics[MetricNames.CHESTIMAGENOMELABELAUC] = auc_fn(
+            pred_chest_imagenome_probs, gt_chest_imagenome_labels)
+        # compute chest imagenome prc auc
+        metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC] = prc_auc_fn(
             pred_chest_imagenome_probs, gt_chest_imagenome_labels)
         # save label names
         metrics['chest_imagenome_label_names'] = chest_imagenome_label_names
@@ -181,6 +194,8 @@ def _compute_and_save_metrics__ensemble__chest_imagenome(
     metrics[MetricNames.CHESTIMAGENOMELABELROCAUC] = roc_auc_fn(merged_probs, gt_labels)
     # compute chest imagenome auc
     metrics[MetricNames.CHESTIMAGENOMELABELAUC] = auc_fn(merged_probs, gt_labels)
+    # compute precision-recall auc
+    metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC] = prc_auc_fn(merged_probs, gt_labels)
     # save label names
     metrics['chest_imagenome_label_names'] = label_names
     # save ensemble related arguments
@@ -200,7 +215,7 @@ def _recover_model_kwargs(metadata):
     kwargs.update(metadata['auxiliary_tasks_kwargs'])
     return kwargs
 
-def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, num_workers):
+def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, num_workers, eval_dataset_name):
     keys = [
         f'{dataset_name}_trainer_kwargs',
         f'{dataset_name}_vision_trainer_kwargs',
@@ -215,7 +230,11 @@ def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, n
 
     kwargs['batch_size'] = batch_size
     kwargs['num_workers'] = num_workers
-    kwargs['use_test_set'] = True
+    if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
+        kwargs['use_test_set'] = True
+    elif eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
+        kwargs['use_chest_imagenome_label_gold_set'] = True
+    else: assert False
     kwargs['data_augmentation_enabled'] = False
     
     # Define test image transform
@@ -259,8 +278,8 @@ def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, n
 
     return kwargs
 
-def _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, num_workers):
-    return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size, num_workers)
+def _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, num_workers, eval_dataset_name):
+    return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size, num_workers, eval_dataset_name)
 
 def _calibrate_thresholds_using_chexpert_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
                                                         save_probs=False, results_folder_path=None):
@@ -295,18 +314,16 @@ def _evaluate_model(
     chest_imagenome_labels_filename=None,
     return_results=False,
     cheat=False,
-):
-    # Sanity checks
-    assert eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET]
-    
-    eval_mimiccxr = eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET]
+):    
+    eval_mimiccxr_test_set = eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET
+    eval_chest_imagenome_gold = eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD
 
     if use_ensemble: # do things differently if using ensemble
         assert model_names_for_ensemble is not None
         assert label_name_for_ensemble is not None
         assert len(model_names_for_ensemble) > 0
         assert calibrate_thresholds # always calibrate thresholds when using ensemble
-        assert eval_mimiccxr # not implemented for other datasets
+        assert eval_mimiccxr_test_set # not implemented for other datasets
 
         if label_name_for_ensemble == 'chest_imagenome':
             assert chest_imagenome_label_names_filename is not None
@@ -323,7 +340,7 @@ def _evaluate_model(
             print('Collecting test set probabilities')
             test_probs_list = []
             for model_name in tqdm(model_names_for_ensemble):
-                test_probs_path = os.path.join(RESULTS_DIR, model_name, f'dicom_id_to_pred_{label_name_for_ensemble}_probs__miminiccxr_test_set.pkl')
+                test_probs_path = os.path.join(RESULTS_DIR, model_name, f'dicom_id_to_pred_{label_name_for_ensemble}_probs__mimiccxr_test_set.pkl')
                 assert os.path.exists(test_probs_path), f'Could not find {test_probs_path}'
                 test_probs_list.append(load_pickle(test_probs_path))
             # Collect label names used by each model (we will ensemble only the labels that are common to all models)
@@ -388,7 +405,7 @@ def _evaluate_model(
             # Save ensemble probabilities
             if save_probs:
                 save_to_pickle(test_merged_probs, os.path.join(ensemble_results_folder_path,
-                                f'dicom_id_to_pred_{label_name_for_ensemble}_probs__miminiccxr_test_set.pkl'))
+                                f'dicom_id_to_pred_{label_name_for_ensemble}_probs__mimiccxr_test_set.pkl'))
             # Return results
             if return_results:
                 return metrics
@@ -439,22 +456,30 @@ def _evaluate_model(
         raise ValueError(f'Invalid model_name: {model_name}')
     model = model.to(device)
     model.load_state_dict(checkpoint['model'], strict=False)
+    
+    # Create MIMIC-CXR visual module evaluator
+    if eval_mimiccxr_test_set or eval_chest_imagenome_gold:
+        count_print('Creating MIMIC-CXR visual module evaluator ...')
+        if eval_mimiccxr_test_set:
+            assert mimiccxr_vision_evaluator_kwargs['use_test_set']
+        if eval_chest_imagenome_gold:
+            assert mimiccxr_vision_evaluator_kwargs['use_chest_imagenome_label_gold_set']
+        mimiccxr_vision_evaluator = MIMICCXR_VisualModuleTrainer(**mimiccxr_vision_evaluator_kwargs)
 
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
-    evaluator = get_engine(model=model, classify_tags=classify_tags, classify_orientation=classify_orientation,
-                            classify_gender=classify_gender, classify_chexpert=classify_chexpert,
-                            classify_questions=classify_questions,
-                            classify_chest_imagenome=classify_chest_imagenome,
-                            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
-                            pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs['pass_pred_bbox_coords_to_model'],
-                            device=device, use_amp=use_amp, training=False)
-    
-    # Create MIMIC-CXR visual module evaluator
-    if eval_mimiccxr:
-        count_print('Creating MIMIC-CXR visual module evaluator ...')
-        assert mimiccxr_vision_evaluator_kwargs['use_test_set']
-        mimiccxr_vision_evaluator = MIMICCXR_VisualModuleTrainer(**mimiccxr_vision_evaluator_kwargs)
+    _engine_kwargs = dict(
+        model=model, classify_tags=classify_tags, classify_orientation=classify_orientation,
+        classify_gender=classify_gender, classify_chexpert=classify_chexpert,
+        classify_questions=classify_questions,
+        classify_chest_imagenome=classify_chest_imagenome,
+        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
+        device=device, use_amp=use_amp, training=False,
+    )
+    if eval_chest_imagenome_gold:
+        _engine_kwargs['valid_chest_imagenome_label_indices'] = mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices
+    evaluator = get_engine(**_engine_kwargs)
 
     # Attach metrics, timer and events to engines
     count_print('Attaching metrics, timer and events to engines ...')
@@ -520,8 +545,8 @@ def _evaluate_model(
     # Run evaluation
     results_dict = {}
 
-    if eval_mimiccxr:
-        count_print('Running evaluator engine on MIMIC-CXR test set ...')
+    if eval_mimiccxr_test_set or eval_chest_imagenome_gold:
+        count_print(f'Running evaluator engine on {eval_dataset_name} ...')
         print('len(mimiccxr_vision_evaluator.test_dataset) =', len(mimiccxr_vision_evaluator.test_dataset))
         print('len(mimiccxr_vision_evaluator.test_dataloader) =', len(mimiccxr_vision_evaluator.test_dataloader))
         evaluator.run(mimiccxr_vision_evaluator.test_dataloader)        
@@ -531,19 +556,19 @@ def _evaluate_model(
         
         # Save probabilities
         if save_probs:
-            print('Saving probabilities on MIMIC-CXR test set ...')
+            print(f'Saving probabilities on {eval_dataset_name} ...')
             _tuples = []
             if classify_chest_imagenome:
-                _tuples.append(('pred_chest_imagenome_probs', 'dicom_id_to_pred_chest_imagenome_probs__miminiccxr_test_set.pkl'))
+                _tuples.append(('pred_chest_imagenome_probs', f'dicom_id_to_pred_chest_imagenome_probs__{eval_dataset_name}.pkl'))
             if classify_chexpert:
-                _tuples.append(('pred_chexpert_probs', 'dicom_id_to_pred_chexpert_probs__miminiccxr_test_set.pkl'))
+                _tuples.append(('pred_chexpert_probs', f'dicom_id_to_pred_chexpert_probs__{eval_dataset_name}.pkl'))
             for pred_probs_key, save_name in _tuples:
                 dicom_id_to_pred_probs = {}            
                 pred_probs = evaluator.state.metrics[pred_probs_key]
                 assert len(mimiccxr_vision_evaluator.test_indices) == len(pred_probs)
                 for i, idx in enumerate(mimiccxr_vision_evaluator.test_indices):
                     dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
-                    dicom_id_to_pred_probs[dicom_id] = pred_probs[i]
+                    dicom_id_to_pred_probs[dicom_id] = pred_probs[i].detach().cpu().numpy()
                 save_path = os.path.join(results_folder_path, save_name)
                 save_to_pickle(dicom_id_to_pred_probs, save_path)
                 print('Probabilities saved to:', save_path)
@@ -551,6 +576,7 @@ def _evaluate_model(
         if calibrate_thresholds:
             kwargs = mimiccxr_vision_evaluator_kwargs.copy()
             kwargs['use_test_set'] = False
+            kwargs['use_chest_imagenome_label_gold_set'] = False
             kwargs['use_val_set_only'] = True
             kwargs['val_image_transform'] = kwargs['test_image_transform']
             assert kwargs['val_image_transform'] is not None
@@ -564,6 +590,10 @@ def _evaluate_model(
         if classify_chest_imagenome and calibrate_thresholds:
             chest_imagenome_thresholds = _calibrate_thresholds_using_chest_imagenome_for_mimiccxr(
                 model, device, use_amp, kwargs, save_probs, results_folder_path)
+            if eval_chest_imagenome_gold:
+                print(f'chest_imagenome_thresholds.shape (before) = {chest_imagenome_thresholds.shape}')
+                chest_imagenome_thresholds = chest_imagenome_thresholds[mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices]
+                print(f'chest_imagenome_thresholds.shape (after) = {chest_imagenome_thresholds.shape}')
         else:
             chest_imagenome_thresholds = None
 
@@ -601,10 +631,9 @@ def evaluate_model(
     cheat=False,
 ):
     print()
-    print_blue('----- Evaluating model ------')
+    print_blue('----- Evaluating model ------', bold=True)
 
     # Sanity checks
-    assert eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET]
     if use_ensemble:
         assert model_names_for_ensemble is not None
         assert label_name_for_ensemble is not None
@@ -616,10 +645,11 @@ def evaluate_model(
         metadata = load_metadata(checkpoint_folder)        
         model_kwargs = _recover_model_kwargs(metadata)
         auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
-        if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
-            mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, num_workers)
+        if eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD]:
+            mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
+                metadata, batch_size, num_workers, eval_dataset_name)
         else:
-            mimiccxr_vision_evaluator_kwargs = None
+            assert False, f'Unknown eval_dataset_name: {eval_dataset_name}'
     else:
         model_kwargs = None
         auxiliary_tasks_kwargs = None

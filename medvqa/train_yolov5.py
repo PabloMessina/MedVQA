@@ -11,7 +11,7 @@ from medvqa.datasets.chest_imagenome import (
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_dicom_ids,
-    load_gold_standard_dicom_ids,
+    load_gold_standard_related_dicom_ids,
     load_chest_imagenome_silver_bboxes,
 )
 from medvqa.datasets.mimiccxr import (
@@ -32,18 +32,14 @@ from medvqa.utils.common import (
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset-name', type=str, default=DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME_MODE)
-    parser.add_argument('--decent-images-only', action='store_true')
-    parser.set_defaults(decent_images_only=False)
-    parser.add_argument('--validation-only', action='store_true')
-    parser.set_defaults(validation_only=False)
+    parser.add_argument('--decent-images-only', action='store_true', default=False)
+    parser.add_argument('--validation-only', action='store_true', default=False)
     parser.add_argument('--image-size', type=int, default=416)
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--weights', type=str, default='yolov5s.pt')
-    parser.add_argument('--cache-images', action='store_true')
-    parser.set_defaults(cache_images=False)
-    parser.add_argument('--debug', action='store_true')
-    parser.set_defaults(debug=False)
+    parser.add_argument('--cache-images', action='store_true', default=False)
+    parser.add_argument('--debug', action='store_true', default=False)
     return parser.parse_args()
 
 def prepare_train_val_test_data__chest_imagenome(decent_images_only=False, validation_only=False, debug=False):
@@ -87,7 +83,7 @@ def prepare_train_val_test_data__chest_imagenome(decent_images_only=False, valid
             mimiccxr_val_dicom_ids = set(get_mimiccxr_val_dicom_ids())
             mimiccxr_test_dicom_ids = set(get_mimiccxr_test_dicom_ids())
             allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=decent_images_only))
-            gold_dicom_ids = set(load_gold_standard_dicom_ids())
+            gold_dicom_ids = set(load_gold_standard_related_dicom_ids())
             actual_train_dicom_ids = (mimiccxr_train_dicom_ids & allowed_dicom_ids) - gold_dicom_ids
             actual_val_dicom_ids = (mimiccxr_val_dicom_ids & allowed_dicom_ids) - gold_dicom_ids
             actual_test_dicom_ids = mimiccxr_test_dicom_ids & allowed_dicom_ids

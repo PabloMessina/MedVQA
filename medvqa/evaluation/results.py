@@ -346,7 +346,9 @@ def _append_chest_imagenome_bbox_regressor_version_column(df, results):
         try:
             if metadata['model_kwargs'].get('predict_bboxes_chest_imagenome', False):
                 if metadata['model_kwargs'].get('predict_labels_and_bboxes_chest_imagenome', False):
-                    version = 'v4'
+                    version = metadata['model_kwargs'].get('chest_imagenome_bbox_regressor_version', None) or 'v4'
+                    if version == 'v1': 
+                        version = 'v4' # due to a bug when saving the model's metadata
                 else:
                     version = metadata['model_kwargs']['chest_imagenome_bbox_regressor_version']
             else:
@@ -362,6 +364,8 @@ def _append_chest_imagenome_mlc_version_column(df, results):
         try:
             if metadata['model_kwargs'].get('predict_labels_and_bboxes_chest_imagenome', False):
                 version = metadata['model_kwargs'].get('chest_imagenome_bbox_regressor_version', None) or 'v4'
+                if version == 'v1':
+                    version = 'v4' # due to a bug when saving the model's metadata
             elif metadata['model_kwargs'].get('classify_chest_imagenome', False):
                 version = 'gf->labels'
             else:

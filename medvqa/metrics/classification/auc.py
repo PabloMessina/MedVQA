@@ -6,15 +6,7 @@ _shared_gt = None
 def _auc_task(idx):
     probs = _shared_probs.T[idx]
     gt = _shared_gt.T[idx]
-    idxs = np.argsort(probs)
-    n = len(gt)
-    pos = 0
-    count = 0
-    for i in range(n):
-        if gt[idxs[i]]:
-            count += i - pos
-            pos += 1
-    return count / (pos * (n - pos)) if pos > 0 and pos < n else 0.5
+    return _auc(probs, gt)
 
 def _auc(probs, gt):
     idxs = np.argsort(probs)

@@ -391,4 +391,77 @@ def plot_chest_imagenome_silver_vs_gold_iou_per_bbox_class():
     plt.xlabel('Mean IoU')
     plt.ylabel('Bounding box class')
     plt.show()
-        
+
+def print_number_of_contradictions_per_class(label_names, image_id_to_contradictions):
+    num_contradictions_per_class = np.zeros(len(label_names), dtype=np.int32)
+    for contradictions in image_id_to_contradictions.values():
+        for i in range(len(contradictions)):
+            if contradictions[i] == 1:
+                num_contradictions_per_class[i] += 1
+    idxs = np.argsort(num_contradictions_per_class)[::-1]
+    for i in idxs:
+        if num_contradictions_per_class[i] > 0:
+            print(f'{label_names[i]}: {num_contradictions_per_class[i]}')
+
+def collect_dicom_ids_with_contradictions(label_names, image_id_to_contradictions):
+    dicom_ids = []
+    for dicom_id, contradictions in image_id_to_contradictions.items():
+        nc = np.sum(contradictions)
+        if nc > 0:
+            problematic_labels = [label_names[i] for i in range(len(contradictions)) if contradictions[i] == 1]
+            dicom_ids.append((dicom_id, nc, problematic_labels))
+    dicom_ids.sort(key=lambda x: x[1], reverse=True)
+    return dicom_ids
+
+_shared_image_id_to_binary_labels = None
+_shared_image_id_to_mask = None
+
+def _count_pos_neg_unmasked(label_idx):
+    global _shared_image_id_to_binary_labels
+    global _shared_image_id_to_mask
+    num_positive_masked = 0
+    num_negative_masked = 0
+    num_unmasked = 0
+    for image_id, binary_labels in _shared_image_id_to_binary_labels.items():
+        mask = _shared_image_id_to_mask[image_id]
+        if binary_labels[label_idx] == 1:
+            assert mask[label_idx] == 1
+            num_positive_masked += 1
+        else:
+            if mask[label_idx] == 1:
+                num_negative_masked += 1
+            else:
+                num_unmasked += 1
+    return num_positive_masked, num_negative_masked, num_unmasked
+
+def plot_positive_negative_masked_distribution_per_label(label_names, image_id_to_binary_labels, image_id_to_mask, figsize=(10, 10), num_workers=6):
+    """
+    For each label, plot a single horizontal bar divided into three parts (each of a different color):
+    - the left part shows the number of images with a positive label and mask == 1
+    - the middle part shows the number of images with a negative label and mask == 1
+    - the right part shows the number of images with mask == 0 (i.e. the rest)
+    """
+    global _shared_image_id_to_binary_labels
+    global _shared_image_id_to_mask
+    _shared_image_id_to_binary_labels = image_id_to_binary_labels
+    _shared_image_id_to_mask = image_id_to_mask
+    with Pool(num_workers) as pool:
+        results = pool.map(_count_pos_neg_unmasked, range(len(label_names)))
+    num_positive_masked = np.array([r[0] for r in results], dtype=np.int32)
+    num_negative_masked = np.array([r[1] for r in results], dtype=np.int32)
+    num_unmasked = np.array([r[2] for r in results], dtype=np.int32)
+    idxs = np.argsort(num_unmasked)[::-1]
+    label_names = [f'{label_names[i]} (p={num_positive_masked[i]}, n={num_negative_masked[i]}, u={num_unmasked[i]})' for i in idxs]
+    num_positive_masked = num_positive_masked[idxs]
+    num_negative_masked = num_negative_masked[idxs]
+    num_unmasked = num_unmasked[idxs]
+    plt.figure(figsize=figsize)
+    plt.title('Number of images per label')
+    plt.barh(label_names, num_positive_masked, color='green', label='Positive')
+    plt.barh(label_names, num_negative_masked, left=num_positive_masked, color='red', label='Negative')
+    plt.barh(label_names, num_unmasked, left=num_positive_masked+num_negative_masked, color='gray', label='Not annotated')
+    plt.xlabel('Number of images')
+    plt.ylabel('Label')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

@@ -77,11 +77,7 @@ def prepare_eval_data__chest_imagenome(eval_dataset_name, decent_images_only=Fal
 
     return eval_images_txt_path
 
-def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids, gt_bbox_dict, bbox_names, eval_dataset_name,
-                                  results_folder_path, decent_images_only, valid_classes=None):
-    metrics = {}
-
-    # Load predictions
+def _load_predictions_from_folder(model_predictions_folder, dicom_ids):
     n = len(dicom_ids)
     pred_boxes = [None] * n
     pred_classes = [None] * n
@@ -98,8 +94,8 @@ def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids,
             assert 1 <= len(pred_labels.shape) <= 2
             if len(pred_labels.shape) == 1:
                 pred_labels = pred_labels.reshape(1, -1)
-            pred_classes[i] = pred_labels[:, 0].astype(np.int)
-            pred_boxes[i] = pred_labels[:, 1:].astype(np.float)
+            pred_classes[i] = pred_labels[:, 0].astype(int)
+            pred_boxes[i] = pred_labels[:, 1:].astype(float)
             # adapt from (x_center, y_center, w, h) to (x_min, y_min, x_max, y_max)
             pred_boxes[i][:, 0] = pred_boxes[i][:, 0] - pred_boxes[i][:, 2] / 2
             pred_boxes[i][:, 1] = pred_boxes[i][:, 1] - pred_boxes[i][:, 3] / 2
@@ -109,9 +105,12 @@ def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids,
     if skipped > 0:
         print_red(f'WARNING: {skipped} images without predictions', bold=True)
     
-    # Load ground truth
-    test_bbox_coords = np.zeros((n, len(bbox_names), 4), dtype=np.float)
-    test_bbox_presences = np.zeros((n, len(bbox_names)), dtype=np.int)
+    return pred_boxes, pred_classes
+
+def _load_ground_truth(dicom_ids, gt_bbox_dict, n_bbox_classes):
+    n = len(dicom_ids)
+    test_bbox_coords = np.zeros((n, n_bbox_classes, 4), dtype=float)
+    test_bbox_presences = np.zeros((n, n_bbox_classes), dtype=int)
     for i in range(n):
         dicom_id = dicom_ids[i]
         gt_bboxes = gt_bbox_dict[dicom_id]            
@@ -119,8 +118,10 @@ def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids,
         test_bbox_presences[i] = gt_bboxes['presence']
     # clip coords to [0, 1]
     test_bbox_coords = np.clip(test_bbox_coords, 0, 1)
+    return test_bbox_coords, test_bbox_presences
 
-    # Compute metrics    
+def _compute_bbox_metrics(pred_boxes, pred_classes, test_bbox_coords, test_bbox_presences, valid_classes, bbox_names):
+    metrics = {}
     # Mean Absolute Error
     print('Computing Mean Absolute Error (MAE) ...')
     metrics['mae'] = compute_mae_per_class__yolov5(pred_boxes, pred_classes, test_bbox_coords, test_bbox_presences, valid_classes,
@@ -172,8 +173,23 @@ def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids,
     else:
         assert len(valid_classes) == len(bbox_names)
         metrics['bbox_names'] = [bbox_names[i] for i in range(len(bbox_names)) if valid_classes[i]]
+
+    return metrics
+
+
+def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids, gt_bbox_dict, bbox_names, eval_dataset_name,
+                                  results_folder_path, decent_images_only, valid_classes=None):
+
+    # Load predictions
+    pred_boxes, pred_classes = _load_predictions_from_folder(model_predictions_folder, dicom_ids)
     
-    # Save metrics    
+    # Load ground truth
+    test_bbox_coords, test_bbox_presences = _load_ground_truth(dicom_ids, gt_bbox_dict, len(bbox_names))
+
+    # Compute metrics
+    metrics = _compute_bbox_metrics(pred_boxes, pred_classes, test_bbox_coords, test_bbox_presences, valid_classes, bbox_names)
+    
+    # Save metrics
     save_path = os.path.join(results_folder_path,
         (f'{eval_dataset_name}__bbox_metrics({"decent" if decent_images_only else ""}).pkl'))
     save_to_pickle(metrics, save_path)

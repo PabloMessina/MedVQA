@@ -43,11 +43,9 @@ from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
     attach_dataset_aware_chest_imagenome_bbox_mae,
     attach_dataset_aware_chest_imagenome_bbox_iou,
-    attach_dataset_aware_chest_imagenome_labels_accuracy,
     attach_dataset_aware_chest_imagenome_labels_auc,
-    attach_dataset_aware_chest_imagenome_labels_macroavgf1,
-    attach_dataset_aware_chest_imagenome_labels_microavgf1,
-    attach_dataset_aware_chest_imagenome_bbox_meanf1,    
+    attach_dataset_aware_chest_imagenome_bbox_meanf1,
+    attach_dataset_aware_chest_imagenome_labels_prcauc,    
     attach_dataset_aware_vinbig_labels_macroavgf1,
     attach_dataset_aware_vinbig_labels_microavgf1,
     attach_dataset_aware_cxr14_labels_macroavgf1,
@@ -266,6 +264,7 @@ _METRIC_WEIGHTS = {
     MetricNames.CHESTIMAGENOMELABELMACROAVGF1: 0.5,
     MetricNames.CHESTIMAGENOMELABELMICROAVGF1: 0.5,
     MetricNames.CHESTIMAGENOMELABELAUC: 1,
+    MetricNames.CHESTIMAGENOMELABELPRCAUC: 1,
     MetricNames.CHESTIMAGENOMEBBOXMEANF1: 1,
 }
 
@@ -275,6 +274,9 @@ def _metric_getter(metrics_dict, key):
         assert len(scores) == 4
         return sum(scores) / len(scores)
     if key == MetricNames.CHESTIMAGENOMELABELAUC:
+        scores = metrics_dict[key]
+        return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
+    if key == MetricNames.CHESTIMAGENOMELABELPRCAUC:
         scores = metrics_dict[key]
         return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
     return metrics_dict[key]
@@ -613,17 +615,14 @@ def train_model(
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
 
     if classify_chest_imagenome:
-        attach_dataset_aware_chest_imagenome_labels_accuracy(trainer_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_accuracy(validator_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_macroavgf1(trainer_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_macroavgf1(validator_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_microavgf1(trainer_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_labels_microavgf1(validator_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_labels_auc(trainer_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_chest_imagenome_labels_auc(validator_engine, _mim_datasets, 'cpu')
+        attach_dataset_aware_chest_imagenome_labels_prcauc(trainer_engine, _mim_datasets, 'cpu')
+        attach_dataset_aware_chest_imagenome_labels_prcauc(validator_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, _mim_datasets)
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC)        
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELPRCAUC)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)

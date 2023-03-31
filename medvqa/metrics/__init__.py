@@ -6,6 +6,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMacroAvgF1,
     DatasetAwareMultiLabelMicroAvgF1,
 )
+from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
@@ -255,6 +256,13 @@ def attach_dataset_aware_chest_imagenome_labels_auc(engine, allowed_dataset_ids,
                                   allowed_dataset_ids=allowed_dataset_ids,
                                   device=device)
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELAUC)
+
+def attach_dataset_aware_chest_imagenome_labels_prcauc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=prc_auc_fn,
+                                  output_transform=_get_output_transform('pred_chest_imagenome_probs', 'chest_imagenome'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.CHESTIMAGENOMELABELPRCAUC)
 
 def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids, use_detectron2=False):
     if use_detectron2:
