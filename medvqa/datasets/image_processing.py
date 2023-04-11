@@ -55,6 +55,7 @@ def get_image_transform(
     use_bbox_aware_transform=False,
     horizontal_flip_prob=0,
     use_detectron2_transform=False,
+    for_yolov8=False,
     # detectron2_cfg=None,
 ):
     print('get_image_transform()')
@@ -109,15 +110,24 @@ def get_image_transform(
         tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
         tf_hflip = T.Lambda(lambda x: cv2.flip(x, 1))
         tf_totensor = T.ToTensor()
-        tf_normalize = T.Normalize(mean, std)
+        if for_yolov8:
+            tf_normalize = T.Lambda(lambda x: x / 255) # just divide by 255
+        else:
+            tf_normalize = T.Normalize(mean, std)
 
-        def _default_transform(image_path):
+        def _default_transform(image_path, return_image_size=False):
             image = tf_load_image(image_path)
+            if return_image_size:
+                size_before = image.shape[:2] # (H, W)
             # image = tf_bgr2rgb(image)
             image = tf_resize(image)
+            if return_image_size:
+                size_after = image.shape[:2]
             image = tf_totensor(image)
             image = tf_normalize(image)
             # assert len(image.shape) == 3 # (C, H, W)
+            if return_image_size:
+                return image, size_before, size_after
             return image
 
         if augmentation_mode is None: # no augmentation
@@ -127,15 +137,21 @@ def get_image_transform(
         if augmentation_mode == 'horizontal-flip':
             assert horizontal_flip_prob > 0
             print('    Returning horizontal flip transform')
-            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, _):
+            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, _, return_image_size=False):
                 image = tf_load_image(image_path)
+                if return_image_size:
+                    size_before = image.shape[:2]
                 image = tf_resize(image)
+                if return_image_size:
+                    size_after = image.shape[:2]
                 if random.random() < horizontal_flip_prob:
                     image = tf_hflip(image)
                     bboxes = flipped_bboxes
                     presence = flipped_presence
                 image = tf_totensor(image)
                 image = tf_normalize(image)
+                if return_image_size:
+                    return image, bboxes, presence, size_before, size_after
                 return image, bboxes, presence
             return _transform
         
@@ -158,10 +174,14 @@ def get_image_transform(
         def _get_transform(tf_img_bbox_aug, tf_img_bbox_aug_2): # closure (needed to capture tf_img_bbox_aug)
             def _transform(image_path, bboxes, albumentation_adapter, presence=None,
                             flipped_bboxes=None, flipped_presence=None,
-                            pred_bboxes=None, flipped_pred_bboxes=None):
+                            pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
                 image = tf_load_image(image_path)
+                if return_image_size:
+                    size_before = image.shape[:2]
                 # image = tf_bgr2rgb(image)
                 image = tf_resize(image)
+                if return_image_size:
+                    size_after = image.shape[:2]
                 if flip_image:
                     assert flipped_bboxes is not None
                     if presence is not None:
@@ -194,8 +214,12 @@ def get_image_transform(
                 if pred_bboxes is not None:
                     pred_bboxes = augmented['bboxes2']
                     pred_bboxes = albumentation_adapter.decode(pred_bboxes, only_boxes=True)
+                    if return_image_size:
+                        return image, bboxes, presence, pred_bboxes, size_before, size_after
                     return image, bboxes, presence, pred_bboxes
                 else:
+                    if return_image_size:
+                        return image, bboxes, presence, size_before, size_after
                     return image, bboxes, presence
             return _transform
 
@@ -208,10 +232,17 @@ def get_image_transform(
         print('    flip_image =', flip_image)
 
         def transform_fn(image_path, bboxes, albumentation_adapter, presence=None, flipped_bboxes=None, flipped_presence=None,
-                         pred_bboxes=None, flipped_pred_bboxes=None):
+                         pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
             # randomly choose between default transform and augmented transform
             if random.random() < default_prob:
+                if return_image_size:
+                    img, size_before, size_after = _default_transform(image_path, return_image_size=True)
+                    if pred_bboxes is not None:
+                        return img, bboxes, presence, pred_bboxes, size_before, size_after
+                    return img, bboxes, presence, size_before, size_after
                 img = _default_transform(image_path)
+                if pred_bboxes is not None:
+                    return img, bboxes, presence, pred_bboxes
                 return img, bboxes, presence
             return random.choice(_augmented_bbox_transforms)(
                 image_path=image_path,
@@ -222,6 +253,7 @@ def get_image_transform(
                 flipped_presence=flipped_presence,
                 pred_bboxes=pred_bboxes,
                 flipped_pred_bboxes=flipped_pred_bboxes,
+                return_image_size=return_image_size,
             )
 
         print(f'    Returning augmented transforms with mode {augmentation_mode}')
@@ -310,7 +342,7 @@ def get_image_transform(
 
     if augmentation_mode is None:
         print('Returning transform without augmentation')
-        return default_transform
+        return lambda img, **unused: default_transform(img)
     
     assert augmentation_mode in _AUGMENTATION_MODES, f'Unknown augmentation mode {augmentation_mode}'
 
@@ -356,7 +388,7 @@ def get_image_transform(
     print('len(final_transforms) =', len(final_transforms))
     print('default_prob =', default_prob)
 
-    def transform_fn(img):
+    def transform_fn(img, **unused):
         if random.random() < default_prob:
             return default_transform(img)
         return random.choice(final_transforms)(img)
@@ -388,13 +420,18 @@ inv_normalize = T.Normalize(
 )
 
 class ImageDataset(Dataset):
-    def __init__(self, image_paths, image_transform):
+    def __init__(self, image_paths, image_transform, use_yolov8=False):
         self.image_paths = image_paths
-        self.image_transform = image_transform    
+        self.image_transform = image_transform
+        self.use_yolov8 = use_yolov8
     def __len__(self):
         return len(self.image_paths)
     def __getitem__(self, i):
-        return {'i': self.image_transform(self.image_paths[i]) }
+        if self.use_yolov8:
+            image, _, size_after = self.image_transform(self.image_paths[i], return_image_size=True)
+            return {'i': image, 'resized_shape': size_after}
+        else:
+            return {'i': self.image_transform(self.image_paths[i]) }
 
 def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,
         top_k, threshold, min_num_q_per_report=5):

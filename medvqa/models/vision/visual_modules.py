@@ -1,12 +1,14 @@
+from symtable import Class
 import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.models as models
 import torchxrayvision as xrv
-import clip
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_BBOX_NAMES,
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    get_anaxnet_bbox_sorted_indices,
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
@@ -22,6 +24,9 @@ from medvqa.models.vision.bbox_regression import (
     BoundingBoxRegressorAndMultiLabelClassifier_v5,
     BoundingBoxRegressorAndMultiLabelClassifier_v6,
 )
+from medvqa.models.vision.multilabel_classification import (
+    MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2,
+)
 from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CHEXPERT_GENDERS,
@@ -33,10 +38,8 @@ from medvqa.utils.constants import (
     VINBIG_DISEASES,
 )
 from transformers import AutoModel, ViTModel
-from detectron2.modeling import build_model as build_detectron2_model
-from detectron2.config import get_cfg as get_detectron2_cfg
-from detectron2 import model_zoo as detectron2_model_zoo
-from detectron2.checkpoint import DetectionCheckpointer
+from ultralytics.yolo.utils.ops import non_max_suppression
+from ultralytics.nn.tasks import DetectionModel
 import re
 
 class RawImageEncoding:
@@ -52,6 +55,7 @@ class RawImageEncoding:
     VITMODEL__HUGGINGFACE = 'vitmodel-huggingface'
     VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
     DETECTRON2 = 'detectron2'
+    YOLOV8 = 'yolov8'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -86,6 +90,8 @@ class MultiPurposeVisualModule(nn.Module):
                 roi_heads_batch_size_per_image=None,
                 rpn_batch_size_per_image=None,
                 roi_align_output_size=None,
+                yolov8_model_name_or_path=None,
+                yolov8_model_alias=None,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -110,6 +116,8 @@ class MultiPurposeVisualModule(nn.Module):
                 n_chest_imagenome_bboxes=None,
                 chest_imagenome_bbox_hidden_size=None,
                 chest_imagenome_bbox_regressor_version=None,
+                chest_imagenome_mlc_version=MLCVersion.DEFAULT,
+                chest_imagenome_mlc_hidden_size=None,
                 use_anaxnet_bbox_subset=False,
                 merge_findings=False,
                 n_findings=None,
@@ -163,6 +171,10 @@ class MultiPurposeVisualModule(nn.Module):
         self.roi_heads_batch_size_per_image = roi_heads_batch_size_per_image
         self.rpn_batch_size_per_image = rpn_batch_size_per_image
         self.roi_align_output_size = roi_align_output_size
+        self.yolov8_model_name_or_path = yolov8_model_name_or_path
+        self.yolov8_model_alias = yolov8_model_alias
+        self.chest_imagenome_mlc_version = chest_imagenome_mlc_version
+        self.chest_imagenome_mlc_hidden_size = chest_imagenome_mlc_hidden_size
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -177,6 +189,9 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
         ]:
             assert torchxrayvision_weights_name is not None
+        if raw_image_encoding == RawImageEncoding.YOLOV8:
+            assert yolov8_model_name_or_path is not None
+            assert yolov8_model_alias is not None
 
         if use_anaxnet_bbox_subset:
             assert predict_bboxes_chest_imagenome
@@ -205,6 +220,8 @@ class MultiPurposeVisualModule(nn.Module):
                 model_name = self.torchxrayvision_weights_name
             elif self.detectron2_model_yaml is not None:
                 model_name = self.detectron2_model_yaml
+            elif self.yolov8_model_name_or_path is not None:
+                model_name = self.yolov8_model_name_or_path
             else:
                 model_name = None
             self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
@@ -229,6 +246,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.DENSENET_121__TORCHXRAYVISION,
             RawImageEncoding.RESNET__TORCHXRAYVISION,
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
+            RawImageEncoding.YOLOV8,
         ]:
             return 2 * image_local_feat_size
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
@@ -281,6 +299,20 @@ class MultiPurposeVisualModule(nn.Module):
             self.raw_image_encoder = create_detectron2_model(model_name, num_classes=num_classes,
                                                              roi_heads_batch_size_per_image=self.roi_heads_batch_size_per_image,
                                                              rpn_batch_size_per_image=self.rpn_batch_size_per_image)
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
+            if self.predict_bboxes_chest_imagenome:
+                if self.use_anaxnet_bbox_subset:
+                    num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+                    class_names = {i:CHEST_IMAGENOME_BBOX_NAMES[idx] for i, idx in \
+                                   enumerate(get_anaxnet_bbox_sorted_indices())}
+                else:
+                    num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
+                    class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
+                self.num_bbox_classes = num_classes
+            else:
+                assert False, 'We only support predicting bboxes for chest_imagenome at the moment'
+            self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=num_classes,
+                                                         class_names=class_names)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -412,9 +444,40 @@ class MultiPurposeVisualModule(nn.Module):
         else:
             if self.classify_chest_imagenome:
                 print(f'    Initializing Chest ImaGenome classification task (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
-                assert self.n_chest_imagenome_labels is not None
-                self.W_chst_imgn = nn.Linear(self.global_feat_size, self.n_chest_imagenome_labels)
-            if self.predict_bboxes_chest_imagenome and not self.raw_image_encoding == RawImageEncoding.DETECTRON2:
+                if self.chest_imagenome_mlc_version == MLCVersion.DEFAULT:
+                    assert self.n_chest_imagenome_labels is not None
+                    self.W_chst_imgn = nn.Linear(self.global_feat_size, self.n_chest_imagenome_labels)
+                elif self.chest_imagenome_mlc_version == MLCVersion.V1:
+                    assert self.chest_imagenome_mlc_hidden_size is not None
+                    assert self.chest_imagenome_anatomy_to_labels is not None
+                    assert self.chest_imagenome_anatomy_group_to_labels is not None
+                    assert self.n_chest_imagenome_bboxes is not None
+                    self.MLC_chst_imgn = MultilabelClassifier_v1(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.chest_imagenome_mlc_hidden_size,
+                        num_bboxes=self.n_chest_imagenome_bboxes,
+                        num_regions=self.num_regions,
+                        bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                        bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                    )
+                elif self.chest_imagenome_mlc_version == MLCVersion.V2:
+                    self.MLC_chst_imgn = MultilabelClassifier_v2(
+                        global_feat_dim=self.global_feat_size,
+                        local_feat_dim=self.local_feat_size,
+                        input_size=self.num_regions_sqrt,
+                        roi_align_output_size=self.roi_align_output_size,
+                        roi_align_spatial_scale=self.num_regions_sqrt, # [0, 1] -> [0, num_regions_sqrt]
+                        hidden_dim=self.chest_imagenome_mlc_hidden_size,
+                        num_boxes=self.n_chest_imagenome_bboxes,
+                        num_annotated_boxes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                        bbox_to_labels=self.chest_imagenome_anatomy_to_labels,
+                        bbox_group_to_labels=self.chest_imagenome_anatomy_group_to_labels,
+                    )
+                else:
+                    raise NotImplementedError(f'Unsupported Chest ImaGenome MLC version: {self.chest_imagenome_mlc_version}')
+            if self.predict_bboxes_chest_imagenome and not self.raw_image_encoding in [
+                    RawImageEncoding.DETECTRON2, RawImageEncoding.YOLOV8]:
                 print(f'    Initializing Chest ImaGenome bounding box regression task')
                 # Don't need to initialize these custom bbox regressors if using Detectron2
                 assert self.chest_imagenome_bbox_hidden_size is not None
@@ -474,6 +537,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_VITMODEL_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
             img_str = DETECTRON2_YAML_2_SHORT[self.detectron2_model_yaml]
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
+            img_str = self.yolov8_model_alias
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -501,6 +566,7 @@ class MultiPurposeVisualModule(nn.Module):
         refine_bbox_coords=False,
         return_local_features=False,
         return_global_features=False,
+        skip_mlc=False,
         **unused_kwargs,
     ):
 
@@ -528,6 +594,12 @@ class MultiPurposeVisualModule(nn.Module):
                 permute_and_flatten_local_feat = True
             elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
                 compute_global_features = True
+        
+        if self.classify_chest_imagenome:
+            if self.raw_image_encoding == RawImageEncoding.YOLOV8:
+                compute_global_features = True
+            if self.chest_imagenome_mlc_version == MLCVersion.V1:
+                permute_and_flatten_local_feat = True
 
         if compute_global_features:
             global_list = []
@@ -601,6 +673,37 @@ class MultiPurposeVisualModule(nn.Module):
                 global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state
                 if compute_global_features:
                     global_list.append(global_feat)
+
+            elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
+                batch_size = raw_images.size(0)
+                local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(raw_images)
+                assert local_feat_NxCxHxW.shape == (batch_size, self.local_feat_size,
+                                                    self.num_regions_sqrt, self.num_regions_sqrt), \
+                 f'local_feat_NxCxHxW.shape = {local_feat_NxCxHxW.shape}, but expected {(batch_size, self.local_feat_size, self.num_regions_sqrt, self.num_regions_sqrt)}'
+                assert type(detection_output) == list or type(detection_output) == tuple
+                assert len(detection_output) == 3 or len(detection_output) == 2
+                if len(detection_output) == 2:
+                    # print('YOLOv8 output in evaluation mode')
+                    yolov8_predictions = detection_output[0]
+                    yolov8_features = detection_output[1]
+                    # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
+                    yolov8_predictions = non_max_suppression(yolov8_predictions.detach(),
+                                                             conf_thres=0.1, iou_thres=0.1,
+                                                             max_det=self.num_bbox_classes)
+                    # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
+                else:
+                    # print('YOLOv8 output in training mode')
+                    yolov8_predictions = None
+                    yolov8_features = detection_output
+                if permute_and_flatten_local_feat:
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, self.local_feat_size)
+                # compute global features
+                if compute_global_features:
+                    aux = local_feat_NxCxHxW.view(batch_size, self.local_feat_size, -1)
+                    global_avg_pool = aux.mean(2)
+                    global_max_pool = aux.max(2)[0]
+                    global_list.append(global_avg_pool)
+                    global_list.append(global_max_pool)
             
             else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
 
@@ -712,13 +815,25 @@ class MultiPurposeVisualModule(nn.Module):
                     output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                     output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
             else:
-                if self.classify_chest_imagenome:
-                    output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                if self.classify_chest_imagenome and not skip_mlc:
+                    if self.chest_imagenome_mlc_version == MLCVersion.DEFAULT:
+                        output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                    elif self.chest_imagenome_mlc_version == MLCVersion.V1:
+                        output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxRxC, global_feat)
+                    elif self.chest_imagenome_mlc_version == MLCVersion.V2:
+                        assert pred_bbox_coords is not None
+                        output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxCxHxW, global_feat, pred_bbox_coords)
+                    else: assert False
                     output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                 if self.predict_bboxes_chest_imagenome:
-                    pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
-                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
-                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                    if self.raw_image_encoding == RawImageEncoding.YOLOV8:
+                        output['yolov8_features'] = yolov8_features
+                        if yolov8_predictions is not None:
+                            output['yolov8_predictions'] = yolov8_predictions
+                    else:
+                        pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
+                        output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                        output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
 
         return output
 
@@ -1060,6 +1175,7 @@ def _load_pretrained_model_state_dict(model, pretrained_weights_path):
     print(f'Pre-trained weights successfully loaded from {pretrained_weights_path}')
 
 def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
+    import clip
     assert clip_vit_version in _CLIP_VIT_VERSIONS, f'Unknown CLIP ViT version {clip_vit_version}'
     model, _ = clip.load(clip_vit_version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
@@ -1068,6 +1184,7 @@ def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path)
     return vit
 
 def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights_path):
+    import clip
     assert clip_resnet_version in _CLIP_RESNET_VERSIONS, f'Unknown CLIP ResNet version {clip_resnet_version}'
     model, _ = clip.load(clip_resnet_version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
@@ -1095,6 +1212,10 @@ def create_detectron2_model(
         load_model_zoo_weights=True,
         verbose=False,
     ):
+    from detectron2.modeling import build_model as build_detectron2_model
+    from detectron2.config import get_cfg as get_detectron2_cfg
+    from detectron2 import model_zoo as detectron2_model_zoo
+    from detectron2.checkpoint import DetectionCheckpointer
     assert model_yaml is not None
     assert model_yaml.endswith('.yaml')
     cfg = get_detectron2_cfg()
@@ -1124,4 +1245,62 @@ def create_detectron2_model(
         print(f'Loading weights from {checkpoint_url}')
         DetectionCheckpointer(model).load(checkpoint_url)
         print('Weights successfully loaded')
+    return model
+
+class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
+    def __init__(self, cfg='yolov8n.yaml', ch=3, nc=None, verbose=True):  # model, input channels, number of classes
+        super().__init__(cfg, ch, nc, verbose)
+    
+    def custom_forward(self, x):
+        """
+        This is a modified version of the original _forward_once() method in BaseModel,
+        found in ultralytics/nn/tasks.py.
+        The original method returns only the detection output, while this method returns
+        both the detection output and the features extracted by the last convolutional layer.
+        """
+        # print('\n--------------------------')
+        # _count = 0
+        y = []
+        features = None
+        for m in self.model:
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            # if hasattr(x, 'shape'):
+            #     print(f'{_count} (_forward_once) type(x) = {type(x)}, x.shape = {x.shape}')
+            # else:
+            #     print(f'{_count} (_forward_once) type(x) = {type(x)}, shapes = {[y.shape for y in x]}')
+            # _count += 1
+            if torch.is_tensor(x):
+                features = x # keep the last tensor as features
+                # print(f'  features.shape = {features.shape}')
+            x = m(x)  # run
+            if torch.is_tensor(x):
+                features = x # keep the last tensor as features
+                # print(f'  features.shape = {features.shape}')
+            y.append(x if m.i in self.save else None)  # save output
+        if torch.is_tensor(x):
+            features = x # keep the last tensor as features
+            # print(f'  features.shape = {features.shape}')
+        # if hasattr(x, 'shape'):
+        #     print(f'{_count} (_forward_once) type(x) = {type(x)}, x.shape = {x.shape}')
+        # else:
+        #     print(f'{_count} (_forward_once) type(x) = {type(x)}, shapes = {[y.shape if hasattr(y, "shape") else len(y) for y in x]}')
+        return features, x # return features and detection output
+
+def create_yolov8_model(model_name_or_path, nc, class_names):
+    from ultralytics.nn.tasks import attempt_load_one_weight
+    from ultralytics.yolo.cfg import get_cfg
+    ckpt = None
+    if str(model_name_or_path).endswith('.pt'):
+        weights, ckpt = attempt_load_one_weight(model_name_or_path)
+        cfg = ckpt['model'].yaml
+    else:
+        cfg = model_name_or_path
+    model = YOLOv8DetectionAndFeatureExtractorModel(cfg, nc=nc, verbose=True)
+    if weights:
+        model.load(weights)
+    model.nc = nc
+    model.names = class_names  # attach class names to model
+    args = get_cfg(overrides={'model': model_name_or_path})
+    model.args = args  # attach hyperparameters to model
     return model

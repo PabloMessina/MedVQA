@@ -579,7 +579,8 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
                             classify_gender=False, predict_bboxes_chest_imagenome=False, 
                             classify_chexpert=classify_chexpert, classify_chest_imagenome=classify_chest_imagenome,
                             pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
-                            device=device, use_amp=use_amp, training=False)
+                            device=device, use_amp=use_amp, training=False,
+                            using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False))
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)
         attach_chexpert_labels_prf1(evaluator, device)

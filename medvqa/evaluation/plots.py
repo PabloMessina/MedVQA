@@ -10,10 +10,10 @@ from medvqa.datasets.chest_imagenome import (
 )
 
 from medvqa.utils.files import get_cached_pickle_file
-from medvqa.utils.metrics import average_ignoring_nones
+from medvqa.utils.metrics import average_ignoring_nones_and_nans
 
-# Consider 20 different colors
-_COLORS = plt.cm.tab20(np.linspace(0, 1, 20))
+# List of 30 different colors
+_COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
 
 def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
@@ -167,12 +167,12 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
 
     # Sort methods by the mean score (ignoring None values)
     method_idxs = list(range(n))
-    mean_scores = [average_ignoring_nones(scores_per_method[i]) for i in range(n)]
+    mean_scores = [average_ignoring_nones_and_nans(scores_per_method[i]) for i in range(n)]
     method_idxs.sort(key=lambda i: mean_scores[i], reverse=True)
 
     # Sort bbox classes by the mean score
     bbox_idxs = list(range(n_bboxes))
-    mean_scores_per_bbox = [average_ignoring_nones(scores_per_method[i][j] for i in range(n)) for j in range(n_bboxes)]
+    mean_scores_per_bbox = [average_ignoring_nones_and_nans(scores_per_method[i][j] for i in range(n)) for j in range(n_bboxes)]
     bbox_idxs.sort(key=lambda i: mean_scores_per_bbox[i], reverse=horizontal)
     
     # Create a horizontal scatter plot, where each method has one point for each bounding box class
@@ -283,7 +283,7 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
         plt.barh(positions, scores, height=height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
         # plot the scores as text on top of the bars
         for j in range(m):
-            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.2f}', ha='left', va='center', fontsize=fontsize)
+            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=fontsize)
     plt.yticks([height * (n/2-0.5)+ i for i in range(1, m+1)], [metric_aliases[i] for i in metric_idxs])
     plt.ylabel('Metric')
     plt.xlabel('Score')
@@ -304,7 +304,7 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     assert m > 0
 
     scores_per_method = [[dataframe_rows[i][k] for k in metric_names] for i in range(n)]
-    mean_score_per_method = [average_ignoring_nones(scores_per_method[i]) for i in range(n)]
+    mean_score_per_method = [average_ignoring_nones_and_nans(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=True)
 

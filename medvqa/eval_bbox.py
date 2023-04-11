@@ -16,7 +16,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_silver_bboxes,
     get_chest_imagenome_train_average_bbox_coords,
 )
-from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
+from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn, simple_yolov8_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform, ImageDataset
 from medvqa.datasets.mimiccxr import (
     # get_mimiccxr_small_image_path,
@@ -28,10 +28,13 @@ from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR
 from medvqa.metrics.bbox.utils import (
     compute_mae_per_class,
     compute_mae_per_class__detectron2,
+    compute_mae_per_class__yolov8,
     compute_mean_iou_per_class,
     compute_mean_iou_per_class__detectron2,
+    compute_mean_iou_per_class__yolov8,
     compute_multiple_prf1_scores,
     compute_multiple_prf1_scores__detectron2,
+    compute_multiple_prf1_scores__yolov8,
 )
 from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_name_from_checkpoint_path, load_metadata
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
@@ -82,15 +85,23 @@ def parse_args():
 
 def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, bbox_names, eval_mode,
                                     eval_dataset_name, results_folder_path, clamp_bbox_coords, decent_images_only,
-                                    use_detectron2=True, pred_boxes=None, pred_classes=None, scores=None, valid_classes=None,
-                                    pred_bbox_coords=None, pred_bbox_presences=None,
+                                    use_detectron2=False, use_yolov8=False, pred_boxes=None, pred_classes=None,
+                                    scores=None, valid_classes=None, pred_bbox_coords=None, pred_bbox_presences=None,
                                     save_predictions=False, dicom_ids=None):
+
+    assert sum([use_detectron2, use_yolov8]) <= 1
 
     if use_detectron2:
         assert pred_boxes is not None
         assert pred_classes is not None
         assert scores is not None
         assert len(pred_boxes) == len(pred_classes) == len(scores)
+        assert len(pred_boxes) == len(test_bbox_coords)
+        assert len(pred_boxes) == len(test_bbox_presences)
+    elif use_yolov8:
+        assert pred_boxes is not None
+        assert pred_classes is not None
+        assert len(pred_boxes) == len(pred_classes)
         assert len(pred_boxes) == len(test_bbox_coords)
         assert len(pred_boxes) == len(test_bbox_presences)
     else:
@@ -106,6 +117,8 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, bbox_n
     print('Computing Mean Absolute Error (MAE) ...')
     if use_detectron2:
         metrics['mae'] = compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, test_bbox_coords, test_bbox_presences, valid_classes)
+    elif use_yolov8:
+        metrics['mae'] = compute_mae_per_class__yolov8(pred_boxes, pred_classes, test_bbox_coords, test_bbox_presences, valid_classes)
     else:
         metrics['mae'] = compute_mae_per_class(pred_bbox_coords, test_bbox_coords, test_bbox_presences)
     metrics['mean_mae'] = np.mean(metrics['mae'])
@@ -114,6 +127,8 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, bbox_n
     print('Computing Mean Intersection Over Union (IOU) ...')
     if use_detectron2:
         metrics['iou'] = compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, scores, test_bbox_coords, test_bbox_presences, valid_classes)
+    elif use_yolov8:
+        metrics['iou'] = compute_mean_iou_per_class__yolov8(pred_boxes, pred_classes, test_bbox_coords, test_bbox_presences, valid_classes)
     else:
         metrics['iou'] = compute_mean_iou_per_class(pred_bbox_coords, test_bbox_coords, test_bbox_presences)
     metrics['mean_iou'] = np.mean(metrics['iou'])
@@ -126,6 +141,16 @@ def _compute_and_save_bbox_metrics(test_bbox_coords, test_bbox_presences, bbox_n
             pred_boxes=pred_boxes,
             pred_classes=pred_classes,
             scores=scores,
+            gt_coords=test_bbox_coords,
+            gt_presences=test_bbox_presences,
+            iou_thresholds=iou_thresholds,
+            valid_classes=valid_classes,
+            num_workers=7,
+        )
+    elif use_yolov8:
+        scores = compute_multiple_prf1_scores__yolov8(
+            pred_boxes=pred_boxes,
+            pred_classes=pred_classes,
             gt_coords=test_bbox_coords,
             gt_presences=test_bbox_presences,
             iou_thresholds=iou_thresholds,
@@ -317,6 +342,9 @@ def _evaluate_model(
         assert validator_engine_kwargs is not None
         assert mimiccxr_trainer_kwargs['use_decent_images_only'] == decent_images_only
 
+        use_detectron2 = mimiccxr_trainer_kwargs.get('use_detectron2', False)
+        use_yolov8 = mimiccxr_trainer_kwargs.get('use_yolov8', False)
+
         # Define image transform
         if DATASET_NAMES.MIMICCXR in image_transform_kwargs:
             image_transform = get_image_transform(**image_transform_kwargs[DATASET_NAMES.MIMICCXR])
@@ -324,9 +352,10 @@ def _evaluate_model(
             image_transform = get_image_transform(**image_transform_kwargs)
 
         # Define collate_batch_fn
-        use_detectron2 = mimiccxr_trainer_kwargs.get('use_detectron2', False)
         if use_detectron2:
             collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE])
+        elif use_yolov8:
+            collate_batch_fn = simple_yolov8_collate_batch_fn
         else:
             collate_batch_fn = None # use default collate_fn
 
@@ -391,7 +420,7 @@ def _evaluate_model(
                             image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
                             test_image_paths.append(image_path)
                             bbox = bboxes_dict[dicom_id]
-                            test_bbox_coords.append(bbox['coords'])
+                            test_bbox_coords.append(bbox['coords'].reshape(-1, 4))
                             test_bbox_presences.append(bbox['presence'])
                             if save_predictions:
                                 dicom_ids.append(dicom_id)
@@ -404,7 +433,7 @@ def _evaluate_model(
                     part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
                     image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
                     test_image_paths.append(image_path)
-                    test_bbox_coords.append(bbox['coords'])
+                    test_bbox_coords.append(bbox['coords'].reshape(-1, 4))
                     test_bbox_presences.append(bbox['presence'])
                     if save_predictions:
                         dicom_ids.append(dicom_id)
@@ -413,6 +442,7 @@ def _evaluate_model(
             test_dataset = ImageDataset(
                 image_paths=test_image_paths,
                 image_transform=image_transform,
+                use_yolov8=use_yolov8,
             )
             test_dataloader = DataLoader(test_dataset,
                                         batch_size=batch_size,
@@ -451,6 +481,23 @@ def _evaluate_model(
             pred_boxes = test_engine.state.metrics['pred_boxes']
             pred_classes = test_engine.state.metrics['pred_classes']
             scores = test_engine.state.metrics['scores']
+        elif use_yolov8:
+            pred_boxes = []
+            pred_classes = []
+            with torch.no_grad():
+                model.eval()
+                for batch in tqdm(test_dataloader):
+                    images = batch['i'].to(device)
+                    resized_shapes = batch['resized_shape']
+                    output = model(raw_images=images, mimiccxr_forward=True, skip_mlc=True)
+                    batch_predictions = output['yolov8_predictions']
+                    assert len(resized_shapes) == len(batch_predictions)
+                    for i in range(len(resized_shapes)):
+                        resized_shape = resized_shapes[i]
+                        pred = batch_predictions[i].detach().cpu()
+                        pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                        pred_boxes.append(pred[:, :4])
+                        pred_classes.append(pred[:, 5].int())
         else:
             pred_bbox_coords = []
             pred_bbox_presences = []
@@ -468,7 +515,7 @@ def _evaluate_model(
         # Convert to numpy arrays
         test_bbox_coords = np.array(test_bbox_coords)
         test_bbox_presences = np.array(test_bbox_presences)
-        if not use_detectron2:
+        if not use_detectron2 and not use_yolov8:
             pred_bbox_coords = np.array(pred_bbox_coords)
             pred_bbox_presences = np.array(pred_bbox_presences)
 
@@ -478,19 +525,19 @@ def _evaluate_model(
         
         # Filter out bboxes if required
         if filter_bbox_classes:
-            if not use_detectron2:
+            if not use_detectron2 and not use_yolov8:
                 test_bbox_coords = test_bbox_coords[:, gt_coord_indices]
                 test_bbox_presences = test_bbox_presences[:, gt_presence_indices]
                 pred_bbox_coords = pred_bbox_coords[:, model_coord_indices]
                 pred_bbox_presences = pred_bbox_presences[:, model_presence_indices]
-            valid_classes = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES, dtype=np.bool)
+            valid_classes = np.zeros(CHEST_IMAGENOME_NUM_BBOX_CLASSES, dtype=bool)
             valid_classes[gt_presence_indices] = True
             print('valid_classes: ', valid_classes)
             assert len(valid_classes) == CHEST_IMAGENOME_NUM_BBOX_CLASSES
         else:
             valid_classes = None
 
-        if not use_detectron2:
+        if not use_detectron2 and not use_yolov8:
             assert test_bbox_coords.shape == pred_bbox_coords.shape
             assert test_bbox_presences.shape == pred_bbox_presences.shape
             print(f'pred_bbox_coords.shape: {pred_bbox_coords.shape}')
@@ -507,6 +554,23 @@ def _evaluate_model(
                 pred_boxes=pred_boxes,
                 pred_classes=pred_classes,
                 scores=scores,
+                valid_classes=valid_classes,
+                bbox_names=bbox_names,
+                eval_mode=eval_mode,
+                eval_dataset_name=eval_dataset_name,
+                results_folder_path=get_results_folder_path(checkpoint_folder_path),
+                clamp_bbox_coords=clamp_bbox_coords,
+                decent_images_only=decent_images_only,
+                save_predictions=save_predictions,
+                dicom_ids=dicom_ids if save_predictions else None,
+            )
+        elif use_yolov8:
+            _compute_and_save_bbox_metrics(
+                use_yolov8=use_yolov8,
+                test_bbox_coords=test_bbox_coords,
+                test_bbox_presences=test_bbox_presences,
+                pred_boxes=pred_boxes,
+                pred_classes=pred_classes,
                 valid_classes=valid_classes,
                 bbox_names=bbox_names,
                 eval_mode=eval_mode,

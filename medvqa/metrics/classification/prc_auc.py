@@ -2,7 +2,7 @@ import multiprocessing as mp
 import numpy as np
 from sklearn.metrics import auc, precision_recall_curve
 
-from medvqa.utils.metrics import average_ignoring_nones
+from medvqa.utils.metrics import average_ignoring_nones_and_nans
 
 def _prc_auc(probs, gt):
     precision, recall, _ = precision_recall_curve(gt, probs)
@@ -26,7 +26,7 @@ def prc_auc_fn(probs, gt, num_workers=6):
     with mp.Pool(num_workers) as pool:
         per_class = pool.map(_prc_auc_task, range(n_classes))
     per_class = [x if not np.isnan(x) else None for x in per_class]
-    macro_avg = average_ignoring_nones(per_class)
+    macro_avg = average_ignoring_nones_and_nans(per_class)
     return {
         'micro_avg': micro_avg,
         'macro_avg': macro_avg,

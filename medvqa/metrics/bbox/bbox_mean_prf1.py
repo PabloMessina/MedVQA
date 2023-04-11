@@ -3,6 +3,7 @@ from medvqa.metrics.bbox.utils import (
     compute_multiple_precision_scores,
     compute_multiple_recall_scores,
     compute_multiple_f1_scores__detectron2,
+    compute_multiple_f1_scores__yolov8,
 )
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 import numpy as np
@@ -12,17 +13,21 @@ class DatasetAwareBboxMeanF1(DatasetAwareMetric):
     """
 
     def __init__(self, output_transform, allowed_dataset_ids, n_classes,
-                iou_thresholds=[0.9], use_detectron2=False):
+                iou_thresholds=[0.9], use_detectron2=False, use_yolov8=False):
         super().__init__(output_transform, allowed_dataset_ids)
         self._iou_thresholds = iou_thresholds
         self._n_classes = n_classes
         self._use_detectron2 = use_detectron2
+        self._use_yolov8 = use_yolov8
         self._gt_coords = []
         self._gt_presence = []
         if self._use_detectron2:
             self._pred_boxes = []
             self._pred_classes = []
             self._scores = []
+        elif self._use_yolov8:
+            self._pred_boxes = []
+            self._pred_classes = []
         else:
             self._pred_coords = []
             self._pred_presence = []
@@ -34,6 +39,9 @@ class DatasetAwareBboxMeanF1(DatasetAwareMetric):
             self._pred_boxes.clear()
             self._pred_classes.clear()
             self._scores.clear()
+        elif self._use_yolov8:
+            self._pred_boxes.clear()
+            self._pred_classes.clear()
         else:
             self._pred_coords.clear()
             self._pred_presence.clear()
@@ -46,6 +54,16 @@ class DatasetAwareBboxMeanF1(DatasetAwareMetric):
                 self._pred_boxes.append(pred_boxes[i])
                 self._pred_classes.append(pred_classes[i])
                 self._scores.append(scores[i])
+                self._gt_coords.append(gt_coords[i])
+                self._gt_presence.append(gt_presence[i])
+        elif self._use_yolov8:
+            yolov8_predictions, gt_coords, gt_presence = output
+            n = len(gt_presence)
+            assert n == len(yolov8_predictions)
+            assert n == len(gt_coords)
+            for i in range(n):
+                self._pred_boxes.append(yolov8_predictions[i][:, :4])
+                self._pred_classes.append(yolov8_predictions[i][:, 5].int())
                 self._gt_coords.append(gt_coords[i])
                 self._gt_presence.append(gt_presence[i])
         else:
@@ -68,6 +86,20 @@ class DatasetAwareBboxMeanF1(DatasetAwareMetric):
                 pred_boxes=self._pred_boxes,
                 pred_classes=self._pred_classes,
                 scores=self._scores,
+                gt_coords=self._gt_coords,
+                gt_presences=self._gt_presence,
+                iou_thresholds=self._iou_thresholds,
+                num_workers=num_workers,
+            )
+            mean_f1 = np.mean(f1_scores)
+        elif self._use_yolov8:
+            n = len(self._pred_boxes)
+            assert n == len(self._pred_classes)
+            assert n == len(self._gt_coords)
+            assert n == len(self._gt_presence)
+            f1_scores = compute_multiple_f1_scores__yolov8(
+                pred_boxes=self._pred_boxes,
+                pred_classes=self._pred_classes,
                 gt_coords=self._gt_coords,
                 gt_presences=self._gt_presence,
                 iou_thresholds=self._iou_thresholds,

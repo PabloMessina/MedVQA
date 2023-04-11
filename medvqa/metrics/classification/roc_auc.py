@@ -1,5 +1,5 @@
 from sklearn.metrics import roc_auc_score
-from medvqa.utils.metrics import average_ignoring_nones
+from medvqa.utils.metrics import average_ignoring_nones_and_nans
 
 def roc_auc_fn(y_pred, y_true):
     try:
@@ -14,7 +14,7 @@ def roc_auc_fn(y_pred, y_true):
             per_class[i] = roc_auc_score(y_true.T[i], y_pred.T[i])
         except ValueError:
             pass
-    macro_avg = average_ignoring_nones(per_class)
+    macro_avg = average_ignoring_nones_and_nans(per_class)
     return {
         'micro_avg': micro_avg,
         'macro_avg': macro_avg,

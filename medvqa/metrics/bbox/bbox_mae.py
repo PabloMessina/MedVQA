@@ -4,10 +4,11 @@ from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 
 class DatasetAwareBboxMAE(DatasetAwareMetric):
 
-    def __init__(self, output_transform, allowed_dataset_ids, use_detectron2=False):
+    def __init__(self, output_transform, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
         self._acc_score = 0
         self._count = 0
         self._use_detectron2 = use_detectron2
+        self._use_yolov8 = use_yolov8
         super().__init__(output_transform, allowed_dataset_ids)
     
     def reset(self):
@@ -25,6 +26,18 @@ class DatasetAwareBboxMAE(DatasetAwareMetric):
                     cls = pred_classes[i][j].item()
                     if gt_presence[i][cls] == 1:
                         ae = torch.abs(pred_boxes[i][j] - gt_coords[i][cls])
+                        self._acc_score += ae.mean()
+                        self._count += 1
+        elif self._use_yolov8:
+            yolov8_predictions, gt_coords, gt_presence = output
+            n = len(gt_presence)
+            assert n == len(yolov8_predictions)
+            assert n == len(gt_coords)
+            for i in range(n):
+                for j in range(len(yolov8_predictions[i])):
+                    cls = yolov8_predictions[i][j, 5].int().item()
+                    if gt_presence[i][cls] == 1:
+                        ae = torch.abs(yolov8_predictions[i][j, :4] - gt_coords[i][cls])
                         self._acc_score += ae.mean()
                         self._count += 1
         else:

@@ -75,6 +75,9 @@ def compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, scores, gt_
         mean_ious = mean_ious[valid_classes]
     return mean_ious
 
+def compute_mean_iou_per_class__yolov8(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None):
+    return compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes)
+
 def compute_mean_iou_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None):
     return compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes)
 
@@ -111,6 +114,9 @@ def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coord
     if valid_classes is not None:
         mae = mae[valid_classes]
     return mae
+
+def compute_mae_per_class__yolov8(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None, abs_fn=np.abs):
+    return compute_mae_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes, abs_fn)
 
 def compute_mae_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None, abs_fn=np.abs):
     return compute_mae_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes, abs_fn)
@@ -301,3 +307,13 @@ def compute_multiple_prf1_scores__yolov5(
     pred_boxes, pred_classes, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
     return compute_multiple_prf1_scores__detectron2(
         pred_boxes, pred_classes, None, gt_coords, gt_presences, iou_thresholds, valid_classes, num_workers)
+
+def compute_multiple_prf1_scores__yolov8(
+    pred_boxes, pred_classes, gt_coords, gt_presences, iou_thresholds, valid_classes=None, num_workers=5):
+    return compute_multiple_prf1_scores__detectron2(
+        pred_boxes, pred_classes, None, gt_coords, gt_presences, iou_thresholds, valid_classes, num_workers)
+
+def compute_multiple_f1_scores__yolov8(
+    pred_boxes, pred_classes, gt_coords, gt_presences, iou_thresholds, num_workers=5):
+    return _compute_multiple_scores__detectron2(
+        pred_boxes, pred_classes, None, gt_coords, gt_presences, iou_thresholds, None, num_workers, _compute_f1__detectron2)

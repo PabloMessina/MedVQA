@@ -264,23 +264,33 @@ def attach_dataset_aware_chest_imagenome_labels_prcauc(engine, allowed_dataset_i
                                   device=device)
     met.attach(engine, MetricNames.CHESTIMAGENOMELABELPRCAUC)
 
-def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids, use_detectron2=False):
+def attach_dataset_aware_chest_imagenome_bbox_mae(engine, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
     if use_detectron2:
         met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
                                                                         'bbox_coords', 'bbox_presence'),
                                 allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True)
-    else:        
+    elif use_yolov8:
+        met = DatasetAwareBboxMAE(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
+                                allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True)
+    else:
         met = DatasetAwareBboxMAE(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
                                                                             'chest_imagenome_bbox_coords',
                                                                             'chest_imagenome_bbox_presence'),
                                     allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMAE)
 
-def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, use_detectron2=False):
+def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
     if use_detectron2:
         met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
                                                                         'bbox_coords', 'bbox_presence'),
                                 allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True)
+    elif use_yolov8:
+        met = DatasetAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
+                                allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True)
     else:
         met = DatasetAwareBboxIOU(output_transform=_get_output_transform('pred_chest_imagenome_bbox_coords',
                                                                             'chest_imagenome_bbox_coords',
@@ -288,11 +298,17 @@ def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, u
                                     allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
-def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids, use_detectron2=False):
+def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
     if use_detectron2:
         met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
                                                                             'bbox_coords', 'bbox_presence'),
                                     allowed_dataset_ids=allowed_dataset_ids, use_detectron2=True,
+                                    n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
+    elif use_yolov8:
+        met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
+                                    allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True,
                                     n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
     else:
         met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform(

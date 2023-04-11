@@ -7,7 +7,7 @@ import operator
 
 from medvqa.losses.schedulers import LRSchedulerNames
 from medvqa.utils.constants import METRIC2SHORT, MetricNames
-from medvqa.utils.metrics import average_ignoring_nones
+from medvqa.utils.metrics import average_ignoring_nones_and_nans
 from medvqa.utils.logging import MetricsLogger
 
 def get_log_epoch_started_handler(model_wrapper):
@@ -140,7 +140,7 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
                 if score is not None:
                     if hasattr(score, '__len__') and not (type(score) is Tensor and score.dim() == 0):
                         try:
-                            score = average_ignoring_nones(score)
+                            score = average_ignoring_nones_and_nans(score)
                         except TypeError:
                             print(f'm = {m}, score = {score}, type(score) = {type(score)}')
                             raise

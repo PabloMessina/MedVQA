@@ -367,7 +367,12 @@ def _append_chest_imagenome_mlc_version_column(df, results):
                 if version == 'v1':
                     version = 'v4' # due to a bug when saving the model's metadata
             elif metadata['model_kwargs'].get('classify_chest_imagenome', False):
-                version = 'gf->labels'
+                # self.chest_imagenome_mlc_version
+                mlc_version =  metadata['model_kwargs'].get('chest_imagenome_mlc_version', None)
+                if mlc_version is not None:
+                    version = f'mlc:{mlc_version}'
+                else:
+                    version = 'gf->labels'
             else:
                 version = None
         except KeyError:
@@ -466,6 +471,7 @@ def _append_method_columns__chest_imagenome_bbox(df, results):
     _append_datasets_column(df, results)
     _append_model_column(df, results)
     _append_chest_imagenome_bbox_regressor_version_column(df, results)
+    _append_chest_imagenome_mlc_version_column(df, results)
     _append_data_augmentation_column(df, results)
     _append_eval_mode_column(df, results)
     _append_image_size_column(df, results)

@@ -3,8 +3,6 @@ import numpy as np
 import random
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from detectron2.structures import BoxMode
-from detectron2.data.detection_utils import annotations_to_instances
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
@@ -53,7 +51,7 @@ from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
 
-_DEBUG = False
+# _DEBUG = False
 
 class _BalancedSamplingMode:
     BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS = 'balanced_chest_imagenome_global_labels'
@@ -142,6 +140,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 use_precomputed_visual_features=False,
                 precomputed_visual_features=None,
                 idx2visfeatidx=None,
+                # yolov8
+                use_yolov8=False,
             ):
         self.indices = indices
         self.report_ids = report_ids
@@ -173,6 +173,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.flipped_gt_bbox_coords = flipped_gt_bbox_coords
         self.flipped_gt_bbox_presence = flipped_gt_bbox_presence
         self.flipped_pred_bbox_coords = flipped_pred_bbox_coords
+        self.use_yolov8 = use_yolov8
 
         if self.pass_pred_bbox_coords_to_model:
             assert self.pred_bbox_coords is not None
@@ -203,7 +204,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
             self._len = len(self.indices)
     
     def __len__(self):
-        return len(self.indices)
+        return self._len
 
     def __getitem__(self, i):
         if self.infinite:
@@ -212,7 +213,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         rid = self.report_ids[idx]
         output = { 'idx': idx }
         if self.include_image:
-            global _DEBUG
+            # global _DEBUG
             image_path = self.image_paths[idx]
             # handle transform differently for chest imagenome bboxes
             if self.predict_bboxes_chest_imagenome and not self.pass_pred_bbox_coords_to_model: 
@@ -221,29 +222,40 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 gt_bbox_presence = self.gt_bbox_presence[dicom_idx]
                 if self.data_augmentation_enabled: # data augmentation with albumentations
                     if self.horizontal_flip:
-                        image, gt_bbox_coords, gt_bbox_presence = self.image_transform(
+                        tmp = self.image_transform(
                             image_path=image_path,
                             bboxes=gt_bbox_coords,
                             presence=gt_bbox_presence,
                             albumentation_adapter=self.albumentation_adapter,
                             flipped_bboxes=self.flipped_gt_bbox_coords[dicom_idx],
                             flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
+                            return_image_size=self.use_yolov8,
                         )
                     else:
-                        image, gt_bbox_coords, gt_bbox_presence = self.image_transform(
+                        tmp = self.image_transform(
                             image_path=image_path,
                             bboxes=gt_bbox_coords,
                             presence=gt_bbox_presence,
                             albumentation_adapter=self.albumentation_adapter,
+                            return_image_size=self.use_yolov8,
                         )
+                    if self.use_yolov8:
+                        image, gt_bbox_coords, gt_bbox_presence, image_size_before, image_size_after = tmp
+                    else:
+                        image, gt_bbox_coords, gt_bbox_presence = tmp
                 else: # no data augmentation
-                    image = self.image_transform(image_path)
+                    tmp = self.image_transform(image_path, return_image_size=self.use_yolov8)
+                    if self.use_yolov8:
+                        image, image_size_before, image_size_after = tmp
+                    else:
+                        image = tmp
                 assert len(gt_bbox_coords.shape) == 2
-                output['chest_imagenome_bbox_coords'] = gt_bbox_coords.reshape(-1)
+                output['chest_imagenome_bbox_coords'] = gt_bbox_coords
                 output['chest_imagenome_bbox_presence'] = gt_bbox_presence
-                if _DEBUG:
-                    print('Case 1: A and not B')
+                # if _DEBUG:
+                #     print('Case 1: A and not B')
             elif not self.predict_bboxes_chest_imagenome and self.pass_pred_bbox_coords_to_model:
+                assert not self.use_yolov8
                 dicom_idx = self.dicom_idxs[idx]
                 pred_bbox_coords = self.pred_bbox_coords[dicom_idx]
                 if self.data_augmentation_enabled:
@@ -263,8 +275,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 else:
                     image = self.image_transform(image_path)                
                 output['pred_bbox_coords'] = pred_bbox_coords
-                if _DEBUG:
-                    print('Case 2: not A and B')
+                # if _DEBUG:
+                #     print('Case 2: not A and B')
             elif self.predict_bboxes_chest_imagenome and self.pass_pred_bbox_coords_to_model:
                 dicom_idx = self.dicom_idxs[idx]
                 gt_bbox_coords = self.gt_bbox_coords[dicom_idx]
@@ -272,7 +284,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 pred_bbox_coords = self.pred_bbox_coords[dicom_idx]
                 if self.data_augmentation_enabled:
                     if self.horizontal_flip:
-                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = self.image_transform(
+                        tmp = self.image_transform(
                             image_path=image_path,
                             bboxes=gt_bbox_coords,
                             presence=gt_bbox_presence,
@@ -281,29 +293,40 @@ class MIMICCXR_Visual_Dataset(Dataset):
                             flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
                             pred_bboxes=pred_bbox_coords,
                             flipped_pred_bboxes=self.flipped_pred_bbox_coords[dicom_idx],
+                            return_image_size=self.use_yolov8,
                         )
                     else:
-                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = self.image_transform(
+                        tmp = self.image_transform(
                             image_path=image_path,
                             bboxes=gt_bbox_coords,
                             presence=gt_bbox_presence,
                             albumentation_adapter=self.albumentation_adapter,
                             pred_bboxes=pred_bbox_coords,
+                            return_image_size=self.use_yolov8,
                         )
+                    if self.use_yolov8:
+                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords, image_size_before, image_size_after = tmp
+                    else:
+                        image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = tmp
                 else:
-                    image = self.image_transform(image_path)
+                    tmp = self.image_transform(image_path, return_image_size=self.use_yolov8)
+                    if self.use_yolov8:
+                        image, image_size_before, image_size_after = tmp
+                    else:
+                        image = tmp
                 assert len(gt_bbox_coords.shape) == 2
-                output['chest_imagenome_bbox_coords'] = gt_bbox_coords.reshape(-1)
+                output['chest_imagenome_bbox_coords'] = gt_bbox_coords
                 output['chest_imagenome_bbox_presence'] = gt_bbox_presence
                 output['pred_bbox_coords'] = pred_bbox_coords
-                if _DEBUG:
-                    print('Case 3: A and B')
+                # if _DEBUG:
+                #     print('Case 3: A and B')
             else:
+                assert not self.use_yolov8
                 image = self.image_transform(image_path)
-                if _DEBUG:
-                    print('Case 4: not A and not B')
+                # if _DEBUG:
+                #     print('Case 4: not A and not B')
             output['i'] = image
-            _DEBUG = False
+            # _DEBUG = False
         if self.use_precomputed_visual_features:
             visfeat_idx = self.idx2visfeatidx[idx]
             visfeat = self.precomputed_visual_features[visfeat_idx]
@@ -317,7 +340,14 @@ class MIMICCXR_Visual_Dataset(Dataset):
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
         if self.classify_chest_imagenome:
-            output['chest_imagenome'] = self.chest_imagenome_labels[rid]        
+            output['chest_imagenome'] = self.chest_imagenome_labels[rid]
+        if self.use_yolov8:
+            # We need to adapt the output a little bit to make it compatible with YOLOv8
+            output['im_file'] = image_path
+            output['ori_shape'] = image_size_before
+            output['resized_shape'] = image_size_after
+            output['img'] = output['i']
+            del output['i']
         return output
 
 class MIMICCXR_VisualModuleTrainer():
@@ -361,8 +391,13 @@ class MIMICCXR_VisualModuleTrainer():
                 balanced_sampling_mode=None,
                 pass_pred_bbox_coords_to_model=False,
                 use_gt_bboxes_as_pred=False,
+                use_yolov8=False,
                 **unused_kwargs,
             ):
+
+        train_collate_batch_fn = lambda batch: collate_batch_fn(batch, training_mode=True)
+        eval_collate_batch_fn = lambda batch: collate_batch_fn(batch, training_mode=False)
+
         if len(unused_kwargs) > 0:
             # Print warning in orange and bold
             print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
@@ -380,6 +415,7 @@ class MIMICCXR_VisualModuleTrainer():
 
         self.use_detectron2 = use_detectron2
         self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
+        self.use_yolov8 = use_yolov8
 
         if chest_imagenome_label_names_filename is not None:
             self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
@@ -410,7 +446,7 @@ class MIMICCXR_VisualModuleTrainer():
                     dataset=self.test_dataset,
                     batch_size=batch_size,
                     num_workers=num_workers,
-                    collate_fn=collate_batch_fn,
+                    collate_fn=eval_collate_batch_fn,
                     shuffle=False,
                 )
             elif use_chest_imagenome_bbox_gold_set:
@@ -429,7 +465,7 @@ class MIMICCXR_VisualModuleTrainer():
                     dataset=self.test_dataset,
                     batch_size=batch_size,
                     num_workers=num_workers,
-                    collate_fn=collate_batch_fn,
+                    collate_fn=eval_collate_batch_fn,
                     shuffle=False,
                 )
             else:
@@ -449,7 +485,7 @@ class MIMICCXR_VisualModuleTrainer():
                         dataset=self.train_dataset,
                         batch_size=batch_size,
                         num_workers=num_workers,
-                        collate_fn=collate_batch_fn,
+                        collate_fn=train_collate_batch_fn,
                         shuffle=True,
                     )
                 # self.train_dataloader = build_detection_train_loader(
@@ -472,7 +508,7 @@ class MIMICCXR_VisualModuleTrainer():
                     dataset=self.val_dataset,
                     batch_size=batch_size,
                     num_workers=num_workers,
-                    collate_fn=collate_batch_fn,
+                    collate_fn=eval_collate_batch_fn,
                     shuffle=False,
                 )
         else:
@@ -483,7 +519,8 @@ class MIMICCXR_VisualModuleTrainer():
             self.horizontal_flip = horizontal_flip
             self.include_image = include_image
             self.batch_size = batch_size
-            self.collate_batch_fn = collate_batch_fn
+            self.train_collate_batch_fn = train_collate_batch_fn
+            self.eval_collate_batch_fn = eval_collate_batch_fn
             self.num_workers = num_workers
 
             BIG_ENOGUGH = 1000000
@@ -673,6 +710,8 @@ class MIMICCXR_VisualModuleTrainer():
                     load_chest_imagenome_silver_bboxes_as_numpy_array(
                         self.dicom_ids, clamp_bboxes_chest_imagenome,
                         use_anaxnet_bbox_subset=use_anaxnet_bbox_subset)
+                print(f'self.bbox_coords.shape = {self.bbox_coords.shape}')
+                print(f'self.bbox_presence.shape = {self.bbox_presence.shape}')
                 if horizontal_flip:
                     assert data_augmentation_enabled
                     print('Loading Chest Imagenome bounding boxes (flipped)...')
@@ -715,6 +754,11 @@ class MIMICCXR_VisualModuleTrainer():
                 for _, labels in tmp['anatomy_group_to_global_labels']:
                     label_order.extend(labels)
                 assert len(label_order) == len(self.chest_imagenome_label_names)
+            elif classify_chest_imagenome and use_chest_imagenome_label_gold_set:
+                label_order = list(range(len(self.chest_imagenome_label_names)))
+            else:
+                label_order = None
+            if label_order is not None:
                 if use_chest_imagenome_label_gold_set:
                     print('  Using gold labels for Chest Imagenome (not the labels used for training)')
                     gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
@@ -767,18 +811,18 @@ class MIMICCXR_VisualModuleTrainer():
             if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 # Create test dataset and dataloader
                 self.test_dataset, self.test_dataloader = self._create_dataset_and_dataloader(
-                    self.test_indices, test_image_transform)
+                    self.test_indices, test_image_transform, self.eval_collate_batch_fn)
             else:
                 if not use_val_set_only:
                     # Create train dataset and dataloader
                     self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
-                        self.train_indices, train_image_transform,
+                        self.train_indices, train_image_transform, self.train_collate_batch_fn,
                         data_augmentation_enabled=self.data_augmentation_enabled,
                         shuffle=True, balanced_sampling_mode=balanced_sampling_mode)
 
                 # Create validation dataset and dataloader
                 self.val_dataset, self.val_dataloader = self._create_dataset_and_dataloader(
-                    self.val_indices, val_image_transform)
+                    self.val_indices, val_image_transform, self.eval_collate_batch_fn)
 
     def _create_dataset(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False, infinite=False):
         return MIMICCXR_Visual_Dataset(
@@ -814,9 +858,10 @@ class MIMICCXR_VisualModuleTrainer():
             use_precomputed_visual_features=self.use_precomputed_visual_features,
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx=self.idx2visfeatidx,
+            use_yolov8=self.use_yolov8,
         )
     
-    def _create_dataset_and_dataloader(self, indices, image_transform, data_augmentation_enabled=False, shuffle=False, balanced_sampling_mode=None):
+    def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False, shuffle=False, balanced_sampling_mode=None):
         if balanced_sampling_mode is not None:
             print(f'Balanced sampling mode: {balanced_sampling_mode}')
             datasets = []
@@ -901,7 +946,7 @@ class MIMICCXR_VisualModuleTrainer():
             batch_size=self.batch_size,
             shuffle=shuffle and balanced_sampling_mode is None,
             num_workers=self.num_workers,
-            collate_fn=self.collate_batch_fn,
+            collate_fn=collate_batch_fn,
             pin_memory=True,
         )
         return dataset, dataloader
@@ -1081,6 +1126,10 @@ class Detectron2AdaptedDataset(Dataset):
                 data_augmentation_enabled=False,
                 use_anaxnet_bbox_subset=False,
                 ):
+        from detectron2.structures import BoxMode
+        from detectron2.data.detection_utils import annotations_to_instances
+        self.box_mode = BoxMode.XYXY_ABS
+        self.annotations_to_instances = annotations_to_instances
         self.split_name = split_name
         self.source_image_size_mode = source_image_size_mode
         self.use_chest_imagenome_gold_set = use_chest_imagenome_gold_set
@@ -1120,10 +1169,10 @@ class Detectron2AdaptedDataset(Dataset):
             if bbox_presence[i] == 1:
                 annotations.append({
                     'bbox': bbox_coords[i].tolist(),
-                    'bbox_mode': BoxMode.XYXY_ABS,
+                    'bbox_mode': self.box_mode,
                     'category_id': i,
                 })
-        instances = annotations_to_instances(annotations, image.shape[-2:])
+        instances = self.annotations_to_instances(annotations, image.shape[-2:])
         output = {
             'image': image,
             'height': height,

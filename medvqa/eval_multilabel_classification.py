@@ -476,6 +476,7 @@ def _evaluate_model(
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
         device=device, use_amp=use_amp, training=False,
+        using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False),
     )
     if eval_chest_imagenome_gold:
         _engine_kwargs['valid_chest_imagenome_label_indices'] = mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices
@@ -549,7 +550,7 @@ def _evaluate_model(
         count_print(f'Running evaluator engine on {eval_dataset_name} ...')
         print('len(mimiccxr_vision_evaluator.test_dataset) =', len(mimiccxr_vision_evaluator.test_dataset))
         print('len(mimiccxr_vision_evaluator.test_dataloader) =', len(mimiccxr_vision_evaluator.test_dataloader))
-        evaluator.run(mimiccxr_vision_evaluator.test_dataloader)        
+        evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
         results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
         results_dict['mimiccxr_dataset'] = mimiccxr_vision_evaluator.test_dataset        
         results_folder_path = get_results_folder_path(checkpoint_folder_path)

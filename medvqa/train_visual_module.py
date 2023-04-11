@@ -21,6 +21,7 @@ from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModule
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
+from medvqa.models.vision.multilabel_classification import MLCVersion
 from medvqa.models.vision.visual_modules import DETECTRON2_HAS_RPN, MultiPurposeVisualModule, does_include_visual_features
 
 from medvqa.models.vqa.open_ended_vqa import (
@@ -132,12 +133,16 @@ def parse_args(args=None):
     parser.add_argument('--huggingface-model-name', type=str, default=None)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default=None)
+    parser.add_argument('--chest-imagenome-mlc-version', type=str, default=None)
+    parser.add_argument('--chest-imagenome-mlc-hidden-size', type=int, default=128)
     parser.add_argument('--torchxrayvision-weights-name', type=str, default=None)
     parser.add_argument('--detectron2-model-yaml', type=str, default=None)
     parser.add_argument('--num-regions', type=int, default=None)
     parser.add_argument('--roi-heads-batch-size-per-image', type=int, default=128)
     parser.add_argument('--rpn-batch-size-per-image', type=int, default=128)
     parser.add_argument('--roi-align-output-size', type=int, default=None)
+    parser.add_argument('--yolov8-model-name-or-path', type=str, default=None)
+    parser.add_argument('--yolov8-model-alias', type=str, default=None)
     
     parser.add_argument('--optimizer-name', type=str, default='adam')
     
@@ -320,6 +325,7 @@ def train_model(
     train_padchest = training_kwargs['train_padchest']  
     use_merged_findings = trainer_engine_kwargs.get('use_merged_findings', False)
     use_detectron2 = mimiccxr_trainer_kwargs.get('use_detectron2', False)
+    use_yolov8 = mimiccxr_trainer_kwargs.get('use_yolov8', False)
     
     visual_input_mode = model_kwargs['visual_input_mode']
     include_image = does_include_image(visual_input_mode)
@@ -383,8 +389,13 @@ def train_model(
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')
+    if model_kwargs['raw_image_encoding'] == RawImageEncoding.YOLOV8:
+        model_for_yolov8 = model.raw_image_encoder
+    else:
+        model_for_yolov8 = None
     trainer_engine = get_engine(model=model, optimizer=optimizer, device=device, 
-        update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
+        update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler,
+        model_for_yolov8=model_for_yolov8, **trainer_engine_kwargs)
     validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)
     
     # Define collate_batch_fn
@@ -628,7 +639,7 @@ def train_model(
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
 
-    if predict_bboxes_chest_imagenome and not use_detectron2:
+    if predict_bboxes_chest_imagenome and not use_detectron2 and not use_yolov8:
         attach_dataset_aware_chest_imagenome_bbox_mae(trainer_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_mae(validator_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_iou(trainer_engine, _mim_datasets)
@@ -641,6 +652,24 @@ def train_model(
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_BBOX_LOSS)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
+    
+    if use_yolov8:
+        assert predict_bboxes_chest_imagenome
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _mim_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _mim_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _mim_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _mim_datasets)
+        attach_dataset_aware_chest_imagenome_bbox_mae(validator_engine, _mim_datasets, use_yolov8=True)
+        attach_dataset_aware_chest_imagenome_bbox_iou(validator_engine, _mim_datasets, use_yolov8=True)
+        attach_dataset_aware_chest_imagenome_bbox_meanf1(validator_engine, _mim_datasets, use_yolov8=True)
+        # for logging
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXMEANF1, train=False)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
+        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
+        metrics_to_print.append(MetricNames.YOLOV8_LOSS)
+        metrics_to_print.append(MetricNames.YOLOV8_BOX_LOSS)
+        metrics_to_print.append(MetricNames.YOLOV8_CLS_LOSS)
+        metrics_to_print.append(MetricNames.YOLOV8_DFL_LOSS)
 
     if use_detectron2:
         _d2_datasets = [MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE]
@@ -825,6 +854,8 @@ def train_from_scratch(
     pretrained_checkpoint_folder_path,
     chest_imagenome_bbox_hidden_size,
     chest_imagenome_bbox_regressor_version,
+    chest_imagenome_mlc_version,
+    chest_imagenome_mlc_hidden_size,
     clip_version,
     huggingface_model_name,
     torchxrayvision_weights_name,
@@ -832,6 +863,8 @@ def train_from_scratch(
     roi_heads_batch_size_per_image,
     rpn_batch_size_per_image,
     roi_align_output_size,
+    yolov8_model_name_or_path,
+    yolov8_model_alias,
     # Optimizer args
     optimizer_name,
     lr,
@@ -934,9 +967,9 @@ def train_from_scratch(
         RawImageEncoding.RESNET__TORCHXRAYVISION,
         RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
     )
-    use_bbox_aware_transform = (predict_bboxes_chest_imagenome or pass_pred_bbox_coords_as_input)\
-                                and img_aug_mode is not None
+    use_bbox_aware_transform = predict_bboxes_chest_imagenome or pass_pred_bbox_coords_as_input
     use_detectron2 = raw_image_encoding == RawImageEncoding.DETECTRON2
+    use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     
     if use_clip or use_huggingface_vitmodel:
         if use_clip: assert clip_version is not None
@@ -977,6 +1010,8 @@ def train_from_scratch(
         roi_heads_batch_size_per_image=roi_heads_batch_size_per_image,
         rpn_batch_size_per_image=rpn_batch_size_per_image,
         roi_align_output_size=roi_align_output_size,
+        yolov8_model_name_or_path=yolov8_model_name_or_path,
+        yolov8_model_alias=yolov8_model_alias,
         # Aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
@@ -989,6 +1024,8 @@ def train_from_scratch(
         n_chest_imagenome_labels=n_chest_imagenome_labels,
         chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
         chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
+        chest_imagenome_mlc_version=chest_imagenome_mlc_version,
+        chest_imagenome_mlc_hidden_size=chest_imagenome_mlc_hidden_size,
         use_anaxnet_bbox_subset=use_anaxnet_bbox_subset,
         use_cxr14=train_cxr14,
         use_vinbig=train_vinbig,
@@ -1007,7 +1044,8 @@ def train_from_scratch(
         print('avg_coords.shape=', avg_coords.shape)
         avg_coords = avg_coords.tolist()
         model_kwargs['chest_imagenome_train_average_bbox_coords'] = avg_coords
-    if predict_labels_and_bboxes_chest_imagenome:
+    if predict_labels_and_bboxes_chest_imagenome or (classify_chest_imagenome and\
+                                                      chest_imagenome_mlc_version in (MLCVersion.V1, MLCVersion.V2)):
         tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
         model_kwargs['chest_imagenome_anatomy_to_labels'] = tmp['anatomy_to_localized_labels']
         model_kwargs['chest_imagenome_anatomy_group_to_labels'] = tmp['anatomy_group_to_global_labels']
@@ -1060,6 +1098,7 @@ def train_from_scratch(
             use_bbox_aware_transform=use_bbox_aware_transform,
             horizontal_flip_prob=horizontal_flip_prob,
             use_detectron2_transform=use_detectron2,
+            for_yolov8=use_yolov8,
         )
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]['augmentation_mode'] = None # no augmentation for validation
@@ -1084,6 +1123,7 @@ def train_from_scratch(
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
+        use_yolov8=use_yolov8,
     )
     collate_batch_fn_kwargs = {}
     if train_mimiccxr:
@@ -1136,6 +1176,7 @@ def train_from_scratch(
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
             pass_pred_bbox_coords_to_model=pass_pred_bbox_coords_as_input,
             use_gt_bboxes_as_pred=use_gt_bboxes_as_predictions,
+            use_yolov8=use_yolov8,
         )
         if merge_findings:
             mimiccxr_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1220,7 +1261,8 @@ def train_from_scratch(
         use_vinbig_dataset=train_vinbig,
         use_padchest_dataset=train_padchest,        
         iters_to_accumulate=iters_to_accumulate,
-        chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,        
+        chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
+        using_yolov8=use_yolov8,
     )
     if use_detectron2:
         trainer_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]
@@ -1242,6 +1284,7 @@ def train_from_scratch(
         use_vinbig_dataset=train_vinbig,
         use_padchest_dataset=train_padchest,
         use_merged_findings=merge_findings,
+        using_yolov8=use_yolov8,
     )
     if use_detectron2:
         validator_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]

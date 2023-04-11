@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
-from detectron2.utils.events import EventStorage
 from medvqa.models.vqa.open_ended_vqa import QuestionEncoding
 from medvqa.models.common import AnswerDecoding
 from medvqa.losses import get_binary_multilabel_loss
@@ -73,6 +72,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         valid_chest_imagenome_label_indices=None,
         # detectron2
         detectron2_includes_rpn=False,
+        # yolov8
+        using_yolov8=False,
+        yolov8_criterion=None,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -94,6 +96,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     if update_lr_batchwise:
         assert lr_scheduler is not None
 
+    if using_yolov8 and training:
+        assert yolov8_criterion is not None
+
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
     
@@ -106,6 +111,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     # DEBUG = True
 
     def step_fn__mimiccxr_chest_imagenome_detectron2(batch):
+
+        from detectron2.utils.events import EventStorage
+
         # Extract elements from batch
         dataset_id = batch['dataset_id']
         
@@ -173,7 +181,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         idxs = batch['idx']
         dataset_id = batch['dataset_id']        
         if include_image:
-            images = batch['i'].to(device)
+            if using_yolov8:
+                images = batch['img'].to(device)
+            else:
+                images = batch['i'].to(device)
         if include_visual_features:
             visual_features = batch['vf'].to(device)
         if not use_visual_module_only:
@@ -201,8 +212,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if classify_chest_imagenome:
             chest_imagenome = batch['chest_imagenome'].to(device)
         if predict_bboxes_chest_imagenome:
-            chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
-            chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
+            if using_yolov8 and not training:
+                chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
+                chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
+            elif not using_yolov8:
+                chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
+                chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
         if pass_pred_bbox_coords_as_input:
             predicted_bbox_coords = batch['pred_bbox_coords'].to(device)
         
@@ -269,8 +284,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         pred_chest_imagenome_logits = pred_chest_imagenome_logits[:, valid_chest_imagenome_label_indices]
                         pred_chest_imagenome_probs = pred_chest_imagenome_probs[:, valid_chest_imagenome_label_indices]
                 if predict_bboxes_chest_imagenome:
-                    pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
-                    pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
+                    if using_yolov8:
+                        yolov8_features = model_output['yolov8_features']
+                        if not training:
+                            yolov8_predictions = model_output['yolov8_predictions']
+                    else:
+                        pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
+                        pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
 
                 if not use_visual_module_only:
                     if training:
@@ -302,14 +322,21 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     if classify_chest_imagenome:
                         chest_imagenome_loss = chest_imagenome_multilabel_criterion(pred_chest_imagenome_logits, chest_imagenome.float())
                         losses.append(chest_imagenome_loss)
-                    if predict_bboxes_chest_imagenome:                        
-                        chest_imagenome_bbox_coords_loss = chest_imagenome_bbox_coords_criterion(
-                            pred_chest_imagenome_bbox_coords, chest_imagenome_bbox_coords.float())
-                        chest_imagenome_bbox_presence_loss = chest_imagenome_bbox_presence_criterion(
-                            pred_chest_imagenome_bbox_presence, chest_imagenome_bbox_presence.float())
-                        chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
-                        chest_imagenome_bbox_loss = chest_imagenome_bbox_loss * chest_imagenome_bbox_loss_weight # weight the loss
-                        losses.append(chest_imagenome_bbox_loss)
+                    if predict_bboxes_chest_imagenome:
+                        if using_yolov8:
+                            batch_size = images.shape[0]
+                            assert batch_size == yolov8_features[0].shape[0]
+                            chest_imagenome_yolov8_loss, yolov8_loss_items = yolov8_criterion(yolov8_features, batch)
+                            chest_imagenome_yolov8_loss /= batch_size
+                            losses.append(chest_imagenome_yolov8_loss)
+                        else:
+                            chest_imagenome_bbox_coords_loss = chest_imagenome_bbox_coords_criterion(
+                                pred_chest_imagenome_bbox_coords, chest_imagenome_bbox_coords.float())
+                            chest_imagenome_bbox_presence_loss = chest_imagenome_bbox_presence_criterion(
+                                pred_chest_imagenome_bbox_presence, chest_imagenome_bbox_presence.float())
+                            chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
+                            chest_imagenome_bbox_loss = chest_imagenome_bbox_loss * chest_imagenome_bbox_loss_weight # weight the loss
+                            losses.append(chest_imagenome_bbox_loss)
                     
                     if not use_visual_module_only:
                         if verbose_question:
@@ -366,12 +393,31 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             if training:
                 output[MetricNames.CHEST_IMAGENOME_LABEL_LOSS] = chest_imagenome_loss.detach()
         if predict_bboxes_chest_imagenome:
-            output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
-            output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
-            output['pred_chest_imagenome_bbox_coords'] = pred_chest_imagenome_bbox_coords.detach().cpu()
-            output['pred_chest_imagenome_bbox_presence'] = pred_chest_imagenome_bbox_presence.detach().cpu()
-            if training:
-                output[MetricNames.CHEST_IMAGENOME_BBOX_LOSS] = chest_imagenome_bbox_loss.detach()
+            if using_yolov8:
+                if training:
+                    output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
+                    output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
+                    output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
+                    output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+                else:
+                    # normalize yolov8 predictions
+                    resized_shapes = batch['resized_shape']
+                    assert len(resized_shapes) == len(yolov8_predictions)
+                    for i in range(len(resized_shapes)):
+                        resized_shape = resized_shapes[i]
+                        pred = yolov8_predictions[i].detach().cpu()
+                        pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                        yolov8_predictions[i] = pred
+                    output['yolov8_predictions'] = yolov8_predictions
+                    output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
+                    output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
+            else:
+                output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
+                output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
+                output['pred_chest_imagenome_bbox_coords'] = pred_chest_imagenome_bbox_coords.detach().cpu()
+                output['pred_chest_imagenome_bbox_presence'] = pred_chest_imagenome_bbox_presence.detach().cpu()
+                if training:
+                    output[MetricNames.CHEST_IMAGENOME_BBOX_LOSS] = chest_imagenome_bbox_loss.detach()
 
         if not use_visual_module_only:
             # Compute predicted Q & A
@@ -828,6 +874,8 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
                 use_visual_module_only=False,
                 detectron2_includes_rpn=False,
+                using_yolov8=False,
+                model_for_yolov8=None,
             ):
     
     print(f'get_engine(): shift_answer={shift_answer}')
@@ -927,6 +975,14 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
         chest_imagenome_bbox_coords_criterion = None
         chest_imagenome_bbox_presence_criterion = None
 
+    if training and using_yolov8:
+        assert model_for_yolov8 is not None
+        from ultralytics.yolo.v8.detect.train import Loss
+        from ultralytics.yolo.utils.torch_utils import de_parallel
+        yolov8_criterion = Loss(de_parallel(model_for_yolov8))
+    else:
+        yolov8_criterion = None
+
     # Create engine
     step_fn = get_step_fn(model, optimizer, nlg_criterion, tokenizer,
                             use_visual_module_only=use_visual_module_only,
@@ -977,6 +1033,9 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             valid_chest_imagenome_label_indices=valid_chest_imagenome_label_indices,
                             # detectron2
                             detectron2_includes_rpn=detectron2_includes_rpn,
+                            # yolov8
+                            using_yolov8=using_yolov8,
+                            yolov8_criterion=yolov8_criterion,
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,

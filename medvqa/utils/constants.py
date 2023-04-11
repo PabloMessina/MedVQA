@@ -250,7 +250,11 @@ class MetricNames:
     QLABELS_LOSS = 'qlabels_loss'
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
-    GENDER_ACC = 'gender_acc'    
+    GENDER_ACC = 'gender_acc'
+    YOLOV8_LOSS = 'yolov8_loss'
+    YOLOV8_BOX_LOSS = 'yolov8_box_loss'
+    YOLOV8_CLS_LOSS = 'yolov8_cls_loss'
+    YOLOV8_DFL_LOSS = 'yolov8_dfl_loss'
 
 METRIC2SHORT = {
     'loss': 'loss',
@@ -332,6 +336,10 @@ METRIC2SHORT = {
     'qlabels_loss': 'ql_loss',
     'gender_loss': 'gloss',
     'gender_acc': 'gacc',
+    'yolov8_loss': 'y8_loss',
+    'yolov8_box_loss': 'y8box_loss',
+    'yolov8_cls_loss': 'y8cls_loss',
+    'yolov8_dfl_loss': 'y8dfl_loss',
 }
 
 IUXRAY_DATASET_ID = 0
