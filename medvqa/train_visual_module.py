@@ -563,7 +563,7 @@ def train_model(
     _iu_mim_datasets = [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID]    
     _orientation_datasets = _iu_mim_datasets + [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, PADCHEST_DATASET_ID]
     _chexpert_labels_datasets = _iu_mim_datasets + [CHEXPERT_DATASET_ID]
-    _gender_datasets = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, PADCHEST_DATASET_ID]
+    _gender_datasets = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, PADCHEST_DATASET_ID, MIMICCXR_DATASET_ID]
 
     if use_merged_findings:
         _findings_remapper = trainer_engine_kwargs['findings_remapper']
@@ -692,10 +692,10 @@ def train_model(
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
 
     if classify_gender:
-        attach_dataset_aware_gender_accuracy(trainer_engine, _gender_datasets)
+        attach_dataset_aware_gender_accuracy(trainer_engine, _gender_datasets, ignore_index=2)
         attach_dataset_aware_loss(trainer_engine, MetricNames.GENDER_LOSS, _gender_datasets)
-        in_val = train_padchest and padchest_trainer.use_validation_set
-        if in_val: attach_dataset_aware_gender_accuracy(validator_engine, [PADCHEST_DATASET_ID])
+        in_val = (train_padchest and padchest_trainer.use_validation_set) or train_mimiccxr
+        if in_val: attach_dataset_aware_gender_accuracy(validator_engine, [PADCHEST_DATASET_ID, MIMICCXR_DATASET_ID])
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.GENDER_ACC, val=in_val)
         metrics_to_print.append(MetricNames.GENDER_LOSS)
@@ -1017,6 +1017,7 @@ def train_from_scratch(
         classify_orientation=classify_orientation,
         classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
+        classify_gender=classify_gender,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_labels_and_bboxes_chest_imagenome=predict_labels_and_bboxes_chest_imagenome,
@@ -1164,6 +1165,7 @@ def train_from_scratch(
             classify_chexpert=classify_chexpert,
             chexpert_labels_filename=mimiccxr_chexpert_labels_filename,
             classify_questions=classify_questions,
+            classify_gender=classify_gender,
             classify_chest_imagenome=classify_chest_imagenome,
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
             predict_labels_and_bboxes_chest_imagenome=predict_labels_and_bboxes_chest_imagenome,
@@ -1358,6 +1360,7 @@ def resume_training(
     lr_decay_patience,
     warmup_and_decay_args,
     warmup_and_cosine_args,
+    warmup_decay_and_cyclic_decay_args,
     num_workers,    
     epochs = 1,
     batches_per_epoch = 1000,
@@ -1400,6 +1403,7 @@ def resume_training(
             patience = lr_decay_patience,
             warmup_and_decay_args = warmup_and_decay_args,
             warmup_and_cosine_args = warmup_and_cosine_args,
+            warmup_decay_and_cyclic_decay_args = warmup_decay_and_cyclic_decay_args,
             n_batches_per_epoch = batches_per_epoch,
         )
 

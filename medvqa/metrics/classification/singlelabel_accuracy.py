@@ -3,9 +3,10 @@ from ignite.engine import Events
 
 class DatasetAwareSinglelabelAccuracy:
 
-    def __init__(self, output_transform, allowed_dataset_ids, record_scores=False):
+    def __init__(self, output_transform, allowed_dataset_ids, record_scores=False, ignore_index=-100):
         self.allowed_dataset_ids = allowed_dataset_ids
         self.output_transform = output_transform
+        self.ignore_index = ignore_index
         self._acc_score = 0
         self._count = 0
         self.record_scores = record_scores
@@ -25,10 +26,11 @@ class DatasetAwareSinglelabelAccuracy:
             pred = pred_labels[i]
             gt = gt_labels[i]
             score = (gt == pred).item() # 0 or 1
-            self._acc_score += score
+            if self.ignore_index != gt:
+                self._acc_score += score
+                self._count += 1
             if self.record_scores:
                 self._scores.append(score)
-        self._count += n
     
     def attach(self, engine, metric_alias):
         

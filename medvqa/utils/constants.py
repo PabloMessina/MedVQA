@@ -1,18 +1,20 @@
-CHEXPERT_LABELS = [
-    'No Finding',
-    'Enlarged Cardiomediastinum',
-    'Cardiomegaly',    
-    'Lung Lesion',
-    'Lung Opacity',
-    'Edema',
-    'Consolidation',    
-    'Pneumonia',
-    'Atelectasis',
-    'Pneumothorax',
-    'Pleural Effusion',
-    'Pleural Other',
-    'Fracture',
-    'Support Devices',
+CHEXPERT_LABELS = [ # Note: I'm annotating roughly equivalent labels in the Chest ImaGenome dataset
+    'No Finding', # NOT abnormal
+    'Enlarged Cardiomediastinum', # mediastinal widening
+    'Cardiomegaly', # enlarged cardiac silhouette
+    'Lung Lesion', # lung lesion
+    'Lung Opacity', # lung opacity
+    'Edema', # pulmonary edema/hazy opacity
+    'Consolidation', # consolidation
+    'Pneumonia', # pneumonia
+    'Atelectasis', # atelectasis
+    'Pneumothorax', # pneumothorax
+    'Pleural Effusion', # pleural effusion
+    'Pleural Other', # pleural/parenchymal scarring
+    'Fracture', # spinal fracture, rib fracture, bone lesion
+    'Support Devices', # cardiac pacer and wires, cabg grafts, prosthetic valve,
+    # chest tube, swan-ganz catheter, enteric tube, endotracheal tube, tracheostomy tube,
+    # subclavian line, picc, chest port, ij line
 ]
 
 CHEXPERT_LABEL2SHORT = {
@@ -116,6 +118,9 @@ CXR14_VINBIG_SYNONYMS = [
     ('Pneumonia', 'Pneumonia'),
     ('Pneumothorax', 'Pneumothorax'),
 ]
+
+CHEST_IMAGENOME_GENDERS = ['F', 'M', 'UNK']
+CHEST_IMAGENOME_GENDER2ID = {'F': 0, 'M': 1, 'UNK': 2}
 
 CHEXPERT_GENDERS = ['Female', 'Male']
 CHEXPERT_ORIENTATIONS = ['FrontalAP', 'Lateral', 'FrontalPA']

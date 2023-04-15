@@ -2,17 +2,20 @@ import os
 from medvqa.utils.files import make_dirs_in_filepath
 from termcolor import colored
 
-def print_blue(*args, bold=False):
+def _print_with_color(color, *args, bold=False):
     if bold:
-        print(*[colored(x, 'blue', attrs=['bold']) for x in args])
+        print(*[colored(x, color, attrs=['bold']) for x in args])
     else:
-        print(*[colored(x, 'blue') for x in args])
+        print(*[colored(x, color) for x in args])
+
+def print_blue(*args, bold=False):
+    _print_with_color('blue', *args, bold=bold)
 
 def print_red(*args, bold=False):
-    if bold:
-        print(*[colored(x, 'red', attrs=['bold']) for x in args])
-    else:
-        print(*[colored(x, 'red') for x in args])
+    _print_with_color('red', *args, bold=bold)
+
+def print_magenta(*args, bold=False):
+    _print_with_color('magenta', *args, bold=bold)
 
 def print_bold(*args):
     print(*[colored(x, attrs=['bold']) for x in args])

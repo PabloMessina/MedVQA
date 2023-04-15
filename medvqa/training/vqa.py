@@ -45,6 +45,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         mimiccxr_orientation_criterion=None,
         # gender aux task
         classify_gender=False,
+        chest_imagenome_gender_criterion=None,
         # chexpert aux task
         classify_chexpert=False,
         chexpert_criterion=None,
@@ -209,6 +210,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             chexpert = batch['chexpert'].to(device)
         if classify_questions:
             question_labels = batch['qlabels'].to(device)
+        if classify_gender:
+            genders = batch['gender'].to(device)
         if classify_chest_imagenome:
             chest_imagenome = batch['chest_imagenome'].to(device)
         if predict_bboxes_chest_imagenome:
@@ -277,6 +280,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     pred_chexpert_probs = model_output[f'pred_{findings_name}_probs']
                 if classify_questions:
                     pred_qlabels_logits = model_output['pred_qlabels']
+                if classify_gender:
+                    pred_gender_logits = model_output['pred_gender']
                 if classify_chest_imagenome:
                     pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
                     pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
@@ -319,6 +324,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     if classify_questions:
                         qlabels_loss = question_criterion(pred_qlabels_logits, question_labels.float())
                         losses.append(qlabels_loss)
+                    if classify_gender:
+                        gender_loss = chest_imagenome_gender_criterion(pred_gender_logits, genders)
+                        losses.append(gender_loss)
                     if classify_chest_imagenome:
                         chest_imagenome_loss = chest_imagenome_multilabel_criterion(pred_chest_imagenome_logits, chest_imagenome.float())
                         losses.append(chest_imagenome_loss)
@@ -386,6 +394,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['pred_qlabels'] = (pred_qlabels_logits.detach() > 0).cpu()
             if training:
                 output['qlabels_loss'] = qlabels_loss.detach()
+        if classify_gender:
+            output['gender'] = genders.detach()
+            output['pred_gender'] = pred_gender_logits.argmax(-1).detach()
+            if training:
+                output['gender_loss'] = gender_loss.detach()
         if classify_chest_imagenome:
             output['chest_imagenome'] = chest_imagenome.detach().cpu()
             output[f'pred_chest_imagenome'] = (pred_chest_imagenome_logits.detach() > 0).cpu()
@@ -922,6 +935,11 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
         question_criterion = get_binary_multilabel_loss(binary_loss_name, **binary_loss_kwargs)
     else:
         question_criterion = None
+    
+    if training and classify_gender:
+        chest_imagenome_gender_criterion = nn.CrossEntropyLoss(ignore_index=2) # ignore unknown
+    else:
+        chest_imagenome_gender_criterion = None
 
     if training and (use_chexpert_dataset or use_cxr14_dataset or use_cxr14_dataset):
         chexpert_aux_criterion = nn.CrossEntropyLoss()
@@ -1006,6 +1024,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             mimiccxr_orientation_criterion=mimiccxr_orientation_criterion,
                             # gender auxiliary task
                             classify_gender=classify_gender,
+                            chest_imagenome_gender_criterion=chest_imagenome_gender_criterion,
                             # chexpert auxiliary task
                             classify_chexpert=classify_chexpert,
                             chexpert_criterion=chexpert_criterion,

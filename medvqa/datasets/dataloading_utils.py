@@ -252,6 +252,8 @@ def get_vqa_collate_batch_fn(
                 batch_dict['chexpert'] = torch.tensor([batch[i]['chexpert'] for i in indexes])
             if classify_questions:
                 batch_dict['qlabels'] = torch.tensor([batch[i]['qlabels'] for i in indexes])
+            if classify_gender:
+                batch_dict['gender'] = torch.tensor([batch[i]['gender'] for i in indexes])
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([batch[i]['chest_imagenome'] for i in indexes])
             if predict_bboxes_chest_imagenome:

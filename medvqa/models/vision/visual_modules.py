@@ -1,4 +1,3 @@
-from symtable import Class
 import numpy as np
 import torch
 import torch.nn as nn
@@ -28,6 +27,7 @@ from medvqa.models.vision.multilabel_classification import (
     MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2,
 )
 from medvqa.utils.constants import (
+    CHEST_IMAGENOME_GENDERS,
     CHEXPERT_LABELS,
     CHEXPERT_GENDERS,
     CHEXPERT_ORIENTATIONS,
@@ -350,7 +350,8 @@ class MultiPurposeVisualModule(nn.Module):
         # 4) gender classification
         if self.classify_gender:
             print(f'    Initializing gender classification task')   
-            self.W_gender = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
+            self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
+            self.W_gender_chstimgn = nn.Linear(self.global_feat_size, len(CHEST_IMAGENOME_GENDERS))
 
         if self.merge_findings:
             print(f'    Initializing merged findings classification task (n_findings={self.n_findings})')
@@ -733,7 +734,7 @@ class MultiPurposeVisualModule(nn.Module):
             if self.classify_orientation:
                 output['pred_orientation'] = self.W_ori_chexpert(global_feat)
             if self.classify_gender:
-                output['pred_gender'] = self.W_gender(global_feat)
+                output['pred_gender'] = self.W_gender_chexpert(global_feat)
             if not self.merge_findings and self.classify_chexpert:
                 output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
@@ -778,6 +779,8 @@ class MultiPurposeVisualModule(nn.Module):
                 output['mimiccxr_pred_orientation'] = self.W_ori_iuxray(global_feat)
             if self.classify_questions:
                 output['pred_qlabels'] = self.W_q(global_feat)
+            if self.classify_gender:
+                output['pred_gender'] = self.W_gender_chstimgn(global_feat)
             if not self.merge_findings and self.classify_chexpert:
                 output['pred_chexpert'] = self.W_chx(global_feat)
                 output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
@@ -1258,33 +1261,19 @@ class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
         The original method returns only the detection output, while this method returns
         both the detection output and the features extracted by the last convolutional layer.
         """
-        # print('\n--------------------------')
-        # _count = 0
         y = []
         features = None
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            # if hasattr(x, 'shape'):
-            #     print(f'{_count} (_forward_once) type(x) = {type(x)}, x.shape = {x.shape}')
-            # else:
-            #     print(f'{_count} (_forward_once) type(x) = {type(x)}, shapes = {[y.shape for y in x]}')
-            # _count += 1
             if torch.is_tensor(x):
                 features = x # keep the last tensor as features
-                # print(f'  features.shape = {features.shape}')
             x = m(x)  # run
             if torch.is_tensor(x):
                 features = x # keep the last tensor as features
-                # print(f'  features.shape = {features.shape}')
             y.append(x if m.i in self.save else None)  # save output
         if torch.is_tensor(x):
             features = x # keep the last tensor as features
-            # print(f'  features.shape = {features.shape}')
-        # if hasattr(x, 'shape'):
-        #     print(f'{_count} (_forward_once) type(x) = {type(x)}, x.shape = {x.shape}')
-        # else:
-        #     print(f'{_count} (_forward_once) type(x) = {type(x)}, shapes = {[y.shape if hasattr(y, "shape") else len(y) for y in x]}')
         return features, x # return features and detection output
 
 def create_yolov8_model(model_name_or_path, nc, class_names):

@@ -9,6 +9,7 @@ from medvqa.datasets.chest_imagenome import (
     get_anaxnet_bbox_sorted_indices,
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    get_dicomId2gender,
     get_labels_per_anatomy_and_anatomy_group,
     load_chest_imagenome_dicom_ids,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
@@ -50,6 +51,7 @@ from medvqa.datasets.mimiccxr import (
 from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
+from medvqa.utils.logging import print_magenta
 
 # _DEBUG = False
 
@@ -121,6 +123,9 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 # aux task: question labels
                 classify_questions=False,
                 question_labels=None,
+                # aux task: genders
+                classify_gender=False,
+                genders=None,
                 # aux task: chest imagenome labels
                 classify_chest_imagenome=False,
                 chest_imagenome_labels=None,
@@ -157,6 +162,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.chexpert_labels = chexpert_labels
         self.classify_questions = classify_questions
         self.question_labels = question_labels
+        self.classify_gender = classify_gender
+        self.genders = genders
         self.classify_chest_imagenome = classify_chest_imagenome
         self.chest_imagenome_labels = chest_imagenome_labels
         self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
@@ -339,6 +346,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
             output['chexpert'] = self.chexpert_labels[rid]
         if self.classify_questions:
             output['qlabels'] = self.question_labels[rid]
+        if self.classify_gender:
+            output['gender'] = self.genders[idx]
         if self.classify_chest_imagenome:
             output['chest_imagenome'] = self.chest_imagenome_labels[rid]
         if self.use_yolov8:
@@ -370,6 +379,7 @@ class MIMICCXR_VisualModuleTrainer():
                 classify_tags=False,
                 medical_tags_per_report_filename=None,
                 classify_orientation=False,
+                classify_gender=False,
                 classify_chexpert=False,
                 chexpert_labels_filename=None,
                 classify_questions=False,
@@ -411,7 +421,9 @@ class MIMICCXR_VisualModuleTrainer():
         else:
             assert val_image_transform is not None
             if not use_val_set_only:
-                assert train_image_transform is not None                
+                assert train_image_transform is not None
+        if classify_gender:
+            assert view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME
 
         self.use_detectron2 = use_detectron2
         self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
@@ -632,6 +644,7 @@ class MIMICCXR_VisualModuleTrainer():
             self.classify_orientation = classify_orientation
             self.classify_chexpert = classify_chexpert
             self.classify_questions = classify_questions
+            self.classify_gender = classify_gender
             self.classify_chest_imagenome = classify_chest_imagenome
             self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
             self.use_precomputed_visual_features = use_precomputed_visual_features
@@ -664,7 +677,25 @@ class MIMICCXR_VisualModuleTrainer():
                 question_labels_path = os.path.join(MIMICCXR_CACHE_DIR, question_labels_filename)
                 self.question_labels = get_cached_pickle_file(question_labels_path)
             else:
-                self.question_labels = None        
+                self.question_labels = None
+
+            if classify_gender:
+                print('Loading Chest Imagenome genders...')
+                dicomId2gender = get_dicomId2gender()
+                def _get_gender_label(x):
+                    if x == 'F': return 0
+                    if x == 'M': return 1
+                    assert np.isnan(x)
+                    return 2
+                self.genders = np.array([_get_gender_label(dicomId2gender[dicom_id]) for dicom_id in self.dicom_ids])
+            else:
+                self.genders = None
+
+            if predict_labels_and_bboxes_chest_imagenome:
+                assert classify_chest_imagenome
+                assert chest_imagenome_label_names_filename is not None
+                assert not use_anaxnet_bbox_subset # Not supported in this mode yet
+                assert not use_chest_imagenome_bbox_gold_set # Not supported in this mode yet
             
             if classify_chest_imagenome:
                 print('Loading Chest Imagenome labels...')
@@ -700,8 +731,49 @@ class MIMICCXR_VisualModuleTrainer():
                 else:
                     _, self.chest_imagenome_labels = \
                         load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
-            else:
-                self.chest_imagenome_labels = None
+
+                if chest_imagenome_label_names_filename is not None:
+                    # We need to rearrange the labels to match the order in which the model will predict them
+                    print_magenta('Reordering Chest Imagenome labels according to anatomy-label relations...', bold=True)
+                    tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
+                    label_order = []
+                    for _, labels in tmp['anatomy_to_localized_labels']:
+                        label_order.extend(labels)
+                    for _, labels in tmp['anatomy_group_to_global_labels']:
+                        label_order.extend(labels)
+                    assert len(label_order) == len(self.chest_imagenome_label_names)
+                elif use_chest_imagenome_label_gold_set:
+                    label_order = list(range(len(self.chest_imagenome_label_names)))
+                else:
+                    label_order = None
+                if label_order is not None:
+                    if use_chest_imagenome_label_gold_set:
+                        print('  Using gold labels for Chest Imagenome (not the labels used for training)')
+                        gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+                        common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
+                        assert len(common_label_names) > 0
+                        _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
+                                                            if self.chest_imagenome_label_names[idx] in common_label_names]
+                        _valid_label_indices__gold_pov = [gold_label_names.index(self.chest_imagenome_label_names[idx]) for idx in label_order\
+                                                        if self.chest_imagenome_label_names[idx] in common_label_names]
+                        self.valid_chest_imagenome_label_indices = _valid_label_indices__model_pov
+                        self.chest_imagenome_labels = self.chest_imagenome_labels[:, _valid_label_indices__gold_pov]
+                        self.chest_imagenome_label_names = [gold_label_names[i] for i in _valid_label_indices__gold_pov]
+                        assert set(self.chest_imagenome_label_names) == set(common_label_names)
+                        print(f'  len(gold_label_names) = {len(gold_label_names)}')
+                        print(f'  len(label_order) = {len(label_order)}')
+                        print(f'  len(common_label_names) = {len(common_label_names)}')
+                        print(f'  len(self.valid_chest_imagenome_label_indices) = {len(self.valid_chest_imagenome_label_indices)}')
+                    else:
+                        assert self.chest_imagenome_labels.shape[1] == len(label_order)
+                        assert set(label_order) == set(range(len(label_order)))
+                        assert len(label_order) == len(self.chest_imagenome_label_names)
+                        self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
+                        self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
+                    print(f'  len(self.chest_imagenome_label_names) = {len(self.chest_imagenome_label_names)}')
+                    print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
+                else:
+                    self.chest_imagenome_labels = None
             
             if predict_bboxes_chest_imagenome or (pass_pred_bbox_coords_to_model and use_gt_bboxes_as_pred):
                 assert not use_chest_imagenome_bbox_gold_set, 'Not supported yet'
@@ -738,52 +810,7 @@ class MIMICCXR_VisualModuleTrainer():
                 self.pred_bbox_coords = None
                 self.flipped_bbox_coords = None
                 self.flipped_bbox_presence = None
-                self.flipped_pred_bbox_coords = None            
-
-            if predict_labels_and_bboxes_chest_imagenome:
-                assert chest_imagenome_label_names_filename is not None
-                assert classify_chest_imagenome
-                assert not use_anaxnet_bbox_subset # Not supported in this mode yet
-                assert not use_chest_imagenome_bbox_gold_set # Not supported in this mode yet
-                # We need to rearrange the labels to match the order in which the model will predict them
-                print('Reordering Chest Imagenome labels for combined label/bbox prediction...')
-                tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
-                label_order = []
-                for _, labels in tmp['anatomy_to_localized_labels']:
-                    label_order.extend(labels)
-                for _, labels in tmp['anatomy_group_to_global_labels']:
-                    label_order.extend(labels)
-                assert len(label_order) == len(self.chest_imagenome_label_names)
-            elif classify_chest_imagenome and use_chest_imagenome_label_gold_set:
-                label_order = list(range(len(self.chest_imagenome_label_names)))
-            else:
-                label_order = None
-            if label_order is not None:
-                if use_chest_imagenome_label_gold_set:
-                    print('  Using gold labels for Chest Imagenome (not the labels used for training)')
-                    gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
-                    common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
-                    assert len(common_label_names) > 0
-                    _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
-                                                        if self.chest_imagenome_label_names[idx] in common_label_names]
-                    _valid_label_indices__gold_pov = [gold_label_names.index(self.chest_imagenome_label_names[idx]) for idx in label_order\
-                                                       if self.chest_imagenome_label_names[idx] in common_label_names]
-                    self.valid_chest_imagenome_label_indices = _valid_label_indices__model_pov
-                    self.chest_imagenome_labels = self.chest_imagenome_labels[:, _valid_label_indices__gold_pov]
-                    self.chest_imagenome_label_names = [gold_label_names[i] for i in _valid_label_indices__gold_pov]
-                    assert set(self.chest_imagenome_label_names) == set(common_label_names)
-                    print(f'  len(gold_label_names) = {len(gold_label_names)}')
-                    print(f'  len(label_order) = {len(label_order)}')
-                    print(f'  len(common_label_names) = {len(common_label_names)}')
-                    print(f'  len(self.valid_chest_imagenome_label_indices) = {len(self.valid_chest_imagenome_label_indices)}')
-                else:
-                    assert self.chest_imagenome_labels.shape[1] == len(label_order)
-                    assert set(label_order) == set(range(len(label_order)))
-                    assert len(label_order) == len(self.chest_imagenome_label_names)
-                    self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
-                    self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
-                print(f'  len(self.chest_imagenome_label_names) = {len(self.chest_imagenome_label_names)}')
-                print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
+                self.flipped_pred_bbox_coords = None
             
             if use_precomputed_visual_features:
                 print('Loading precomputed visual features...')
@@ -842,6 +869,8 @@ class MIMICCXR_VisualModuleTrainer():
             chexpert_labels=self.chexpert_labels,
             classify_questions=self.classify_questions,
             question_labels=self.question_labels,
+            classify_gender=self.classify_gender,
+            genders=self.genders,
             classify_chest_imagenome=self.classify_chest_imagenome,
             chest_imagenome_labels=self.chest_imagenome_labels,
             predict_bboxes_chest_imagenome=self.predict_bboxes_chest_imagenome,
@@ -872,7 +901,7 @@ class MIMICCXR_VisualModuleTrainer():
                 global2idxs = {}
                 without_global = []
                 print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                for i in tqdm(indices):
+                for i in tqdm(indices, mininterval=2):
                     rid = self.report_ids[i]
                     labels = self.chest_imagenome_labels[rid]
                     has_global = False
@@ -907,7 +936,7 @@ class MIMICCXR_VisualModuleTrainer():
                 assert self.chest_imagenome_label_names is not None
                 global2idxs = {}
                 print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                for i in tqdm(indices):
+                for i in tqdm(indices, mininterval=2):
                     rid = self.report_ids[i]
                     labels = self.chest_imagenome_labels[rid]
                     for j, label in enumerate(labels):

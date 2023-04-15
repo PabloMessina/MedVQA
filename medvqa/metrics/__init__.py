@@ -404,10 +404,10 @@ def attach_dataset_aware_padchest_localization_microavgf1(engine, allowed_datase
 # ---------------------------------------------
 
 # Gender
-def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False):
+def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False, ignore_index=-1):
     met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
                                 allowed_dataset_ids=allowed_dataset_ids,
-                                record_scores=record_scores)
+                                record_scores=record_scores, ignore_index=ignore_index)
     met.attach(engine, MetricNames.GENDER_ACC)
 
 # Orientation/View/Projection

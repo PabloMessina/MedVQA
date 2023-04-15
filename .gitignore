@@ -4,4 +4,4 @@ __tmp/
 .ipynb_checkpoints
 .env
 .vscode
-.pt
+*.pt

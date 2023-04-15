@@ -88,6 +88,16 @@ def get_silver_scene_graphs_paths_for_gold_dataset():
         output.append(scene_graph_path)
     return output
 
+def get_dicomId2gender(num_workers=4):
+    cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'dicomId2gender.pkl')
+    if os.path.exists(cache_path):
+        dicomId2gender = get_cached_pickle_file(cache_path)
+        return dicomId2gender
+    scene_graphs = load_scene_graphs_in_parallel(num_workers=num_workers)
+    dicomId2gender = { x['image_id'] : x['gender'] for x in scene_graphs }
+    save_to_pickle(dicomId2gender, cache_path)
+    return dicomId2gender
+
 def load_postprocessed_label_names(label_names_filename):
     label_names = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, label_names_filename))
     assert label_names is not None, label_names_filename

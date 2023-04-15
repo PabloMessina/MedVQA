@@ -210,6 +210,124 @@ def get_imageId2PartPatientStudy():
     save_to_pickle(imageId2partpatstud, cache_path)
     return imageId2partpatstud
 
+def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
+    metadata = get_detailed_metadata_for_dicom_id(dicom_id)
+    assert len(metadata) == 1
+    metadata = metadata[0]
+    part_id = metadata['part_id']
+    patient_id = metadata['subject_id']
+    study_id = metadata['study_id']
+    image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
+    # Plot main image
+    from PIL import Image
+    from matplotlib import pyplot as plt
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    fig, ax = plt.subplots(1, figsize=figsize)
+    print(f'dicom_id = {dicom_id}')
+    print(f'image_path = {image_path}')
+    # set title
+    view_pos = metadata['view_pos']
+    title = f'View position: {view_pos}, dicom_id: {dicom_id}'
+    ax.set_title(title)
+    ax.imshow(image)
+    plt.show()
+    # Print original report
+    print()
+    print('-' * 80)
+    print('Original report:')
+    report_path = get_mimiccxr_report_path(part_id=part_id, subject_id=patient_id, study_id=study_id)
+    with open(report_path, 'r') as f:
+        print(f.read())
+    # Find and plot other images
+    print()
+    print('-' * 80)
+    if len(metadata['dicom_id_view_pos_pairs']) == 1:
+        print('No other images')
+        return
+    print('Other images:')
+    for _dicom_id, _view_pos in metadata['dicom_id_view_pos_pairs']:
+        if _dicom_id == dicom_id:
+            continue
+        _image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, _dicom_id)
+        _image = Image.open(_image_path)
+        _image = _image.convert('RGB')
+        fig, ax = plt.subplots(1, figsize=figsize)
+        print(f'dicom_id = {_dicom_id}')
+        print(f'image_path = {_image_path}')
+        # set title
+        title = f'View position: {_view_pos}, dicom_id: {_dicom_id}'
+        ax.set_title(title)
+        ax.imshow(_image)
+        plt.show()
+
+def save_report_image_and_other_images_as_pdf(dicom_id, pdf_path):
+    import pdfkit
+    metadata = get_detailed_metadata_for_dicom_id(dicom_id)
+    assert len(metadata) == 1
+    metadata = metadata[0]
+    part_id = metadata['part_id']
+    patient_id = metadata['subject_id']
+    study_id = metadata['study_id']
+    image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
+    # Generate html
+    html = f'''
+    <html>
+    <head>
+    <style>
+    .image {{
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        width: 85%;
+    }}
+    </style>
+    </head>
+    <body>
+    '''
+    # Add main image
+    html += f'''
+    <h2>View position: {metadata['view_pos']}, dicom_id: {dicom_id}</h2>
+    <img src="{image_path}" class="image">
+    '''
+    # Add original report
+    html += f'''
+    <h2>Original report</h2>
+    '''
+    report_path = get_mimiccxr_report_path(part_id=part_id, subject_id=patient_id, study_id=study_id)
+    with open(report_path, 'r') as f:
+        report = f.read()
+    # we will use white-space: pre-wrap; to preserve newlines
+    html += f'''
+    <pre style="white-space: pre-wrap;">{report}</pre>
+    '''
+    # Add other images
+    html += f'''
+    <h2>Other images</h2>
+    '''
+    if len(metadata['dicom_id_view_pos_pairs']) == 1:
+        html += f'''
+        <p>No other images</p>
+        '''
+    else:
+        for _dicom_id, _view_pos in metadata['dicom_id_view_pos_pairs']:
+            if _dicom_id == dicom_id:
+                continue
+            _image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, _dicom_id)
+            html += f'''
+            <h2>View position: {_view_pos}, dicom_id: {_dicom_id}</h2>
+            <img src="{_image_path}" class="image">
+            '''
+    html += '''
+    </body>
+    </html>
+    '''
+    # Save html to pdf
+    # NOTE: to avoid OSError: wkhtmltopdf reported an error:
+    #       Exit with code 1 due to network error: ProtocolUnknownError
+    # we add the following option: '--enable-local-file-access ""'
+    pdfkit.from_string(html, pdf_path, options={'enable-local-file-access': ''})
+
 def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
 
     if qa_adapted_reports_filename is None:
@@ -285,15 +403,13 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
 def get_number_of_reports():
     return len(load_mimiccxr_reports_detailed_metadata()['part_ids'])
 
-def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
+def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename=None):
     detailed_metadata = load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename)    
     output = []
     for i in range(len(detailed_metadata['dicom_id_view_pos_pairs'])):
         for dicom_id_view_pos_pair in detailed_metadata['dicom_id_view_pos_pairs'][i]:
             if dicom_id_view_pos_pair[0] == dicom_id:
                 output.append({
-                    'background': detailed_metadata['backgrounds'][i],
-                    'report': detailed_metadata['reports'][i],
                     'part_id': detailed_metadata['part_ids'][i],
                     'subject_id': detailed_metadata['subject_ids'][i],
                     'study_id': detailed_metadata['study_ids'][i],
@@ -303,6 +419,9 @@ def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename):
                     'filepath': detailed_metadata['filepaths'][i],
                     'dicom_id_view_pos_pairs': detailed_metadata['dicom_id_view_pos_pairs'][i],
                 })
+                if qa_adapted_reports_filename is not None:
+                    output[-1]['background'] = detailed_metadata['backgrounds'][i]
+                    output[-1]['report'] = detailed_metadata['reports'][i]
     return output
 
 def _get_mimiccxr_split_dicom_ids(split_name):

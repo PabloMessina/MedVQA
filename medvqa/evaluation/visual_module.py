@@ -28,6 +28,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     visualize_predicted_bounding_boxes,
     visualize_scene_graph,
 )
+from medvqa.datasets.mimiccxr import save_report_image_and_other_images_as_pdf, visualize_image_report_and_other_images
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.metrics import (
     attach_chest_imagenome_labels_accuracy,
@@ -52,6 +53,7 @@ from medvqa.utils.handlers import (
     get_log_iteration_handler,
     get_log_metrics_handler,
 )
+from medvqa.utils.logging import print_red
 
 _VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,
@@ -535,30 +537,113 @@ class ChestImaGenomeMLCVisualizer:
         pr_auc = auc(recall, precision)
         print(f'p: {p:.4f}, r: {r:.4f}, f1: {f1:.4f}, roc_auc: {roc_auc:.4f}, pr_auc: {pr_auc:.4f}')
 
-    def _plot_example_for_label(self, label_name, pos=True):
+    def _plot_example_for_label(self, label_name, gt_val=1, pred_val=1, figsize=(8, 8), show_scene_graph=True):
         label_idx = self.label_names.index(label_name)
         gt_label_idx = self.gt_label_names.index(label_name)
         idxs = []
         for i, dicom_id in enumerate(self.dicom_ids):
-             if (self.gt_labels[dicom_id][gt_label_idx] == 1) == pos:
+             if self.gt_labels[dicom_id][gt_label_idx] == gt_val and \
+                (self.dicom_id_to_probs[dicom_id][label_idx] > 0.5) == pred_val:
                 idxs.append(i)
         idx = random.choice(idxs)
         dicom_id = self.dicom_ids[idx]
         label_prob = self.dicom_id_to_probs[dicom_id][label_idx]
-        if pos:
-            print('Positive example:')
+        if gt_val == 1 and pred_val == 1:
+            print('True Positive')
+        elif gt_val == 0 and pred_val == 0:
+            print('True Negative')
+        elif gt_val == 1 and pred_val == 0:
+            print('False Negative')
+        elif gt_val == 0 and pred_val == 1:
+            print('False Positive')
         else:
-            print('Negative example:')
+            raise ValueError(f'gt_val: {gt_val}, pred_val: {pred_val}')
         print(f'dicom_id: {dicom_id}')
         print(f'Label: {label_name}, prob: {label_prob:.4f}')
         print('-' * 50)
-        visualize_scene_graph(load_scene_graph(dicom_id))
+        if show_scene_graph:
+            visualize_scene_graph(load_scene_graph(dicom_id), figsize=figsize)
+        else:
+            visualize_image_report_and_other_images(dicom_id, figsize=figsize)
 
-    def plot_positive_example_for_label(self, label_name):
-        self._plot_example_for_label(label_name, pos=True)
+    def plot_true_positive_example_for_label(self, label_name, **kwargs):
+        self._plot_example_for_label(label_name, gt_val=1, pred_val=1, **kwargs)
 
-    def plot_negative_example_for_label(self, label_name):
-        self._plot_example_for_label(label_name, pos=False)
+    def plot_true_negative_example_for_label(self, label_name, **kwargs):
+        self._plot_example_for_label(label_name, gt_val=0, pred_val=0, **kwargs)
+
+    def plot_false_positive_example_for_label(self, label_name, **kwargs):
+        self._plot_example_for_label(label_name, gt_val=0, pred_val=1, **kwargs)
+
+    def plot_false_negative_example_for_label(self, label_name, **kwargs):
+        self._plot_example_for_label(label_name, gt_val=1, pred_val=0, **kwargs)
+
+    def save_examples_for_label_as_pdf_files(self, label_name, save_dir, ntp, ntn, nfp, nfn):
+        assert len(label_name) == 2, 'We only support global labels'
+        # NOTE: global labels are tuples of length 2, while local labels are tuples of length 3
+        label_idx = self.label_names.index(label_name)
+        gt_label_idx = self.gt_label_names.index(label_name)
+        tp_idxs, tn_idxs, fp_idxs, fn_idxs = [], [], [], []
+        for i, dicom_id in enumerate(self.dicom_ids):
+            gt_val = self.gt_labels[dicom_id][gt_label_idx]
+            pred_val = self.dicom_id_to_probs[dicom_id][label_idx] > 0.5
+            if ntp > 0 and gt_val == 1 and pred_val == 1:
+                tp_idxs.append(i)
+            elif ntn > 0 and gt_val == 0 and pred_val == 0:
+                tn_idxs.append(i)
+            elif nfp > 0 and gt_val == 1 and pred_val == 0:
+                fn_idxs.append(i)
+            elif nfn > 0 and gt_val == 0 and pred_val == 1:
+                fp_idxs.append(i)
+        if nfn > 0:
+            if len(fn_idxs) > nfn:
+                fn_idxs = random.sample(fn_idxs, nfn)
+            elif len(fn_idxs) < nfn:
+                print_red(f'Warning: only {len(fn_idxs)}/{nfn} false negatives for {label_name}')
+                ntp += nfn - len(fn_idxs) # add to tp
+        if ntp > 0:
+            if len(tp_idxs) > ntp:
+                tp_idxs = random.sample(tp_idxs, ntp)
+            elif len(tp_idxs) < ntp:
+                print_red(f'Warning: only {len(tp_idxs)}/{ntp} true positives for {label_name}')
+        if nfp > 0:
+            if len(fp_idxs) > nfp:
+                fp_idxs = random.sample(fp_idxs, nfp)
+            elif len(fp_idxs) < nfp:
+                print_red(f'Warning: only {len(fp_idxs)}/{nfp} false positives for {label_name}')
+                ntn += nfp - len(fp_idxs) # add to tn
+        if ntn > 0:
+            if len(tn_idxs) > ntn:
+                tn_idxs = random.sample(tn_idxs, ntn)
+            elif len(tn_idxs) < ntn:
+                print_red(f'Warning: only {len(tn_idxs)}/{ntn} true negatives for {label_name}')
+        
+        gt_pos_idxs = tp_idxs + fn_idxs
+        gt_neg_idxs = tn_idxs + fp_idxs
+
+        assert len(gt_pos_idxs) > 0
+        assert len(gt_neg_idxs) > 0
+        abnormality_name = label_name[1]
+        abnormality_name = abnormality_name.replace('/', ' or ')
+        abnormality_name = abnormality_name.replace('_', ' ')
+        abnormality_name = ' '.join(abnormality_name.split())
+        abnormality_name_with_underscores = abnormality_name.replace(' ', '_')
+        abnormality_folder_path = os.path.join(save_dir, abnormality_name_with_underscores)
+        os.makedirs(abnormality_folder_path, exist_ok=True)
+        print('Saving examples for', abnormality_name)
+        print(f'len(gt_pos_idxs): {len(gt_pos_idxs)}, len(gt_neg_idxs): {len(gt_neg_idxs)}')
+        for i, idx in enumerate(gt_pos_idxs):
+            dicom_id = self.dicom_ids[idx]
+            pdf_path=os.path.join(abnormality_folder_path,
+                                  f'{abnormality_name_with_underscores}__positive_{i+1}.pdf')
+            print('Saving', pdf_path)
+            save_report_image_and_other_images_as_pdf(dicom_id, pdf_path)
+        for i, idx in enumerate(gt_neg_idxs):
+            dicom_id = self.dicom_ids[idx]
+            pdf_path=os.path.join(abnormality_folder_path,
+                                  f'{abnormality_name_with_underscores}__negative_{i+1}.pdf')
+            print('Saving', pdf_path)
+            save_report_image_and_other_images_as_pdf(dicom_id, pdf_path)
     
 def calibrate_thresholds_on_mimiccxr_validation_set(
     model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
@@ -722,4 +807,3 @@ def merge_probabilities(dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_l
     pred_labels = (merged_probs > thresholds).astype(np.int)
     # Return
     return merged_probs, pred_labels, gt, label_names
-

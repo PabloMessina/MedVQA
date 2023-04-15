@@ -70,14 +70,13 @@ class MultilabelClassifier_v1(nn.Module):
         # 2.2) Compute the multi-label classification for each bounding box group
         for i, (bbox_group, _) in enumerate(self.bbox_group_to_labels):
             # 2.2.1) Get the features for the bounding boxes in the group
-            group_features = [bbox_features[i] for i in bbox_group]
-            group_features = torch.stack(group_features, dim=1) # (batch_size, num_bboxes, hidden_dim)
-            group_features = group_features.view(batch_size, -1) # (batch_size, num_bboxes * hidden_dim)
+            group_features = [bbox_features[j] for j in bbox_group]
+            group_features = torch.cat(group_features, dim=1) # (batch_size, hidden_dim * len(bbox_group))
             # 2.2.2) Apply the global multi-label classification layer
             glob_label_logits = self.glob_mlc_fc[i](group_features) # (batch_size, num_labels)
             mlc_scores.append(glob_label_logits)
         # 2.3) Concatenate the local and global logits
-        mlc_scores = torch.concat(mlc_scores, dim=1) # (batch_size, (num_bboxes + num_bbox_groups) * num_labels)
+        mlc_scores = torch.cat(mlc_scores, dim=1) # (batch_size, (num_bboxes + num_bbox_groups) * num_labels)
 
         # 3) Return the predicted multi-label classification scores
         return mlc_scores
@@ -131,8 +130,7 @@ class MultilabelClassifier_v2(nn.Module):
     def forward(self, local_features, global_features, pred_bbox_coords):
         batch_size = local_features.size(0)
         assert local_features.shape == (batch_size, self.local_feat_dim, self.input_size, self.input_size)
-        assert pred_bbox_coords.shape == (batch_size, self.num_annotated_boxes, 4)        
-        assert len(pred_bbox_coords) == batch_size
+        assert pred_bbox_coords.shape == (batch_size, self.num_annotated_boxes, 4)
         assert 0 <= pred_bbox_coords.min() and pred_bbox_coords.max() <= 1
 
         # 1) ROI Align pooling
@@ -155,7 +153,7 @@ class MultilabelClassifier_v2(nn.Module):
         )
         assert roi_align_output.shape == (n_boxes, self.local_feat_dim, self.roi_align_output_size, self.roi_align_output_size)
         roi_align_output = roi_align_output.reshape(batch_size, self.num_boxes, self.local_feat_dim, -1)
-        roi_align_output = roi_align_output.permute(0, 1, 3, 2)
+        roi_align_output = roi_align_output.permute(0, 1, 3, 2) # (batch_size, num_boxes, num_regions, local_feat_dim)
         
         # 2) Bbox feature extraction
         bbox_features = []
@@ -182,13 +180,13 @@ class MultilabelClassifier_v2(nn.Module):
         # 3.2) Compute the multi-label classification for each bounding box group
         for i, (bbox_group, _) in enumerate(self.bbox_group_to_labels):
             # 3.2.1) Get the features for the bounding boxes in the group
-            group_features = [bbox_features[idx] for idx in bbox_group]
+            group_features = [bbox_features[j] for j in bbox_group]
             group_features = torch.cat(group_features, dim=1) # (batch_size, hidden_dim * len(bbox_group))
             # 3.2.2) Apply the global multi-label classification layer
             glob_label_logits = self.glob_mlc_fc[i](group_features) # (batch_size, num_labels)
             mlc_scores.append(glob_label_logits)
         # 3.3) Concatenate the local and global logits
-        mlc_scores = torch.concat(mlc_scores, dim=1) # (batch_size, num_labels)
+        mlc_scores = torch.cat(mlc_scores, dim=1) # (batch_size, num_labels)
         assert mlc_scores.shape == (batch_size, self.num_labels)
 
         # 4) Return the predicted bounding box coordinates, presence and multi-label classification scores
