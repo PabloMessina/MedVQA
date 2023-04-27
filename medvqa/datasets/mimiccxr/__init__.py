@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from pathlib import Path
+from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_to_pickle
 load_dotenv()
 
@@ -21,7 +22,21 @@ MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-met
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
-MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP']
+MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO', 'RAO', 
+                                    'AP LLD', 'AP AXIAL', 'SWIMMERS', 'PA LLD', 'XTABLE LATERAL',
+                                    'PA RLD', 'AP RLD', 'LPO']
+MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP', 'LATERAL']
+def get_mimiccxr_image_orientation_id(o):
+    if type(o) != str:
+        o = 'UNKNOWN'
+    assert o in MIMICCXR_IMAGE_ORIENTATIONS__RAW
+    if o == 'LL':
+        o = 'LATERAL'
+    try:
+        return MIMICCXR_IMAGE_ORIENTATIONS.index(o)    
+    except ValueError:
+        return 0
+
 MIMICCXR_SPLIT_NAMES = ['train', 'validate', 'test']
 
 MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE = os.path.join(MIMICCXR_JPG_IMAGES_SMALL_DIR, 'p{}', 'p{}', 's{}', '{}.jpg')
@@ -156,10 +171,19 @@ def get_split_dict():
     _cache['get_split_dict()'] = split_dict
     return split_dict
 
-def get_mimiccxr_image_paths(report):
-    filepath = report['filepath']
+def get_mimiccxr_image_paths(report=None, filepath=None, image_size='small'):
+    assert report is not None or filepath is not None
+    assert image_size in ['small', 'medium', 'large']
+    if filepath is None:
+        filepath = report['filepath']
     part_id, subject_id, study_id = MIMICCXR_STUDY_REGEX.findall(filepath)[0]
-    images = glob.glob(MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, '*'))
+    if image_size == 'small':
+        template = MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE
+    elif image_size == 'medium':
+        template = MIMICCXR_IMAGE_MEDIUM_PATH_TEMPLATE
+    elif image_size == 'large':
+        template = MIMICCXR_IMAGE_LARGE_PATH_TEMPLATE
+    images = glob.glob(template.format(part_id, subject_id, study_id, '*'))
     return images
 
 def get_reports_txt_paths():
@@ -328,12 +352,15 @@ def save_report_image_and_other_images_as_pdf(dicom_id, pdf_path):
     # we add the following option: '--enable-local-file-access ""'
     pdfkit.from_string(html, pdf_path, options={'enable-local-file-access': ''})
 
-def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
+def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, exclude_invalid_sentences=False):
 
     if qa_adapted_reports_filename is None:
         filename = 'detailed_metadata.pkl'
     else:
-        filename = f'{qa_adapted_reports_filename}__detailed_metadata.pkl'
+        if exclude_invalid_sentences:
+            filename = f'{qa_adapted_reports_filename}(invalid_excluded)__detailed_metadata.pkl'
+        else:
+            filename = f'{qa_adapted_reports_filename}__detailed_metadata.pkl'
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, filename)
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
@@ -374,7 +401,12 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None):
             filepath = report['filepath']
             part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])            
             backgrounds[i] = report['background']
-            reports[i] = '.\n '.join(report['sentences'])
+            if exclude_invalid_sentences:
+                invalid_set = set(report['invalid'])
+                sentences = report['sentences']
+                reports[i] = '.\n '.join(sentences[i] for i in range(len(sentences)) if i not in invalid_set)
+            else:
+                reports[i] = '.\n '.join(report['sentences'])
             part_ids[i] = part_id
             subject_ids[i] = subject_id
             study_ids[i] = study_id
@@ -436,3 +468,63 @@ def get_mimiccxr_train_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('train')
 def get_mimiccxr_val_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('validate')
+
+def get_train_val_test_stats_per_chexpert_label(chexpert_labels_filename):
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, f'train_val_test_chexpert_stats_per_label({chexpert_labels_filename}).pkl')
+    if os.path.exists(cache_path): return get_cached_pickle_file(cache_path)
+
+    chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename)
+    chexpert_labels = get_cached_pickle_file(chexpert_labels_path)
+
+    metadata = load_mimiccxr_reports_detailed_metadata()
+    splits = metadata['splits']
+    assert len(splits) == len(chexpert_labels)
+    n = len(splits)
+
+    label2stats = {}
+    for i, label_name in tqdm(enumerate(CHEXPERT_LABELS)):
+        train_pos_count, train_neg_count = 0, 0
+        val_pos_count, val_neg_count = 0, 0
+        test_pos_count, test_neg_count = 0, 0
+        for j in range(n):
+            if splits[j] == 'train':
+                if chexpert_labels[j][i] == 1: train_pos_count += 1
+                elif chexpert_labels[j][i] == 0: train_neg_count += 1
+                else: assert False
+            elif splits[j] == 'validate':
+                if chexpert_labels[j][i] == 1: val_pos_count += 1
+                elif chexpert_labels[j][i] == 0: val_neg_count += 1
+                else: assert False
+            elif splits[j] == 'test':
+                if chexpert_labels[j][i] == 1: test_pos_count += 1
+                elif chexpert_labels[j][i] == 0: test_neg_count += 1
+                else: assert False
+            else: assert False
+        label2stats[label_name] = {
+            'train': {'positive': train_pos_count, 'negative': train_neg_count},
+            'val': {'positive': val_pos_count, 'negative': val_neg_count},
+            'test': {'positive': test_pos_count, 'negative': test_neg_count},
+        }
+
+    save_to_pickle(label2stats, cache_path)
+    return label2stats
+
+def get_train_val_test_summary_text_for_chexpert_label(label, labels_filename):
+    label2stats = get_train_val_test_stats_per_chexpert_label(labels_filename)
+    # Get actual label
+    label_idx = CHEXPERT_LABELS.index(label)
+    assert label_idx != -1, f'Could not find label {label}'
+    # Retrieve summary statistics
+    stats = label2stats[label]
+    # Return summary text
+    train_pos_count = stats['train']['positive']
+    train_fraction  = train_pos_count / (train_pos_count + stats['train']['negative'])
+    val_pos_count   = stats['val']['positive']
+    val_fraction    = val_pos_count / (val_pos_count + stats['val']['negative'])
+    test_pos_count  = stats['test']['positive']
+    test_fraction   = test_pos_count / (test_pos_count + stats['test']['negative'])
+    summary_text = (f'Label: {label}\n'
+                    f'Train: {train_pos_count} ({train_fraction:.2%})\n'
+                    f'Val: {val_pos_count} ({val_fraction:.2%})\n'
+                    f'Test: {test_pos_count} ({test_fraction:.2%})')
+    return summary_text

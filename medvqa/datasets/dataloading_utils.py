@@ -177,19 +177,6 @@ def multi_cyclic_dataloaders_generator(dataloaders):
             for batch in dataloader:
                 yield batch
 
-# def collate_test_batch(batch):
-#     indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
-#     batch_dict = dict()
-#     batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
-#     batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
-#     batch_dict['q'] = nn.utils.rnn.pad_sequence(
-#         sequences = [torch.tensor(batch[i]['q']) for i in indexes],
-#         batch_first=True,
-#         padding_value=0,
-#     )
-#     batch_dict['ql'] = torch.tensor([len(batch[i]['q']) for i in indexes])
-#     return batch_dict
-
 def simple_yolov8_collate_batch_fn(batch):
     batch_dict = {}
     batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -450,7 +437,6 @@ def get_multimodal_collate_batch_fn(dataset_id, use_text=True, classify_orientat
 
     return collate_batch_fn
 
-
 def qa_collate_batch_fn(batch):
     indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
     batch_dict = dict()
@@ -476,3 +462,40 @@ def get_mae_collate_batch_fn(dataset_id):
         batch_dict['dataset_id'] = dataset_id
         return batch_dict
     return mae_collate_batch_fn
+
+def get_report_gen_collate_batch_fn(dataset_id, use_report, use_gender, use_chexpert, use_chest_imagenome,
+                                    use_ground_truth_as_prediction):
+    if dataset_id == MIMICCXR_DATASET_ID:
+        def collate_batch_fn(batch):
+            batch_dict = dict()
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+            if use_report:
+                batch_dict['report'] = nn.utils.rnn.pad_sequence(
+                    sequences = [torch.tensor(x['report']) for x in batch],
+                    batch_first=True,
+                    padding_value=0,
+                )
+            batch_dict['use_gt_as_pred'] = use_ground_truth_as_prediction
+            if use_ground_truth_as_prediction:
+                to_concat = []
+                if use_gender:
+                    batch_dict['g'] = torch.tensor([x['g'] for x in batch])
+                    to_concat.append(batch_dict['g'])
+                if use_chest_imagenome:
+                    batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
+                    to_concat.append(batch_dict['chest_imagenome'])
+                if use_chexpert:
+                    batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
+                    to_concat.append(batch_dict['chexpert'])
+                assert len(to_concat) > 0
+                batch_dict['predicted_binary_scores'] = torch.cat(to_concat, dim=1).float()
+            else:
+                if use_chest_imagenome:
+                    batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
+                if use_chexpert:
+                    batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
+                batch_dict['predicted_binary_scores'] = torch.tensor([x['ensemble_probs'] for x in batch])
+            return batch_dict
+    else: assert False, f'Unknown dataset_id {dataset_id}'
+    return collate_batch_fn

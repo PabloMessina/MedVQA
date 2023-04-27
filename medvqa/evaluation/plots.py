@@ -253,7 +253,8 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
     plt.show()
 
 def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric_names, metric_aliases, dataset_name,
-                                          figsize=(10, 8), fontsize=7):
+                                          figsize=(10, 8), scores_fontsize=7, ytick_fontsize=10,
+                                          plot_vertical_size=1.0, sort_metrics=True, sort_methods=True):
     n = len(dataframe_rows)
     assert n == len(method_aliases)
     assert n > 0
@@ -264,10 +265,12 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     scores_per_method = [[dataframe_rows[i][k] for k in metric_names] for i in range(n)]
     mean_score_per_metric = [np.mean([scores_per_method[i][j] for i in range(n)]) for j in range(m)]
     metric_idxs = list(range(m))
-    metric_idxs.sort(key=lambda i: mean_score_per_metric[i])
+    if sort_metrics:
+        metric_idxs.sort(key=lambda i: mean_score_per_metric[i])
     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
-    method_idxs.sort(key=lambda i: mean_score_per_method[i])
+    if sort_methods:
+        method_idxs.sort(key=lambda i: mean_score_per_method[i])
     min_score = min(min(scores_per_method[i]) for i in range(n))
     max_score = max(max(scores_per_method[i]) for i in range(n))
 
@@ -275,16 +278,17 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     # The height of the bar is the metric score
     # Each method is a different color    
     plt.figure(figsize=figsize)
-    height = 0.9 / n
+    bar_height = 0.9 * plot_vertical_size / (n * m)
     for i in range(n):
         label = method_aliases[method_idxs[n-1-i]]
-        positions = [j + (n-1-i)*height for j in range(1, m+1)]
+        label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
+        positions = [j * (plot_vertical_size / m) + (n-1-i)*bar_height for j in range(1, m+1)]
         scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-        plt.barh(positions, scores, height=height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
+        plt.barh(positions, scores, height=bar_height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
         # plot the scores as text on top of the bars
         for j in range(m):
-            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=fontsize)
-    plt.yticks([height * (n/2-0.5)+ i for i in range(1, m+1)], [metric_aliases[i] for i in metric_idxs])
+            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+    plt.yticks([(j+0.5) * (plot_vertical_size / m) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs], fontsize=ytick_fontsize)
     plt.ylabel('Metric')
     plt.xlabel('Score')
     plt.title(f'Metrics on {dataset_name}')

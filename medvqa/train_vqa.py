@@ -468,7 +468,7 @@ def train_model(
         count_print('Loading mimiccxr QA adapted reports ...')
         mimiccxr_qa_adapted_reports_filename = mimiccxr_vqa_trainer_kwargs['qa_adapted_reports_filename']
         assert mimiccxr_qa_adapted_reports_filename is not None        
-        mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)        
+        mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)
         mimiccxr_qa_reports = load_json_file(mimiccxr_qa_adapted_reports_path)
     if train_iuxray and train_mimiccxr:
         assert iuxray_qa_reports['questions'] == mimiccxr_qa_reports['questions']
@@ -1217,7 +1217,7 @@ def train_from_scratch(
         vocab_min_freq = vocab_min_freq,
         use_medical_tokenization = use_medical_tokenization,
         medical_terms_frequency_filename = medical_terms_frequency_filename,
-    )    
+    )
 
     # Compute the total number of questions (that will be encoded as one-hot vectors)
     # considerning different modes of training and datasets

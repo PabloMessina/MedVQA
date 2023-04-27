@@ -90,13 +90,13 @@ def attach_meteor(engine, device, record_scores=False):
                     device = device, record_scores=record_scores)
     met.attach(engine, MetricNames.METEOR)
 
-def attach_ciderd(engine, device, record_scores=False):
-    met = CiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
+def attach_ciderd(engine, device, record_scores=False, field='answers'):
+    met = CiderD(output_transform = _get_output_transform(f'pred_{field}', field),
                 device=device, record_scores=record_scores)
     met.attach(engine, MetricNames.CIDER_D)
 
-def attach_dataset_aware_ciderd(engine, allowed_dataset_ids, record_scores=False):
-    met = DatasetAwareCiderD(output_transform = _get_output_transform('pred_answers', 'answers'),
+def attach_dataset_aware_ciderd(engine, allowed_dataset_ids, record_scores=False, field='answers'):
+    met = DatasetAwareCiderD(output_transform = _get_output_transform(f'pred_{field}', field),
                 allowed_dataset_ids=allowed_dataset_ids,
                 record_scores=record_scores)
     met.attach(engine, MetricNames.CIDER_D)
@@ -127,21 +127,21 @@ def attach_dataset_aware_exactmatch_answer(engine, allowed_dataset_ids, record_s
 # Medical Completeness related metrics (these evaluate natural language answers)
 # ------------------------------------------------------------------------------
 
-def attach_medical_completeness(engine, device, tokenizer, record_scores=False):
+def attach_medical_completeness(engine, device, tokenizer, record_scores=False, field='answers'):
     met = MedicalCompleteness(tokenizer,
-                output_transform = _get_output_transform('pred_answers', 'answers'),
+                output_transform = _get_output_transform(f'pred_{field}', field),
                 device = device, record_scores=record_scores)
     met.attach(engine, MetricNames.MEDCOMP)
 
-def attach_weighted_medical_completeness(engine, device, tokenizer, record_scores=False):
+def attach_weighted_medical_completeness(engine, device, tokenizer, record_scores=False, field='answers'):
     met = WeightedMedicalCompleteness(tokenizer,
-                output_transform = _get_output_transform('pred_answers', 'answers'),
+                output_transform = _get_output_transform(f'pred_{field}', field),
                 device = device, record_scores=record_scores)
     met.attach(engine, MetricNames.WMEDCOMP)
 
-def attach_dataset_aware_weighted_medical_completeness(engine, tokenizer, allowed_dataset_ids, record_scores=False):
+def attach_dataset_aware_weighted_medical_completeness(engine, tokenizer, allowed_dataset_ids, record_scores=False, field='answers'):
     met = DatasetAwareWeightedMedicalCompleteness(tokenizer,
-                output_transform = _get_output_transform('pred_answers', 'answers'),
+                output_transform = _get_output_transform(f'pred_{field}', field),
                 allowed_dataset_ids = allowed_dataset_ids,
                 record_scores=record_scores)
     met.attach(engine, MetricNames.WMEDCOMP)
@@ -210,6 +210,20 @@ def attach_dataset_aware_chexpert_labels_microavgf1(engine, allowed_dataset_ids,
     met = DatasetAwareMultiLabelMicroAvgF1(output_transform=_get_output_transform('pred_chexpert', 'chexpert', class_indices=class_indices),
                                            allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHXLABELMICROAVGF1)
+
+def attach_dataset_aware_chexpert_labels_auc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=auc_fn,
+                                  output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.CHXLABEL_AUC)
+
+def attach_dataset_aware_chexpert_labels_prcauc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=prc_auc_fn,
+                                  output_transform=_get_output_transform('pred_chexpert_probs', 'chexpert'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.CHXLABEL_PRCAUC)
 
 # ---------------------------------------------
 # Chest-ImaGenome related metrics

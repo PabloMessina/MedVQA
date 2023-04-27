@@ -1,3 +1,4 @@
+# import time
 from ignite.metrics import Metric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 from medvqa.utils.nlp import indexes_to_string
@@ -45,7 +46,10 @@ class DatasetAwareCiderD(DatasetAwareMetric):
             self.scorer += (pred_s, [gt_s])
 
     def compute(self):
+        # start = time.time()
         mean_score, scores = self.scorer.compute_score()
+        # end = time.time()
+        # print(f"Time taken to compute CIDEr: {end-start}")
         if self.record_scores:
             return mean_score, scores
         return mean_score

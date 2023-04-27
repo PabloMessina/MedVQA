@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+from nltk.tokenize import wordpunct_tokenize
 from PIL import Image
 import random
 from sklearn.metrics import (
@@ -9,6 +10,8 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
 )
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_postprocessed_label_names
+from medvqa.datasets.mimiccxr import get_mimiccxr_image_paths
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
@@ -25,7 +28,8 @@ from medvqa.utils.constants import (
     ReportEvalMode,
 )
 from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
-from medvqa.utils.metrics import chexpert_label_array_to_string
+from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 from medvqa.utils.common import CACHE_DIR, get_timestamp
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
@@ -155,32 +159,42 @@ def recover_reports__template_based(
 
 def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
                                 metric_names=_REPORT_LEVEL_METRIC_NAMES,
-                                max_processes=10):
+                                max_processes=10,):
 
     n = len(gt_reports)
     gt_texts = []
+    gt_texts_tokenized = []
     gen_texts = []
+    gen_texts_tokenized = []
     
-    for i in range(n):        
+    for i in range(n):
         # gt text
-        gt_report = gt_reports[i]
-        gt_text = gt_report['text']
-        gt_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gt_text)))
+        if type(gt_reports[i]) == str:
+            gt_text = gt_reports[i]
+        else:
+            gt_text = gt_reports[i]['text']
+        gt_texts_tokenized.append(tokenizer.clean_sentence(tokenizer.string2ids(gt_text)))
+        gt_texts.append(gt_text)
         # gen text
-        gen_report = gen_reports[i]
-        gen_text = ' . '.join(x for x in gen_report['a'] if len(x) > 0)
-        gen_texts.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
+        if type(gen_reports[i]) == str:
+            gen_text = gen_reports[i]
+        else:            
+            gen_text = ' . '.join(x for x in gen_reports[i]['a'] if len(x) > 0)
+        gen_texts_tokenized.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
+        gen_texts.append(gen_text)
 
     print('Computing report-level metrics...')
-    print('Example gt text: ', tokenizer.ids2string(gt_texts[0]))
-    print('Example gen text: ', tokenizer.ids2string(gen_texts[0]))
+    print_bold('Example gt text:')
+    print_magenta(gt_texts[0], bold=True)
+    print_bold('Example gen text:')
+    print_magenta(gen_texts[0], bold=True)
 
     metrics = {}
     
     metric_name = 'bleu'
     if metric_name in metric_names:
         metric = Bleu(device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         scores = metric.compute()    
         for k in range(0, 4):
             blue_k = f'bleu-{k+1}'
@@ -189,43 +203,45 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
     metric_name = 'rougeL'
     if metric_name in metric_names:
         metric = RougeL(device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
 
     metric_name = 'meteor'
     if metric_name in metric_names:
         metric = Meteor(device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        gen_texts_ = [wordpunct_tokenize(x) for x in gen_texts]
+        gt_texts_ = [wordpunct_tokenize(x) for x in gt_texts]
+        metric.update((gen_texts_, gt_texts_))
         metrics[metric_name] = metric.compute()
     
     metric_name = 'ciderD'
     if metric_name in metric_names:
         metric = CiderD(device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
 
     metric_name = 'medcomp'
     if metric_name in metric_names:
         metric = MedicalCompleteness(tokenizer, device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
     
     metric_name = 'wmedcomp'
     if metric_name in metric_names:
         metric = WeightedMedicalCompleteness(tokenizer, device='cpu', record_scores=True)
-        metric.update((gen_texts, gt_texts))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
 
     metric_name = 'chexpert_labels'
     if metric_name in metric_names:
-        gt_texts = [tokenizer.ids2string(x) for x in gt_texts]
-        gen_texts = [tokenizer.ids2string(x) for x in gen_texts]
+        gt_texts_ = [tokenizer.ids2string(x) for x in gt_texts_tokenized]
+        gen_texts_ = [tokenizer.ids2string(x) for x in gen_texts_tokenized]
         labeler = ChexpertLabeler()
         tmp_anticolission_code = f'_{get_timestamp()}_{random.random()}'
-        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts, tmp_suffix=tmp_anticolission_code,
+        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts_, tmp_suffix=tmp_anticolission_code,
                                             update_cache_on_disk=True, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
-        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix=tmp_anticolission_code,
+        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts_, tmp_suffix=tmp_anticolission_code,
                                             update_cache_on_disk=False, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
     
@@ -396,24 +412,112 @@ def get_chexpert_based_outputs_dataframe(metrics_paths):
 
     return pd.DataFrame(data=data, columns=columns)
 
+# class ReportGenExamplePlotter:
+
+#     def __init__(self, reports, report_metrics, tokenizer, qa_adapted_dataset_path, images_getter):
+#         self.reports = reports
+#         self.report_metrics = report_metrics
+#         self.tokenizer = tokenizer
+#         self.qa_adapted_dataset = get_cached_json_file(qa_adapted_dataset_path)
+#         self.n = len(reports['gt_reports'])
+#         self.metric_names = set(report_metrics.keys())
+#         self.images_getter = images_getter
+        
+#         if 'chexpert_labels_gt' in report_metrics:
+#             if 'chxlabf1' not in report_metrics:
+#                 gen_labels = report_metrics['chexpert_labels_gen']
+#                 gt_labels = report_metrics['chexpert_labels_gt']
+#                 chxlabf1 = ChexpertLabelsF1score(device='cpu', record_scores=True)
+#                 chxlabf1.update((gen_labels, gt_labels))
+#                 report_metrics['chxlabf1'] = chxlabf1.compute()
+#             self.metric_names.remove('chexpert_labels_gt')
+#             self.metric_names.remove('chexpert_labels_gen')
+
+#         self.metric_names = sorted(list(self.metric_names))
+
+#     def _get_metric(self, name, idx):
+#         m = self.report_metrics[name]
+#         if type(m) is tuple: m = m[1]
+#         return m[idx]        
+
+#     def inspect_example(self, metrics_to_rank=None, idx=None, mode='random'):
+
+#         if idx is None: idx = 0
+#         if mode == 'random':
+#             idx = random.choice(range(self.n))                
+#         elif mode == 'default':
+#             assert idx is not None
+#         else:            
+#             if metrics_to_rank is None:
+#                 metrics_to_rank = self.metric_names
+#             if mode == 'best':
+#                 indices = sorted(list(range(self.n)), key=lambda i : sum(self._get_metric(name,i) for name in metrics_to_rank), reverse=True)
+#             else:
+#                 indices = sorted(list(range(self.n)), key=lambda i : sum(self._get_metric(name,i) for name in metrics_to_rank))
+#             idx = indices[idx]                
+        
+#         print('idx:', idx)        
+#         print('\n--')
+#         print('gt_report:\n')
+#         gt_report = self.reports['gt_reports'][idx]
+#         rid = gt_report['rid']
+#         print(gt_report['text'])
+        
+#         print('\n--')
+#         print('gen_report:\n')
+#         gen_report = self.reports['gen_reports'][idx]        
+#         gen_answers = gen_report['a']
+#         gen_text = ' . '.join(gen_answers)
+#         print(gen_text)
+
+#         print('\n--')
+#         print('answered questions:\n')
+#         for q in gen_report['q']: print(q)
+
+#         if 'chexpert_labels_gt' in self.report_metrics:
+#             print('\n--')
+#             print('chexpert_labels_gt:', self.report_metrics['chexpert_labels_gt'][idx])
+#             print('chexpert_labels_gen:', self.report_metrics['chexpert_labels_gen'][idx])
+#             print('chexpert_labels_gt (verbose):', chexpert_label_array_to_string(self.report_metrics['chexpert_labels_gt'][idx]))
+#             print('chexpert_labels_gen (verbose):', chexpert_label_array_to_string(self.report_metrics['chexpert_labels_gen'][idx]))
+        
+#         for m in self.metric_names:
+#             print(f'{m}:', self._get_metric(m, idx))
+
+#         print('\n--')
+#         print('\nimages:')
+#         image_paths = self.images_getter(self.qa_adapted_dataset['reports'][rid])
+#         for imgpath in image_paths:
+#             print(imgpath)
+#             img = Image.open(imgpath).convert('RGB')
+#             plt.imshow(img)
+#             plt.show()
+
 class ReportGenExamplePlotter:
 
-    def __init__(self, reports, report_metrics, tokenizer, qa_adapted_dataset_path, images_getter):
-        self.reports = reports
-        self.report_metrics = report_metrics
-        self.tokenizer = tokenizer
-        self.qa_adapted_dataset = get_cached_json_file(qa_adapted_dataset_path)
-        self.n = len(reports['gt_reports'])
-        self.metric_names = set(report_metrics.keys())
-        self.images_getter = images_getter
+    def __init__(self, reports_path, report_metrics_path, input_labels_path, chest_imagenome_label_names_filename=None):
+        reports_data = load_pickle(reports_path)
+        self.gen_reports = reports_data['gen_reports']
+        self.gt_reports = reports_data['gt_reports']
+        self.gt_report_paths = reports_data['gt_report_paths']
+        self.report_metrics = load_pickle(report_metrics_path)
+        self.metric_names = set(self.report_metrics.keys())
+        self.input_labels = load_pickle(input_labels_path)
+        self.n = len(self.gt_reports)
+
+        if 'chest_imagenome' in self.input_labels:
+            assert chest_imagenome_label_names_filename is not None
+            self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+            assert len(self.chest_imagenome_label_names) == len(self.input_labels['chest_imagenome'][0])
         
-        if 'chexpert_labels_gt' in report_metrics:
-            if 'chxlabf1' not in report_metrics:
-                gen_labels = report_metrics['chexpert_labels_gen']
-                gt_labels = report_metrics['chexpert_labels_gt']
+        if 'chexpert_labels_gt' in self.report_metrics:
+            if 'chxlabf1' not in self.report_metrics:
+                gen_labels = self.report_metrics['chexpert_labels_gen']
+                gt_labels = self.report_metrics['chexpert_labels_gt']
                 chxlabf1 = ChexpertLabelsF1score(device='cpu', record_scores=True)
                 chxlabf1.update((gen_labels, gt_labels))
-                report_metrics['chxlabf1'] = chxlabf1.compute()
+                self.report_metrics['chxlabf1'] = chxlabf1.compute()
+                self.metric_names.add('chxlabf1')
             self.metric_names.remove('chexpert_labels_gt')
             self.metric_names.remove('chexpert_labels_gen')
 
@@ -442,21 +546,29 @@ class ReportGenExamplePlotter:
         
         print('idx:', idx)        
         print('\n--')
-        print('gt_report:\n')
-        gt_report = self.reports['gt_reports'][idx]
-        rid = gt_report['rid']
-        print(gt_report['text'])
-        
-        print('\n--')
-        print('gen_report:\n')
-        gen_report = self.reports['gen_reports'][idx]        
-        gen_answers = gen_report['a']
-        gen_text = ' . '.join(gen_answers)
-        print(gen_text)
+        print('Input labels:\n')
+        for label_name, label_list in self.input_labels.items():
+            print()
+            print_bold(label_name)
+            print('array:', label_list[idx])
+            if label_name == 'chest_imagenome':
+                print('verbose:', chest_imagenome_label_array_to_string(label_list[idx], self.chest_imagenome_label_names))
+            elif label_name == 'chexpert':
+                print('verbose:', chexpert_label_array_to_string(label_list[idx]))
+            else:
+                raise ValueError(f'Unknown label name: {label_name}')
 
         print('\n--')
-        print('answered questions:\n')
-        for q in gen_report['q']: print(q)
+        print('gen_report:\n')
+        print(self.gen_reports[idx])
+        print('\n--')
+        print('gt_report:\n')
+        print(self.gt_reports[idx])
+        print('\n--')
+        print('gt_report_path:\n')
+        print(self.gt_report_paths[idx])
+        with open(self.gt_report_paths[idx], 'r') as f:
+            print(f.read())
 
         if 'chexpert_labels_gt' in self.report_metrics:
             print('\n--')
@@ -470,7 +582,7 @@ class ReportGenExamplePlotter:
 
         print('\n--')
         print('\nimages:')
-        image_paths = self.images_getter(self.qa_adapted_dataset['reports'][rid])
+        image_paths = get_mimiccxr_image_paths(filepath=self.gt_report_paths[idx])
         for imgpath in image_paths:
             print(imgpath)
             img = Image.open(imgpath).convert('RGB')

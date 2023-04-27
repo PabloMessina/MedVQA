@@ -28,9 +28,9 @@ class Focal_BCE_WBCE_Loss(nn.Module):
         loss3 = self.wbce_loss(output, target)
         if self.adaptively_rescale_losses:
             tot = (loss1 + loss2 + loss3).detach().item()
-            w1 = tot / loss1.detach().item()
-            w2 = tot / loss2.detach().item()
-            w3 = tot / loss3.detach().item()
+            w1 = tot / (loss1.detach().item() + 1e-6)
+            w2 = tot / (loss2.detach().item() + 1e-6)
+            w3 = tot / (loss3.detach().item() + 1e-6)
             w1 *= self.focal_weight
             w2 *= self.bce_weight
             w3 *= self.wbce_weight

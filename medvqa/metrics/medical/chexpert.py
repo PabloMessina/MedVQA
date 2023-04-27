@@ -106,8 +106,8 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
 
     n = len(texts)
     chunk_size = n // n_chunks + (n % n_chunks > 0)
-    if chunk_size < 30:
-        chunk_size = 30
+    if chunk_size < 70:
+        chunk_size = 70
         n_chunks = n // chunk_size + (n % chunk_size > 0)
         chunk_size = n // n_chunks + (n % n_chunks > 0)
 

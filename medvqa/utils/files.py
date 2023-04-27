@@ -137,3 +137,17 @@ def find_inconsistencies_between_directories(dir_path_1, dir_path_2):
         'in_dir1_not_in_dir2': in_dir1_not_in_dir2,
         'in_dir2_not_in_dir1': in_dir2_not_in_dir1,
     }
+
+def zip_files_and_folders_in_dir(dir_path, file_or_folder_names, output_path):
+    import zipfile
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for name in file_or_folder_names:
+            path = os.path.join(dir_path, name)
+            if os.path.isfile(path):
+                zipf.write(path, arcname=name)
+            elif os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    for f in files:
+                        file_path = os.path.join(root, f)
+                        arcname = os.path.join(name, file_path.replace(path, ''))
+                        zipf.write(file_path, arcname=arcname)

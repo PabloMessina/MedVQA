@@ -43,9 +43,9 @@ class Tokenizer:
     END_TOKEN = '</s>'
     
     def __init__(self, qa_adapted_dataset_paths=None, vocab_min_freq=5, overwrite=False,
-                mode='report', medical_terms_frequency_filename = None,
-                other_vocab_generators = None, other_vocab_generators_names = None,
-                vocab_filepath = None):
+                mode='report', use_medical_tokenization=False, medical_terms_frequency_filename=None,
+                other_vocab_generators=None, other_vocab_generators_names=None,
+                vocab_filepath=None):
 
         if vocab_filepath is None:
             if qa_adapted_dataset_paths is not None:
@@ -59,12 +59,11 @@ class Tokenizer:
                                             other_vocab_generators_names)
         self.vocab_filepath = vocab_filepath
         
-        if medical_terms_frequency_filename is not None:
+        self.medical_tokenization = use_medical_tokenization
+        if use_medical_tokenization:
+            assert medical_terms_frequency_filename is not None
             self.med_tags_extractor = MedicalTagsExtractor(medical_terms_frequency_filename)
             self.medical_terms_frequency_filename = medical_terms_frequency_filename
-            self.medical_tokenization = True
-        else:
-            self.medical_tokenization = False
 
         if not overwrite:
             print(f'Loading {vocab_filepath} ...')
@@ -126,6 +125,7 @@ class Tokenizer:
         return self._hash
 
     def string2ids(self, s):
+        s = s.lower()
         ids = [self.token2id[self.START_TOKEN]]
         for token in wordpunct_tokenize(s):
             try:
@@ -136,6 +136,7 @@ class Tokenizer:
         return ids
     
     def string2medical_tag_ids(self, s):
+        s = s.lower()
         tags = self.med_tags_extractor.extract_tags_sequence_with_punctuation(s)
         ids = [self.token2id[self.START_TOKEN]]
         for tag in tags:
@@ -144,6 +145,7 @@ class Tokenizer:
         return ids
     
     def tokenize(self, s):
+        s = s.lower()
         if self.medical_tokenization:
             return self.string2medical_tag_ids(s)
         return self.string2ids(s)

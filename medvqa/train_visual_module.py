@@ -749,12 +749,13 @@ def train_model(
     timer.attach(validator_engine, start=Events.EPOCH_STARTED)
 
     # Score function
-    if use_detectron2: # If using detectron2, we only care about validation metrics
-        merge_metrics_fn = get_merge_metrics_fn([], val_metrics_to_merge, _METRIC_WEIGHTS, 0., 1., _metric_getter)
-        score_fn = lambda _ : merge_metrics_fn(validator_engine.state.metrics)
-    else:
+    assert len(val_metrics_to_merge) > 0
+    if len(train_metrics_to_merge) > 0:
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(trainer_engine.state.metrics, validator_engine.state.metrics)
+    else:
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
+        score_fn = lambda _ : merge_metrics_fn(validator_engine.state.metrics)
 
     # Learning rate scheduler
     if not update_lr_batchwise:
@@ -834,9 +835,7 @@ def train_model(
 
     # Start training
     count_print('Running trainer engine ...')
-    trainer_engine.run(train_dataloader,
-                max_epochs = epochs,
-                epoch_length = batches_per_epoch)
+    trainer_engine.run(train_dataloader, max_epochs = epochs, epoch_length = batches_per_epoch)
 
 
 def train_from_scratch(

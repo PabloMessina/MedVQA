@@ -3,7 +3,7 @@ import os
 import re
 from pprint import pprint
 
-from medvqa.utils.files import load_json_file, save_to_json
+from medvqa.utils.files import get_cached_json_file, load_json_file, save_to_json
 
 _CHECKPOINT_REGEX = re.compile(r'^[A-Za-z]+_(\d+)(?:_((.+)=)?([\d\.]+)\.pt)?$')
 CheckpointInfo = namedtuple('CheckpointInfo', ('name', 'epoch', 'metric', 'value'))
@@ -58,7 +58,7 @@ def get_model_name_from_checkpoint_path(checkpoint_path):
 
 def load_metadata(folder, verbose=True):
     fpath = os.path.join(folder, 'metadata.json')    
-    data = load_json_file(fpath)
+    data = get_cached_json_file(fpath)
     if verbose:
         print('metadata loaded from', fpath)
     return data

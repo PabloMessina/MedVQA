@@ -366,6 +366,7 @@ class MIMICCXR_VisualModuleTrainer():
                 train_image_transform=None,
                 val_image_transform=None, 
                 use_test_set=False,
+                use_all_data=False,
                 use_chest_imagenome_bbox_gold_set=False,
                 use_chest_imagenome_label_gold_set=False,
                 use_val_set_only=False,
@@ -414,8 +415,9 @@ class MIMICCXR_VisualModuleTrainer():
         # Sanity checks
         assert sum([use_test_set, use_val_set_only,
                     use_chest_imagenome_bbox_gold_set,
-                    use_chest_imagenome_label_gold_set]) <= 1 # at most one of these can be true
-        if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+                    use_chest_imagenome_label_gold_set,
+                    use_all_data]) <= 1 # at most one of these can be true
+        if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set or use_all_data:
             assert test_image_transform is not None
             assert not data_augmentation_enabled
         else:
@@ -540,7 +542,9 @@ class MIMICCXR_VisualModuleTrainer():
             image_paths = [None] * BIG_ENOGUGH
             report_ids = [None] * BIG_ENOGUGH
             orientations = [None] * BIG_ENOGUGH
-            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+            if use_all_data:
+                all_indices = []
+            elif use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 test_indices = []
             else:
                 train_indices = []
@@ -555,36 +559,41 @@ class MIMICCXR_VisualModuleTrainer():
                 raise ValueError(f'Unknown source image size mode: {source_image_size_mode}')
             print(f'Using source image size mode: {source_image_size_mode}')
 
-
-            if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                allowed_train_val_dicom_ids = None
-                if use_decent_images_only:
-                    decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
-                if use_test_set:
-                    if use_decent_images_only:
-                        allowed_test_dicom_ids = decent_dicom_ids
-                    else:
-                        allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
-                elif use_chest_imagenome_bbox_gold_set:
-                    allowed_test_dicom_ids = set(load_gold_bbox_dicom_ids())
-                    if use_decent_images_only:
-                        allowed_test_dicom_ids &= decent_dicom_ids
-                elif use_chest_imagenome_label_gold_set:
-                    allowed_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
-                    if use_decent_images_only:
-                        allowed_test_dicom_ids &= decent_dicom_ids
+            if use_all_data:
+                if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+                    allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
                 else:
-                    allowed_train_val_dicom_ids = set(load_nongold_dicom_ids())
-                    if use_decent_images_only:
-                        allowed_train_val_dicom_ids &= decent_dicom_ids
+                    allowed_dicom_ids = None
             else:
-                assert use_decent_images_only is False
-                assert use_chest_imagenome_bbox_gold_set is False
-                assert use_chest_imagenome_label_gold_set is False
-                allowed_train_val_dicom_ids = None
-                allowed_test_dicom_ids = None
+                if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+                    allowed_train_val_dicom_ids = None
+                    if use_decent_images_only:
+                        decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
+                    if use_test_set:
+                        if use_decent_images_only:
+                            allowed_test_dicom_ids = decent_dicom_ids
+                        else:
+                            allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
+                    elif use_chest_imagenome_bbox_gold_set:
+                        allowed_test_dicom_ids = set(load_gold_bbox_dicom_ids())
+                        if use_decent_images_only:
+                            allowed_test_dicom_ids &= decent_dicom_ids
+                    elif use_chest_imagenome_label_gold_set:
+                        allowed_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
+                        if use_decent_images_only:
+                            allowed_test_dicom_ids &= decent_dicom_ids
+                    else:
+                        allowed_train_val_dicom_ids = set(load_nongold_dicom_ids())
+                        if use_decent_images_only:
+                            allowed_train_val_dicom_ids &= decent_dicom_ids
+                else:
+                    assert use_decent_images_only is False
+                    assert use_chest_imagenome_bbox_gold_set is False
+                    assert use_chest_imagenome_label_gold_set is False
+                    allowed_train_val_dicom_ids = None
+                    allowed_test_dicom_ids = None
 
-            allowed_dicom_ids = allowed_train_val_dicom_ids or allowed_test_dicom_ids
+                allowed_dicom_ids = allowed_train_val_dicom_ids or allowed_test_dicom_ids
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
@@ -604,7 +613,9 @@ class MIMICCXR_VisualModuleTrainer():
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                     report_ids[idx] = rid
                     orientations[idx] = MIMICCXR_IMAGE_ORIENTATIONS.index(view)
-                    if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+                    if use_all_data:
+                        all_indices.append(idx)
+                    elif use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                         if use_test_set:
                             if split == 'test':
                                 test_indices.append(idx)
@@ -630,7 +641,10 @@ class MIMICCXR_VisualModuleTrainer():
             self.image_paths = np.array(image_paths[:idx])
             self.report_ids = np.array(report_ids[:idx])
             self.orientations = np.array(orientations[:idx])
-            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+            if use_all_data:
+                self.all_indices = np.array(all_indices)
+                print(f'len(self.all_indices) = {len(self.all_indices)}')
+            elif use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 self.test_indices = np.array(test_indices)
                 print(f'len(self.test_indices) = {len(self.test_indices)}')
             else:
@@ -774,6 +788,8 @@ class MIMICCXR_VisualModuleTrainer():
                     print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
                 else:
                     self.chest_imagenome_labels = None
+            else:
+                self.chest_imagenome_labels = None
             
             if predict_bboxes_chest_imagenome or (pass_pred_bbox_coords_to_model and use_gt_bboxes_as_pred):
                 assert not use_chest_imagenome_bbox_gold_set, 'Not supported yet'
@@ -835,7 +851,11 @@ class MIMICCXR_VisualModuleTrainer():
                 self.labels2mergedfindings = None
                 self.finding_labels = None
 
-            if use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
+            if use_all_data:
+                # Create all dataset and dataloader
+                self.all_dataset, self.all_dataloader = self._create_dataset_and_dataloader(
+                all_indices, test_image_transform, self.eval_collate_batch_fn)
+            elif use_test_set or use_chest_imagenome_bbox_gold_set or use_chest_imagenome_label_gold_set:
                 # Create test dataset and dataloader
                 self.test_dataset, self.test_dataloader = self._create_dataset_and_dataloader(
                     self.test_indices, test_image_transform, self.eval_collate_batch_fn)

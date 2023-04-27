@@ -366,7 +366,7 @@ def _evaluate_model(
     evaluator.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
     evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
+    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
 
     # Run evaluation
 

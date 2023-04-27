@@ -198,12 +198,53 @@ def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i, figsize=(10, 1
                 ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color=plt.cm.tab20(i))                
                 print(f'Object: {CHEST_IMAGENOME_BBOX_NAMES[i]} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})')
 
-
 def inspect_iuxray_vqa_trainer(iuxray_vqa_trainer, dataset_name, i):
     _inspect_vqa_trainer(iuxray_vqa_trainer, IUXRAY_CACHE_DIR, dataset_name, i)
 
 def inspect_mimiccxr_vqa_trainer(mimiccxr_vqa_trainer, dataset_name, i):
     _inspect_vqa_trainer(mimiccxr_vqa_trainer, MIMICCXR_CACHE_DIR, dataset_name, i)
+
+def inspect_labels2report_trainer(trainer, dataset_name, i):
+
+    assert hasattr(trainer, dataset_name)
+    dataset = getattr(trainer, dataset_name)
+
+    instance = dataset[i]
+    idx = instance['idx']
+    
+    # Idx
+    print('idx:', idx)
+    
+    # Report (from encoding)
+    print()
+    print('report (from encoding):', trainer.tokenizer.ids2string(instance['report']))
+
+    # Report (from file)
+    print()
+    print('report (qa adapted):')
+    qa_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, trainer.qa_adapted_reports_filename))
+    rid = trainer.report_ids[idx]
+    print(qa_reports['reports'][rid])
+
+    # Print original report
+    print()
+    print('original report:')
+    report_path = qa_reports['reports'][rid]['filepath']
+    with open(report_path, 'r') as f:
+        print(f.read())
+
+    # Chexpert labels
+    if trainer.use_chexpert:
+        print('chexpert labels:', instance['chexpert'])
+        print('chexpert labels (verbose):', chexpert_label_array_to_string(instance['chexpert']))
+
+    # Chest ImaGenome labels
+    if trainer.use_chest_imagenome:
+        chest_imagenome_label_names = trainer.chest_imagenome_label_names
+        print('chest imagenome labels:', instance['chest_imagenome'])
+        print('chest imagenome labels (verbose):',
+            chest_imagenome_label_array_to_string(instance['chest_imagenome'],
+            chest_imagenome_label_names))
 
 _shared_image_id_to_binary_labels = None
 def _count_labels(idx):

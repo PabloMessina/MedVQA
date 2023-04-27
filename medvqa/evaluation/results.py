@@ -199,7 +199,8 @@ def _append_medical_tokenization_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
         try:
-            medtok = metadata['tokenizer_kwargs'].get('medical_tokenization', False)
+            medtok = metadata['tokenizer_kwargs'].get('medical_tokenization', False) or\
+                    metadata['tokenizer_kwargs'].get('use_medical_tokenization', False)
         except KeyError:
             medtok = False
         column.append(medtok)
@@ -417,6 +418,31 @@ def _append_mimiccxr_balanced_sampling_mode_column(df, results):
         column.append(mode)
     df['mimiccxr_balanced_sampling'] = column
 
+def _append_ensemble_column(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            num_ensembled_models = len(metadata['mimiccxr_trainer_kwargs']['precomputed_sigmoid_paths'])
+        except KeyError:
+            num_ensembled_models = None
+        column.append(num_ensembled_models)
+    df['ensemble'] = column
+
+def _append_input_labels_colum(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            strings = []
+            if metadata['mimiccxr_trainer_kwargs']['use_chexpert']:
+                strings.append('chexpert')
+            if metadata['mimiccxr_trainer_kwargs']['use_chest_imagenome']:
+                strings.append('chest_imagenome')
+            input_labels = '+'.join(strings)
+        except KeyError:
+            input_labels = None
+        column.append(input_labels)
+    df['input_labels'] = column
+
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
     df['timestamp'] = [x[1][:15] for x in results]
@@ -434,6 +460,8 @@ def _append_method_columns__report_level(df, results):
     _append_amp_column(df, results)
     _append_data_augmentation_column(df, results)
     _append_gradient_accumulation_column(df, results)
+    _append_ensemble_column(df, results)
+    _append_input_labels_colum(df, results)
 
 def _append_method_columns__visual_module(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]

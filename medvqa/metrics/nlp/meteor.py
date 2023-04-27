@@ -1,7 +1,6 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from nltk.translate.meteor_score import meteor_score
-from medvqa.utils.nlp import indexes_to_string
 
 class Meteor(Metric):
 
@@ -22,9 +21,9 @@ class Meteor(Metric):
 
     def update(self, output):
         pred_sentences, gt_sentences = output
+        assert type(pred_sentences[0]) == list
+        assert type(gt_sentences[0]) == list
         for pred_s, gt_s in zip(pred_sentences, gt_sentences):
-            pred_s = indexes_to_string(pred_s)
-            gt_s = indexes_to_string(gt_s)
             score = meteor_score([gt_s], pred_s)
             self._acc_score += score
             if self.record_scores:
