@@ -47,13 +47,13 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import get_cached_pickle_file, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_to_pickle
 from medvqa.utils.handlers import (
     attach_accumulator,
     get_log_iteration_handler,
     get_log_metrics_handler,
 )
-from medvqa.utils.logging import print_red
+from medvqa.utils.logging import print_blue, print_bold, print_red
 
 _VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,
@@ -646,16 +646,46 @@ class ChestImaGenomeMLCVisualizer:
             save_report_image_and_other_images_as_pdf(dicom_id, pdf_path)
     
 def calibrate_thresholds_on_mimiccxr_validation_set(
-    model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-    classify_chexpert, classify_chest_imagenome, save_probs=False, results_folder_path=None):
+        model_and_device_getter, use_amp, mimiccxr_vision_evaluator_kwargs, classify_chexpert, classify_chest_imagenome,
+        cache_thresholds=False, cache_probs=False, results_folder_path=None, score_name='f1'):
+
+    print_blue('Calibrating thresholds on MIMIC-CXR validation set', bold=True)
+    print('score_name:', score_name)
     
-    assert classify_chexpert != classify_chest_imagenome # Only one of them can be True
-    
-    if classify_chexpert:
-        labeler_name = 'chexpert'
-    elif classify_chest_imagenome:
-        labeler_name = 'chest_imagenome'
-    else: assert False, 'This should not happen'
+    assert classify_chexpert or classify_chest_imagenome # at least one of these must be true
+
+    skip_chexpert = not classify_chexpert
+    skip_chest_imagenome = not classify_chest_imagenome
+    thresholds_dict = {}
+
+    if cache_thresholds:
+        assert results_folder_path is not None
+        done = True
+        if classify_chexpert:
+            chexpert_cache_path = os.path.join(results_folder_path, f'thresholds_chexpert({score_name}).pkl')
+            if os.path.exists(chexpert_cache_path):
+                print(f'Loading thresholds from {chexpert_cache_path}')
+                thresholds = load_pickle(chexpert_cache_path)
+                thresholds_dict['chexpert'] = thresholds
+                print('thresholds.shape:', thresholds.shape)
+                skip_chexpert = True
+            else:
+                done = False
+        if classify_chest_imagenome:
+            chest_imagenome_cache_path = os.path.join(results_folder_path, f'thresholds_chest_imagenome({score_name}).pkl')
+            if os.path.exists(chest_imagenome_cache_path):
+                print(f'Loading thresholds from {chest_imagenome_cache_path}')
+                thresholds = load_pickle(chest_imagenome_cache_path)
+                thresholds_dict['chest_imagenome'] = thresholds
+                print('thresholds.shape:', thresholds.shape)
+                skip_chest_imagenome = True
+            else:
+                done = False
+        if done:
+            return thresholds_dict
+
+    # Obtain model and device
+    model, device = model_and_device_getter()
 
     # Run model on MIMICCXR validation dataset to get predictions
     assert mimiccxr_vision_evaluator_kwargs['use_val_set_only']
@@ -666,66 +696,84 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
                             pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
                             device=device, use_amp=use_amp, training=False,
                             using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False))
+    
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)
         attach_chexpert_labels_prf1(evaluator, device)
         attach_chexpert_labels_roc_auc(evaluator, 'cpu')
-    elif classify_chest_imagenome:
+        attach_accumulator(evaluator, 'pred_chexpert_probs')
+        attach_accumulator(evaluator, 'chexpert')
+    if classify_chest_imagenome:
         attach_chest_imagenome_labels_accuracy(evaluator, device)
         attach_chest_imagenome_labels_prf1(evaluator, device)
         attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
-    else: assert False
-    attach_accumulator(evaluator, f'pred_{labeler_name}_probs')
-    attach_accumulator(evaluator, labeler_name)
+        attach_accumulator(evaluator, 'pred_chest_imagenome_probs')
+        attach_accumulator(evaluator, 'chest_imagenome')
+    
     timer = Timer()
     timer.attach(evaluator, start=Events.EPOCH_STARTED)
     metrics_to_print=[]
+    
     if classify_chexpert:
         metrics_to_print.append(MetricNames.CHXLABEL_PRF1)
         metrics_to_print.append(MetricNames.CHXLABELACC)
         metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
-    elif classify_chest_imagenome:
+    if classify_chest_imagenome:
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
-    else: assert False
+    
     log_metrics_handler = get_log_metrics_handler(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()    
     evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
     print('Running model on MIMICCXR validation dataset ...')
     evaluator.run(mimiccxr_vision_evaluator.val_dataloader)
-    # Retrieve predictions and ground truth labels
-    pred_probs = evaluator.state.metrics[f'pred_{labeler_name}_probs']
-    pred_probs = torch.stack(pred_probs).numpy()
-    pred_probs = np.expand_dims(pred_probs, axis=0) # add extra dimension
-    gt_labels = evaluator.state.metrics[labeler_name]
-    gt_labels = torch.stack(gt_labels).numpy()
-    print('pred_probs.shape:', pred_probs.shape)
-    print('gt_labels.shape:', gt_labels.shape)
-    # Search optimal thresholds
-    print('Searching optimal thresholds ...')
-    mloes = MultilabelOptimalEnsembleSearcher(probs=pred_probs, gt=gt_labels)
-    mloes.sample_weights(n_tries=1)
-    thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
-    print('thresholds.shape:', thresholds.shape)
-    if classify_chexpert: # Only print thresholds for CheXpert
-        print('thresholds:', thresholds)
-    print('Done!')
-    # Save probabilities
-    if save_probs:
-        assert results_folder_path is not None
-        print('Saving probabilities on MIMICCXR validation set ...')
-        dicom_id_to_pred_probs = {}
-        pred_probs = pred_probs[0] # remove extra dimension
-        assert len(mimiccxr_vision_evaluator.val_indices) == len(pred_probs)
-        for i, idx in enumerate(mimiccxr_vision_evaluator.val_indices):
-            dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
-            dicom_id_to_pred_probs[dicom_id] = pred_probs[i]
-        save_path = os.path.join(results_folder_path, f'dicom_id_to_pred_probs__mimiccxr_val__{labeler_name}.pkl')
-        save_to_pickle(dicom_id_to_pred_probs, save_path)
-        print('Probabilities saved to:', save_path)
-    return thresholds
+    
+    for labeler_name in ['chexpert', 'chest_imagenome']:
+        if labeler_name == 'chexpert' and skip_chexpert: continue
+        if labeler_name == 'chest_imagenome' and skip_chest_imagenome: continue
+        # Retrieve predictions and ground truth labels
+        pred_probs = evaluator.state.metrics[f'pred_{labeler_name}_probs']
+        pred_probs = torch.stack(pred_probs).numpy()
+        pred_probs = np.expand_dims(pred_probs, axis=0) # add extra dimension
+        gt_labels = evaluator.state.metrics[labeler_name]
+        gt_labels = torch.stack(gt_labels).numpy()
+        print('pred_probs.shape:', pred_probs.shape)
+        print('gt_labels.shape:', gt_labels.shape)
+        # Search optimal thresholds
+        print_bold('Searching optimal thresholds ...')
+        mloes = MultilabelOptimalEnsembleSearcher(probs=pred_probs, gt=gt_labels, score_name=score_name)
+        mloes.sample_weights(n_tries=1)
+        thresholds = mloes.compute_best_merged_probs_and_thresholds()['thresholds']
+        print('thresholds.shape:', thresholds.shape)
+        thresholds_dict[labeler_name] = thresholds
+        print('Done!')
+        # Save thresholds
+        if cache_thresholds:
+            print('Saving thresholds ...')
+            save_path = os.path.join(results_folder_path, f'thresholds_{labeler_name}({score_name}).pkl')
+            save_to_pickle(thresholds, save_path)
+            print('Thresholds saved to ', end=''); print_bold(save_path)
+        # Save probabilities
+        if cache_probs:
+            assert results_folder_path is not None
+            save_path = os.path.join(results_folder_path, f'dicom_id_to_pred_{labeler_name}_probs__mimiccxr_val_set.pkl')
+            if os.path.exists(save_path):
+                print('File already exists. Skipping saving probabilities.')
+                continue
+            print('Saving probabilities on MIMICCXR validation set ...')
+            dicom_id_to_pred_probs = {}
+            pred_probs = pred_probs[0] # remove extra dimension
+            assert len(mimiccxr_vision_evaluator.val_indices) == len(pred_probs)
+            for i, idx in enumerate(mimiccxr_vision_evaluator.val_indices):
+                dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
+                dicom_id_to_pred_probs[dicom_id] = pred_probs[i]
+            save_to_pickle(dicom_id_to_pred_probs, save_path)
+            print('Probabilities saved to: ', end=''); print_bold(save_path)
+    
+    assert len(thresholds_dict) > 0
+    return thresholds_dict
 
 def _prepare_data_for_ensemble(dicom_id_2_probs_list, label_names_list, dicom_id_2_gt_labels, gt_label_names):
     # Determine the intersection of dicom_ids

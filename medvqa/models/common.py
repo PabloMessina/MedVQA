@@ -6,7 +6,7 @@ class AnswerDecoding:
 def freeze_parameters(model, ignore_name_regex=None):
     for name, param in model.named_parameters():
         if ignore_name_regex is not None and ignore_name_regex.search(name):
-            print(f'Ignore freezing parameter: {name}')
+            print(f"Skip freezing parameter: {name}")
             continue
         param.requires_grad = False
 

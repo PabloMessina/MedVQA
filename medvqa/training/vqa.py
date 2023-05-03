@@ -215,10 +215,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if classify_chest_imagenome:
             chest_imagenome = batch['chest_imagenome'].to(device)
         if predict_bboxes_chest_imagenome:
-            if using_yolov8 and not training:
-                chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
-                chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
-            elif not using_yolov8:
+            if (using_yolov8 and not training) or not using_yolov8:
                 chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
                 chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
         if pass_pred_bbox_coords_as_input:

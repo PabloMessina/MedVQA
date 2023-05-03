@@ -19,7 +19,7 @@ from medvqa.datasets.dataloading_utils import (
     INFINITE_DATASET_LENGTH,
 )
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
-from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
+from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
 
 def _group_indices_by_question_id(indices, question_ids, convert_to_numpy=True):
     # group by question id

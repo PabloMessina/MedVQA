@@ -42,8 +42,8 @@ from medvqa.utils.files import (
     get_results_folder_path,
     save_to_pickle,
 )
-from medvqa.training.report_gen import get_engine
-from medvqa.datasets.dataloading_utils import get_report_gen_collate_batch_fn
+from medvqa.training.labels2report import get_engine
+from medvqa.datasets.dataloading_utils import get_labels2report_collate_batch_fn
 from medvqa.utils.logging import CountPrinter, print_blue, print_bold
 
 def parse_args(args=None):
@@ -132,8 +132,7 @@ def evaluate_model(
     # Init tokenizer
     count_print('Initializing tokenizer ...')
     tokenizer = Tokenizer(**tokenizer_kwargs)
-    tokenizer_kwargs['vocab_filepath'] = tokenizer.vocab_filepath # Rememeber vocab filepath in case we need to reload tokenizer
-
+    
     # Create model
     count_print('Creating instance of Labels2ReportModel ...')
     model = Labels2ReportModel(vocab_size=tokenizer.vocab_size,
@@ -148,7 +147,7 @@ def evaluate_model(
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
     if eval_mimiccxr:
-        mimiccxr_collate_batch_fn = get_report_gen_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
+        mimiccxr_collate_batch_fn = get_labels2report_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
 
     # Create MIMIC-CXR trainer
     if eval_mimiccxr:

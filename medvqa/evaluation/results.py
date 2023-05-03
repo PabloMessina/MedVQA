@@ -118,6 +118,15 @@ def _extract_image_transform_argument(metadata, arg_name):
         pass
     return None
 
+def _append_experiment_timestamp_column(df, results):
+    df['exp_timestamp'] = [x[1][:15] for x in results]
+
+def _append_filesystem_modified_time_column(df, results):
+    from datetime import datetime 
+    df['modif_time'] = [os.path.getmtime(mp) for mp in df['metrics_path']]
+    # make human readable
+    df['modif_time'] = [datetime.fromtimestamp(x).strftime('%Y-%m-%d %H:%M:%S') for x in df['modif_time']]
+
 def _append_frozen_image_encoder_column(df, results):
     column = []
     for metadata in _get_metadata_generator(results):
@@ -245,7 +254,7 @@ def _append_training_history_column(df, results):
             checkpoint_folder_path = os.path.join(WORKSPACE_DIR, 'models', r[0], r[1])
             history = get_model_training_history(checkpoint_folder_path)
             assert len(history) > 0
-            assert history[-1].timestamp == df['timestamp'][i], f'{history[-1].timestamp} != {df["timestamp"][i]}' # sanity check
+            assert history[-1].timestamp == df['exp_timestamp'][i], f'{history[-1].timestamp} != {df["exp_timestamp"][i]}' # sanity check
             num_training_examples = 0
             for instance in history:
                 num_training_examples += instance.batches_per_epoch * instance.batch_size * instance.best_epoch
@@ -445,7 +454,8 @@ def _append_input_labels_colum(df, results):
 
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
-    df['timestamp'] = [x[1][:15] for x in results]
+    _append_experiment_timestamp_column(df, results)
+    _append_filesystem_modified_time_column(df, results)
     _append_datasets_column(df, results)
     _append_vinbig_mode_column(df, results)
     _append_model_column(df, results)
@@ -465,7 +475,7 @@ def _append_method_columns__report_level(df, results):
 
 def _append_method_columns__visual_module(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
-    df['timestamp'] = [x[1][:15] for x in results]
+    _append_experiment_timestamp_column(df, results)
     _append_datasets_column(df, results)
     _append_model_column(df, results)
     _append_frozen_image_encoder_column(df, results)
@@ -480,7 +490,7 @@ def _append_method_columns__visual_module(df, results):
 
 def _append_method_columns__chest_imagenome_multilabel_classification(df, results, metrics_paths):
     df['folder'] = [x[0] for x in results]
-    df['timestamp'] = [x[1][:15] for x in results]
+    _append_experiment_timestamp_column(df, results)
     _append_datasets_column(df, results)
     _append_model_column(df, results)
     _append_chest_imagenome_bbox_regressor_version_column(df, results)
@@ -495,7 +505,7 @@ def _append_method_columns__chest_imagenome_multilabel_classification(df, result
 
 def _append_method_columns__chest_imagenome_bbox(df, results):
     df['folder'] = [x[0] for x in results]
-    df['timestamp'] = [x[1][:15] for x in results]
+    _append_experiment_timestamp_column(df, results)
     _append_datasets_column(df, results)
     _append_model_column(df, results)
     _append_chest_imagenome_bbox_regressor_version_column(df, results)

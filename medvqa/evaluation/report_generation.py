@@ -28,7 +28,7 @@ from medvqa.utils.constants import (
     ReportEvalMode,
 )
 from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.logging import print_blue, print_bold, print_magenta
 from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 from medvqa.utils.common import CACHE_DIR, get_timestamp
 
@@ -105,10 +105,19 @@ class TemplateBasedModes:
     CHEXPERT_LABELS = 'chexpert_labels'
     CHEST_IMAGENOME_LABELS = 'chest_imagenome_labels'
     CHEST_IMAGENOME_LABELS__ORACLE = 'chest_imagenome_labels__oracle'
+    CHEXPERT_AND_CHEST_IMAGENOME_LABELS = 'chexpert_and_chest_imagenome_labels'
+    @staticmethod
+    def get_choices():
+        return [
+            TemplateBasedModes.CHEXPERT_LABELS,
+            TemplateBasedModes.CHEST_IMAGENOME_LABELS,
+            TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE,
+            TemplateBasedModes.CHEXPERT_AND_CHEST_IMAGENOME_LABELS,
+        ]
 
 def recover_reports__template_based(
-        mode, metrics_dict, qa_adapted_dataset, label_names, label_templates,
-        label_thresholds, label_order=None, report_ids=None, dataset=None):
+        report_ids, pred_probs, qa_adapted_dataset, label_names, label_templates, label_thresholds,
+        label_order=None, top_k_label_indices=None):
     '''
     mode: TemplateBasedModes
     label_names: list of str
@@ -116,26 +125,14 @@ def recover_reports__template_based(
     label_thresholds: list of float
     label_order: list of str
     '''
-    if mode == TemplateBasedModes.CHEXPERT_LABELS:
-        assert dataset is not None
-        report_ids = [dataset.report_ids[i] for i in metrics_dict['idxs']]
-        pred_probs = metrics_dict['pred_chexpert_probs']
-    elif mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS:
-        assert dataset is not None
-        report_ids = [dataset.report_ids[i] for i in metrics_dict['idxs']]
-        pred_probs = metrics_dict['pred_chest_imagenome_probs']
-    elif mode == TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE:
-        assert report_ids is not None
-        pred_probs = metrics_dict['oracle_probs']
-    else: assert False, f'Unknown mode: {mode}'
-    
     n = len(report_ids)
     assert len(pred_probs) == n
 
     if label_order is None:
         label_order = label_names
 
-    template_rg_model = SimpleTemplateRGModel(label_names, label_templates, label_thresholds, label_order)
+    template_rg_model = SimpleTemplateRGModel(label_names, label_templates, label_thresholds,
+                                              label_order, top_k_label_indices)
     template_based_reports = template_rg_model(pred_probs)
     
     gen_reports = []
@@ -183,11 +180,12 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
         gen_texts_tokenized.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
         gen_texts.append(gen_text)
 
-    print('Computing report-level metrics...')
+    print_blue('Computing report-level metrics...', bold=True)
+    rand_idx = random.randint(0, n-1)
     print_bold('Example gt text:')
-    print_magenta(gt_texts[0], bold=True)
+    print_magenta(gt_texts[rand_idx], bold=True)
     print_bold('Example gen text:')
-    print_magenta(gen_texts[0], bold=True)
+    print_magenta(gen_texts[rand_idx], bold=True)
 
     metrics = {}
     
@@ -495,20 +493,22 @@ def get_chexpert_based_outputs_dataframe(metrics_paths):
 
 class ReportGenExamplePlotter:
 
-    def __init__(self, reports_path, report_metrics_path, input_labels_path, chest_imagenome_label_names_filename=None):
+    def __init__(self, reports_path, report_metrics_path, input_labels_path=None, chest_imagenome_label_names_filename=None):
         reports_data = load_pickle(reports_path)
         self.gen_reports = reports_data['gen_reports']
         self.gt_reports = reports_data['gt_reports']
         self.gt_report_paths = reports_data['gt_report_paths']
         self.report_metrics = load_pickle(report_metrics_path)
         self.metric_names = set(self.report_metrics.keys())
-        self.input_labels = load_pickle(input_labels_path)
+        if input_labels_path is not None:
+            self.input_labels = load_pickle(input_labels_path)
+            if 'chest_imagenome' in self.input_labels:
+                assert chest_imagenome_label_names_filename is not None
+                self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+                assert len(self.chest_imagenome_label_names) == len(self.input_labels['chest_imagenome'][0])
+        else:
+            self.input_labels = None
         self.n = len(self.gt_reports)
-
-        if 'chest_imagenome' in self.input_labels:
-            assert chest_imagenome_label_names_filename is not None
-            self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
-            assert len(self.chest_imagenome_label_names) == len(self.input_labels['chest_imagenome'][0])
         
         if 'chexpert_labels_gt' in self.report_metrics:
             if 'chxlabf1' not in self.report_metrics:
@@ -546,19 +546,19 @@ class ReportGenExamplePlotter:
         
         print('idx:', idx)        
         print('\n--')
-        print('Input labels:\n')
-        for label_name, label_list in self.input_labels.items():
-            print()
-            print_bold(label_name)
-            print('array:', label_list[idx])
-            if label_name == 'chest_imagenome':
-                print('verbose:', chest_imagenome_label_array_to_string(label_list[idx], self.chest_imagenome_label_names))
-            elif label_name == 'chexpert':
-                print('verbose:', chexpert_label_array_to_string(label_list[idx]))
-            else:
-                raise ValueError(f'Unknown label name: {label_name}')
-
-        print('\n--')
+        if self.input_labels is not None:
+            print('Input labels:\n')
+            for label_name, label_list in self.input_labels.items():
+                print()
+                print_bold(label_name)
+                print('array:', label_list[idx])
+                if label_name == 'chest_imagenome':
+                    print('verbose:', chest_imagenome_label_array_to_string(label_list[idx], self.chest_imagenome_label_names))
+                elif label_name == 'chexpert':
+                    print('verbose:', chexpert_label_array_to_string(label_list[idx]))
+                else:
+                    raise ValueError(f'Unknown label name: {label_name}')
+            print('\n--')
         print('gen_report:\n')
         print(self.gen_reports[idx])
         print('\n--')

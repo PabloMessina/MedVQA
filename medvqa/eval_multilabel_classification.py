@@ -418,11 +418,11 @@ def _evaluate_model(
 
     # Pull out some args from kwargs
     # auxiliary task: medical tags prediction
-    classify_tags = auxiliary_tasks_kwargs['classify_tags']
+    classify_tags = auxiliary_tasks_kwargs.get('classify_tags', False)
     # auxiliary task: gender classification
     classify_gender = auxiliary_tasks_kwargs.get('classify_gender', False)
     # auxiliary task: orientation classification
-    classify_orientation = auxiliary_tasks_kwargs['classify_orientation']
+    classify_orientation = auxiliary_tasks_kwargs.get('classify_orientation', False)
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
     # auxiliary task: chest imagenome labels
@@ -447,6 +447,7 @@ def _evaluate_model(
     # Create model
     count_print('Creating model ...')
     model_name = get_model_name_from_checkpoint_path(checkpoint_path)
+    print('model_name =', model_name)
     if model_name == 'vqa':
         model = OpenEndedVQA(**model_kwargs, device=device, use_visual_module_only=True,
                             vocab_size=None, start_idx=None)

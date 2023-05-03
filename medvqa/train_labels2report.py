@@ -60,13 +60,13 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
     save_to_pickle,
 )
-from medvqa.training.report_gen import get_engine
+from medvqa.training.labels2report import get_engine
 from medvqa.training.vision import get_engine as get_vision_engine
 from medvqa.datasets.dataloading_utils import (
     balanced_dataloaders_generator,
     get_vision_collate_batch_fn,
     multi_cyclic_dataloaders_generator,
-    get_report_gen_collate_batch_fn,
+    get_labels2report_collate_batch_fn,
 )
 from medvqa.metrics.utils import (
     get_merge_metrics_fn,
@@ -442,7 +442,7 @@ def train_model(
     # Init tokenizer
     count_print('Initializing tokenizer ...')
     tokenizer = Tokenizer(**tokenizer_kwargs)
-    tokenizer_kwargs['vocab_filepath'] = tokenizer.vocab_filepath # Rememeber vocab filepath in case we need to reload tokenizer
+    tokenizer_kwargs['vocab_filepath'] = tokenizer.vocab_filepath # Remember vocab filepath in case we need to reload tokenizer
 
     # Create model
     count_print('Creating instance of Labels2ReportModel ...')
@@ -472,7 +472,7 @@ def train_model(
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
     if train_mimiccxr:
-        mimiccxr_collate_batch_fn = get_report_gen_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
+        mimiccxr_collate_batch_fn = get_labels2report_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
 
     # Create MIMIC-CXR trainer
     if train_mimiccxr:

@@ -42,6 +42,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_ViewModes,
     get_broken_images,
     get_dicom_id_and_orientation_list,
+    get_image_path_getter,
     get_image_views_dict,
     get_mimiccxr_medium_image_path,
     get_mimiccxr_small_image_path,
@@ -53,11 +54,11 @@ from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
 from medvqa.utils.logging import print_magenta
 
-# _DEBUG = False
-
 class _BalancedSamplingMode:
     BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS = 'balanced_chest_imagenome_global_labels'
     BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE = 'balanced_chest_imagenome_global_labels_batchwise'
+    BALANCED_CHEXPERT_LABELS = 'balanced_chexpert_labels'
+    BALANCED_CHEXPERT_LABELS_BATCHWISE = 'balanced_chexpert_labels_batchwise'
 
 class _AlbumentationAdapter:
 
@@ -359,6 +360,258 @@ class MIMICCXR_Visual_Dataset(Dataset):
             del output['i']
         return output
 
+def _define_allowed_dicom_ids(view_mode, use_all_data, use_test_set, use_chest_imagenome_bbox_gold_set,
+                              use_chest_imagenome_label_gold_set, use_decent_images_only):
+    allowed_dicom_ids = None
+
+    if use_all_data:
+        if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+            allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
+    else:
+        allowed_train_val_dicom_ids = None
+        if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
+            if use_decent_images_only:
+                decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
+            if use_test_set:
+                if use_decent_images_only:
+                    allowed_test_dicom_ids = decent_dicom_ids
+                else:
+                    allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
+            elif use_chest_imagenome_bbox_gold_set:
+                allowed_test_dicom_ids = set(load_gold_bbox_dicom_ids())
+                if use_decent_images_only:
+                    allowed_test_dicom_ids &= decent_dicom_ids
+            elif use_chest_imagenome_label_gold_set:
+                allowed_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
+                if use_decent_images_only:
+                    allowed_test_dicom_ids &= decent_dicom_ids
+            else:
+                allowed_train_val_dicom_ids = set(load_nongold_dicom_ids())
+                if use_decent_images_only:
+                    allowed_train_val_dicom_ids &= decent_dicom_ids
+        else:
+            assert use_decent_images_only is False
+            assert use_chest_imagenome_bbox_gold_set is False
+            assert use_chest_imagenome_label_gold_set is False
+        allowed_dicom_ids = allowed_train_val_dicom_ids or allowed_test_dicom_ids
+        print(f'Allowed dicom ids: {len(allowed_dicom_ids)}')
+    
+    return allowed_dicom_ids
+
+def _load_chest_imagenome_labels(self, chest_imagenome_labels_filename, use_chest_imagenome_label_gold_set,
+                                 chest_imagenome_label_names_filename):
+    print('Loading Chest Imagenome labels...')
+    assert chest_imagenome_labels_filename is not None
+    assert chest_imagenome_labels_filename != 'gold_imageId2binaryLabels.pkl', \
+        'This should be file used for training, not testing'
+    if use_chest_imagenome_label_gold_set:
+        _, self.chest_imagenome_labels = \
+            load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix('gold_imageId2binaryLabels.pkl')
+        print('Using gold labels for Chest Imagenome (not the labels used for training)')
+        print(f'\tFile used in training: {chest_imagenome_labels_filename}')
+        print('\tFile used for testing (right now): gold_imageId2binaryLabels.pkl')
+        print(f'self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
+        # sanity check
+        used_rid_set = set()
+        _hc, _unhc = 0, 0
+        for i in self.test_indices:
+            rid = self.report_ids[i]
+            used_rid_set.add(rid)
+            if self.chest_imagenome_labels[rid].max() == 1:
+                _unhc += 1
+            else:
+                _hc += 1
+        print('Sanity check: _hc =', _hc, '_unhc =', _unhc)
+        assert _unhc > 0, 'No abnormal reports found in gold labels'
+        # choose 100 report_ids not in used_rid_set
+        for _ in range(100):
+            while True:
+                rid = random.randint(0, self.chest_imagenome_labels.shape[0] - 1)
+                if rid not in used_rid_set:
+                    break
+            assert self.chest_imagenome_labels[rid].max() == 0
+    else:
+        _, self.chest_imagenome_labels = \
+            load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
+
+    if chest_imagenome_label_names_filename is not None:
+        # We need to rearrange the labels to match the order in which the model will predict them
+        print_magenta('Reordering Chest Imagenome labels according to anatomy-label relations...', bold=True)
+        tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
+        label_order = []
+        for _, labels in tmp['anatomy_to_localized_labels']:
+            label_order.extend(labels)
+        for _, labels in tmp['anatomy_group_to_global_labels']:
+            label_order.extend(labels)
+        assert len(label_order) == len(self.chest_imagenome_label_names)
+    elif use_chest_imagenome_label_gold_set:
+        label_order = list(range(len(self.chest_imagenome_label_names)))
+    else:
+        label_order = None
+    if label_order is not None:
+        if use_chest_imagenome_label_gold_set:
+            print('  Using gold labels for Chest Imagenome (not the labels used for training)')
+            gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+            common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
+            assert len(common_label_names) > 0
+            _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
+                                                if self.chest_imagenome_label_names[idx] in common_label_names]
+            _valid_label_indices__gold_pov = [gold_label_names.index(self.chest_imagenome_label_names[idx]) for idx in label_order\
+                                            if self.chest_imagenome_label_names[idx] in common_label_names]
+            self.valid_chest_imagenome_label_indices = _valid_label_indices__model_pov
+            self.chest_imagenome_labels = self.chest_imagenome_labels[:, _valid_label_indices__gold_pov]
+            self.chest_imagenome_label_names = [gold_label_names[i] for i in _valid_label_indices__gold_pov]
+            assert set(self.chest_imagenome_label_names) == set(common_label_names)
+            print(f'  len(gold_label_names) = {len(gold_label_names)}')
+            print(f'  len(label_order) = {len(label_order)}')
+            print(f'  len(common_label_names) = {len(common_label_names)}')
+            print(f'  len(self.valid_chest_imagenome_label_indices) = {len(self.valid_chest_imagenome_label_indices)}')
+        else:
+            assert self.chest_imagenome_labels.shape[1] == len(label_order)
+            assert set(label_order) == set(range(len(label_order)))
+            assert len(label_order) == len(self.chest_imagenome_label_names)
+            self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
+            self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
+        print(f'  len(self.chest_imagenome_label_names) = {len(self.chest_imagenome_label_names)}')
+        print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
+    else:
+        self.chest_imagenome_labels = None
+
+def _create_dataset(self, indices, shuffle=False, balanced_sampling_mode=None, **create_dataset_kwargs):
+    if balanced_sampling_mode is not None:
+        print(f'Balanced sampling mode: {balanced_sampling_mode}')
+        datasets = []
+        if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS:
+            assert (hasattr(self, 'use_chest_imagenome') and self.use_chest_imagenome) or\
+                   (hasattr(self, 'classify_chest_imagenome') and self.classify_chest_imagenome)
+            assert self.chest_imagenome_labels is not None
+            assert self.chest_imagenome_label_names is not None
+            global2idxs = {}
+            without_global = []                
+            print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
+            _labels, _rids = self.chest_imagenome_labels, self.report_ids
+            for i, label_name in tqdm(enumerate(self.chest_imagenome_label_names)):
+                if len(label_name) == 2:
+                    global_name = label_name[-1]
+                    global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
+            without_global = [idx for idx in indices if _labels[_rids[idx]].max() == 0]
+            for global_name, idxs in global2idxs.items():
+                print(f'Global: {global_name}, # images: {len(idxs)}')
+                dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                datasets.append(dataset)
+            print(f'# images without global: {len(without_global)}')
+            if len(without_global) > 0:
+                dataset = self._create_dataset(without_global, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                datasets.append(dataset)
+            dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
+        elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEXPERT_LABELS:
+            assert (hasattr(self, 'use_chexpert') and self.use_chexpert) or\
+                   (hasattr(self, 'classify_chexpert') and self.classify_chexpert)
+            assert self.chexpert_labels is not None
+            label2idxs = {}
+            without_label = []
+            print('Regrouping indices by CheXpert labels for balanced sampling...')
+            for i in tqdm(indices, mininterval=2):
+                rid = self.report_ids[i]
+                labels = self.chexpert_labels[rid]
+                has_label = False
+                for j, label in enumerate(labels):
+                    if label == 1:
+                        label_name = CHEXPERT_LABELS[j]
+                        try:
+                            label2idxs[label_name].append(i)
+                        except KeyError:
+                            label2idxs[label_name] = [i]
+                        has_label = True
+                if not has_label:
+                    without_label.append(i)
+            for label_name, idxs in label2idxs.items():
+                print(f'Label: {label_name}, # images: {len(idxs)}')
+                dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                datasets.append(dataset)
+            print(f'# images without label: {len(without_label)}')
+            if len(without_label) > 0:
+                dataset = self._create_dataset(without_label, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                datasets.append(dataset)
+            dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
+        elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE:
+            assert hasattr(self, 'balanced_batch_size') and self.balanced_batch_size is not None
+            # assert (hasattr(self, 'use_chest_imagenome') and self.use_chest_imagenome) or\
+            #        (hasattr(self, 'classify_chest_imagenome') and self.classify_chest_imagenome)
+            assert self.chest_imagenome_labels is not None
+            assert self.chest_imagenome_label_names is not None
+            global2idxs = {}
+            print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
+            _labels, _rids = self.chest_imagenome_labels, self.report_ids
+            for i, label_name in tqdm(enumerate(self.chest_imagenome_label_names)):
+                if len(label_name) == 2:
+                    global_name = label_name[-1]
+                    global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
+            max_name_len = max(len(global_name) for global_name in global2idxs.keys())
+            for global_name, idxs in global2idxs.items():
+                idxs_set = set(idxs)
+                other_idxs = [i for i in indices if i not in idxs_set]
+                global_name = global_name.ljust(max_name_len)
+                print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
+                assert len(idxs) > 0
+                assert len(other_idxs) > 0
+                dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.6, 0.4])
+                datasets.append(dataset_pos_neg)
+            dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.balanced_batch_size)
+        elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEXPERT_LABELS_BATCHWISE:
+            assert hasattr(self, 'balanced_batch_size') and self.balanced_batch_size is not None
+            assert (hasattr(self, 'use_chexpert') and self.use_chexpert) or\
+                   (hasattr(self, 'classify_chexpert') and self.classify_chexpert)
+            assert self.chexpert_labels is not None
+            label2idxs = {}
+            print('Regrouping indices by CheXpert labels for balanced sampling...')
+            for i in tqdm(indices, mininterval=2):
+                rid = self.report_ids[i]
+                labels = self.chexpert_labels[rid]
+                for j, label in enumerate(labels):
+                    if label == 1:
+                        label_name = CHEXPERT_LABELS[j]
+                        try:
+                            label2idxs[label_name].append(i)
+                        except KeyError:
+                            label2idxs[label_name] = [i]
+            max_name_len = max(len(label_name) for label_name in label2idxs.keys())
+            for label_name, idxs in label2idxs.items():
+                idxs_set = set(idxs)
+                other_idxs = [i for i in indices if i not in idxs_set]
+                label_name = label_name.ljust(max_name_len)
+                print(f'Label: {label_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
+                assert len(idxs) > 0
+                assert len(other_idxs) > 0
+                dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
+                dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.6, 0.4])
+                datasets.append(dataset_pos_neg)
+            dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.balanced_batch_size)
+        else:
+            raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')
+    else:
+        dataset = self._create_dataset(indices, **create_dataset_kwargs)
+    return dataset
+
+def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False,
+                                   shuffle=False, balanced_sampling_mode=None):
+    dataset = _create_dataset(self, indices, shuffle, balanced_sampling_mode,
+                              image_transform=image_transform,
+                              data_augmentation_enabled=data_augmentation_enabled)
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=self.batch_size,
+        shuffle=shuffle and balanced_sampling_mode is None,
+        num_workers=self.num_workers,
+        collate_fn=collate_batch_fn,
+        pin_memory=True,
+    )
+    return dataset, dataloader
+
 class MIMICCXR_VisualModuleTrainer():
 
     def __init__(self, 
@@ -551,50 +804,11 @@ class MIMICCXR_VisualModuleTrainer():
                 val_indices = []
             idx = 0
 
-            if source_image_size_mode == MIMICCXR_ImageSizeModes.SMALL_256x256:
-                image_path_getter = get_mimiccxr_small_image_path
-            elif source_image_size_mode == MIMICCXR_ImageSizeModes.MEDIUM_512:
-                image_path_getter = get_mimiccxr_medium_image_path
-            else:
-                raise ValueError(f'Unknown source image size mode: {source_image_size_mode}')
-            print(f'Using source image size mode: {source_image_size_mode}')
+            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
 
-            if use_all_data:
-                if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                    allowed_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=use_decent_images_only))
-                else:
-                    allowed_dicom_ids = None
-            else:
-                if view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME:
-                    allowed_train_val_dicom_ids = None
-                    if use_decent_images_only:
-                        decent_dicom_ids = set(load_chest_imagenome_dicom_ids(decent_images_only=True))
-                    if use_test_set:
-                        if use_decent_images_only:
-                            allowed_test_dicom_ids = decent_dicom_ids
-                        else:
-                            allowed_test_dicom_ids = set(load_chest_imagenome_dicom_ids())
-                    elif use_chest_imagenome_bbox_gold_set:
-                        allowed_test_dicom_ids = set(load_gold_bbox_dicom_ids())
-                        if use_decent_images_only:
-                            allowed_test_dicom_ids &= decent_dicom_ids
-                    elif use_chest_imagenome_label_gold_set:
-                        allowed_test_dicom_ids = set(load_gold_attributes_relations_dicom_ids())
-                        if use_decent_images_only:
-                            allowed_test_dicom_ids &= decent_dicom_ids
-                    else:
-                        allowed_train_val_dicom_ids = set(load_nongold_dicom_ids())
-                        if use_decent_images_only:
-                            allowed_train_val_dicom_ids &= decent_dicom_ids
-                else:
-                    assert use_decent_images_only is False
-                    assert use_chest_imagenome_bbox_gold_set is False
-                    assert use_chest_imagenome_label_gold_set is False
-                    allowed_train_val_dicom_ids = None
-                    allowed_test_dicom_ids = None
-
-                allowed_dicom_ids = allowed_train_val_dicom_ids or allowed_test_dicom_ids
-
+            allowed_dicom_ids = _define_allowed_dicom_ids(view_mode, use_all_data, use_test_set,
+                                      use_chest_imagenome_bbox_gold_set, use_chest_imagenome_label_gold_set,
+                                      use_decent_images_only)
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
             max_idx_count = 0
@@ -712,82 +926,8 @@ class MIMICCXR_VisualModuleTrainer():
                 assert not use_chest_imagenome_bbox_gold_set # Not supported in this mode yet
             
             if classify_chest_imagenome:
-                print('Loading Chest Imagenome labels...')
-                assert chest_imagenome_labels_filename is not None
-                assert chest_imagenome_labels_filename != 'gold_imageId2binaryLabels.pkl', \
-                    'This should be file used for training, not testing'
-                if use_chest_imagenome_label_gold_set:
-                    _, self.chest_imagenome_labels = \
-                        load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix('gold_imageId2binaryLabels.pkl')
-                    print('Using gold labels for Chest Imagenome (not the labels used for training)')
-                    print(f'\tFile used in training: {chest_imagenome_labels_filename}')
-                    print('\tFile used for testing (right now): gold_imageId2binaryLabels.pkl')
-                    print(f'self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
-                    # sanity check
-                    used_rid_set = set()
-                    _hc, _unhc = 0, 0
-                    for i in self.test_indices:
-                        rid = self.report_ids[i]
-                        used_rid_set.add(rid)
-                        if self.chest_imagenome_labels[rid].max() == 1:
-                            _unhc += 1
-                        else:
-                            _hc += 1
-                    print('Sanity check: _hc =', _hc, '_unhc =', _unhc)
-                    assert _unhc > 0, 'No abnormal reports found in gold labels'
-                    # choose 100 report_ids not in used_rid_set
-                    for _ in range(100):
-                        while True:
-                            rid = random.randint(0, self.chest_imagenome_labels.shape[0] - 1)
-                            if rid not in used_rid_set:
-                                break
-                        assert self.chest_imagenome_labels[rid].max() == 0
-                else:
-                    _, self.chest_imagenome_labels = \
-                        load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
-
-                if chest_imagenome_label_names_filename is not None:
-                    # We need to rearrange the labels to match the order in which the model will predict them
-                    print_magenta('Reordering Chest Imagenome labels according to anatomy-label relations...', bold=True)
-                    tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
-                    label_order = []
-                    for _, labels in tmp['anatomy_to_localized_labels']:
-                        label_order.extend(labels)
-                    for _, labels in tmp['anatomy_group_to_global_labels']:
-                        label_order.extend(labels)
-                    assert len(label_order) == len(self.chest_imagenome_label_names)
-                elif use_chest_imagenome_label_gold_set:
-                    label_order = list(range(len(self.chest_imagenome_label_names)))
-                else:
-                    label_order = None
-                if label_order is not None:
-                    if use_chest_imagenome_label_gold_set:
-                        print('  Using gold labels for Chest Imagenome (not the labels used for training)')
-                        gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
-                        common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
-                        assert len(common_label_names) > 0
-                        _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
-                                                            if self.chest_imagenome_label_names[idx] in common_label_names]
-                        _valid_label_indices__gold_pov = [gold_label_names.index(self.chest_imagenome_label_names[idx]) for idx in label_order\
-                                                        if self.chest_imagenome_label_names[idx] in common_label_names]
-                        self.valid_chest_imagenome_label_indices = _valid_label_indices__model_pov
-                        self.chest_imagenome_labels = self.chest_imagenome_labels[:, _valid_label_indices__gold_pov]
-                        self.chest_imagenome_label_names = [gold_label_names[i] for i in _valid_label_indices__gold_pov]
-                        assert set(self.chest_imagenome_label_names) == set(common_label_names)
-                        print(f'  len(gold_label_names) = {len(gold_label_names)}')
-                        print(f'  len(label_order) = {len(label_order)}')
-                        print(f'  len(common_label_names) = {len(common_label_names)}')
-                        print(f'  len(self.valid_chest_imagenome_label_indices) = {len(self.valid_chest_imagenome_label_indices)}')
-                    else:
-                        assert self.chest_imagenome_labels.shape[1] == len(label_order)
-                        assert set(label_order) == set(range(len(label_order)))
-                        assert len(label_order) == len(self.chest_imagenome_label_names)
-                        self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
-                        self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
-                    print(f'  len(self.chest_imagenome_label_names) = {len(self.chest_imagenome_label_names)}')
-                    print(f'  self.chest_imagenome_labels.shape = {self.chest_imagenome_labels.shape}')
-                else:
-                    self.chest_imagenome_labels = None
+                _load_chest_imagenome_labels(self, chest_imagenome_labels_filename, use_chest_imagenome_label_gold_set,
+                                             chest_imagenome_label_names_filename)
             else:
                 self.chest_imagenome_labels = None
             
@@ -910,95 +1050,10 @@ class MIMICCXR_VisualModuleTrainer():
             use_yolov8=self.use_yolov8,
         )
     
-    def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False, shuffle=False, balanced_sampling_mode=None):
-        if balanced_sampling_mode is not None:
-            print(f'Balanced sampling mode: {balanced_sampling_mode}')
-            datasets = []
-            if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS:
-                assert self.classify_chest_imagenome
-                assert self.chest_imagenome_labels is not None
-                assert self.chest_imagenome_label_names is not None
-                global2idxs = {}
-                without_global = []
-                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                for i in tqdm(indices, mininterval=2):
-                    rid = self.report_ids[i]
-                    labels = self.chest_imagenome_labels[rid]
-                    has_global = False
-                    for j, label in enumerate(labels):
-                        if label == 1:
-                            label_name = self.chest_imagenome_label_names[j]
-                            if len(label_name) == 2:
-                                global_name = label_name[-1]
-                                try:
-                                    global2idxs[global_name].append(i)
-                                except KeyError:
-                                    global2idxs[global_name] = [i]
-                                has_global = True
-                            elif len(label_name) == 3:
-                                pass
-                            else:
-                                raise ValueError('Unexpected label name: {}'.format(label_name))
-                    if not has_global:
-                        without_global.append(i)
-                for global_name, idxs in global2idxs.items():
-                    print(f'Global: {global_name}, # images: {len(idxs)}')
-                    dataset = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                print(f'# images without global: {len(without_global)}')
-                if len(without_global) > 0:
-                    dataset = self._create_dataset(without_global, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
-            elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE:
-                assert self.classify_chest_imagenome
-                assert self.chest_imagenome_labels is not None
-                assert self.chest_imagenome_label_names is not None
-                global2idxs = {}
-                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                for i in tqdm(indices, mininterval=2):
-                    rid = self.report_ids[i]
-                    labels = self.chest_imagenome_labels[rid]
-                    for j, label in enumerate(labels):
-                        if label == 1:
-                            label_name = self.chest_imagenome_label_names[j]
-                            if len(label_name) == 2:
-                                global_name = label_name[-1]
-                                try:
-                                    global2idxs[global_name].append(i)
-                                except KeyError:
-                                    global2idxs[global_name] = [i]
-                            elif len(label_name) == 3:
-                                pass
-                            else:
-                                raise ValueError('Unexpected label name: {}'.format(label_name))
-                max_name_len = max(len(global_name) for global_name in global2idxs.keys())
-                for global_name, idxs in global2idxs.items():
-                    idxs_set = set(idxs)
-                    other_idxs = [i for i in indices if i not in idxs_set]
-                    global_name = global_name.ljust(max_name_len)
-                    print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
-                    assert len(idxs) > 0
-                    assert len(other_idxs) > 0
-                    dataset_pos = self._create_dataset(idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    dataset_neg = self._create_dataset(other_idxs, image_transform, data_augmentation_enabled, shuffle=shuffle, infinite=True)
-                    dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.7, 0.3])
-                    datasets.append(dataset_pos_neg)
-                dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.batch_size)
-            else:
-                raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')
-        else:
-            dataset = self._create_dataset(indices, image_transform, data_augmentation_enabled)
-
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            shuffle=shuffle and balanced_sampling_mode is None,
-            num_workers=self.num_workers,
-            collate_fn=collate_batch_fn,
-            pin_memory=True,
-        )
-        return dataset, dataloader
+    def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False,
+                                       shuffle=False, balanced_sampling_mode=None):
+        return _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled,
+                                              shuffle, balanced_sampling_mode)
 
 # MAE: Masked AutoEncoder
 class MIMICCXR_MAE_Trainer(MAETrainerBase):

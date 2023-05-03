@@ -463,7 +463,7 @@ def get_mae_collate_batch_fn(dataset_id):
         return batch_dict
     return mae_collate_batch_fn
 
-def get_report_gen_collate_batch_fn(dataset_id, use_report, use_gender, use_chexpert, use_chest_imagenome,
+def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_chexpert, use_chest_imagenome,
                                     use_ground_truth_as_prediction):
     if dataset_id == MIMICCXR_DATASET_ID:
         def collate_batch_fn(batch):
@@ -496,6 +496,77 @@ def get_report_gen_collate_batch_fn(dataset_id, use_report, use_gender, use_chex
                 if use_chexpert:
                     batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
                 batch_dict['predicted_binary_scores'] = torch.tensor([x['ensemble_probs'] for x in batch])
+            return batch_dict
+    else: assert False, f'Unknown dataset_id {dataset_id}'
+    return collate_batch_fn
+
+def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visual_module_only=False,
+        classify_gender=False, classify_chexpert=False, classify_chest_imagenome=False,
+        predict_bboxes_chest_imagenome=False, use_yolov8=False,
+    ):
+    if dataset_id == MIMICCXR_DATASET_ID:
+        def collate_batch_fn(batch, training_mode=True):
+            batch_dict = dict()
+            batch_dict['dataset_id'] = dataset_id
+            batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+            if not use_visual_module_only:
+                if include_report:
+                    batch_dict['report'] = nn.utils.rnn.pad_sequence(
+                        sequences = [torch.tensor(x['report']) for x in batch],
+                        batch_first=True,
+                        padding_value=0,
+                    )
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['img'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            # Auxiliary tasks
+            if classify_gender:
+                batch_dict['gender'] = torch.tensor([x['gender'] for x in batch])
+            if classify_chexpert:
+                batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
+            if classify_chest_imagenome:
+                batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
+            if predict_bboxes_chest_imagenome:
+                if use_yolov8:
+                    if training_mode:
+                        batch_dict['im_file'] = [x['im_file'] for x in batch]
+                        batch_dict['ori_shape'] = [x['ori_shape'] for x in batch]
+                        batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                        bboxes_list, cls_list, batch_idx_list, count = None, None, None, 0
+                        for i, x in enumerate(batch):
+                            coords = x['chest_imagenome_bbox_coords']
+                            presence = x['chest_imagenome_bbox_presence']
+                            if bboxes_list is None:
+                                bboxes_list = [None] * len(presence) * len(batch)
+                                cls_list = [None] * len(presence) * len(batch)
+                                batch_idx_list = [None] * len(presence) * len(batch)
+                            for cls in range(len(presence)):
+                                if presence[cls]:
+                                    # convert coords[cls] from xyxy to x_c, y_c, w, h
+                                    bboxes_list[count] = torch.tensor([
+                                        (coords[cls, 0] + coords[cls, 2]) / 2,
+                                        (coords[cls, 1] + coords[cls, 3]) / 2,
+                                        coords[cls, 2] - coords[cls, 0],
+                                        coords[cls, 3] - coords[cls, 1],
+                                    ])
+                                    cls_list[count] = cls
+                                    batch_idx_list[count] = i
+                                    count += 1
+                        batch_dict['bboxes'] = torch.stack(bboxes_list[:count])
+                        assert batch_dict['bboxes'].shape == (count, 4)
+                        batch_dict['cls'] = torch.tensor(cls_list[:count])
+                        batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
+                        assert batch_dict['cls'].shape == (count, 1)
+                        batch_dict['batch_idx'] = torch.tensor(batch_idx_list[:count])
+                    else:
+                        batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                        batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([x['chest_imagenome_bbox_coords'] for x in batch])
+                        batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([x['chest_imagenome_bbox_presence'] for x in batch])
+                else:
+                    batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([x['chest_imagenome_bbox_coords'] for x in batch])
+                    batch_dict['chest_imagenome_bbox_presence'] = torch.tensor([x['chest_imagenome_bbox_presence'] for x in batch])
+            
             return batch_dict
     else: assert False, f'Unknown dataset_id {dataset_id}'
     return collate_batch_fn

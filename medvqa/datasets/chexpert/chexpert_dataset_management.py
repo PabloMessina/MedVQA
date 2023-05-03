@@ -8,7 +8,7 @@ from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CS
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
-from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
+from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_GENDER2ID, CHEXPERT_LABELS, CHEXPERT_ORIENTATION2ID
 
 

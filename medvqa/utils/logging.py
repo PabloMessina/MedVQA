@@ -17,6 +17,12 @@ def print_red(*args, bold=False):
 def print_magenta(*args, bold=False):
     _print_with_color('magenta', *args, bold=bold)
 
+def print_orange(*args, bold=False):
+    if bold:
+        print(*[f'\033[93m\033[1m{x}\033[0m' for x in args])
+    else:
+        print(*[f'\033[93m{x}\033[0m' for x in args])
+
 def print_bold(*args):
     print(*[colored(x, attrs=['bold']) for x in args])
 

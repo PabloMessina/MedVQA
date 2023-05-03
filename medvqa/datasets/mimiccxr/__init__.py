@@ -1,3 +1,4 @@
+from functools import cache
 from dotenv import load_dotenv
 from pathlib import Path
 from medvqa.utils.constants import CHEXPERT_LABELS
@@ -73,6 +74,17 @@ def get_mimiccxr_large_image_path(part_id, subject_id, study_id, dicom_id):
 
 def get_mimiccxr_report_path(part_id, subject_id, study_id):    
     return os.path.join(MIMICCXR_DATASET_DIR, 'files', 'p{}'.format(part_id), 'p{}'.format(subject_id), 's{}.txt'.format(study_id))
+
+def get_image_path_getter(image_size_mode, verbose=False):
+    if image_size_mode == MIMICCXR_ImageSizeModes.SMALL_256x256:
+        image_path_getter = get_mimiccxr_small_image_path
+    elif image_size_mode == MIMICCXR_ImageSizeModes.MEDIUM_512:
+        image_path_getter = get_mimiccxr_medium_image_path
+    else:
+        raise ValueError(f'Unknown source image size mode: {image_size_mode}')
+    if verbose:
+        print(f'Using image size mode: {image_size_mode}')
+    return image_path_getter
 
 class MIMICCXR_ViewModes:
     ALL = 'all'
@@ -221,6 +233,18 @@ def get_imageId2partId():
         imageId2partId[imageId] = partId
     save_to_pickle(imageId2partId, cache_path)
     return imageId2partId
+
+def get_imageId2reportId():
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2reportId.pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)    
+    metadata = load_mimiccxr_reports_detailed_metadata()
+    imageId2reportId = {}
+    for rid, dicom_id_view_pos_pairs in enumerate(metadata['dicom_id_view_pos_pairs']):
+        for dicom_id, _ in dicom_id_view_pos_pairs:
+            imageId2reportId[dicom_id] = rid
+    save_to_pickle(imageId2reportId, cache_path)
+    return imageId2reportId
 
 def get_imageId2PartPatientStudy():
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'imageId2PartPatientStudy.pkl')

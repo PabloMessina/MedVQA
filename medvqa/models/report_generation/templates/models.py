@@ -1,7 +1,7 @@
 import torch
 
 class SimpleTemplateRGModel:
-    def __init__(self, labels, templates, thresholds, label_order):
+    def __init__(self, labels, templates, thresholds, label_order, top_k_label_indices=None):
 
         # sanity checks
         assert len(thresholds) == len(labels)
@@ -17,6 +17,12 @@ class SimpleTemplateRGModel:
         self.templates = templates
         self.thresholds = thresholds
         self.label_order = [labels.index(l) for l in label_order]
+        if top_k_label_indices is not None:
+            self.label_mask = [False for _ in range(len(labels))]
+            for idx in top_k_label_indices:
+                self.label_mask[idx] = True
+        else:
+            self.label_mask = None
 
     def __call__(self, pred_probs):
         """Transforms classification scores into fixed templates."""
@@ -33,7 +39,10 @@ class SimpleTemplateRGModel:
             report = []
             for idx in self.label_order:
                 label_name = self.labels[idx]
-                sentence = self.templates[label_name][sample_binary[idx].item()]
+                if self.label_mask is not None and not self.label_mask[idx]:
+                    sentence = ''
+                else:
+                    sentence = self.templates[label_name][sample_binary[idx].item()]
                 report.append(sentence)
             reports.append(report)
         return reports

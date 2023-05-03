@@ -11,26 +11,16 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_nongold_dicom_ids,
     load_postprocessed_label_names,
 )
-from medvqa.datasets.dataloading_utils import (
-    INFINITE_DATASET_LENGTH,
-    BatchedCompositeInfiniteDataset,
-    CompositeInfiniteDataset,
-)
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_ViewModes,
     get_dicom_id_and_orientation_list,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import _create_dataset
 from medvqa.utils.files import get_cached_pickle_file, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta
-
-class _BalancedSamplingMode:
-    BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS = 'balanced_chest_imagenome_global_labels'
-    BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE = 'balanced_chest_imagenome_global_labels_batchwise'
-    BALANCED_CHEXPERT_LABELS = 'balanced_chexpert_labels'
-    BALANCED_CHEXPERT_LABELS_BATCHWISE = 'balanced_chexpert_labels_batchwise'
     
 
 class MIMICCXR_Labels2Report_Dataset(Dataset):
@@ -390,116 +380,8 @@ class MIMICCXR_Labels2ReportTrainer():
         )
     
     def _create_dataset_and_dataloader(self, indices, collate_batch_fn, shuffle=False, balanced_sampling_mode=None):
-        if balanced_sampling_mode is not None:
-            print(f'Balanced sampling mode: {balanced_sampling_mode}')
-            datasets = []
-            if balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS:
-                assert self.use_chest_imagenome
-                assert self.chest_imagenome_labels is not None
-                assert self.chest_imagenome_label_names is not None
-                global2idxs = {}
-                without_global = []                
-                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                _labels, _rids = self.chest_imagenome_labels, self.report_ids
-                for i, label_name in tqdm(enumerate(self.chest_imagenome_label_names)):
-                    if len(label_name) == 2:
-                        global_name = label_name[-1]
-                        global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
-                without_global = [idx for idx in indices if _labels[_rids[idx]].max() == 0]
-                for global_name, idxs in global2idxs.items():
-                    print(f'Global: {global_name}, # images: {len(idxs)}')
-                    dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                print(f'# images without global: {len(without_global)}')
-                if len(without_global) > 0:
-                    dataset = self._create_dataset(without_global, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
-            elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEXPERT_LABELS:
-                assert self.use_chexpert
-                assert self.chexpert_labels is not None
-                label2idxs = {}
-                without_label = []
-                print('Regrouping indices by CheXpert labels for balanced sampling...')
-                for i in tqdm(indices, mininterval=2):
-                    rid = self.report_ids[i]
-                    labels = self.chexpert_labels[rid]
-                    has_label = False
-                    for j, label in enumerate(labels):
-                        if label == 1:
-                            label_name = CHEXPERT_LABELS[j]
-                            try:
-                                label2idxs[label_name].append(i)
-                            except KeyError:
-                                label2idxs[label_name] = [i]
-                            has_label = True
-                    if not has_label:
-                        without_label.append(i)
-                for label_name, idxs in label2idxs.items():
-                    print(f'Label: {label_name}, # images: {len(idxs)}')
-                    dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                print(f'# images without label: {len(without_label)}')
-                if len(without_label) > 0:
-                    dataset = self._create_dataset(without_label, shuffle=shuffle, infinite=True)
-                    datasets.append(dataset)
-                dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
-            elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS_BATCHWISE:
-                assert self.use_chest_imagenome
-                assert self.chest_imagenome_labels is not None
-                assert self.chest_imagenome_label_names is not None
-                global2idxs = {}
-                print('Regrouping indices by Chest Imagenome labels for balanced sampling...')
-                _labels, _rids = self.chest_imagenome_labels, self.report_ids
-                for i, label_name in tqdm(enumerate(self.chest_imagenome_label_names)):
-                    if len(label_name) == 2:
-                        global_name = label_name[-1]
-                        global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
-                max_name_len = max(len(global_name) for global_name in global2idxs.keys())
-                for global_name, idxs in global2idxs.items():
-                    idxs_set = set(idxs)
-                    other_idxs = [i for i in indices if i not in idxs_set]
-                    global_name = global_name.ljust(max_name_len)
-                    print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
-                    assert len(idxs) > 0
-                    assert len(other_idxs) > 0
-                    dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True)
-                    dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True)
-                    dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.7, 0.3])
-                    datasets.append(dataset_pos_neg)
-                dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.batch_size)
-            elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEXPERT_LABELS_BATCHWISE:
-                assert self.use_chexpert
-                assert self.chexpert_labels is not None
-                label2idxs = {}
-                print('Regrouping indices by CheXpert labels for balanced sampling...')
-                for i in tqdm(indices, mininterval=2):
-                    rid = self.report_ids[i]
-                    labels = self.chexpert_labels[rid]
-                    for j, label in enumerate(labels):
-                        if label == 1:
-                            label_name = CHEXPERT_LABELS[j]
-                            try:
-                                label2idxs[label_name].append(i)
-                            except KeyError:
-                                label2idxs[label_name] = [i]
-                max_name_len = max(len(label_name) for label_name in label2idxs.keys())
-                for label_name, idxs in label2idxs.items():
-                    idxs_set = set(idxs)
-                    other_idxs = [i for i in indices if i not in idxs_set]
-                    label_name = label_name.ljust(max_name_len)
-                    print(f'Label: {label_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
-                    assert len(idxs) > 0
-                    assert len(other_idxs) > 0
-                    dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True)
-                    dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True)
-                    dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.7, 0.3])
-                    datasets.append(dataset_pos_neg)
-                dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.batch_size)
-            else:
-                raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')
-        else:
-            dataset = self._create_dataset(indices)
+        
+        dataset = _create_dataset(self, indices, shuffle, balanced_sampling_mode)
 
         dataloader = DataLoader(
             dataset,

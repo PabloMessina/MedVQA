@@ -9,7 +9,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.utils import deduplicate_indices
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
-from medvqa.models.report_generation.templates.chex_v1 import TEMPLATES_CHEXPERT_v1
+from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
 
 from medvqa.models.vqa.open_ended_vqa import (
     QuestionEncoding,

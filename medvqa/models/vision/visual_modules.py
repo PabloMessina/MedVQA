@@ -77,6 +77,7 @@ class MultiPurposeVisualModule(nn.Module):
                 raw_image_encoding=RawImageEncoding.DENSENET_121,
                 image_local_feat_size=None,
                 freeze_image_encoder=False,
+                only_compute_features=False,
                 image_encoder_pretrained_weights_path=None,
                 imagenet_pretrained=True,
                 mlp_in_dim=None,
@@ -155,6 +156,7 @@ class MultiPurposeVisualModule(nn.Module):
         self.image_encoder_pretrained_weights_path = image_encoder_pretrained_weights_path
         self.imagenet_pretrained = imagenet_pretrained
         self.freeze_image_encoder = freeze_image_encoder
+        self.only_compute_features = only_compute_features
         self.image_local_feat_size = image_local_feat_size
         self.mlp_in_dim = mlp_in_dim
         self.mlp_out_dim = mlp_out_dim
@@ -201,8 +203,6 @@ class MultiPurposeVisualModule(nn.Module):
         
         self._init_visual_backbone()
         self._init_auxiliary_tasks()
-
-        print(f'MultiPurposeVisualModule: self.name={self.get_name()}')
 
     def _init_visual_backbone(self):
         
@@ -300,17 +300,14 @@ class MultiPurposeVisualModule(nn.Module):
                                                              roi_heads_batch_size_per_image=self.roi_heads_batch_size_per_image,
                                                              rpn_batch_size_per_image=self.rpn_batch_size_per_image)
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
-            if self.predict_bboxes_chest_imagenome:
-                if self.use_anaxnet_bbox_subset:
-                    num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
-                    class_names = {i:CHEST_IMAGENOME_BBOX_NAMES[idx] for i, idx in \
-                                   enumerate(get_anaxnet_bbox_sorted_indices())}
-                else:
-                    num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
-                    class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
-                self.num_bbox_classes = num_classes
+            if self.use_anaxnet_bbox_subset:
+                num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+                class_names = {i:CHEST_IMAGENOME_BBOX_NAMES[idx] for i, idx in \
+                                enumerate(get_anaxnet_bbox_sorted_indices())}
             else:
-                assert False, 'We only support predicting bboxes for chest_imagenome at the moment'
+                num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
+                class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
+            self.num_bbox_classes = num_classes
             self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=num_classes,
                                                          class_names=class_names)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
@@ -579,6 +576,9 @@ class MultiPurposeVisualModule(nn.Module):
         # General forward pass
         assert (raw_images is not None) or (visual_features is not None)
 
+        if self.only_compute_features:
+            assert return_global_features or return_local_features
+
         permute_and_flatten_local_feat = False
         compute_global_features = False
 
@@ -683,16 +683,17 @@ class MultiPurposeVisualModule(nn.Module):
                  f'local_feat_NxCxHxW.shape = {local_feat_NxCxHxW.shape}, but expected {(batch_size, self.local_feat_size, self.num_regions_sqrt, self.num_regions_sqrt)}'
                 assert type(detection_output) == list or type(detection_output) == tuple
                 assert len(detection_output) == 3 or len(detection_output) == 2
-                if len(detection_output) == 2:
+                if len(detection_output) == 2: # this is the case when the model is in evaluation mode
                     # print('YOLOv8 output in evaluation mode')
-                    yolov8_predictions = detection_output[0]
                     yolov8_features = detection_output[1]
-                    # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
-                    yolov8_predictions = non_max_suppression(yolov8_predictions.detach(),
-                                                             conf_thres=0.1, iou_thres=0.1,
-                                                             max_det=self.num_bbox_classes)
-                    # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
-                else:
+                    if not self.only_compute_features:
+                        yolov8_predictions = detection_output[0]
+                        # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
+                        yolov8_predictions = non_max_suppression(yolov8_predictions.detach(),
+                                                                conf_thres=0.1, iou_thres=0.1,
+                                                                max_det=self.num_bbox_classes)
+                        # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
+                else: # this is the case when the model is in training mode
                     # print('YOLOv8 output in training mode')
                     yolov8_predictions = None
                     yolov8_features = detection_output
@@ -726,117 +727,117 @@ class MultiPurposeVisualModule(nn.Module):
         if return_local_features:
             output['local_feat'] = local_feat_NxRxC
 
-        if self.merge_findings:
-            output['pred_findings'] = self.W_findings(global_feat)
-            output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
-
-        if chexpert_forward:
-            if self.classify_orientation:
-                output['pred_orientation'] = self.W_ori_chexpert(global_feat)
-            if self.classify_gender:
-                output['pred_gender'] = self.W_gender_chexpert(global_feat)
-            if not self.merge_findings and self.classify_chexpert:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-        elif cxr14_forward:
-            if self.classify_orientation:            
-                output['pred_orientation'] = self.W_ori_chexpert(global_feat) # weight sharing with chexpert
-            if self.classify_gender:
-                output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
-            if not self.merge_findings:
-                output['pred_cxr14'] = self.W_cxr14(global_feat)
-                output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
-        elif vinbig_forward:
-            if not self.merge_findings:
-                output['pred_vinbig'] = self.W_vinbig(global_feat)
-                output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
-        elif padchest_forward:
-            if self.classify_orientation:
-                output['pred_orientation'] = self.W_padchest_ori(global_feat)
-            if self.classify_gender:
-                output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
-            output['pred_padchest_labels'] = self.W_padchest_labels(global_feat)
-            output['pred_padchest_labels_probs'] = torch.sigmoid(output['pred_padchest_labels'])
-            output['pred_padchest_loc'] = self.W_padchest_loc(global_feat)
-            output['pred_padchest_loc_probs'] = torch.sigmoid(output['pred_padchest_loc'])
-        elif iuxray_forward:
-            if self.classify_tags:
-                output['pred_tags'] = self.W_tags(global_feat)
-            if self.classify_orientation:
-                output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
-            if self.classify_questions:
-                output['pred_qlabels'] = self.W_q(global_feat)
-            if not self.merge_findings and self.classify_chexpert:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-            if self.classify_chest_imagenome:
-                output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
-                output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-        elif mimiccxr_forward:
-            if self.classify_tags:
-                output['pred_tags'] = self.W_tags(global_feat)
-            if self.classify_orientation:
-                output['mimiccxr_pred_orientation'] = self.W_ori_iuxray(global_feat)
-            if self.classify_questions:
-                output['pred_qlabels'] = self.W_q(global_feat)
-            if self.classify_gender:
-                output['pred_gender'] = self.W_gender_chstimgn(global_feat)
-            if not self.merge_findings and self.classify_chexpert:
-                output['pred_chexpert'] = self.W_chx(global_feat)
-                output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
-            if self.predict_labels_and_bboxes_chest_imagenome:
-                if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
-                    pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC, global_feat)
-                    output['pred_chest_imagenome'] = mlc_scores
+        if not self.only_compute_features:
+            if self.merge_findings:
+                output['pred_findings'] = self.W_findings(global_feat)
+                output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
+            if chexpert_forward:
+                if self.classify_orientation:
+                    output['pred_orientation'] = self.W_ori_chexpert(global_feat)
+                if self.classify_gender:
+                    output['pred_gender'] = self.W_gender_chexpert(global_feat)
+                if not self.merge_findings and self.classify_chexpert:
+                    output['pred_chexpert'] = self.W_chx(global_feat)
+                    output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+            elif cxr14_forward:
+                if self.classify_orientation:            
+                    output['pred_orientation'] = self.W_ori_chexpert(global_feat) # weight sharing with chexpert
+                if self.classify_gender:
+                    output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
+                if not self.merge_findings:
+                    output['pred_cxr14'] = self.W_cxr14(global_feat)
+                    output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
+            elif vinbig_forward:
+                if not self.merge_findings:
+                    output['pred_vinbig'] = self.W_vinbig(global_feat)
+                    output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+            elif padchest_forward:
+                if self.classify_orientation:
+                    output['pred_orientation'] = self.W_padchest_ori(global_feat)
+                if self.classify_gender:
+                    output['pred_gender'] = self.W_gender_chexpert(global_feat) # weight sharing with chexpert
+                output['pred_padchest_labels'] = self.W_padchest_labels(global_feat)
+                output['pred_padchest_labels_probs'] = torch.sigmoid(output['pred_padchest_labels'])
+                output['pred_padchest_loc'] = self.W_padchest_loc(global_feat)
+                output['pred_padchest_loc_probs'] = torch.sigmoid(output['pred_padchest_loc'])
+            elif iuxray_forward:
+                if self.classify_tags:
+                    output['pred_tags'] = self.W_tags(global_feat)
+                if self.classify_orientation:
+                    output['iuxray_pred_orientation'] = self.W_ori_iuxray(global_feat)
+                if self.classify_questions:
+                    output['pred_qlabels'] = self.W_q(global_feat)
+                if not self.merge_findings and self.classify_chexpert:
+                    output['pred_chexpert'] = self.W_chx(global_feat)
+                    output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+                if self.classify_chest_imagenome:
+                    output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
                     output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
-                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
-                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4_1:
-                    mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC)
-                    output['pred_chest_imagenome'] = mlc_scores
-                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
-                    assert pred_bbox_coords is not None
-                    if refine_bbox_coords:
-                        pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
-                            local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+            elif mimiccxr_forward:
+                if self.classify_tags:
+                    output['pred_tags'] = self.W_tags(global_feat)
+                if self.classify_orientation:
+                    output['mimiccxr_pred_orientation'] = self.W_ori_iuxray(global_feat)
+                if self.classify_questions:
+                    output['pred_qlabels'] = self.W_q(global_feat)
+                if self.classify_gender:
+                    output['pred_gender'] = self.W_gender_chstimgn(global_feat)
+                if not self.merge_findings and self.classify_chexpert:
+                    output['pred_chexpert'] = self.W_chx(global_feat)
+                    output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
+                if self.predict_labels_and_bboxes_chest_imagenome:
+                    if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
+                        pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC, global_feat)
                         output['pred_chest_imagenome'] = mlc_scores
                         output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                         output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                         output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
-                    else:
-                        mlc_scores  = self.bbox_regressor_and_classifier(
-                            local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+                    elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4_1:
+                        mlc_scores = self.bbox_regressor_and_classifier(local_feat_NxRxC)
                         output['pred_chest_imagenome'] = mlc_scores
                         output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
-                    assert pred_bbox_coords is not None
-                    pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
-                        global_feat, local_feat_NxCxHxW, pred_bbox_coords)
-                    output['pred_chest_imagenome'] = mlc_scores
-                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                    output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
-                    output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
-            else:
-                if self.classify_chest_imagenome and not skip_mlc:
-                    if self.chest_imagenome_mlc_version == MLCVersion.DEFAULT:
-                        output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
-                    elif self.chest_imagenome_mlc_version == MLCVersion.V1:
-                        output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxRxC, global_feat)
-                    elif self.chest_imagenome_mlc_version == MLCVersion.V2:
+                    elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V5:
                         assert pred_bbox_coords is not None
-                        output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxCxHxW, global_feat, pred_bbox_coords)
-                    else: assert False
-                    output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
-                if self.predict_bboxes_chest_imagenome:
-                    if self.raw_image_encoding == RawImageEncoding.YOLOV8:
-                        output['yolov8_features'] = yolov8_features
-                        if yolov8_predictions is not None:
-                            output['yolov8_predictions'] = yolov8_predictions
-                    else:
-                        pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
+                        if refine_bbox_coords:
+                            pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
+                                local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+                            output['pred_chest_imagenome'] = mlc_scores
+                            output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                            output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                            output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                        else:
+                            mlc_scores  = self.bbox_regressor_and_classifier(
+                                local_feat_NxCxHxW, pred_bbox_coords, refine_bbox_coords)
+                            output['pred_chest_imagenome'] = mlc_scores
+                            output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                    elif self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V6:
+                        assert pred_bbox_coords is not None
+                        pred_bbox_coords, pred_bbox_presence, mlc_scores = self.bbox_regressor_and_classifier(
+                            global_feat, local_feat_NxCxHxW, pred_bbox_coords)
+                        output['pred_chest_imagenome'] = mlc_scores
+                        output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
                         output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                         output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+                else:
+                    if self.classify_chest_imagenome and not skip_mlc:
+                        if self.chest_imagenome_mlc_version == MLCVersion.DEFAULT:
+                            output['pred_chest_imagenome'] = self.W_chst_imgn(global_feat)
+                        elif self.chest_imagenome_mlc_version == MLCVersion.V1:
+                            output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxRxC, global_feat)
+                        elif self.chest_imagenome_mlc_version == MLCVersion.V2:
+                            assert pred_bbox_coords is not None
+                            output['pred_chest_imagenome'] = self.MLC_chst_imgn(local_feat_NxCxHxW, global_feat, pred_bbox_coords)
+                        else: assert False
+                        output['pred_chest_imagenome_probs'] = torch.sigmoid(output['pred_chest_imagenome'])
+                    if self.predict_bboxes_chest_imagenome:
+                        if self.raw_image_encoding == RawImageEncoding.YOLOV8:
+                            output['yolov8_features'] = yolov8_features
+                            if yolov8_predictions is not None:
+                                output['yolov8_predictions'] = yolov8_predictions
+                        else:
+                            pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
+                            output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
+                            output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
 
         return output
 

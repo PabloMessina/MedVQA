@@ -437,9 +437,20 @@ def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_la
     
     return dicom_ids, adapted_chest_imagenome_labels
 
-def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename):
+def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename, apply_anatomy_reordering=False):
     # Load chest_imagenome_label_names and compute templates for each label
     chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+
+    if apply_anatomy_reordering:
+        tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
+        label_order = []
+        for _, labels in tmp['anatomy_to_localized_labels']:
+            label_order.extend(labels)
+        for _, labels in tmp['anatomy_group_to_global_labels']:
+            label_order.extend(labels)
+        assert len(label_order) == len(chest_imagenome_label_names)
+        chest_imagenome_label_names = [chest_imagenome_label_names[i] for i in label_order]
+
     chest_imagenome_templates = {}
     for label_name in chest_imagenome_label_names:
         if len(label_name) == 3:

@@ -47,13 +47,60 @@ def best_threshold_and_f1_score(probs, gt):
             best_thrs = probs[i]
     return best_thrs, best_f1
 
+def best_threshold_and_precision_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    fp = len(gt) - tp
+    best_precision = tp / (tp + fp)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+        else:
+            fp -= 1
+        if tp == 0:
+            break
+        precision = tp / (tp + fp)
+        if precision > best_precision:
+            best_precision = precision
+            best_thrs = probs[i]
+    return best_thrs, best_precision
+
+def best_threshold_and_accuracy_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    tn = 0
+    fp = len(gt) - tp
+    fn = 0
+    best_acc = (tp + tn) / (tp + tn + fp + fn)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+            fn += 1
+        else:
+            tn += 1
+            fp -= 1
+        acc = (tp + tn) / (tp + tn + fp + fn)
+        if acc > best_acc:
+            best_acc = acc
+            best_thrs = probs[i]
+    return best_thrs, best_acc
+
 class MultilabelOptimalEnsembleSearcher:
-    def __init__(self, probs, gt, topk=10):
+    def __init__(self, probs, gt, topk=10, score_name='f1'):
     
         assert len(probs.shape) == 3
         assert len(gt.shape) == 2
         assert probs[0].shape == gt.shape
-        
+        assert score_name in ['f1', 'precision', 'accuracy']
+        if score_name == 'f1':
+            self.score_func = best_threshold_and_f1_score
+        elif score_name == 'precision':
+            self.score_func = best_threshold_and_precision_score
+        elif score_name == 'accuracy':
+            self.score_func = best_threshold_and_accuracy_score
+
         self.gt = gt
         self.probs = probs
         self.n = gt.shape[0]
@@ -80,7 +127,7 @@ class MultilabelOptimalEnsembleSearcher:
             weights[i] = 1
             merged_probs = np.average(self.probs, 0, weights=weights)
             for j in range(self.m):
-                threshold, score = best_threshold_and_f1_score(merged_probs.T[j], self.gt.T[j])
+                threshold, score = self.score_func(merged_probs.T[j], self.gt.T[j])
                 self._update_minheap(j, weights, threshold, score)
         # Try 1 for two models and 0 for the others, for each pair of models
         print('  2) Try pairs of models')
@@ -94,7 +141,7 @@ class MultilabelOptimalEnsembleSearcher:
             weights /= weights.sum()
             merged_probs = np.average(self.probs, 0, weights=weights)
             for k in range(self.m):
-                threshold, score = best_threshold_and_f1_score(merged_probs.T[k], self.gt.T[k])
+                threshold, score = self.score_func(merged_probs.T[k], self.gt.T[k])
                 self._update_minheap(k, weights, threshold, score)
         # Try the average of all models
         print('  3) Try the average of all models')
@@ -102,7 +149,7 @@ class MultilabelOptimalEnsembleSearcher:
         weights /= weights.sum()
         merged_probs = np.average(self.probs, 0, weights=weights)
         for j in range(self.m):
-            threshold, score = best_threshold_and_f1_score(merged_probs.T[j], self.gt.T[j])
+            threshold, score = self.score_func(merged_probs.T[j], self.gt.T[j])
             self._update_minheap(j, weights, threshold, score)
         print('  Done')
     
@@ -112,7 +159,7 @@ class MultilabelOptimalEnsembleSearcher:
             weights /= weights.sum()
             merged_probs = np.average(self.probs, 0, weights=weights)
             for i in range(self.m):
-                threshold, score = best_threshold_and_f1_score(merged_probs.T[i], self.gt.T[i])
+                threshold, score = self.score_func(merged_probs.T[i], self.gt.T[i])
                 self._update_minheap(i, weights, threshold, score)
                 
     def sample_weights_from_previous_ones(self, n_tries, noise_coef=0.05):
@@ -125,7 +172,7 @@ class MultilabelOptimalEnsembleSearcher:
                 weights_array[i] /= weights_array[i].sum()                
             merged_probs = (probs * weights_array).sum(-1)            
             for i in range(self.m):
-                threshold, score = best_threshold_and_f1_score(merged_probs.T[i], self.gt.T[i])
+                threshold, score = self.score_func(merged_probs.T[i], self.gt.T[i])
                 self._update_minheap(i, weights_array[i], threshold, score)
                 
     def _compute_best_merged_probs_and_thresholds(self):
