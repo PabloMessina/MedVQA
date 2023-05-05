@@ -21,8 +21,8 @@ from medvqa.datasets.chest_imagenome import (
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_train_val_test_stats_per_label,
-    load_postprocessed_label_names,
-    load_postprocessed_labels,
+    load_chest_imagenome_label_names,
+    load_chest_imagenome_labels,
     load_scene_graph,
     visualize_ground_truth_bounding_boxes,
     visualize_predicted_bounding_boxes,
@@ -53,7 +53,7 @@ from medvqa.utils.handlers import (
     get_log_iteration_handler,
     get_log_metrics_handler,
 )
-from medvqa.utils.logging import print_blue, print_bold, print_red
+from medvqa.utils.logging import print_blue, print_bold, print_normal_and_bold, print_red
 
 _VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,
@@ -233,7 +233,7 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
         else:
             # TODO: remove this hack
             if len(metrics_dict[MetricNames.CHESTIMAGENOMELABEL_PRF1]['p']) == 627:
-                label_names = load_postprocessed_label_names('labels(min_freq=100).pkl')
+                label_names = load_chest_imagenome_label_names('labels(min_freq=100).pkl')
             else:
                 assert False
         label_names_list.append(label_names)
@@ -442,8 +442,8 @@ class ChestImaGenomeMLCVisualizer:
         self.stats_per_label = get_train_val_test_stats_per_label('labels(min_freq=1000).pkl',
                                                                    'imageId2labels(min_freq=1000).pkl', 
                                                                    use_gold_in_test=use_gold_in_test)
-        self.gt_labels = load_postprocessed_labels(test_labels_filename)
-        self.gt_label_names = load_postprocessed_label_names(test_label_names_filename)
+        self.gt_labels = load_chest_imagenome_labels(test_labels_filename)
+        self.gt_label_names = load_chest_imagenome_label_names(test_label_names_filename)
 
     def print_auc_per_class(self):
         set_completer_delims = self.metrics[MetricNames.CHESTIMAGENOMELABELAUC]['per_class']
@@ -644,15 +644,21 @@ class ChestImaGenomeMLCVisualizer:
                                   f'{abnormality_name_with_underscores}__negative_{i+1}.pdf')
             print('Saving', pdf_path)
             save_report_image_and_other_images_as_pdf(dicom_id, pdf_path)
-    
+
+def _get_thresholds_filepath(results_folder_path, labeler_name, score_name):
+    return os.path.join(results_folder_path, f'thresholds_{labeler_name}({score_name}).pkl')
+
 def calibrate_thresholds_on_mimiccxr_validation_set(
         model_and_device_getter, use_amp, mimiccxr_vision_evaluator_kwargs, classify_chexpert, classify_chest_imagenome,
-        cache_thresholds=False, cache_probs=False, results_folder_path=None, score_name='f1'):
+        cache_thresholds=False, cache_probs=False, results_folder_path=None, score_name='f1',
+        return_filepaths_instead=False):
 
     print_blue('Calibrating thresholds on MIMIC-CXR validation set', bold=True)
     print('score_name:', score_name)
     
     assert classify_chexpert or classify_chest_imagenome # at least one of these must be true
+    if return_filepaths_instead:
+        assert cache_thresholds, 'return_filepaths_instead=True requires cache_thresholds=True'
 
     skip_chexpert = not classify_chexpert
     skip_chest_imagenome = not classify_chest_imagenome
@@ -662,22 +668,30 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
         assert results_folder_path is not None
         done = True
         if classify_chexpert:
-            chexpert_cache_path = os.path.join(results_folder_path, f'thresholds_chexpert({score_name}).pkl')
+            chexpert_cache_path = _get_thresholds_filepath(results_folder_path, 'chexpert', score_name)
             if os.path.exists(chexpert_cache_path):
-                print(f'Loading thresholds from {chexpert_cache_path}')
-                thresholds = load_pickle(chexpert_cache_path)
-                thresholds_dict['chexpert'] = thresholds
-                print('thresholds.shape:', thresholds.shape)
+                if return_filepaths_instead:
+                    thresholds_dict['chexpert'] = chexpert_cache_path
+                    print_normal_and_bold('Thresholds for CheXpert already cached at ', chexpert_cache_path)
+                else:
+                    print_normal_and_bold('Loading thresholds for CheXpert from ', chexpert_cache_path)
+                    thresholds = load_pickle(chexpert_cache_path)
+                    thresholds_dict['chexpert'] = thresholds
+                    print('thresholds.shape:', thresholds.shape)
                 skip_chexpert = True
             else:
                 done = False
         if classify_chest_imagenome:
-            chest_imagenome_cache_path = os.path.join(results_folder_path, f'thresholds_chest_imagenome({score_name}).pkl')
+            chest_imagenome_cache_path = _get_thresholds_filepath(results_folder_path, 'chest_imagenome', score_name)
             if os.path.exists(chest_imagenome_cache_path):
-                print(f'Loading thresholds from {chest_imagenome_cache_path}')
-                thresholds = load_pickle(chest_imagenome_cache_path)
-                thresholds_dict['chest_imagenome'] = thresholds
-                print('thresholds.shape:', thresholds.shape)
+                if return_filepaths_instead:
+                    thresholds_dict['chest_imagenome'] = chest_imagenome_cache_path
+                    print_normal_and_bold('Thresholds for Chest ImaGenome already cached at ', chest_imagenome_cache_path)
+                else:
+                    print_normal_and_bold('Loading thresholds for Chest ImaGenome from ', chest_imagenome_cache_path)
+                    thresholds = load_pickle(chest_imagenome_cache_path)
+                    thresholds_dict['chest_imagenome'] = thresholds
+                    print('thresholds.shape:', thresholds.shape)
                 skip_chest_imagenome = True
             else:
                 done = False
@@ -752,9 +766,11 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
         # Save thresholds
         if cache_thresholds:
             print('Saving thresholds ...')
-            save_path = os.path.join(results_folder_path, f'thresholds_{labeler_name}({score_name}).pkl')
+            save_path = _get_thresholds_filepath(results_folder_path, labeler_name, score_name)
             save_to_pickle(thresholds, save_path)
             print('Thresholds saved to ', end=''); print_bold(save_path)
+            if return_filepaths_instead:
+                thresholds_dict[labeler_name] = save_path
         # Save probabilities
         if cache_probs:
             assert results_folder_path is not None

@@ -98,15 +98,10 @@ def get_dicomId2gender(num_workers=4):
     save_to_pickle(dicomId2gender, cache_path)
     return dicomId2gender
 
-def load_postprocessed_label_names(label_names_filename):
-    label_names = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, label_names_filename))
-    assert label_names is not None, label_names_filename
-    return label_names
-
-def load_postprocessed_labels(labels_filename):
-    labels = load_pickle(os.path.join(CHEST_IMAGENOME_CACHE_DIR, labels_filename))
-    assert labels is not None, labels_filename
-    return labels
+def _load_pickle_from_cache_dir(filename):
+    data = get_cached_pickle_file(os.path.join(CHEST_IMAGENOME_CACHE_DIR, filename))
+    assert data is not None, filename
+    return data
 
 def load_chest_imagenome_silver_bboxes():
     chest_imagenome_bboxes = get_cached_pickle_file(CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH)
@@ -418,7 +413,7 @@ def extract_labels_from_scene_graph(scene_graph):
 
 def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename):
     # Load chest_imagenome_labels    
-    chest_imagenome_labels = load_postprocessed_labels(chest_imagenome_labels_filename)
+    chest_imagenome_labels = _load_pickle_from_cache_dir(chest_imagenome_labels_filename)
     # Obtain dicom_ids
     dicom_ids = set(chest_imagenome_labels.keys())
     # Adapt chest_imagenome_labels so that they can be indexed by report_id    
@@ -437,10 +432,11 @@ def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_la
     
     return dicom_ids, adapted_chest_imagenome_labels
 
-def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename, apply_anatomy_reordering=False):
-    # Load chest_imagenome_label_names and compute templates for each label
-    chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+def load_chest_imagenome_labels(chest_imagenome_labels_filename):
+    return _load_pickle_from_cache_dir(chest_imagenome_labels_filename)
 
+def load_chest_imagenome_label_names(chest_imagenome_label_names_filename, apply_anatomy_reordering=False):
+    chest_imagenome_label_names = _load_pickle_from_cache_dir(chest_imagenome_label_names_filename)
     if apply_anatomy_reordering:
         tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
         label_order = []
@@ -450,6 +446,12 @@ def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_f
             label_order.extend(labels)
         assert len(label_order) == len(chest_imagenome_label_names)
         chest_imagenome_label_names = [chest_imagenome_label_names[i] for i in label_order]
+    return chest_imagenome_label_names
+
+def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename, apply_anatomy_reordering=False):
+    # Load chest_imagenome_label_names and compute templates for each label
+    chest_imagenome_label_names = load_chest_imagenome_label_names(
+        chest_imagenome_label_names_filename, apply_anatomy_reordering)
 
     chest_imagenome_templates = {}
     for label_name in chest_imagenome_label_names:
@@ -472,7 +474,7 @@ def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_f
 
 def get_labels_per_anatomy_and_anatomy_group(label_names_filename, for_training=False):
     # Load label names
-    label_names = load_postprocessed_label_names(label_names_filename)
+    label_names = _load_pickle_from_cache_dir(label_names_filename)
     localized_label_names = [x for x in label_names if len(x) == 3]
     global_label_names = [x for x in label_names if len(x) == 2]
     assert len(localized_label_names) + len(global_label_names) == len(label_names)
@@ -935,11 +937,11 @@ def get_train_val_test_stats_per_label(label_names_filename, labels_filename, nu
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
     
-    train_val_label_names = load_postprocessed_label_names(label_names_filename)
-    train_val_dicom_id_to_labels = load_postprocessed_labels(labels_filename)
+    train_val_label_names = _load_pickle_from_cache_dir(label_names_filename)
+    train_val_dicom_id_to_labels = _load_pickle_from_cache_dir(labels_filename)
     if use_gold_in_test:
-        test_dicom_id_to_labels = load_postprocessed_label_names('gold_imageId2binaryLabels.pkl')
-        test_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+        test_dicom_id_to_labels = _load_pickle_from_cache_dir('gold_imageId2binaryLabels.pkl')
+        test_label_names = _load_pickle_from_cache_dir('gold_binary_labels.pkl')
     else:
         test_dicom_id_to_labels = train_val_dicom_id_to_labels
         test_label_names = train_val_label_names
@@ -1016,7 +1018,7 @@ def _get_train_val_test_summary_stats_for_label(label):
 
 def get_train_val_test_summary_text_for_label(label, label_names_filename, labels_filename, use_gold_in_test=False):
     label2stats = get_train_val_test_stats_per_label(label_names_filename, labels_filename, use_gold_in_test=use_gold_in_test)
-    label_names = load_postprocessed_label_names(label_names_filename)
+    label_names = _load_pickle_from_cache_dir(label_names_filename)
     # Get actual label
     label_idx = -1
     if type(label) == str:

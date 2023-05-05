@@ -886,6 +886,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 detectron2_includes_rpn=False,
                 using_yolov8=False,
                 model_for_yolov8=None,
+                **unused_kwargs,
             ):
     
     print(f'get_engine(): shift_answer={shift_answer}')

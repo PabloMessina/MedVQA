@@ -47,7 +47,7 @@ class ModelWrapper:
             epoch = self.epoch_wrapper,
         )
 
-    def load_checkpoint(self, checkpoint_path, device, model_only=False):
+    def load_checkpoint(self, checkpoint_path, device, model_only=False, strict=True):
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        Checkpoint.load_objects(self.to_load(model_only), checkpoint)
+        Checkpoint.load_objects(self.to_load(model_only), checkpoint, strict=strict)
         print('Checkpoint successfully loaded!')

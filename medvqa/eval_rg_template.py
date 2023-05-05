@@ -9,7 +9,7 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_label_names_and_templates,
-    load_postprocessed_labels as load_chest_imagenome_postprocessed_labels,
+    load_chest_imagenome_labels,
 )
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
@@ -59,7 +59,7 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold
 from medvqa.evaluation.report_generation import (
     TemplateBasedModes,
     compute_report_level_metrics,
@@ -84,6 +84,7 @@ def parse_args():
     parser.add_argument('--chest-imagenome-labels-filename', type=str)
     parser.add_argument('--top-k-chexpert-labels', type=int, default=None, help='if None, use all labels')
     parser.add_argument('--top-k-chest-imagenome-labels', type=int, default=None, help='if None, use all labels')
+    parser.add_argument('--label-score-threshold', type=float, default=None, help='if not None, keep only labels with score >= threshold')
     parser.add_argument('--use-amp', action='store_true', default=False)
     parser.add_argument('--cache-computations', action='store_true', default=False)
     
@@ -107,7 +108,9 @@ _BEST_CHEXPERT_ORDER = [
 
 def _compute_and_save_report_level_metrics(gt_reports, gen_reports, dataset_name, tokenizer, results_folder_path, 
                                            max_processes, template_based_mode, calibrate_thresholds, calibration_score_name,
-                                           top_k_chexpert_labels, top_k_chest_imagenome_labels):
+                                           top_k_chexpert_labels, tot_chexpert_labels,
+                                           top_k_chest_imagenome_labels, tot_chest_imagenome_labels,
+                                           label_score_threshold):
     metrics = compute_report_level_metrics(gt_reports, gen_reports, tokenizer, max_processes=max_processes)
     template_based_mode = template_based_mode.replace('_','-')
     strings = ['template-based', template_based_mode]
@@ -115,8 +118,13 @@ def _compute_and_save_report_level_metrics(gt_reports, gen_reports, dataset_name
         strings.append('thrs-calib')
         assert calibration_score_name is not None
         strings.append(f'calib-score={calibration_score_name}')
-    if top_k_chexpert_labels is not None: strings.append(f'chxp-top{top_k_chexpert_labels}')
-    if top_k_chest_imagenome_labels is not None: strings.append(f'chst-img-top{top_k_chest_imagenome_labels}')
+    if label_score_threshold is not None: strings.append(f'lbl-thr={label_score_threshold:.2f}')
+    if top_k_chexpert_labels is not None:
+        assert tot_chexpert_labels is not None
+        strings.append(f'chxp-top{top_k_chexpert_labels}(tot={tot_chexpert_labels})')
+    if top_k_chest_imagenome_labels is not None:
+        assert tot_chest_imagenome_labels is not None
+        strings.append(f'chst-img-top{top_k_chest_imagenome_labels}(tot={tot_chest_imagenome_labels})')
     save_path = os.path.join(results_folder_path,
         f'{dataset_name}_report_level_metrics(eval_mode={",".join(strings)}).pkl')
     save_to_pickle(metrics, save_path)
@@ -164,7 +172,7 @@ def _recover_vision_dataset_manager_kwargs(
     return kwargs
 
 def _recover_mimiccxr_vision_evaluator_kwargs(
-        metadata, batch_size, num_workers, qa_adapted_reports_filename):
+        metadata, batch_size, num_workers, qa_adapted_reports_filename=None):
     return _recover_vision_dataset_manager_kwargs(
         'mimiccxr', metadata, batch_size, num_workers, qa_adapted_reports_filename)
 
@@ -178,7 +186,7 @@ def _evaluate_chest_imagenome_template_based_oracle(
     assert mimiccxr_qa_adapted_reports_filename is not None
     label_names, label_templates = load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_filename)
     label_order = label_names
-    labels_dict = load_chest_imagenome_postprocessed_labels(chest_imagenome_labels_filename)
+    labels_dict = load_chest_imagenome_labels(chest_imagenome_labels_filename)
     mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(mimiccxr_qa_adapted_reports_filename)
     test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']
     test_report_ids = []
@@ -217,8 +225,6 @@ def _compute_probs_and_gt_labels_for_mimiccxr_test_set(
         auxiliary_tasks_kwargs, checkpoint_folder_path, model_kwargs, mimiccxr_vision_evaluator_kwargs,
         use_amp, save_probs_and_gt_labels=True):
 
-    print_blue('Computing probs and gt labels for mimiccxr test set from scratch...', bold=True)
-
     # Pull out some args from kwargs
     # auxiliary task: medical tags prediction
     classify_tags = auxiliary_tasks_kwargs.get('classify_tags', False)
@@ -234,6 +240,50 @@ def _compute_probs_and_gt_labels_for_mimiccxr_test_set(
     predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
+
+    assert classify_chexpert or classify_chest_imagenome
+
+    results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+    skip_chexpert = not classify_chexpert
+    skip_chest_imagenome = not classify_chest_imagenome
+    if classify_chexpert:
+        chexpert_probs_path = os.path.join(results_folder_path, 'dicom_id_to_pred_chexpert_probs__mimiccxr_test_set.pkl')
+        chexpert_gt_path = os.path.join(results_folder_path, 'dicom_id_to_gt_chexpert_labels__mimiccxr_test_set.pkl')
+        if os.path.exists(chexpert_probs_path):
+            assert os.path.exists(chexpert_gt_path)
+            print_bold('Loading cached chexpert predictions and ground truth...')
+            dicom_id_to_pred_chexpert_probs = get_cached_pickle_file(chexpert_probs_path)
+            dicom_id_to_gt_chexpert_labels = get_cached_pickle_file(chexpert_gt_path)
+            print(f'len(dicom_id_to_pred_chexpert_probs): {len(dicom_id_to_pred_chexpert_probs)}')
+            print(f'len(dicom_id_to_gt_chexpert_labels): {len(dicom_id_to_gt_chexpert_labels)}')
+            assert len(dicom_id_to_pred_chexpert_probs) == len(dicom_id_to_gt_chexpert_labels)
+            skip_chexpert = True
+    if classify_chest_imagenome:
+        assert auxiliary_tasks_kwargs['classify_chest_imagenome']
+        chest_imagenome_probs_path = os.path.join(results_folder_path, 'dicom_id_to_pred_chest_imagenome_probs__mimiccxr_test_set.pkl')
+        chest_imagenome_gt_path = os.path.join(results_folder_path, 'dicom_id_to_gt_chest_imagenome_labels__mimiccxr_test_set.pkl')
+        if os.path.exists(chest_imagenome_probs_path):
+            assert os.path.exists(chest_imagenome_gt_path)
+            print_bold('Loading cached chest imagenome predictions and ground truth...')
+            dicom_id_to_pred_chest_imagenome_probs = get_cached_pickle_file(chest_imagenome_probs_path)
+            dicom_id_to_gt_chest_imagenome_labels = get_cached_pickle_file(chest_imagenome_gt_path)
+            print(f'len(dicom_id_to_pred_chest_imagenome_probs): {len(dicom_id_to_pred_chest_imagenome_probs)}')
+            print(f'len(dicom_id_to_gt_chest_imagenome_labels): {len(dicom_id_to_gt_chest_imagenome_labels)}')
+            assert len(dicom_id_to_pred_chest_imagenome_probs) == len(dicom_id_to_gt_chest_imagenome_labels)
+            skip_chest_imagenome = True
+
+    if skip_chexpert and skip_chest_imagenome:
+        output = {}
+        if classify_chexpert:
+            output['dicom_id_to_pred_chexpert_probs'] = dicom_id_to_pred_chexpert_probs
+            output['dicom_id_to_gt_chexpert_labels'] = dicom_id_to_gt_chexpert_labels
+        if classify_chest_imagenome:
+            output['dicom_id_to_pred_chest_imagenome_probs'] = dicom_id_to_pred_chest_imagenome_probs
+            output['dicom_id_to_gt_chest_imagenome_labels'] = dicom_id_to_gt_chest_imagenome_labels
+        return output
+
+    print_blue('Computing probs and gt labels for mimiccxr test set from scratch...', bold=True)
     
     count_print = CountPrinter()
         
@@ -332,7 +382,6 @@ def _compute_probs_and_gt_labels_for_mimiccxr_test_set(
     print('len(mimiccxr_vision_evaluator.test_dataset) =', len(mimiccxr_vision_evaluator.test_dataset))
     print('len(mimiccxr_vision_evaluator.test_dataloader) =', len(mimiccxr_vision_evaluator.test_dataloader))
     evaluator_engine.run(mimiccxr_vision_evaluator.test_dataloader)
-    results_folder_path = get_results_folder_path(checkpoint_folder_path)
     
     # Prepare probabilities and ground truth labels
     count_print(f'Preparing probs and gt labels ...')
@@ -342,10 +391,10 @@ def _compute_probs_and_gt_labels_for_mimiccxr_test_set(
         label_names.append('chest_imagenome')
     if classify_chexpert:
         label_names.append('chexpert')
+    
     for label_name in label_names:
         pred_probs_key = f'pred_{label_name}_probs'
         gt_labels_key = f'{label_name}'
-        
         dicom_id_to_pred_probs = {}
         dicom_id_to_gt_labels = {}
         pred_probs = evaluator_engine.state.metrics[pred_probs_key]
@@ -381,7 +430,8 @@ def _compute_probs_and_gt_labels_for_mimiccxr_test_set(
     return output
 
 def _find_top_k_label_indices(dicom_id_to_gt_labels, dicom_id_to_pred_probs, thresholds, k, label_names,
-                              score_name):
+                              score_name, score_threshold):
+    assert (k is None) != (score_threshold is None), 'Exactly one of k and score_threshold must be specified'
     # Find the top k label classes with the highest precision scores
     assert score_name in ['f1', 'precision', 'accuracy']
     if score_name == 'f1':
@@ -427,9 +477,15 @@ def _find_top_k_label_indices(dicom_id_to_gt_labels, dicom_id_to_pred_probs, thr
     for i in range(gt_labels.shape[1]):
         score_list.append(score_func(gt_labels[:, i], pred_labels[:, i]))
     score_list = np.array(score_list)
-    top_k_label_indices = np.argsort(score_list)[::-1][:k]
-    # Print top k label classes with the highest p scores
-    print_bold(f'Top {k} label classes with the highest precision scores:')
+    if score_threshold is not None:
+        top_k_label_indices = np.where(score_list >= score_threshold)[0]
+        top_k_label_indices = top_k_label_indices[np.argsort(score_list[top_k_label_indices])[::-1]]
+    elif k is not None:
+        top_k_label_indices = np.argsort(score_list)[::-1][:k]
+    else: assert False
+    # Print top k label classes with the highest scores
+    k = len(top_k_label_indices)
+    print_bold(f'Top {k} label classes with the highest {score_name} scores:')
     if k > 20:
         idxs_to_print = set(np.linspace(0, k-1, 20, dtype=int))
     else:
@@ -454,6 +510,7 @@ def _evaluate_model(
     calibration_score_name='f1',
     top_k_chexpert_labels=None,
     top_k_chest_imagenome_labels=None,
+    label_score_threshold=None,
     mimiccxr_qa_adapted_reports_filename=None,
     chest_imagenome_label_names_filename=None,
     chest_imagenome_labels_filename=None,
@@ -484,52 +541,20 @@ def _evaluate_model(
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
             
             # Obtain model's predictions on MIMIC-CXR test set
-            skip_chexpert = not use_chexpert
-            skip_chest_imagenome = not use_chest_imagenome
+            tmp = _compute_probs_and_gt_labels_for_mimiccxr_test_set(
+                auxiliary_tasks_kwargs=auxiliary_tasks_kwargs,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+                use_amp=use_amp,
+                save_probs_and_gt_labels=cache_computations,
+            )
             if use_chexpert:
-                assert auxiliary_tasks_kwargs['classify_chexpert']
-                chexpert_probs_path = os.path.join(results_folder_path, 'dicom_id_to_pred_chexpert_probs__mimiccxr_test_set.pkl')
-                chexpert_gt_path = os.path.join(results_folder_path, 'dicom_id_to_gt_chexpert_labels__mimiccxr_test_set.pkl')
-                if os.path.exists(chexpert_probs_path):
-                    assert os.path.exists(chexpert_gt_path)
-                    print_bold('Loading cached chexpert predictions and ground truth...')
-                    dicom_id_to_pred_chexpert_probs = get_cached_pickle_file(chexpert_probs_path)
-                    dicom_id_to_gt_chexpert_labels = get_cached_pickle_file(chexpert_gt_path)
-                    print(f'len(dicom_id_to_pred_chexpert_probs): {len(dicom_id_to_pred_chexpert_probs)}')
-                    print(f'len(dicom_id_to_gt_chexpert_labels): {len(dicom_id_to_gt_chexpert_labels)}')
-                    assert len(dicom_id_to_pred_chexpert_probs) == len(dicom_id_to_gt_chexpert_labels)
-                    skip_chexpert = True
+                dicom_id_to_pred_chexpert_probs = tmp['dicom_id_to_pred_chexpert_probs']
+                dicom_id_to_gt_chexpert_labels = tmp['dicom_id_to_gt_chexpert_labels']
             if use_chest_imagenome:
-                assert auxiliary_tasks_kwargs['classify_chest_imagenome']
-                chest_imagenome_probs_path = os.path.join(results_folder_path, 'dicom_id_to_pred_chest_imagenome_probs__mimiccxr_test_set.pkl')
-                chest_imagenome_gt_path = os.path.join(results_folder_path, 'dicom_id_to_gt_chest_imagenome_labels__mimiccxr_test_set.pkl')
-                if os.path.exists(chest_imagenome_probs_path):
-                    assert os.path.exists(chest_imagenome_gt_path)
-                    print_bold('Loading cached chest imagenome predictions and ground truth...')
-                    dicom_id_to_pred_chest_imagenome_probs = get_cached_pickle_file(chest_imagenome_probs_path)
-                    dicom_id_to_gt_chest_imagenome_labels = get_cached_pickle_file(chest_imagenome_gt_path)
-                    print(f'len(dicom_id_to_pred_chest_imagenome_probs): {len(dicom_id_to_pred_chest_imagenome_probs)}')
-                    print(f'len(dicom_id_to_gt_chest_imagenome_labels): {len(dicom_id_to_gt_chest_imagenome_labels)}')
-                    assert len(dicom_id_to_pred_chest_imagenome_probs) == len(dicom_id_to_gt_chest_imagenome_labels)
-                    skip_chest_imagenome = True
-
-            if not skip_chexpert or not skip_chest_imagenome:
-                print('skip_chexpert:', skip_chexpert)
-                print('skip_chest_imagenome:', skip_chest_imagenome)
-                tmp = _compute_probs_and_gt_labels_for_mimiccxr_test_set(
-                    auxiliary_tasks_kwargs=auxiliary_tasks_kwargs,
-                    checkpoint_folder_path=checkpoint_folder_path,
-                    model_kwargs=model_kwargs,
-                    mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
-                    use_amp=use_amp,
-                    save_probs_and_gt_labels=cache_computations,
-                )
-                if use_chexpert:
-                    dicom_id_to_pred_chexpert_probs = tmp['dicom_id_to_pred_chexpert_probs']
-                    dicom_id_to_gt_chexpert_labels = tmp['dicom_id_to_gt_chexpert_labels']
-                if use_chest_imagenome:
-                    dicom_id_to_pred_chest_imagenome_probs = tmp['dicom_id_to_pred_chest_imagenome_probs']
-                    dicom_id_to_gt_chest_imagenome_labels = tmp['dicom_id_to_gt_chest_imagenome_labels']
+                dicom_id_to_pred_chest_imagenome_probs = tmp['dicom_id_to_pred_chest_imagenome_probs']
+                dicom_id_to_gt_chest_imagenome_labels = tmp['dicom_id_to_gt_chest_imagenome_labels']
 
             # Calibrate thresholds on MIMIC-CXR validation set
             if calibrate_thresholds:
@@ -540,7 +565,7 @@ def _evaluate_model(
                 kwargs['val_image_transform'] = kwargs['test_image_transform']
                 assert kwargs['val_image_transform'] is not None
 
-                def _model_and_device_getter():
+                def _get_model_and_device():
                     # Define device
                     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                     # Load saved checkpoint    
@@ -556,7 +581,7 @@ def _evaluate_model(
                     return model, device
 
                 thresholds_dict = calibrate_thresholds_on_mimiccxr_validation_set(
-                    model_and_device_getter=_model_and_device_getter,
+                    model_and_device_getter=_get_model_and_device,
                     use_amp=use_amp,
                     mimiccxr_vision_evaluator_kwargs=kwargs,
                     classify_chexpert=use_chexpert,
@@ -603,13 +628,17 @@ def _evaluate_model(
                 if label_thresholds is None:
                     label_thresholds = np.array([0.5] * len(label_names)) # default thresholds
                 chexpert_report_ids, pred_probs = _get_report_ids_and_pred_probs(dicom_id_to_pred_chexpert_probs)
-                if top_k_chexpert_labels is not None:
+                if top_k_chexpert_labels is not None or label_score_threshold is not None:
                     top_k_label_indices = _find_top_k_label_indices(dicom_id_to_gt_chexpert_labels,
-                                                                   dicom_id_to_pred_chexpert_probs,
-                                                                   chexpert_thresholds, top_k_chexpert_labels,
-                                                                   CHEXPERT_LABELS, calibration_score_name)
+                                                                    dicom_id_to_pred_chexpert_probs,
+                                                                    chexpert_thresholds, top_k_chexpert_labels,
+                                                                    CHEXPERT_LABELS, calibration_score_name,
+                                                                    label_score_threshold)
+                    tot_chexpert_labels = len(CHEXPERT_LABELS)
+                    top_k_chexpert_labels = len(top_k_label_indices)
                 else:
                     top_k_label_indices = None
+                    tot_chexpert_labels = None
                 chexpert_reports = recover_reports__template_based(
                     report_ids=chexpert_report_ids,
                     pred_probs=pred_probs,
@@ -632,13 +661,17 @@ def _evaluate_model(
                     label_thresholds = np.array([0.5] * len(label_names)) # default thresholds
                 chest_imagenome_report_ids, pred_probs = _get_report_ids_and_pred_probs(
                     dicom_id_to_pred_chest_imagenome_probs)
-                if top_k_chest_imagenome_labels is not None:
+                if top_k_chest_imagenome_labels is not None or label_score_threshold is not None:
                     top_k_label_indices = _find_top_k_label_indices(dicom_id_to_gt_chest_imagenome_labels,
-                                                                   dicom_id_to_pred_chest_imagenome_probs,
-                                                                   chest_imagenome_thresholds, top_k_chest_imagenome_labels,
-                                                                   label_names, calibration_score_name)
+                                                                    dicom_id_to_pred_chest_imagenome_probs,
+                                                                    chest_imagenome_thresholds, top_k_chest_imagenome_labels,
+                                                                    label_names, calibration_score_name,
+                                                                    label_score_threshold)
+                    tot_chest_imagenome_labels = len(label_names)
+                    top_k_chest_imagenome_labels = len(top_k_label_indices)
                 else:
                     top_k_label_indices = None
+                    tot_chest_imagenome_labels = None
                 chest_imagenome_reports = recover_reports__template_based(
                     report_ids=chest_imagenome_report_ids,
                     pred_probs=pred_probs,
@@ -686,7 +719,9 @@ def _evaluate_model(
             _compute_and_save_report_level_metrics(
                 reports['gt_reports'], reports['gen_reports'], 'mimiccxr', tokenizer, results_folder_path,
                 max_processes_for_chexpert_labeler, template_based_mode, calibrate_thresholds, calibration_score_name,
-                top_k_chexpert_labels, top_k_chest_imagenome_labels)
+                top_k_chexpert_labels, tot_chexpert_labels,
+                top_k_chest_imagenome_labels, tot_chest_imagenome_labels,
+                label_score_threshold)
 
 def evaluate_model(
     checkpoint_folder,
@@ -702,6 +737,7 @@ def evaluate_model(
     chest_imagenome_labels_filename=None,
     top_k_chexpert_labels=None,
     top_k_chest_imagenome_labels=None,
+    label_score_threshold=None,
     cache_computations=False,
 ):
     print()
@@ -735,6 +771,7 @@ def evaluate_model(
         calibration_score_name=calibration_score_name,
         top_k_chexpert_labels=top_k_chexpert_labels,
         top_k_chest_imagenome_labels=top_k_chest_imagenome_labels,
+        label_score_threshold=label_score_threshold,
         mimiccxr_qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
         chest_imagenome_label_names_filename=chest_imagenome_label_names_filename,
         chest_imagenome_labels_filename=chest_imagenome_labels_filename,

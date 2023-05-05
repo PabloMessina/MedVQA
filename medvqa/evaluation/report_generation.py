@@ -10,7 +10,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
 )
-from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_postprocessed_label_names
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
 from medvqa.datasets.mimiccxr import get_mimiccxr_image_paths
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
@@ -27,7 +27,7 @@ from medvqa.utils.constants import (
     VINBIG_DISEASES,
     ReportEvalMode,
 )
-from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
+from medvqa.utils.files import load_pickle, save_to_pickle
 from medvqa.utils.logging import print_blue, print_bold, print_magenta
 from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 from medvqa.utils.common import CACHE_DIR, get_timestamp
@@ -504,7 +504,7 @@ class ReportGenExamplePlotter:
             self.input_labels = load_pickle(input_labels_path)
             if 'chest_imagenome' in self.input_labels:
                 assert chest_imagenome_label_names_filename is not None
-                self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+                self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
                 assert len(self.chest_imagenome_label_names) == len(self.input_labels['chest_imagenome'][0])
         else:
             self.input_labels = None

@@ -2,20 +2,20 @@ import  os
 import argparse
 import numpy as np
 import gc
-
 import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
-)
+
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
 from medvqa.datasets.data_inspection_utils import inspect_labels2report_trainer
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.datasets.mimiccxr.mimiccxr_labels2report_dataset_management import MIMICCXR_Labels2ReportTrainer
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.tokenizer import Tokenizer
+from medvqa.eval_rg_template import _compute_probs_and_gt_labels_for_mimiccxr_test_set, _find_top_k_label_indices, _recover_mimiccxr_vision_evaluator_kwargs
+from medvqa.evaluation.visual_module import calibrate_thresholds_on_mimiccxr_validation_set
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
@@ -58,6 +58,8 @@ from medvqa.utils.handlers import (
 from medvqa.utils.files import (
     get_checkpoint_folder_path,
     get_file_path_with_hashing_if_too_long,
+    get_results_folder_path,
+    load_pickle,
     save_to_pickle,
 )
 from medvqa.training.labels2report import get_engine
@@ -72,7 +74,7 @@ from medvqa.metrics.utils import (
     get_merge_metrics_fn,
     get_hybrid_score_name,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_red
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_normal_and_bold, print_orange, print_red
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -87,13 +89,14 @@ def parse_args(args=None):
 
     parser.add_argument('--checkpoint-folder', type=str, default=None,
                         help='Relative path to folder with checkpoint to resume training from')
-    parser.add_argument('--generation-mode', type=str,  default=GenerationMode.GROUND_TRUTH_LABELS_2_REPORT,
-                        choices=[GenerationMode.GROUND_TRUTH_LABELS_2_REPORT,
-                                  GenerationMode.ENSEMBLE_PREDICTIONS_2_REPORT,
-                                  GenerationMode.HYBRID])
+    parser.add_argument('--generation-mode', type=str,  default=GenerationMode.PREDICTIONS_2_REPORT,
+                        choices=GenerationMode.get_all_modes(), help='Generation mode')
+    parser.add_argument('--use-ensemble', action='store_true', default=False)
     parser.add_argument('--ensemble-model-checkpoint-folder-paths', type=str, nargs='+', default=None)
     parser.add_argument('--ensemble-batch-size', type=int, default=None)
     parser.add_argument('--ensemble-num-workers', type=int, default=None)
+    parser.add_argument('--use-hard-predictions', action='store_true', default=False,
+                        help='Models\' sigmoid outputs will be thresholded using thresholds tuned on validation set')
 
     # Model arguments
     parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
@@ -137,6 +140,7 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr-weight', type=float, default=1)
     parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single')    
     parser.add_argument('--mimiccxr-balanced-sampling-mode', type=str, default=None)
+    parser.add_argument('--mimiccxr-balanced-batch-size', type=int, default=None)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
     
     # Chest ImaGenome arguments (NOTE: Chest ImaGenome is built on top of MIMIC-CXR)
@@ -157,6 +161,11 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr-chexpert-labels-filename', type=str, default=None)
     # chest imagenome labels
     parser.add_argument('--use-chest-imagenome', action='store_true', default=False)
+    # label filtering
+    parser.add_argument('--filter-labels', action='store_true', default=False)
+    parser.add_argument('--top-k-chexpert-labels', type=int, default=None, help='if None, use all labels')
+    parser.add_argument('--top-k-chest-imagenome-labels', type=int, default=None, help='if None, use all labels')
+    parser.add_argument('--label-score-threshold', type=float, default=None, help='if not None, keep only labels with score >= threshold')
 
     # debug
     parser.add_argument('--debug', action='store_true', default=False)
@@ -187,14 +196,14 @@ def _get_precomputed_sigmoids_filepath(model_checkpoint_path, mimiccxr_view_mode
     return filepath
 
 def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, classify_chest_imagenome, mimiccxr_view_mode,
-                                     batch_size, num_workers, device, debug=False):
+                                      batch_size, num_workers, device, debug=False):
     assert type(model_folder_paths) == list
     assert len(model_folder_paths) > 0
     assert classify_chexpert or classify_chest_imagenome
 
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
 
-    # Load metadata for each check
+    # Load metadata for each checkpoint
     metadata_list = [load_metadata(checkpoint_path) for checkpoint_path in model_folder_paths]
 
     # Sanity check
@@ -213,16 +222,16 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
         print_magenta('============================================================', bold=True)
         print_magenta(f'Model {k+1}/{len(model_folder_paths)}', bold=True)
 
-        print(f'Processing model_folder_path = {model_folder_path}')
+        print_normal_and_bold('model_folder_path = ', model_folder_path)
 
         model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
-        print(f'model_checkpoint_path = {model_checkpoint_path}')
+        print_normal_and_bold('model_checkpoint_path = ', model_checkpoint_path)
 
         skip_chexpert = True
         skip_chest_imagenome = True
         if classify_chexpert:
             precomputed_chexpert_sigmoids_path = _get_precomputed_sigmoids_filepath(model_checkpoint_path, mimiccxr_view_mode, 'chexpert')
-            print_magenta(f'precomputed_chexpert_sigmoids_path = {precomputed_chexpert_sigmoids_path}', bold=True)
+            print_normal_and_bold('precomputed_chexpert_sigmoids_path = ', precomputed_chexpert_sigmoids_path)
             if os.path.exists(precomputed_chexpert_sigmoids_path):
                 print_red('Precomputed sigmoids for CheXpert already exist.', bold=True)
                 # print file size in megabytes
@@ -232,7 +241,7 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
                 skip_chexpert = False
         if classify_chest_imagenome:
             precomputed_chest_imagenome_sigmoids_path = _get_precomputed_sigmoids_filepath(model_checkpoint_path, mimiccxr_view_mode, 'chest_imagenome')
-            print_magenta(f'precomputed_chest_imagenome_sigmoids_path = {precomputed_chest_imagenome_sigmoids_path}', bold=True)
+            print_normal_and_bold('precomputed_chest_imagenome_sigmoids_path = ', precomputed_chest_imagenome_sigmoids_path)
             if os.path.exists(precomputed_chest_imagenome_sigmoids_path):
                 print_red('Precomputed sigmoids for Chest ImaGenome already exist.', bold=True)
                 # print file size in megabytes
@@ -250,10 +259,15 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
         model = MultiPurposeVisualModule(**model_kwargs)
         model = model.to(device)
         model_wrapper = ModelWrapper(model)
-        model_wrapper.load_checkpoint(model_checkpoint_path, device, model_only=True)
+        model_wrapper.load_checkpoint(model_checkpoint_path, device, model_only=True, strict=False)
 
         # Create inference engine
         validator_engine_kwargs = metadata['validator_engine_kwargs']
+        # Set some flags to False to make it work (TODO: make this cleaner in the future)
+        validator_engine_kwargs['classify_tags'] = False
+        validator_engine_kwargs['classify_orientation'] = False
+        validator_engine_kwargs['classify_questions'] = False
+        validator_engine_kwargs['pass_pred_bbox_coords_as_input'] = False
         inference_engine = get_vision_engine(model=model, device=device, **validator_engine_kwargs)
         
         # Define collate_batch_fn
@@ -266,6 +280,7 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
         mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
         mimiccxr_trainer_kwargs['view_mode'] = mimiccxr_view_mode
         mimiccxr_trainer_kwargs['use_all_data'] = True
+        mimiccxr_trainer_kwargs['data_augmentation_enabled'] = False
         mimiccxr_trainer = MIMICCXR_VisualModuleTrainer(
             test_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
             batch_size=batch_size,
@@ -371,6 +386,171 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
     
     return output
 
+def _get_model_and_device_getter(checkpoint_folder_path, model_kwargs, device):
+    def get_model_and_device():
+        # Load saved checkpoint    
+        checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+        print('Loading model from checkpoint ...')
+        print('checkpoint_path = ', checkpoint_path)
+        checkpoint = torch.load(checkpoint_path)
+        # Load model
+        print('Loading model...')
+        model = MultiPurposeVisualModule(**model_kwargs)
+        model = model.to(device)
+        model.load_state_dict(checkpoint['model'], strict=False)
+        return model, device
+    return get_model_and_device
+
+def _precompute_thresholds_for_ensemble(model_folder_paths, classify_chexpert, classify_chest_imagenome,
+                                        batch_size, num_workers, device):
+    assert type(model_folder_paths) == list
+    assert len(model_folder_paths) > 0
+    assert classify_chexpert or classify_chest_imagenome
+
+    # Load metadata for each checkpoint
+    metadata_list = [load_metadata(checkpoint_path) for checkpoint_path in model_folder_paths]
+
+    # Sanity check
+    if classify_chexpert:
+        for metadata in metadata_list:
+            assert metadata['auxiliary_tasks_kwargs']['classify_chexpert']
+    if classify_chest_imagenome:
+        for metadata in metadata_list:
+            assert metadata['auxiliary_tasks_kwargs']['classify_chest_imagenome']
+
+    output = [None] * len(model_folder_paths) # initialize output
+
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+
+    # Load model for each checkpoint and precompute thresholds
+    for k, (metadata, model_folder_path) in enumerate(zip(metadata_list, model_folder_paths)):
+
+        print_magenta('============================================================', bold=True)
+        print_magenta(f'Model {k+1}/{len(model_folder_paths)}', bold=True)
+
+        print_normal_and_bold('model_folder_path = ', model_folder_path)
+
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+        print_normal_and_bold('model_checkpoint_path = ', model_checkpoint_path)
+        
+        results_folder_path = get_results_folder_path(model_folder_path)
+        print_normal_and_bold('results_folder_path = ', results_folder_path)
+
+        _get_model_and_device = _get_model_and_device_getter(
+            checkpoint_folder_path=model_folder_path,
+            model_kwargs=metadata['model_kwargs'],
+            device=device,
+        )
+        mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
+            metadata=metadata, batch_size=batch_size, num_workers=num_workers,
+        )
+        thresholds_dict = calibrate_thresholds_on_mimiccxr_validation_set(
+            model_and_device_getter=_get_model_and_device,
+            use_amp=metadata['trainer_engine_kwargs']['use_amp'],
+            mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+            classify_chexpert=classify_chexpert,
+            classify_chest_imagenome=classify_chest_imagenome,
+            cache_thresholds=True,
+            results_folder_path=results_folder_path,
+            return_filepaths_instead=True,
+        )
+        output[k] = thresholds_dict
+        # Release GPU memory (just in case)
+        gc.collect()
+        torch.cuda.empty_cache()
+    
+    return output
+
+def _get_top_k_label_indices_save_path(results_folder_path, labeler_name, num_actual_labels, num_tot_labels,
+                                       label_score_threshold, score_name):
+    assert num_actual_labels <= num_tot_labels
+    assert 0.0 <= label_score_threshold <= 1.0
+    strings = [labeler_name, f'top_{num_actual_labels}_out_of_{num_tot_labels}_labels', score_name]
+    if label_score_threshold is not None:
+        strings.append(f'(score_threshold_{label_score_threshold:.2f})')
+    strings.append('indices.pkl')
+    return os.path.join(results_folder_path, '_'.join(strings))
+    
+def _precompute_filtered_labels_for_ensemble(model_folder_paths, classify_chexpert, classify_chest_imagenome,
+                                             batch_size, num_workers, thresholds_paths,
+                                             top_k_chexpert_labels, top_k_chest_imagenome_labels,
+                                             label_score_threshold, device):
+    assert type(model_folder_paths) == list
+    assert len(model_folder_paths) > 0
+    assert classify_chexpert or classify_chest_imagenome
+
+    # Load metadata for each checkpoint
+    metadata_list = [load_metadata(checkpoint_path) for checkpoint_path in model_folder_paths]
+
+
+    # Sanity check
+    if classify_chexpert:
+        for metadata in metadata_list:
+            assert metadata['auxiliary_tasks_kwargs']['classify_chexpert']
+    if classify_chest_imagenome:
+        for metadata in metadata_list:
+            assert metadata['auxiliary_tasks_kwargs']['classify_chest_imagenome']
+
+    output = [{} for _ in range(len(model_folder_paths))] # initialize output
+
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+
+    # Load model for each checkpoint and precompute thresholds
+    for k, (metadata, model_folder_path) in enumerate(zip(metadata_list, model_folder_paths)):
+
+        print_magenta('============================================================', bold=True)
+        print_magenta(f'Model {k+1}/{len(model_folder_paths)}', bold=True)
+
+        print_normal_and_bold('model_folder_path = ', model_folder_path)
+        
+        results_folder_path = get_results_folder_path(model_folder_path)
+        print_normal_and_bold('results_folder_path = ', results_folder_path)
+        
+        mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
+            metadata=metadata, batch_size=batch_size, num_workers=num_workers,
+        )
+        tmp = _compute_probs_and_gt_labels_for_mimiccxr_test_set(
+            auxiliary_tasks_kwargs=metadata['auxiliary_tasks_kwargs'],
+            checkpoint_folder_path=model_folder_path,
+            model_kwargs=metadata['model_kwargs'],
+            mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+            use_amp=metadata['trainer_engine_kwargs']['use_amp'],
+            save_probs_and_gt_labels=True,
+        )
+        if classify_chexpert:
+            dicom_id_to_pred_chexpert_probs = tmp['dicom_id_to_pred_chexpert_probs']
+            dicom_id_to_gt_chexpert_labels = tmp['dicom_id_to_gt_chexpert_labels']
+            chexpert_thresholds = load_pickle(thresholds_paths[k]['chexpert'])
+            top_k_label_indices = _find_top_k_label_indices(dicom_id_to_gt_chexpert_labels,
+                                                            dicom_id_to_pred_chexpert_probs,
+                                                            chexpert_thresholds, top_k_chexpert_labels,
+                                                            CHEXPERT_LABELS, 'f1', label_score_threshold)
+            save_path = _get_top_k_label_indices_save_path(results_folder_path, 'chexpert',
+                                                           len(top_k_label_indices), len(CHEXPERT_LABELS),
+                                                           label_score_threshold, 'f1')
+            output[k]['chexpert_indices_path'] = save_path
+            output[k]['chexpert_num_indices'] = len(top_k_label_indices)
+            save_to_pickle(top_k_label_indices, save_path)
+        if classify_chest_imagenome:
+            dicom_id_to_pred_chest_imagenome_probs = tmp['dicom_id_to_pred_chest_imagenome_probs']
+            dicom_id_to_gt_chest_imagenome_labels = tmp['dicom_id_to_gt_chest_imagenome_labels']
+            chest_imagenome_thresholds = load_pickle(thresholds_paths[k]['chest_imagenome'])
+            chest_imagenome_label_names_filename = mimiccxr_vision_evaluator_kwargs['chest_imagenome_label_names_filename']
+            chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename,
+                                                                           apply_anatomy_reordering=True)
+            top_k_label_indices = _find_top_k_label_indices(dicom_id_to_gt_chest_imagenome_labels,
+                                                            dicom_id_to_pred_chest_imagenome_probs,
+                                                            chest_imagenome_thresholds, top_k_chest_imagenome_labels,
+                                                            chest_imagenome_label_names, 'f1', label_score_threshold)
+            save_path = _get_top_k_label_indices_save_path(results_folder_path, 'chest_imagenome',
+                                                           len(top_k_label_indices), len(chest_imagenome_label_names),
+                                                           label_score_threshold, 'f1')
+            output[k]['chest_imagenome_indices_path'] = save_path
+            output[k]['chest_imagenome_num_indices'] = len(top_k_label_indices)
+            save_to_pickle(top_k_label_indices, save_path)
+    
+    return output
+
 def _compute_number_of_labels_and_ranges_for_ensemble(
         model_folder_paths, use_chexpert, use_chest_imagenome, chest_imagenome_label_names_filename):
     num_input_labels = 0
@@ -378,7 +558,7 @@ def _compute_number_of_labels_and_ranges_for_ensemble(
     chest_imagenome_range = None
     chexpert_range = None
     if use_chest_imagenome:
-        aux = len(load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename))
+        aux = len(load_chest_imagenome_label_names(chest_imagenome_label_names_filename))
         num_input_labels += aux * len(model_folder_paths) # each model has a sigmoid for each chest imagenome label
         num_output_labels += aux # the ensemble has a sigmoid for each chest imagenome label
         chest_imagenome_range = (num_output_labels - aux, num_output_labels)
@@ -699,6 +879,7 @@ def train_from_scratch(
     num_workers,
     mimiccxr_weight,
     mimiccxr_balanced_sampling_mode,
+    mimiccxr_balanced_batch_size,
     # Fixed traning args
     train_mimiccxr,
     binary_loss_name,
@@ -708,7 +889,9 @@ def train_from_scratch(
     use_amp,
     iters_to_accumulate,
     generation_mode,
+    use_hard_predictions,
     # Ensemble args
+    use_ensemble,
     ensemble_model_checkpoint_folder_paths,
     ensemble_batch_size,
     ensemble_num_workers,
@@ -720,6 +903,10 @@ def train_from_scratch(
     use_chexpert,
     mimiccxr_chexpert_labels_filename,
     use_chest_imagenome,
+    filter_labels,
+    top_k_chexpert_labels,
+    top_k_chest_imagenome_labels,
+    label_score_threshold,
     # GPU
     device,
     # Other args
@@ -730,16 +917,25 @@ def train_from_scratch(
 
     assert train_mimiccxr, 'No dataset selected for training'
 
-    use_ensemble = generation_mode in [GenerationMode.ENSEMBLE_PREDICTIONS_2_REPORT, GenerationMode.HYBRID]
-
     if use_ensemble:
         assert ensemble_model_checkpoint_folder_paths is not None
         assert ensemble_batch_size is not None
         assert ensemble_num_workers is not None
         assert not use_gender, 'Not supported yet'
+    
+    if filter_labels:
+        assert use_ensemble
+        assert use_hard_predictions
+        assert use_chexpert or use_chest_imagenome
+        assert top_k_chexpert_labels is not None or top_k_chest_imagenome_labels is not None or \
+            label_score_threshold is not None
 
-    classify_chexpert = use_chexpert and use_ensemble
-    classify_chest_imagenome = use_chest_imagenome and use_ensemble
+    if generation_mode == GenerationMode.PREDICTIONS_2_REFINED_PREDICTIONS_2_REPORT:
+        classify_chexpert = use_chexpert
+        classify_chest_imagenome = use_chest_imagenome
+    else:
+        classify_chexpert = False
+        classify_chest_imagenome = False
 
     tokenizer_kwargs = dict(
         vocab_min_freq=vocab_min_freq,
@@ -750,15 +946,28 @@ def train_from_scratch(
         assert mimiccxr_qa_adapted_reports_filename is not None
         mimiccxr_qa_adapted_reports_path = os.path.join(MIMICCXR_CACHE_DIR, mimiccxr_qa_adapted_reports_filename)
         tokenizer_kwargs['qa_adapted_dataset_paths'] = [mimiccxr_qa_adapted_reports_path]
-
-    if generation_mode == GenerationMode.GROUND_TRUTH_LABELS_2_REPORT:
+    
+    if use_ensemble:
+        print_bold('Computing number of labels and ranges for ensemble ...')
+        tmp = _compute_number_of_labels_and_ranges_for_ensemble(
+            ensemble_model_checkpoint_folder_paths, use_chexpert, use_chest_imagenome, chest_imagenome_label_names_filename)
+        num_input_labels = tmp['num_input_labels']
+        num_output_labels = tmp['num_output_labels']
+        chest_imagenome_range = tmp['chest_imagenome_range']
+        chexpert_range = tmp['chexpert_range']
+        if chest_imagenome_range is not None:
+            print(f'chest_imagenome_range: {chest_imagenome_range}')
+        if chexpert_range is not None:
+            print(f'chexpert_range: {chexpert_range}')
+    else:
+        print_bold('Computing number of labels and ranges assuming ground truth labels as input ...')
         num_input_labels = 0
         num_output_labels = 0
         if use_gender:
             num_input_labels += 2 # M, F
         if use_chest_imagenome:
             assert chest_imagenome_label_names_filename is not None
-            n_chest_imagenome_labels = len(load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename))
+            n_chest_imagenome_labels = len(load_chest_imagenome_label_names(chest_imagenome_label_names_filename))
             num_input_labels += n_chest_imagenome_labels
             num_output_labels += n_chest_imagenome_labels
             chest_imagenome_range = (num_output_labels - n_chest_imagenome_labels, num_output_labels)
@@ -772,22 +981,9 @@ def train_from_scratch(
             print(f'chexpert_range: {chexpert_range}')
         else:
             chexpert_range = None
-    elif generation_mode == GenerationMode.ENSEMBLE_PREDICTIONS_2_REPORT or\
-        generation_mode == GenerationMode.HYBRID:
-        tmp = _compute_number_of_labels_and_ranges_for_ensemble(
-            ensemble_model_checkpoint_folder_paths, use_chexpert, use_chest_imagenome, chest_imagenome_label_names_filename)
-        num_input_labels = tmp['num_input_labels']
-        num_output_labels = tmp['num_output_labels']
-        chest_imagenome_range = tmp['chest_imagenome_range']
-        chexpert_range = tmp['chexpert_range']
-        if chest_imagenome_range is not None:
-            print(f'chest_imagenome_range: {chest_imagenome_range}')
-        if chexpert_range is not None:
-            print(f'chexpert_range: {chexpert_range}')
-    else:
-        raise ValueError(f'Unknown generation_mode: {generation_mode}')
         
     model_kwargs = dict(
+        gen_mode=generation_mode,
         pretrained_checkpoint_folder_path=pretrained_checkpoint_folder_path,
         embedding_dim=embedding_dim,
         num_input_labels=num_input_labels,
@@ -844,16 +1040,18 @@ def train_from_scratch(
             chest_imagenome_labels_filename=chest_imagenome_labels_filename,
             chest_imagenome_label_names_filename=chest_imagenome_label_names_filename,
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
+            balanced_batch_size=mimiccxr_balanced_batch_size,
             use_ensemble_predictions=use_ensemble,
         )
         # Precompute sigmoid activations for different models in ensemble
         if use_ensemble:
             assert ensemble_model_checkpoint_folder_paths is not None
+            print_blue('=' * 60, bold=True)
             print_blue('Precomputing sigmoid activations for ensemble ...', bold=True)
             precomputed_sigmoid_paths = _precompute_sigmoids_for_ensemble(
                 model_folder_paths=ensemble_model_checkpoint_folder_paths,
-                classify_chexpert=classify_chexpert,
-                classify_chest_imagenome=classify_chest_imagenome,
+                classify_chexpert=use_chexpert,
+                classify_chest_imagenome=use_chest_imagenome,
                 mimiccxr_view_mode=mimiccxr_view_mode,
                 batch_size=ensemble_batch_size,
                 num_workers=ensemble_num_workers,
@@ -861,6 +1059,49 @@ def train_from_scratch(
                 debug=debug)
             assert len(precomputed_sigmoid_paths) == len(ensemble_model_checkpoint_folder_paths)
             mimiccxr_trainer_kwargs['precomputed_sigmoid_paths'] = precomputed_sigmoid_paths
+            print_orange('precomputed_sigmoid_paths:', precomputed_sigmoid_paths)
+            if use_hard_predictions:
+                print_blue('=' * 60, bold=True)
+                print_blue('Precomputing thresholds (for hard predictions) for ensemble ...', bold=True)
+                precomputed_thresholds_paths = _precompute_thresholds_for_ensemble(
+                    model_folder_paths=ensemble_model_checkpoint_folder_paths,
+                    classify_chexpert=use_chexpert,
+                    classify_chest_imagenome=use_chest_imagenome,
+                    batch_size=ensemble_batch_size,
+                    num_workers=ensemble_num_workers,
+                    device=device)
+                assert len(precomputed_thresholds_paths) == len(ensemble_model_checkpoint_folder_paths)
+                mimiccxr_trainer_kwargs['use_hard_predictions'] = True
+                mimiccxr_trainer_kwargs['precomputed_thresholds_paths'] = precomputed_thresholds_paths
+                print_orange('precomputed_thresholds_paths:', precomputed_thresholds_paths)
+                if filter_labels:
+                    print_blue('=' * 60, bold=True)
+                    print_blue('Precomputing filtered labels for ensemble ...', bold=True)
+                    precomputed_filtered_labels_paths = _precompute_filtered_labels_for_ensemble(
+                        model_folder_paths=ensemble_model_checkpoint_folder_paths,
+                        classify_chexpert=use_chexpert,
+                        classify_chest_imagenome=use_chest_imagenome,
+                        batch_size=ensemble_batch_size,
+                        num_workers=ensemble_num_workers,
+                        thresholds_paths=precomputed_thresholds_paths,
+                        top_k_chexpert_labels=top_k_chexpert_labels,
+                        top_k_chest_imagenome_labels=top_k_chest_imagenome_labels,
+                        label_score_threshold=label_score_threshold,
+                        device=device)
+                    assert len(precomputed_filtered_labels_paths) == len(ensemble_model_checkpoint_folder_paths)
+                    mimiccxr_trainer_kwargs['filter_labels'] = True
+                    mimiccxr_trainer_kwargs['precomputed_filtered_labels_paths'] = precomputed_filtered_labels_paths
+                    print_orange('precomputed_filtered_labels_paths:', precomputed_filtered_labels_paths)
+                    # update number of input labels
+                    num_input_labels = 0
+                    for x in precomputed_filtered_labels_paths:
+                        if use_chexpert:
+                            num_input_labels += x['chexpert_num_indices']
+                        if use_chest_imagenome:
+                            num_input_labels += x['chest_imagenome_num_indices']
+                    assert num_input_labels > 0
+                    model_kwargs['num_input_labels'] = num_input_labels
+                    print_orange('num_input_labels (after update):', num_input_labels)
             if debug:
                 print_red('Returning prematurely because debug=True', bold=True)
                 return

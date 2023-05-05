@@ -476,7 +476,6 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
                     batch_first=True,
                     padding_value=0,
                 )
-            batch_dict['use_gt_as_pred'] = use_ground_truth_as_prediction
             if use_ground_truth_as_prediction:
                 to_concat = []
                 if use_gender:

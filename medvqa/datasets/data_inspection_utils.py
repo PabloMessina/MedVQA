@@ -10,7 +10,7 @@ from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES, CHEST_IM
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
     load_chest_imagenome_silver_bboxes,
-    load_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.utils.metrics import (
@@ -152,7 +152,7 @@ def _inspect_vqa_trainer(vqa_trainer, cache_dir, dataset_name, i, figsize=(10, 1
             if hasattr(vqa_trainer, 'chest_imagenome_label_names'):
                 chest_imagenome_label_names = vqa_trainer.chest_imagenome_label_names
             else:
-                chest_imagenome_label_names = load_postprocessed_label_names(
+                chest_imagenome_label_names = load_chest_imagenome_label_names(
                     vqa_trainer.chest_imagenome_label_names_filename)
             print('chest imagenome labels:', instance['chest_imagenome'])
             print('chest imagenome labels (verbose):',

@@ -56,7 +56,6 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
         idxs = batch['idx']
         dataset_id = batch['dataset_id']
         predicted_binary_scores = batch['predicted_binary_scores'].to(device)
-        use_gt_as_pred = batch['use_gt_as_pred']
         if include_report:
             reports = batch['report'].to(device)
             if shift_tokens_for_transformer:
@@ -76,7 +75,6 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                 'device': device,
                 'mode': 'train' if training else 'eval',
                 'predicted_binary_scores': predicted_binary_scores,
-                'use_gt_as_pred': use_gt_as_pred,
             }
             if training:
                 if shift_tokens_for_transformer:

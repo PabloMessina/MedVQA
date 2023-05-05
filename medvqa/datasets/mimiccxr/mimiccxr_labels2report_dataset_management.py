@@ -5,11 +5,12 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_dicomId2gender,
+    get_labels_per_anatomy_and_anatomy_group,
     load_chest_imagenome_dicom_ids,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
     load_gold_attributes_relations_dicom_ids,
     load_nongold_dicom_ids,
-    load_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.datasets.mimiccxr import (
@@ -20,7 +21,7 @@ from medvqa.datasets.mimiccxr import (
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import _create_dataset
 from medvqa.utils.files import get_cached_pickle_file, load_pickle
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.logging import print_bold, print_magenta, print_red
     
 
 class MIMICCXR_Labels2Report_Dataset(Dataset):
@@ -97,8 +98,13 @@ class MIMICCXR_Labels2ReportTrainer():
                 chest_imagenome_labels_filename=None,
                 chest_imagenome_label_names_filename=None,
                 balanced_sampling_mode=None,
+                balanced_batch_size=None,
                 use_ensemble_predictions=False,
                 precomputed_sigmoid_paths=None,
+                use_hard_predictions=False,
+                precomputed_thresholds_paths=None,
+                filter_labels=False,
+                precomputed_filtered_labels_paths=None,
             ):
         # Sanity checks
         assert sum([use_test_set, use_val_set_only,
@@ -106,10 +112,19 @@ class MIMICCXR_Labels2ReportTrainer():
         if use_gender:
             assert view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME
 
+        if use_ensemble_predictions:
+            assert precomputed_sigmoid_paths is not None
+        if use_hard_predictions:
+            assert use_ensemble_predictions
+            assert precomputed_thresholds_paths is not None
+        if filter_labels:
+            assert use_hard_predictions
+            assert precomputed_filtered_labels_paths is not None
+
         if chest_imagenome_label_names_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         elif chest_imagenome_labels_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(
                 chest_imagenome_labels_filename.replace('imageId2labels', 'labels'))
         else:
             self.chest_imagenome_label_names = None
@@ -120,6 +135,8 @@ class MIMICCXR_Labels2ReportTrainer():
         self.eval_collate_batch_fn = collate_batch_fn
         self.num_workers = num_workers
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
+        self.use_hard_predictions = use_hard_predictions
+        self.filter_labels = filter_labels
 
         BIG_ENOGUGH = 1000000
         dicom_ids = [None] * BIG_ENOGUGH
@@ -292,10 +309,14 @@ class MIMICCXR_Labels2ReportTrainer():
             assert use_chexpert or use_chest_imagenome
             print('Loading precomputed sigmoid paths for ensemble predictions...')
             self.precomputed_sigmoid_paths = precomputed_sigmoid_paths
+            if use_hard_predictions:
+                self.precomputed_thresholds_paths = precomputed_thresholds_paths
+            if filter_labels:
+                self.precomputed_filtered_labels_paths = precomputed_filtered_labels_paths
             if use_chexpert:
                 self.ensemble_chexpert_sigmoids = []
                 self.ensemble_chexpert_did2idx_dicts = []
-                for x in precomputed_sigmoid_paths:
+                for i, x in enumerate(precomputed_sigmoid_paths):
                     assert 'chexpert_sigmoids_path' in x
                     print('  Loading', x['chexpert_sigmoids_path'])
                     tmp = load_pickle(x['chexpert_sigmoids_path'])
@@ -304,6 +325,18 @@ class MIMICCXR_Labels2ReportTrainer():
                     print(f'    _probs.shape = {_probs.shape}')
                     print(f'    len(_dids) = {len(_dids)}')
                     _did2idx = {did: idx for idx, did in enumerate(_dids)}
+                    if use_hard_predictions:
+                        _thresholds_filepath = self.precomputed_thresholds_paths[i]['chexpert']
+                        _thresholds = load_pickle(_thresholds_filepath)
+                        print(f'    _thresholds.shape = {_thresholds.shape}')
+                        _probs = (_probs > _thresholds).astype(np.float16)
+                        print_red(f'    _probs has been thresholded')
+                        if filter_labels:
+                            _label_indices_filepath = self.precomputed_filtered_labels_paths[i]['chexpert_indices_path']
+                            _label_indices = load_pickle(_label_indices_filepath)
+                            print(f'    _label_indices.shape = {_label_indices.shape}')
+                            _probs = _probs[:, _label_indices]
+                            print_red(f'    _probs has been filtered')
                     # sanity check did2idx
                     assert len(_did2idx) >= len(self.dicom_ids), \
                         f'len(_did2idx) = {len(_did2idx)}, len(self.dicom_ids) = {len(self.dicom_ids)}'
@@ -311,6 +344,8 @@ class MIMICCXR_Labels2ReportTrainer():
                         assert _did in _did2idx, f'_did = {_did}'
                     self.ensemble_chexpert_sigmoids.append(_probs)
                     self.ensemble_chexpert_did2idx_dicts.append(_did2idx)
+                if use_hard_predictions:
+                    self._sanity_check_chexpert_labels()
             if use_chest_imagenome:
                 self.ensemble_chest_imagenome_sigmoids = []
                 self.ensemble_chest_imagenome_did2idx_dicts = []
@@ -323,6 +358,18 @@ class MIMICCXR_Labels2ReportTrainer():
                     print(f'    _probs.shape = {_probs.shape}')
                     print(f'    len(_dids) = {len(_dids)}')
                     _did2idx = {did: idx for idx, did in enumerate(_dids)}
+                    if use_hard_predictions:
+                        _thresholds_filepath = self.precomputed_thresholds_paths[i]['chest_imagenome']
+                        _thresholds = load_pickle(_thresholds_filepath)
+                        print(f'    _thresholds.shape = {_thresholds.shape}')
+                        _probs = (_probs > _thresholds).astype(np.float16)
+                        print_red(f'    _probs has been thresholded')
+                        if filter_labels:
+                            _label_indices_filepath = self.precomputed_filtered_labels_paths[i]['chest_imagenome_indices_path']
+                            _label_indices = load_pickle(_label_indices_filepath)
+                            print(f'    _label_indices.shape = {_label_indices.shape}')
+                            _probs = _probs[:, _label_indices]
+                            print_red(f'    _probs has been filtered')
                     # sanity check did2idx
                     assert len(_did2idx) >= len(self.dicom_ids), \
                         f'len(_did2idx) = {len(_did2idx)}, len(self.dicom_ids) = {len(self.dicom_ids)}'
@@ -330,6 +377,8 @@ class MIMICCXR_Labels2ReportTrainer():
                         assert _did in _did2idx, f'_did = {_did}'
                     self.ensemble_chest_imagenome_sigmoids.append(_probs)
                     self.ensemble_chest_imagenome_did2idx_dicts.append(_did2idx)
+                if use_hard_predictions:
+                    self._sanity_check_chest_imagenome_labels()
             print('Done loading precomputed sigmoid paths for ensemble predictions')
             def _get_ensemble_sigmoid_vector(did):
                 # concatenate all sigmoid vectors
@@ -354,12 +403,53 @@ class MIMICCXR_Labels2ReportTrainer():
         else:
             if not use_val_set_only:
                 # Create train dataset and dataloader
+                self.balanced_batch_size = balanced_batch_size
                 self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
                     self.train_indices, self.train_collate_batch_fn, shuffle=True, balanced_sampling_mode=balanced_sampling_mode)
 
             # Create validation dataset and dataloader
             self.val_dataset, self.val_dataloader = self._create_dataset_and_dataloader(
                 self.val_indices, self.eval_collate_batch_fn)
+
+    def _sanity_check_labels(self, label_name, sigmoids_list, did2idx_dicts, gt_labels, label_order=None):
+        print_red(f'    Sanity checking {label_name} labels', bold=True)
+        if hasattr(self, 'val_indices'):
+            print(f'    len(self.val_indices) = {len(self.val_indices)}')            
+            indices = self.val_indices
+        elif hasattr(self, 'test_indices'):
+            print(f'    len(self.test_indices) = {len(self.test_indices)}')            
+            indices = self.test_indices
+        else:
+            raise NotImplementedError
+        from sklearn.metrics import f1_score
+        for i, (_probs, _did2idx) in enumerate(zip(sigmoids_list, did2idx_dicts)):
+            _pred_labels = np.array([_probs[_did2idx[self.dicom_ids[i]]] for i in indices]).astype(int)
+            _gt_labels = np.array([gt_labels[self.report_ids[i]] for i in indices])
+            if label_order is not None:
+                assert len(label_order) == _gt_labels.shape[1]
+                _gt_labels = _gt_labels[:, label_order]
+            if self.filter_labels:
+                _label_indices_filepath = self.precomputed_filtered_labels_paths[i][f'{label_name}_indices_path']
+                _label_indices = load_pickle(_label_indices_filepath)
+                _gt_labels = _gt_labels[:, _label_indices]
+            print(f'    f1_score(_gt_labels, _pred_labels, average="micro") = {f1_score(_gt_labels, _pred_labels, average="micro")}')
+            print(f'    f1_score(_gt_labels, _pred_labels, average="macro") = {f1_score(_gt_labels, _pred_labels, average="macro")}')
+
+    def _sanity_check_chexpert_labels(self):
+        self._sanity_check_labels('chexpert', self.ensemble_chexpert_sigmoids,
+                                  self.ensemble_chexpert_did2idx_dicts, self.chexpert_labels)
+    
+    def _sanity_check_chest_imagenome_labels(self):
+        # HACK: this is a hacky way to get the label order right
+        tmp = get_labels_per_anatomy_and_anatomy_group("labels(min_freq=100).pkl", for_training=True)
+        label_order = []
+        for _, labels in tmp['anatomy_to_localized_labels']:
+            label_order.extend(labels)
+        for _, labels in tmp['anatomy_group_to_global_labels']:
+            label_order.extend(labels)
+        self._sanity_check_labels('chest_imagenome', self.ensemble_chest_imagenome_sigmoids,
+                                  self.ensemble_chest_imagenome_did2idx_dicts, self.chest_imagenome_labels,
+                                  label_order=label_order)
 
     def _create_dataset(self, indices, shuffle=False, infinite=False):
         return MIMICCXR_Labels2Report_Dataset(

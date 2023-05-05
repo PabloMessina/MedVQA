@@ -20,7 +20,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_gold_bbox_dicom_ids,
     load_gold_standard_related_dicom_ids,
     load_nongold_dicom_ids,
-    load_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.datasets.dataloading_utils import (
     INFINITE_DATASET_LENGTH,
@@ -451,7 +451,7 @@ def _load_chest_imagenome_labels(self, chest_imagenome_labels_filename, use_ches
     if label_order is not None:
         if use_chest_imagenome_label_gold_set:
             print('  Using gold labels for Chest Imagenome (not the labels used for training)')
-            gold_label_names = load_postprocessed_label_names('gold_binary_labels.pkl')
+            gold_label_names = load_chest_imagenome_label_names('gold_binary_labels.pkl')
             common_label_names = set(gold_label_names) & set(self.chest_imagenome_label_names)
             assert len(common_label_names) > 0
             _valid_label_indices__model_pov = [i for i, idx in enumerate(label_order)\
@@ -653,6 +653,7 @@ class MIMICCXR_VisualModuleTrainer():
                 use_detectron2=False,
                 detectron2_cfg=None,
                 balanced_sampling_mode=None,
+                balanced_batch_size=None,
                 pass_pred_bbox_coords_to_model=False,
                 use_gt_bboxes_as_pred=False,
                 use_yolov8=False,
@@ -685,9 +686,9 @@ class MIMICCXR_VisualModuleTrainer():
         self.use_yolov8 = use_yolov8
 
         if chest_imagenome_label_names_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         elif chest_imagenome_labels_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(
                 chest_imagenome_labels_filename.replace('imageId2labels', 'labels'))
         else:
             self.chest_imagenome_label_names = None
@@ -1002,6 +1003,7 @@ class MIMICCXR_VisualModuleTrainer():
             else:
                 if not use_val_set_only:
                     # Create train dataset and dataloader
+                    self.balanced_batch_size = balanced_batch_size
                     self.train_dataset, self.train_dataloader = self._create_dataset_and_dataloader(
                         self.train_indices, train_image_transform, self.train_collate_batch_fn,
                         data_augmentation_enabled=self.data_augmentation_enabled,

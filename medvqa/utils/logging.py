@@ -26,6 +26,10 @@ def print_orange(*args, bold=False):
 def print_bold(*args):
     print(*[colored(x, attrs=['bold']) for x in args])
 
+def print_normal_and_bold(normal, bold):
+    print(normal, end='')
+    print_bold(bold)
+
 class CountPrinter:
     def __init__(self, color='blue', bold=True):
         self.count = 1
