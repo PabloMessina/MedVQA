@@ -9,7 +9,7 @@ from medvqa.datasets.chest_imagenome import get_anaxnet_bbox_sorted_indices
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_chest_imagenome_train_average_bbox_coords,
     get_labels_per_anatomy_and_anatomy_group,
-    load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VisualModuleTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import (
@@ -131,6 +131,8 @@ def parse_args(args=None):
     parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--clip-version', type=str, default=None)
     parser.add_argument('--huggingface-model-name', type=str, default=None)
+    parser.add_argument('--chexpert-mlc-version', type=str, default=None)
+    parser.add_argument('--chexpert-mlc-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default=None)
     parser.add_argument('--chest-imagenome-mlc-version', type=str, default=None)
@@ -851,6 +853,8 @@ def train_from_scratch(
     image_local_feat_size,
     image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
+    chexpert_mlc_version,
+    chexpert_mlc_hidden_size,
     chest_imagenome_bbox_hidden_size,
     chest_imagenome_bbox_regressor_version,
     chest_imagenome_mlc_version,
@@ -978,7 +982,7 @@ def train_from_scratch(
 
     if classify_chest_imagenome:
         assert chest_imagenome_label_names_filename is not None
-        n_chest_imagenome_labels = len(load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename))
+        n_chest_imagenome_labels = len(load_chest_imagenome_label_names(chest_imagenome_label_names_filename))
     else:
         n_chest_imagenome_labels = None
 
@@ -1022,6 +1026,8 @@ def train_from_scratch(
         predict_labels_and_bboxes_chest_imagenome=predict_labels_and_bboxes_chest_imagenome,
         n_questions_aux_task=n_mined_questions,
         n_chest_imagenome_labels=n_chest_imagenome_labels,
+        chexpert_mlc_version=chexpert_mlc_version,
+        chexpert_mlc_hidden_size=chexpert_mlc_hidden_size,
         chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
         chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
         chest_imagenome_mlc_version=chest_imagenome_mlc_version,

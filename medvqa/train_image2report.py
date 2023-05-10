@@ -6,8 +6,9 @@ import torch
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
+    get_chest_imagenome_train_average_bbox_coords,
     get_labels_per_anatomy_and_anatomy_group,
-    load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_ImageSizeModes
 from medvqa.datasets.mimiccxr.mimiccxr_image2report_dataset_management import MIMICCXR_Image2ReportTrainer
@@ -99,8 +100,12 @@ def parse_args(args=None):
     parser.add_argument('--image-encoder-pretrained-weights-path', type=str, default=None)
     parser.add_argument('--freeze-image-encoder', action='store_true', default=False)
     parser.add_argument('--image-encoder-only-compute-features', action='store_true', default=False)
+    parser.add_argument('--chexpert-mlc-version', type=str, default=None)
+    parser.add_argument('--chexpert-mlc-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-mlc-version', type=str, default=None)
     parser.add_argument('--chest-imagenome-mlc-hidden-size', type=int, default=128)
+    parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default=None)
+    parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     parser.add_argument('--num-regions', type=int, default=None)
     parser.add_argument('--yolov8-model-name-or-path', type=str, default=None)
     parser.add_argument('--yolov8-model-alias', type=str, default=None)
@@ -147,7 +152,6 @@ def parse_args(args=None):
     parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
     parser.add_argument('--use-chest-imagenome-decent-images-only', action='store_true', default=False)
     parser.add_argument('--clamp-bboxes-chest-imagenome', action='store_true', default=False)
-    
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -163,6 +167,7 @@ def parse_args(args=None):
     parser.add_argument('--classify-chest-imagenome', action='store_true', default=False)
     parser.add_argument('--predict-bboxes-chest-imagenome', action='store_true', default=False)
     parser.add_argument('--chest-imagenome-bbox-loss-weight', type=float, default=1.0)
+    parser.add_argument('--predict-labels-and-bboxes-chest-imagenome', action='store_true', default=False)
     
     return parser.parse_args(args=args)
 
@@ -375,18 +380,12 @@ def train_model(
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
 
     if predict_bboxes_chest_imagenome and not use_yolov8:
-        attach_dataset_aware_chest_imagenome_bbox_mae(trainer_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_bbox_mae(validator_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_iou(trainer_engine, _mim_datasets)
         attach_dataset_aware_chest_imagenome_bbox_iou(validator_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_bbox_meanf1(trainer_engine, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_bbox_meanf1(validator_engine, _mim_datasets)
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEST_IMAGENOME_BBOX_LOSS, _mim_datasets)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXMEANF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXIOU)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_BBOX_LOSS)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
     
     if use_yolov8 and not model_kwargs.get('only_compute_features', False):
         assert predict_bboxes_chest_imagenome
@@ -508,8 +507,12 @@ def train_from_scratch(
     image_local_feat_size,
     image_encoder_pretrained_weights_path,
     pretrained_checkpoint_folder_path,
+    chexpert_mlc_version,
+    chexpert_mlc_hidden_size,
     chest_imagenome_mlc_version,
     chest_imagenome_mlc_hidden_size,
+    chest_imagenome_bbox_regressor_version,
+    chest_imagenome_bbox_hidden_size,
     yolov8_model_name_or_path,
     yolov8_model_alias,
     # Tokenizer args
@@ -559,6 +562,7 @@ def train_from_scratch(
     mimiccxr_chexpert_labels_filename,
     classify_chest_imagenome,
     predict_bboxes_chest_imagenome,
+    predict_labels_and_bboxes_chest_imagenome,
     clamp_bboxes_chest_imagenome,
     chest_imagenome_bbox_loss_weight,
     # GPU
@@ -576,7 +580,7 @@ def train_from_scratch(
 
     if classify_chest_imagenome:
         assert chest_imagenome_label_names_filename is not None
-        n_chest_imagenome_labels = len(load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename))
+        n_chest_imagenome_labels = len(load_chest_imagenome_label_names(chest_imagenome_label_names_filename))
     else:
         n_chest_imagenome_labels = None
 
@@ -612,12 +616,28 @@ def train_from_scratch(
         classify_gender=classify_gender,
         classify_chexpert=classify_chexpert,
         classify_chest_imagenome=classify_chest_imagenome,
+        chexpert_mlc_version=chexpert_mlc_version,
+        chexpert_mlc_hidden_size=chexpert_mlc_hidden_size,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_labels_and_bboxes_chest_imagenome=predict_labels_and_bboxes_chest_imagenome,
         n_chest_imagenome_labels=n_chest_imagenome_labels,
         chest_imagenome_mlc_version=chest_imagenome_mlc_version,
         chest_imagenome_mlc_hidden_size=chest_imagenome_mlc_hidden_size,
+        chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
+        chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
     )
-    if classify_chest_imagenome and chest_imagenome_mlc_version in (MLCVersion.V1, MLCVersion.V2):
+    if predict_bboxes_chest_imagenome:
+        avg_coords = get_chest_imagenome_train_average_bbox_coords(
+            clamp_bbox_coords=clamp_bboxes_chest_imagenome,
+            use_decent_images_only=use_chest_imagenome_decent_images_only,
+        )
+        print('avg_coords.shape=', avg_coords.shape)
+        avg_coords = avg_coords.tolist()
+        model_kwargs['chest_imagenome_train_average_bbox_coords'] = avg_coords
+    else:
+        model_kwargs['chest_imagenome_train_average_bbox_coords'] = None
+    if predict_labels_and_bboxes_chest_imagenome or (classify_chest_imagenome and\
+                                                     chest_imagenome_mlc_version in (MLCVersion.V1, MLCVersion.V2)):
         tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
         model_kwargs['chest_imagenome_anatomy_to_labels'] = tmp['anatomy_to_localized_labels']
         model_kwargs['chest_imagenome_anatomy_group_to_labels'] = tmp['anatomy_group_to_global_labels']

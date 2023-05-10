@@ -36,13 +36,14 @@ def _compute_mean_iou(j):
     count = 0
     for i in range(_shared_pred_coords.shape[0]):
         if _shared_gt_presences[i, j] == 1:
-            mean_iou += compute_iou(_shared_pred_coords[i, j*4:(j+1)*4], _shared_gt_coords[i, j*4:(j+1)*4])
+            mean_iou += compute_iou(_shared_pred_coords[i, j], _shared_gt_coords[i, j])
             count += 1
     mean_iou /= count
     return mean_iou
 def compute_mean_iou_per_class(pred_coords, gt_coords, gt_presences, num_workers=5):
-    m = pred_coords.shape[1] // 4
-    assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
+    assert len(pred_coords.shape) == 3
+    assert len(gt_coords.shape) == 3
+    m = pred_coords.shape[1]
     global _shared_pred_coords, _shared_gt_coords, _shared_gt_presences
     _shared_pred_coords = pred_coords
     _shared_gt_coords = gt_coords
@@ -82,12 +83,13 @@ def compute_mean_iou_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_p
     return compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes)
 
 def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
-    m = pred_coords.shape[1] // 4
-    assert m * 4 == pred_coords.shape[1] # each bounding box is represented by 4 coordinates
+    assert len(pred_coords.shape) == 3
+    assert len(gt_coords.shape) == 3
+    m = pred_coords.shape[1]
     mae = np.zeros((m,), dtype=np.float32)
     for i in range(m):
         if gt_presences[:, i].sum() > 0:
-            mae[i] = np.abs(pred_coords[:, i*4:(i+1)*4] - gt_coords[:, i*4:(i+1)*4])[gt_presences[:, i] == 1].mean()
+            mae[i] = np.abs(pred_coords[:, i] - gt_coords[:, i])[gt_presences[:, i] == 1].mean()
     return mae
 
 def compute_mae_per_class__detectron2(pred_boxes, pred_classes, scores, gt_coords, gt_presences, valid_classes=None,
@@ -123,13 +125,12 @@ def compute_mae_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presen
 
 def _compute_score(task, metric_fn):
     iou_thrs, c, n = task
-    a, b  = 4 * c, 4 * (c + 1)
     tp, fp, fn = 0, 0, 0
     if type(_shared_pred_presences) == list:
         for i in range(n):
             if _shared_pred_presences[i][c] > 0:
                 if _shared_gt_presences[i][c] == 1:
-                    if compute_iou(_shared_pred_coords[i][a:b], _shared_gt_coords[i][a:b]) >= iou_thrs:
+                    if compute_iou(_shared_pred_coords[i][c], _shared_gt_coords[i][c]) >= iou_thrs:
                         tp += 1
                     else:
                         fp += 1
@@ -143,7 +144,7 @@ def _compute_score(task, metric_fn):
         for i in range(n):
             if _shared_pred_presences[i, c] > 0:
                 if _shared_gt_presences[i, c] == 1:
-                    if compute_iou(_shared_pred_coords[i, a:b], _shared_gt_coords[i, a:b]) >= iou_thrs:
+                    if compute_iou(_shared_pred_coords[i, c], _shared_gt_coords[i, c]) >= iou_thrs:
                         tp += 1
                     else:
                         fp += 1

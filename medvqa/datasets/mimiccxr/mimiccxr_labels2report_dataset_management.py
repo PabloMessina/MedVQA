@@ -5,9 +5,9 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_dicomId2gender,
-    get_labels_per_anatomy_and_anatomy_group,
     load_chest_imagenome_dicom_ids,
     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix,
+    load_chest_imagenome_label_order,
     load_gold_attributes_relations_dicom_ids,
     load_nongold_dicom_ids,
     load_chest_imagenome_label_names,
@@ -20,9 +20,8 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import _create_dataset
-from medvqa.utils.files import get_cached_pickle_file, load_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_json_file, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_red
-    
 
 class MIMICCXR_Labels2Report_Dataset(Dataset):
     def __init__(self, indices, reports, report_ids,
@@ -86,6 +85,8 @@ class MIMICCXR_Labels2ReportTrainer():
 
     def __init__(self, 
                 qa_adapted_reports_filename, tokenizer, batch_size, collate_batch_fn, num_workers,
+                train_collate_batch_fn=None,
+                eval_collate_batch_fn=None,
                 use_test_set=False,
                 use_chest_imagenome_label_gold_set=False,
                 use_val_set_only=False,
@@ -105,6 +106,7 @@ class MIMICCXR_Labels2ReportTrainer():
                 precomputed_thresholds_paths=None,
                 filter_labels=False,
                 precomputed_filtered_labels_paths=None,
+                reorder_chest_imagenome_labels=False,
             ):
         # Sanity checks
         assert sum([use_test_set, use_val_set_only,
@@ -124,15 +126,23 @@ class MIMICCXR_Labels2ReportTrainer():
         if chest_imagenome_label_names_filename is not None:
             self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         elif chest_imagenome_labels_filename is not None:
-            self.chest_imagenome_label_names = load_chest_imagenome_label_names(
-                chest_imagenome_labels_filename.replace('imageId2labels', 'labels'))
+            chest_imagenome_label_names_filename = chest_imagenome_labels_filename.replace('imageId2labels', 'labels')
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         else:
             self.chest_imagenome_label_names = None
 
         self.tokenizer = tokenizer
         self.batch_size = batch_size
-        self.train_collate_batch_fn = collate_batch_fn
-        self.eval_collate_batch_fn = collate_batch_fn
+        if collate_batch_fn is None:
+            assert train_collate_batch_fn is not None
+            assert eval_collate_batch_fn is not None
+            self.train_collate_batch_fn = train_collate_batch_fn
+            self.eval_collate_batch_fn = eval_collate_batch_fn
+        else:
+            assert train_collate_batch_fn is None
+            assert eval_collate_batch_fn is None
+            self.train_collate_batch_fn = collate_batch_fn
+            self.eval_collate_batch_fn = collate_batch_fn
         self.num_workers = num_workers
         self.qa_adapted_reports_filename = qa_adapted_reports_filename
         self.use_hard_predictions = use_hard_predictions
@@ -271,6 +281,7 @@ class MIMICCXR_Labels2ReportTrainer():
             assert chest_imagenome_labels_filename != 'gold_imageId2binaryLabels.pkl', \
                 'This should be file used for training, not testing'
             if use_chest_imagenome_label_gold_set:
+                assert not reorder_chest_imagenome_labels, 'Not supported yet'
                 _, self.chest_imagenome_labels = \
                     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix('gold_imageId2binaryLabels.pkl')
                 print('Using gold labels for Chest Imagenome (not the labels used for training)')
@@ -299,6 +310,12 @@ class MIMICCXR_Labels2ReportTrainer():
             else:
                 _, self.chest_imagenome_labels = \
                     load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_labels_filename)
+                if reorder_chest_imagenome_labels:
+                    assert chest_imagenome_label_names_filename is not None
+                    print_bold('Reordering Chest Imagenome labels...')
+                    label_order = load_chest_imagenome_label_order(chest_imagenome_label_names_filename)
+                    self.chest_imagenome_labels = self.chest_imagenome_labels[:, label_order]
+                    self.chest_imagenome_label_names = [self.chest_imagenome_label_names[i] for i in label_order]
         else:
             self.chest_imagenome_labels = None
 
@@ -347,6 +364,7 @@ class MIMICCXR_Labels2ReportTrainer():
                 if use_hard_predictions:
                     self._sanity_check_chexpert_labels()
             if use_chest_imagenome:
+                self._load_ensemble_chest_imagenome_label_orders()
                 self.ensemble_chest_imagenome_sigmoids = []
                 self.ensemble_chest_imagenome_did2idx_dicts = []
                 for x in precomputed_sigmoid_paths:
@@ -391,10 +409,41 @@ class MIMICCXR_Labels2ReportTrainer():
                         _sigmoid_vector.append(_probs[_did2idx[did]])
                 _sigmoid_vector = np.concatenate(_sigmoid_vector)
                 return _sigmoid_vector
+            def _get_input_labels_breakdown(idxs):
+                output = {
+                    'is_ensemble': True,
+                    'model_folder_paths': [x['model_folder_path'] for x in self.precomputed_sigmoid_paths],
+                }
+                if use_hard_predictions:
+                    output['precomputed_thresholds_paths'] = self.precomputed_thresholds_paths
+                if filter_labels:
+                    output['precomputed_filtered_labels_paths'] = self.precomputed_filtered_labels_paths
+                if use_chexpert:
+                    output['chexpert'] = []
+                    for _probs, _did2idx in zip(self.ensemble_chexpert_sigmoids, self.ensemble_chexpert_did2idx_dicts):
+                        output['chexpert'].append(np.array([_probs[_did2idx[self.dicom_ids[idx]]] for idx in idxs]))
+                if use_chest_imagenome:
+                    output['chest_imagenome'] = []
+                    for _probs, _did2idx in zip(self.ensemble_chest_imagenome_sigmoids, self.ensemble_chest_imagenome_did2idx_dicts):
+                        output['chest_imagenome'].append(np.array([_probs[_did2idx[self.dicom_ids[idx]]] for idx in idxs]))
+                return output
             self.get_ensemble_sigmoid_vector = _get_ensemble_sigmoid_vector # function pointer
+            self.get_input_labels_breakdown = _get_input_labels_breakdown # function pointer
         else:
+            def _get_input_labels_breakdown(idxs):
+                output = {
+                    'is_ensemble': False,
+                }
+                if self.use_gender:
+                    output['gender'] = np.array(self.genders[idxs])
+                if self.use_chexpert:
+                    output['chexpert'] = np.array([self.chexpert_labels[self.report_ids[idx]] for idx in idxs])
+                if self.use_chest_imagenome:
+                    output['chest_imagenome'] = np.array([self.chest_imagenome_labels[self.report_ids[idx]] for idx in idxs])
+                return output            
             self.precomputed_sigmoid_paths = None
             self.get_ensemble_sigmoid_vector = None
+            self.get_input_labels_breakdown = _get_input_labels_breakdown # function pointer
 
         if use_test_set or use_chest_imagenome_label_gold_set:
             # Create test dataset and dataloader
@@ -411,7 +460,23 @@ class MIMICCXR_Labels2ReportTrainer():
             self.val_dataset, self.val_dataloader = self._create_dataset_and_dataloader(
                 self.val_indices, self.eval_collate_batch_fn)
 
-    def _sanity_check_labels(self, label_name, sigmoids_list, did2idx_dicts, gt_labels, label_order=None):
+    def _load_ensemble_chest_imagenome_label_orders(self):
+        self.ensemble_chest_imagenome_label_orders = []
+        self.ensemble_chest_imagenome_label_names_filenames = []
+        for x in self.precomputed_sigmoid_paths:
+            model_folder_path = x['model_folder_path']
+            metadata_path = os.path.join(model_folder_path, 'metadata.json')
+            metadata = load_json_file(metadata_path)
+            chest_imagenome_label_names_filename = metadata['mimiccxr_trainer_kwargs'].get('chest_imagenome_label_names_filename', None)
+            if chest_imagenome_label_names_filename is not None:
+                label_order = load_chest_imagenome_label_order(chest_imagenome_label_names_filename)
+                self.ensemble_chest_imagenome_label_orders.append(label_order)
+                self.ensemble_chest_imagenome_label_names_filenames.append(chest_imagenome_label_names_filename)
+                print(f'Label order inferred from {chest_imagenome_label_names_filename}')
+            else:
+                self.ensemble_chest_imagenome_label_orders.append(None)
+    
+    def _sanity_check_labels(self, label_name, sigmoids_list, did2idx_dicts, gt_labels, label_order_list=None):
         print_red(f'    Sanity checking {label_name} labels', bold=True)
         if hasattr(self, 'val_indices'):
             print(f'    len(self.val_indices) = {len(self.val_indices)}')            
@@ -421,13 +486,17 @@ class MIMICCXR_Labels2ReportTrainer():
             indices = self.test_indices
         else:
             raise NotImplementedError
+        if label_order_list is not None:
+            assert type(label_order_list) == list
+            assert len(sigmoids_list) == len(label_order_list)
+
         from sklearn.metrics import f1_score
         for i, (_probs, _did2idx) in enumerate(zip(sigmoids_list, did2idx_dicts)):
             _pred_labels = np.array([_probs[_did2idx[self.dicom_ids[i]]] for i in indices]).astype(int)
             _gt_labels = np.array([gt_labels[self.report_ids[i]] for i in indices])
-            if label_order is not None:
-                assert len(label_order) == _gt_labels.shape[1]
-                _gt_labels = _gt_labels[:, label_order]
+            if label_order_list is not None and label_order_list[i] is not None:
+                assert len(label_order_list[i]) == _gt_labels.shape[1]
+                _gt_labels = _gt_labels[:, label_order_list[i]]
             if self.filter_labels:
                 _label_indices_filepath = self.precomputed_filtered_labels_paths[i][f'{label_name}_indices_path']
                 _label_indices = load_pickle(_label_indices_filepath)
@@ -440,16 +509,9 @@ class MIMICCXR_Labels2ReportTrainer():
                                   self.ensemble_chexpert_did2idx_dicts, self.chexpert_labels)
     
     def _sanity_check_chest_imagenome_labels(self):
-        # HACK: this is a hacky way to get the label order right
-        tmp = get_labels_per_anatomy_and_anatomy_group("labels(min_freq=100).pkl", for_training=True)
-        label_order = []
-        for _, labels in tmp['anatomy_to_localized_labels']:
-            label_order.extend(labels)
-        for _, labels in tmp['anatomy_group_to_global_labels']:
-            label_order.extend(labels)
         self._sanity_check_labels('chest_imagenome', self.ensemble_chest_imagenome_sigmoids,
                                   self.ensemble_chest_imagenome_did2idx_dicts, self.chest_imagenome_labels,
-                                  label_order=label_order)
+                                  label_order_list=self.ensemble_chest_imagenome_label_orders)
 
     def _create_dataset(self, indices, shuffle=False, infinite=False):
         return MIMICCXR_Labels2Report_Dataset(

@@ -435,15 +435,19 @@ def load_chest_imagenome_dicom_ids_and_labels_as_numpy_matrix(chest_imagenome_la
 def load_chest_imagenome_labels(chest_imagenome_labels_filename):
     return _load_pickle_from_cache_dir(chest_imagenome_labels_filename)
 
+def load_chest_imagenome_label_order(chest_imagenome_label_names_filename):
+    tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
+    label_order = []
+    for _, labels in tmp['anatomy_to_localized_labels']:
+        label_order.extend(labels)
+    for _, labels in tmp['anatomy_group_to_global_labels']:
+        label_order.extend(labels)
+    return label_order
+
 def load_chest_imagenome_label_names(chest_imagenome_label_names_filename, apply_anatomy_reordering=False):
     chest_imagenome_label_names = _load_pickle_from_cache_dir(chest_imagenome_label_names_filename)
     if apply_anatomy_reordering:
-        tmp = get_labels_per_anatomy_and_anatomy_group(chest_imagenome_label_names_filename, for_training=True)
-        label_order = []
-        for _, labels in tmp['anatomy_to_localized_labels']:
-            label_order.extend(labels)
-        for _, labels in tmp['anatomy_group_to_global_labels']:
-            label_order.extend(labels)
+        label_order = load_chest_imagenome_label_order(chest_imagenome_label_names_filename)
         assert len(label_order) == len(chest_imagenome_label_names)
         chest_imagenome_label_names = [chest_imagenome_label_names[i] for i in label_order]
     return chest_imagenome_label_names

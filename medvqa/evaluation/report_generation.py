@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from nltk.tokenize import wordpunct_tokenize
@@ -10,8 +11,8 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
 )
-from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
-from medvqa.datasets.mimiccxr import get_mimiccxr_image_paths
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names, load_chest_imagenome_label_order, load_chest_imagenome_labels
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, get_detailed_metadata_for_dicom_id, get_mimiccxr_image_paths
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
@@ -21,13 +22,14 @@ from medvqa.metrics.medical import (
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.models.report_generation.templates.models import SimpleTemplateRGModel
 from medvqa.utils.constants import (
+    CHEST_IMAGENOME_GENDERS,
     CHEXPERT_LABEL2SHORT,
     CHEXPERT_LABELS,
     METRIC2SHORT,
     VINBIG_DISEASES,
     ReportEvalMode,
 )
-from medvqa.utils.files import load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_to_pickle
 from medvqa.utils.logging import print_blue, print_bold, print_magenta
 from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 from medvqa.utils.common import CACHE_DIR, get_timestamp
@@ -493,7 +495,8 @@ def get_chexpert_based_outputs_dataframe(metrics_paths):
 
 class ReportGenExamplePlotter:
 
-    def __init__(self, reports_path, report_metrics_path, input_labels_path=None, chest_imagenome_label_names_filename=None):
+    def __init__(self, reports_path, report_metrics_path, input_labels_path=None, chest_imagenome_label_names_filename=None,
+                 apply_anatomy_reordering=False):
         reports_data = load_pickle(reports_path)
         self.gen_reports = reports_data['gen_reports']
         self.gt_reports = reports_data['gt_reports']
@@ -504,7 +507,8 @@ class ReportGenExamplePlotter:
             self.input_labels = load_pickle(input_labels_path)
             if 'chest_imagenome' in self.input_labels:
                 assert chest_imagenome_label_names_filename is not None
-                self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
+                self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename,
+                                                                                    apply_anatomy_reordering)
                 assert len(self.chest_imagenome_label_names) == len(self.input_labels['chest_imagenome'][0])
         else:
             self.input_labels = None
@@ -548,16 +552,48 @@ class ReportGenExamplePlotter:
         print('\n--')
         if self.input_labels is not None:
             print('Input labels:\n')
-            for label_name, label_list in self.input_labels.items():
-                print()
-                print_bold(label_name)
-                print('array:', label_list[idx])
-                if label_name == 'chest_imagenome':
-                    print('verbose:', chest_imagenome_label_array_to_string(label_list[idx], self.chest_imagenome_label_names))
-                elif label_name == 'chexpert':
-                    print('verbose:', chexpert_label_array_to_string(label_list[idx]))
-                else:
-                    raise ValueError(f'Unknown label name: {label_name}')
+            if self.input_labels['is_ensemble']:
+                n_models = len(self.input_labels['model_folder_paths'])
+                print(f'Ensemble of {n_models} models')
+                label_names = []
+                if 'chexpert' in self.input_labels:
+                    label_names.append('chexpert')
+                if 'chest_imagenome' in self.input_labels:
+                    label_names.append('chest_imagenome')
+                assert len(label_names) > 0
+                for i in range(n_models):
+                    print(f'Model {i}:')
+                    print('model_folder_path:', self.input_labels['model_folder_paths'][i])
+                    for label_name in label_names:
+                        print()
+                        print_bold(label_name)
+                        label_array = self.input_labels[label_name][i]
+                        print('array:', label_array[idx])
+                        if label_name == 'chest_imagenome':
+                            print('verbose:', chest_imagenome_label_array_to_string(label_array[idx], self.chest_imagenome_label_names))
+                        elif label_name == 'chexpert':
+                            print('verbose:', chexpert_label_array_to_string(label_array[idx]))
+                        else:
+                            raise ValueError(f'Unknown label name: {label_name}')
+            else:
+                if 'gender' in self.input_labels:
+                    print()
+                    print_bold('gender')
+                    label_array = self.input_labels['gender']
+                    print('array:', label_array[idx])
+                    print('verbose:', CHEST_IMAGENOME_GENDERS[label_array[idx]])
+                if 'chexpert' in self.input_labels:
+                    print()
+                    print_bold('chexpert')
+                    label_array = self.input_labels['chexpert']
+                    print('array:', label_array[idx])
+                    print('verbose:', chexpert_label_array_to_string(label_array[idx]))
+                if 'chest_imagenome' in self.input_labels:
+                    print()
+                    print_bold('chest_imagenome')
+                    label_array = self.input_labels['chest_imagenome']
+                    print('array:', label_array[idx])
+                    print('verbose:', chest_imagenome_label_array_to_string(label_array[idx], self.chest_imagenome_label_names))
             print('\n--')
         print('gen_report:\n')
         print(self.gen_reports[idx])
@@ -588,3 +624,128 @@ class ReportGenExamplePlotter:
             img = Image.open(imgpath).convert('RGB')
             plt.imshow(img)
             plt.show()
+
+def get_gt_labels_for_dicom_id(dicom_id, use_chexpert=True, use_chest_imagenome=True,
+                               chexpert_labels_filename=None, chest_imagenome_labels_filename=None,
+                               apply_anatomycal_reordering=False, chest_imagenome_label_names_filename=None,
+                               verbose=True, chexpert_labels_to_drop=None, chexpert_labels_to_add=None,
+                               chest_imagenome_labels_to_drop=None, chest_imagenome_labels_to_add=None,):
+    assert use_chexpert or use_chest_imagenome
+    
+    if use_chexpert:
+        assert chexpert_labels_filename is not None
+        metadata = get_detailed_metadata_for_dicom_id(dicom_id)
+        assert len(metadata) == 1
+        report_index = metadata[0]['report_index']
+        chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename)
+        chexpert_labels = get_cached_pickle_file(chexpert_labels_path)
+        chexpert_labels = chexpert_labels[report_index]
+        if chexpert_labels_to_drop is not None:
+            for x in chexpert_labels_to_drop:
+                chexpert_labels[CHEXPERT_LABELS.index(x)] = 0
+        if chexpert_labels_to_add is not None:
+            for x in chexpert_labels_to_add:
+                chexpert_labels[CHEXPERT_LABELS.index(x)] = 1
+        if verbose:
+            print_bold('chexpert_labels:')
+            print(chexpert_label_array_to_string(chexpert_labels))
+
+    if use_chest_imagenome:
+        assert chest_imagenome_labels_filename is not None
+        chest_imagenome_labels = load_chest_imagenome_labels(chest_imagenome_labels_filename)
+        chest_imagenome_labels = chest_imagenome_labels[dicom_id]
+        if verbose:
+            assert chest_imagenome_label_names_filename is not None
+            label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
+        if apply_anatomycal_reordering:
+            assert chest_imagenome_label_names_filename is not None
+            label_order = load_chest_imagenome_label_order(chest_imagenome_label_names_filename)
+            assert len(label_order) == len(chest_imagenome_labels)
+            chest_imagenome_labels = chest_imagenome_labels[label_order]
+            if verbose:
+                assert len(label_names) == len(chest_imagenome_labels)
+                label_names = [label_names[i] for i in label_order]
+        if chest_imagenome_labels_to_drop is not None:
+            for x in chest_imagenome_labels_to_drop:
+                chest_imagenome_labels[label_names.index(x)] = 0
+        if chest_imagenome_labels_to_add is not None:
+            for x in chest_imagenome_labels_to_add:
+                chest_imagenome_labels[label_names.index(x)] = 1
+        if verbose:
+            print_bold('chest_imagenome_labels:')
+            print(chest_imagenome_label_array_to_string(chest_imagenome_labels, label_names))
+
+    if use_chexpert and use_chest_imagenome:
+        return np.concatenate([chexpert_labels, chest_imagenome_labels])
+    elif use_chexpert:
+        return chexpert_labels
+    elif use_chest_imagenome:
+        return chest_imagenome_labels
+    else: assert False
+
+def load_and_run_labels2report_gen_model_in_inference_mode(
+        input_binary_labels, model_folder_path, is_second_label_source=False, max_report_length=100,
+        use_amp=False, device='GPU'):
+    
+    from medvqa.models.checkpoint import load_metadata
+    from medvqa.datasets.tokenizer import Tokenizer
+    from medvqa.models.report_generation.labels2report import Labels2ReportModel
+    from medvqa.models.checkpoint import get_checkpoint_filepath
+    from torch.cuda.amp.autocast_mode import autocast
+    import torch
+    
+    metadata = load_metadata(model_folder_path)
+    tokenizer_kwargs = metadata['tokenizer_kwargs']
+    model_kwargs = metadata['model_kwargs']
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+
+    # Init tokenizer
+    print_bold('Create tokenizer')
+    tokenizer = Tokenizer(**tokenizer_kwargs)
+    
+    # Create model
+    print_bold('Create model')
+    model = Labels2ReportModel(vocab_size=tokenizer.vocab_size,
+                            start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
+                            device=device, **model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('checkpoint_path = ', checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Prepare input labels
+    print_bold('Prepare input labels')
+    input_binary_labels = torch.tensor(input_binary_labels, dtype=torch.float32).to(device)
+    input_binary_labels = input_binary_labels.unsqueeze(0)
+    
+    # Run model in inference mode
+    print_bold('Run model in inference mode')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        # Prepare args for model forward
+        model_kwargs = {                
+            'device': device,
+            'mode': 'eval',
+            'predicted_binary_scores': input_binary_labels,
+            'is_second_label_source': is_second_label_source,
+            'max_report_length': max_report_length,
+        }
+        # Forward pass
+        with autocast(enabled=use_amp): # automatic mixed precision
+            model_output = model(**model_kwargs)
+            pred_reports = model_output['pred_reports']
+
+    # Convert predicted report from ids to string
+    print_bold('Convert predicted report from ids to string')
+    pred_report = pred_reports[0]
+    pred_report = tokenizer.ids2string(tokenizer.clean_sentence(pred_report))
+    
+    # Return predicted report
+    return pred_report

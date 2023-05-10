@@ -14,6 +14,7 @@ def create_optimizer(name, params, lr):
 
 class GradientAccumulator:
     def __init__(self, optimizer, scaler, num_accumulation_steps):
+        print(f'GradientAccumulator.__init__(): num_accumulation_steps = {num_accumulation_steps}')
         self.optimizer = optimizer
         self.scaler = scaler
         self.num_accumulation_steps = num_accumulation_steps

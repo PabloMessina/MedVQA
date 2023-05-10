@@ -495,11 +495,14 @@ def _create_dataset(self, indices, shuffle=False, balanced_sampling_mode=None, *
                     global_name = label_name[-1]
                     global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
             without_global = [idx for idx in indices if _labels[_rids[idx]].max() == 0]
+            lines = []
             for global_name, idxs in global2idxs.items():
-                print(f'Global: {global_name}, # images: {len(idxs)}')
+                lines.append((len(idxs), f'Global: {global_name}, # images: {len(idxs)}'))
                 dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 datasets.append(dataset)
-            print(f'# images without global: {len(without_global)}')
+            lines.append((-1, f'# images without global: {len(without_global)}'))
+            lines.sort(key=lambda x: x[0], reverse=True)
+            for _, line in lines: print(line)
             if len(without_global) > 0:
                 dataset = self._create_dataset(without_global, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 datasets.append(dataset)
@@ -525,11 +528,14 @@ def _create_dataset(self, indices, shuffle=False, balanced_sampling_mode=None, *
                         has_label = True
                 if not has_label:
                     without_label.append(i)
+            lines = []
             for label_name, idxs in label2idxs.items():
-                print(f'Label: {label_name}, # images: {len(idxs)}')
+                lines.append((len(idxs), f'Label: {label_name}, # images: {len(idxs)}'))
                 dataset = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 datasets.append(dataset)
-            print(f'# images without label: {len(without_label)}')
+            lines.append((-1, f'# images without label: {len(without_label)}'))
+            lines.sort(key=lambda x: x[0], reverse=True)
+            for _, line in lines: print(line)
             if len(without_label) > 0:
                 dataset = self._create_dataset(without_label, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 datasets.append(dataset)
@@ -548,17 +554,20 @@ def _create_dataset(self, indices, shuffle=False, balanced_sampling_mode=None, *
                     global_name = label_name[-1]
                     global2idxs[global_name] = [idx for idx in indices if _labels[_rids[idx], i] == 1]
             max_name_len = max(len(global_name) for global_name in global2idxs.keys())
+            lines = []
             for global_name, idxs in global2idxs.items():
                 idxs_set = set(idxs)
                 other_idxs = [i for i in indices if i not in idxs_set]
                 global_name = global_name.ljust(max_name_len)
-                print(f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
+                lines.append((len(idxs), f'Global: {global_name}, # images: {len(idxs)} (other: {len(other_idxs)})'))
                 assert len(idxs) > 0
                 assert len(other_idxs) > 0
                 dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.6, 0.4])
                 datasets.append(dataset_pos_neg)
+            lines.sort(key=lambda x: x[0], reverse=True)
+            for _, line in lines: print(line)
             dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.balanced_batch_size)
         elif balanced_sampling_mode == _BalancedSamplingMode.BALANCED_CHEXPERT_LABELS_BATCHWISE:
             assert hasattr(self, 'balanced_batch_size') and self.balanced_batch_size is not None
@@ -578,17 +587,20 @@ def _create_dataset(self, indices, shuffle=False, balanced_sampling_mode=None, *
                         except KeyError:
                             label2idxs[label_name] = [i]
             max_name_len = max(len(label_name) for label_name in label2idxs.keys())
+            lines = []
             for label_name, idxs in label2idxs.items():
                 idxs_set = set(idxs)
                 other_idxs = [i for i in indices if i not in idxs_set]
                 label_name = label_name.ljust(max_name_len)
-                print(f'Label: {label_name}, # images: {len(idxs)} (other: {len(other_idxs)})')
+                lines.append((len(idxs), f'Label: {label_name}, # images: {len(idxs)} (other: {len(other_idxs)})'))
                 assert len(idxs) > 0
                 assert len(other_idxs) > 0
                 dataset_pos = self._create_dataset(idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 dataset_neg = self._create_dataset(other_idxs, shuffle=shuffle, infinite=True, **create_dataset_kwargs)
                 dataset_pos_neg = CompositeInfiniteDataset([dataset_pos, dataset_neg], [0.6, 0.4])
                 datasets.append(dataset_pos_neg)
+            lines.sort(key=lambda x: x[0], reverse=True)
+            for _, line in lines: print(line)
             dataset = BatchedCompositeInfiniteDataset(datasets, [1] * len(datasets), batch_size=self.balanced_batch_size)
         else:
             raise ValueError(f'Unexpected balanced sampling mode: {balanced_sampling_mode}')

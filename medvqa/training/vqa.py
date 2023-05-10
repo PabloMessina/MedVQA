@@ -1,3 +1,4 @@
+import bs4
 import torch
 import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
@@ -292,6 +293,8 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                             yolov8_predictions = model_output['yolov8_predictions']
                     else:
                         pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
+                        bs = pred_chest_imagenome_bbox_coords.size(0)
+                        pred_chest_imagenome_bbox_coords = pred_chest_imagenome_bbox_coords.view(bs, -1, 4)
                         pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
 
                 if not use_visual_module_only:

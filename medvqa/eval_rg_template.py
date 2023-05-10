@@ -650,6 +650,9 @@ def _evaluate_model(
                     label_order=label_order,
                     top_k_label_indices=top_k_label_indices,
                 )
+            else:
+                tot_chexpert_labels = None
+
             if use_chest_imagenome:
                 print_blue('Getting label names and templates from Chest-Imagenome ...', bold=True)
                 label_names_filename = mimiccxr_vision_evaluator_kwargs['chest_imagenome_label_names_filename']
@@ -683,6 +686,8 @@ def _evaluate_model(
                     label_order=label_order,
                     top_k_label_indices=top_k_label_indices,
                 )
+            else:
+                tot_chest_imagenome_labels = None
 
             if template_based_mode == TemplateBasedModes.CHEXPERT_LABELS:
                 reports = chexpert_reports

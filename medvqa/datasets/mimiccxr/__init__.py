@@ -1,4 +1,3 @@
-from functools import cache
 from dotenv import load_dotenv
 from pathlib import Path
 from medvqa.utils.constants import CHEXPERT_LABELS
@@ -92,6 +91,16 @@ class MIMICCXR_ViewModes:
     FRONT_SINGLE = 'front_single'
     ANY_SINGLE = 'any_single'
     CHEST_IMAGENOME = 'chest_imagenome'
+
+    @staticmethod
+    def get_all_modes():
+        return [
+            MIMICCXR_ViewModes.ALL,
+            MIMICCXR_ViewModes.FRONT_ALL,
+            MIMICCXR_ViewModes.FRONT_SINGLE,
+            MIMICCXR_ViewModes.ANY_SINGLE,
+            MIMICCXR_ViewModes.CHEST_IMAGENOME,
+        ]
 
 class MIMICCXR_EvalViewModes:
     ALL = 'all'
@@ -466,6 +475,7 @@ def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename=Non
         for dicom_id_view_pos_pair in detailed_metadata['dicom_id_view_pos_pairs'][i]:
             if dicom_id_view_pos_pair[0] == dicom_id:
                 output.append({
+                    'report_index': i,
                     'part_id': detailed_metadata['part_ids'][i],
                     'subject_id': detailed_metadata['subject_ids'][i],
                     'study_id': detailed_metadata['study_ids'][i],

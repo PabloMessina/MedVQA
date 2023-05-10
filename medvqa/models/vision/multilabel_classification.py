@@ -6,6 +6,7 @@ class MLCVersion:
     DEFAULT = 'default' # global features -> fully connected layer -> softmax
     V1 = 'v1'
     V2 = 'v2'
+    V3 = 'v3'
 
 class MultilabelClassifier_v1(nn.Module):
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_bboxes, num_regions,
@@ -190,4 +191,35 @@ class MultilabelClassifier_v2(nn.Module):
         assert mlc_scores.shape == (batch_size, self.num_labels)
 
         # 4) Return the predicted bounding box coordinates, presence and multi-label classification scores
+        return mlc_scores
+
+class MultilabelClassifier_v3(nn.Module):
+    def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_regions, num_labels):
+        super().__init__()
+        print('MultilabelClassifier_v3:')
+        print(f'  local_feat_dim: {local_feat_dim}')
+        print(f'  global_feat_dim: {global_feat_dim}')
+        print(f'  hidden_dim: {hidden_dim}')
+        print(f'  num_regions: {num_regions}')
+        print(f'  num_labels: {num_labels}')
+        self.local_feat_dim = local_feat_dim
+        self.global_feat_dim = global_feat_dim
+        self.hidden_dim = hidden_dim
+        self.num_labels = num_labels
+        # create bbox projection layers
+        self.loc_proj = nn.Linear(local_feat_dim, hidden_dim)
+        self.glob_proj = nn.Linear(global_feat_dim, hidden_dim)
+        self.fc = nn.Linear((num_regions + 1) * hidden_dim, num_labels)
+
+    def forward(self, local_features, global_features):
+        # local_features: (batch_size, num_regions, local_feat_dim)
+        # global_features: (batch_size, global_feat_dim)
+        # return: mlc_scores (batch_size, num_labels)
+        batch_size = local_features.size(0)
+        x_loc = self.loc_proj(local_features) # (batch_size, num_regions, hidden_dim)
+        x_glob = self.glob_proj(global_features) # (batch_size, hidden_dim)
+        x_concat = torch.cat([x_loc, x_glob.unsqueeze(1)], dim=1) # (batch_size, num_regions + 1, hidden_dim)
+        x_concat = x_concat.view(batch_size, -1) # (batch_size, (num_regions + 1) * hidden_dim)
+        x_concat = torch.relu(x_concat) # (batch_size, (num_regions + 1) * hidden_dim)
+        mlc_scores = self.fc(x_concat) # (batch_size, num_labels)
         return mlc_scores

@@ -8,6 +8,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
+from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
@@ -31,7 +32,7 @@ from medvqa.losses import DatasetAwareLoss
 from ignite.metrics import RunningAverage, EpochMetric
 import operator
 from medvqa.metrics.nlp.bleu import DatasetAwareBleu
-from medvqa.metrics.nlp.cider import DatasetAwareCiderD
+from medvqa.metrics.nlp.cider import ConditionAwareCiderD, DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 
 from medvqa.utils.constants import MetricNames
@@ -101,6 +102,13 @@ def attach_dataset_aware_ciderd(engine, allowed_dataset_ids, record_scores=False
                 record_scores=record_scores)
     met.attach(engine, MetricNames.CIDER_D)
 
+def attach_condition_aware_ciderd(engine, condition_function, record_scores=False, field='answers',
+                                  metric_name=MetricNames.CIDER_D):
+    met = ConditionAwareCiderD(output_transform = _get_output_transform(f'pred_{field}', field),
+                condition_function=condition_function,
+                record_scores=record_scores)
+    met.attach(engine, metric_name)
+
 # def attach_bleu_question(engine, device, record_scores=False):
 #     blue = Bleu(output_transform = _get_output_transform('pred_questions', 'questions'),
 #                 device = device, record_scores=record_scores)
@@ -145,6 +153,14 @@ def attach_dataset_aware_weighted_medical_completeness(engine, tokenizer, allowe
                 allowed_dataset_ids = allowed_dataset_ids,
                 record_scores=record_scores)
     met.attach(engine, MetricNames.WMEDCOMP)
+
+def attach_condition_aware_weighted_medical_completeness(engine, tokenizer, condition_function, record_scores=False, field='answers',
+                                                         metric_name=MetricNames.WMEDCOMP):
+    met = ConditionAwareWeightedMedicalCompleteness(tokenizer,
+                output_transform = _get_output_transform(f'pred_{field}', field),
+                condition_function = condition_function,
+                record_scores=record_scores)
+    met.attach(engine, metric_name)
 
 # ---------------------------------------------
 # Medical tags prediction metrics

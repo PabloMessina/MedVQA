@@ -10,7 +10,7 @@ from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
 from medvqa.datasets.data_inspection_utils import inspect_labels2report_trainer
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_ViewModes
 from medvqa.datasets.mimiccxr.mimiccxr_labels2report_dataset_management import MIMICCXR_Labels2ReportTrainer
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.tokenizer import Tokenizer
@@ -31,6 +31,8 @@ from medvqa.utils.constants import (
 )
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
+    attach_condition_aware_ciderd,
+    attach_condition_aware_weighted_medical_completeness,
     attach_dataset_aware_ciderd,
     attach_dataset_aware_weighted_medical_completeness,
     attach_dataset_aware_chest_imagenome_labels_auc,
@@ -97,6 +99,9 @@ def parse_args(args=None):
     parser.add_argument('--ensemble-num-workers', type=int, default=None)
     parser.add_argument('--use-hard-predictions', action='store_true', default=False,
                         help='Models\' sigmoid outputs will be thresholded using thresholds tuned on validation set')
+    parser.add_argument('--use-gt-labels', action='store_true', default=False)
+    parser.add_argument('--train-on-gt-and-eval-on-predictions', action='store_true', default=False)
+    parser.add_argument('--randomly-drop-labels', action='store_true', default=False)
 
     # Model arguments
     parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
@@ -138,7 +143,7 @@ def parse_args(args=None):
     # MIMIC-CXR arguments
     parser.add_argument('--use-mimiccxr', dest='train_mimiccxr', action='store_true', default=False)
     parser.add_argument('--mimiccxr-weight', type=float, default=1)
-    parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single')    
+    parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single', choices=MIMICCXR_ViewModes.get_all_modes())
     parser.add_argument('--mimiccxr-balanced-sampling-mode', type=str, default=None)
     parser.add_argument('--mimiccxr-balanced-batch-size', type=int, default=None)
     parser.add_argument('--mimiccxr-qa-adapted-reports-filename', type=str, default=None)
@@ -174,7 +179,9 @@ def parse_args(args=None):
 
 _METRIC_WEIGHTS = {
     MetricNames.CIDER_D: 0.1,
+    MetricNames.CIDER_D_GT: 0.1,
     MetricNames.WMEDCOMP: 1,
+    MetricNames.WMEDCOMP_GT: 1,
     MetricNames.CHXLABEL_AUC: 1,
     MetricNames.CHXLABEL_PRCAUC: 1,
     MetricNames.CHESTIMAGENOMELABELAUC: 1,
@@ -609,6 +616,12 @@ def train_model(
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
     train_mimiccxr = training_kwargs['train_mimiccxr']
+    support_two_label_sources = training_kwargs['support_two_label_sources']
+    train_on_gt_and_eval_on_predictions = training_kwargs['train_on_gt_and_eval_on_predictions']
+    randomly_drop_labels = training_kwargs['randomly_drop_labels']
+
+    if train_on_gt_and_eval_on_predictions:
+        assert not support_two_label_sources
     
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
@@ -652,7 +665,11 @@ def train_model(
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
     if train_mimiccxr:
-        mimiccxr_collate_batch_fn = get_labels2report_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
+        if train_on_gt_and_eval_on_predictions:
+            mimiccxr_collate_batch_fn = get_labels2report_collate_batch_fn(
+                **collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR], flag='pred') # We add the flag 'pred' to the kwargs
+        else:
+            mimiccxr_collate_batch_fn = get_labels2report_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
 
     # Create MIMIC-CXR trainer
     if train_mimiccxr:
@@ -662,8 +679,48 @@ def train_model(
             batch_size=batch_size,
             collate_batch_fn=mimiccxr_collate_batch_fn,            
             num_workers=num_workers,
+            use_val_set_only=train_on_gt_and_eval_on_predictions,
             **mimiccxr_trainer_kwargs,
         )
+        if support_two_label_sources or train_on_gt_and_eval_on_predictions:
+            collate_batch_fn_kwargs_2 = collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR].copy()
+            assert collate_batch_fn_kwargs_2['use_ground_truth_as_prediction'] == False
+            collate_batch_fn_kwargs_2['use_ground_truth_as_prediction'] = True
+            collate_batch_fn_kwargs_2['is_second_label_source'] = support_two_label_sources
+            if train_on_gt_and_eval_on_predictions:
+                collate_batch_fn_kwargs_2['flag'] = 'gt'
+            if randomly_drop_labels:
+                mimiccxr_train_collate_batch_fn_2 = get_labels2report_collate_batch_fn(
+                    **collate_batch_fn_kwargs_2, randomly_drop_labels=True)
+                mimiccxr_eval_collate_batch_fn_2 = get_labels2report_collate_batch_fn(
+                    **collate_batch_fn_kwargs_2, randomly_drop_labels=False)
+            else:
+                mimiccxr_train_collate_batch_fn_2 = get_labels2report_collate_batch_fn(**collate_batch_fn_kwargs_2)
+                mimiccxr_eval_collate_batch_fn_2 = mimiccxr_train_collate_batch_fn_2
+            assert mimiccxr_trainer_kwargs['use_ensemble_predictions']         
+            mimiccxr_trainer_kwargs_2 = mimiccxr_trainer_kwargs.copy()
+            mimiccxr_trainer_kwargs_2['use_ensemble_predictions'] = False
+            mimiccxr_trainer_kwargs_2['view_mode'] = MIMICCXR_ViewModes.ANY_SINGLE
+            mimiccxr_trainer_kwargs_2['use_decent_images_only'] = False
+            mimiccxr_trainer_kwargs_2['use_hard_predictions'] = False
+            print_blue('Creating MIMIC-CXR_Labels2ReportTrainer for second label source ...', bold=True)
+            reorder_labels = False
+            if train_on_gt_and_eval_on_predictions:
+                if mimiccxr_trainer_kwargs['use_chest_imagenome']:
+                    assert len(mimiccxr_trainer.ensemble_chest_imagenome_label_orders) == 1
+                    assert mimiccxr_trainer.ensemble_chest_imagenome_label_names_filenames[0] ==\
+                        mimiccxr_trainer_kwargs_2['chest_imagenome_label_names_filename']
+                    reorder_labels = True
+            mimiccxr_trainer_2 = MIMICCXR_Labels2ReportTrainer(
+                tokenizer=tokenizer,
+                batch_size=batch_size,
+                collate_batch_fn=None,
+                train_collate_batch_fn=mimiccxr_train_collate_batch_fn_2,
+                eval_collate_batch_fn=mimiccxr_eval_collate_batch_fn_2,
+                num_workers=num_workers,
+                reorder_chest_imagenome_labels=reorder_labels,
+                **mimiccxr_trainer_kwargs_2,
+            )
 
     if debug: # if debugging
         output = {}
@@ -685,10 +742,16 @@ def train_model(
     _dataset_names = []
 
     if train_mimiccxr:
-        _dataset_names.append('mim')
-        _train_weights.append(dataloading_kwargs['mimiccxr_weight'])
-        _train_dataloaders.append(mimiccxr_trainer.train_dataloader)
+        if not train_on_gt_and_eval_on_predictions:
+            _dataset_names.append('mim')
+            _train_weights.append(dataloading_kwargs['mimiccxr_weight'])
+            _train_dataloaders.append(mimiccxr_trainer.train_dataloader)
         _val_dataloaders.append(mimiccxr_trainer.val_dataloader)
+        if support_two_label_sources or train_on_gt_and_eval_on_predictions:
+            _dataset_names.append('mim(gt)')
+            _train_weights.append(dataloading_kwargs['mimiccxr_weight'])
+            _train_dataloaders.append(mimiccxr_trainer_2.train_dataloader)
+            _val_dataloaders.append(mimiccxr_trainer_2.val_dataloader)
     
     assert len(_train_dataloaders) > 0
     assert len(_val_dataloaders) > 0
@@ -725,14 +788,48 @@ def train_model(
     metrics_to_print.append('loss')
 
     if train_mimiccxr:
-        attach_dataset_aware_weighted_medical_completeness(trainer_engine, tokenizer, _mim_datasets, field='reports')
-        attach_dataset_aware_weighted_medical_completeness(validator_engine, tokenizer, _mim_datasets, field='reports')
-        attach_dataset_aware_ciderd(validator_engine, _mim_datasets, field='reports')
-        attach_dataset_aware_loss(trainer_engine, 'report_loss', _mim_datasets)
-        # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
-        metrics_to_print.append('report_loss')
+        if support_two_label_sources or train_on_gt_and_eval_on_predictions:
+            if support_two_label_sources:
+                src_cond_fn_1 = lambda output: output['dataset_id'] in _mim_datasets and output['is_second_label_source'] == False
+                src_cond_fn_2 = lambda output: output['dataset_id'] in _mim_datasets and output['is_second_label_source'] == True
+            else:
+                src_cond_fn_1 = lambda output: output['dataset_id'] in _mim_datasets and output['flag'] == 'pred'
+                src_cond_fn_2 = lambda output: output['dataset_id'] in _mim_datasets and output['flag'] == 'gt'
+            if support_two_label_sources:
+                attach_condition_aware_weighted_medical_completeness(
+                    trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
+            attach_condition_aware_weighted_medical_completeness(
+                trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
+            attach_condition_aware_weighted_medical_completeness(
+                validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
+            attach_condition_aware_weighted_medical_completeness(
+                validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
+            attach_condition_aware_ciderd(
+                validator_engine, field='reports', condition_function=src_cond_fn_1)
+            attach_condition_aware_ciderd(
+                validator_engine, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.CIDER_D_GT)
+            attach_dataset_aware_loss(trainer_engine, 'report_loss', _mim_datasets)
+            # for logging
+            if support_two_label_sources:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
+                metrics_to_print.append(MetricNames.WMEDCOMP_GT)
+                metrics_to_print.append(MetricNames.CIDER_D_GT)
+            else:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP, train=False)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP_GT)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D_GT, train=False)
+            metrics_to_print.append('report_loss')
+        else:
+            attach_dataset_aware_weighted_medical_completeness(trainer_engine, tokenizer, _mim_datasets, field='reports')
+            attach_dataset_aware_weighted_medical_completeness(validator_engine, tokenizer, _mim_datasets, field='reports')
+            attach_dataset_aware_ciderd(validator_engine, _mim_datasets, field='reports')
+            attach_dataset_aware_loss(trainer_engine, 'report_loss', _mim_datasets)
+            # for logging
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
+            metrics_to_print.append('report_loss')
     
     if classify_chexpert:
         attach_dataset_aware_chexpert_labels_auc(validator_engine, _chexpert_labels_datasets, 'cpu')
@@ -890,11 +987,14 @@ def train_from_scratch(
     iters_to_accumulate,
     generation_mode,
     use_hard_predictions,
-    # Ensemble args
+    # Label source args (ensemble and/or ground truth)
     use_ensemble,
     ensemble_model_checkpoint_folder_paths,
     ensemble_batch_size,
     ensemble_num_workers,
+    use_gt_labels,
+    train_on_gt_and_eval_on_predictions,
+    randomly_drop_labels,
     # Variable traning args
     epochs,
     batches_per_epoch,
@@ -917,6 +1017,8 @@ def train_from_scratch(
 
     assert train_mimiccxr, 'No dataset selected for training'
 
+    assert use_ensemble or use_gt_labels, 'No label source selected for training'
+
     if use_ensemble:
         assert ensemble_model_checkpoint_folder_paths is not None
         assert ensemble_batch_size is not None
@@ -929,6 +1031,15 @@ def train_from_scratch(
         assert use_chexpert or use_chest_imagenome
         assert top_k_chexpert_labels is not None or top_k_chest_imagenome_labels is not None or \
             label_score_threshold is not None
+
+    if train_on_gt_and_eval_on_predictions:
+        assert use_gt_labels
+        assert use_ensemble
+        assert use_hard_predictions
+        assert use_chexpert or use_chest_imagenome
+
+    if randomly_drop_labels:
+        assert train_on_gt_and_eval_on_predictions
 
     if generation_mode == GenerationMode.PREDICTIONS_2_REFINED_PREDICTIONS_2_REPORT:
         classify_chexpert = use_chexpert
@@ -951,36 +1062,74 @@ def train_from_scratch(
         print_bold('Computing number of labels and ranges for ensemble ...')
         tmp = _compute_number_of_labels_and_ranges_for_ensemble(
             ensemble_model_checkpoint_folder_paths, use_chexpert, use_chest_imagenome, chest_imagenome_label_names_filename)
-        num_input_labels = tmp['num_input_labels']
-        num_output_labels = tmp['num_output_labels']
-        chest_imagenome_range = tmp['chest_imagenome_range']
-        chexpert_range = tmp['chexpert_range']
-        if chest_imagenome_range is not None:
-            print(f'chest_imagenome_range: {chest_imagenome_range}')
-        if chexpert_range is not None:
-            print(f'chexpert_range: {chexpert_range}')
-    else:
+        ensemble_num_input_labels = tmp['num_input_labels']
+        ensemble_num_output_labels = tmp['num_output_labels']
+        ensemble_chest_imagenome_range = tmp['chest_imagenome_range']
+        ensemble_chexpert_range = tmp['chexpert_range']
+        if ensemble_chest_imagenome_range is not None:
+            print(f'ensemble_chest_imagenome_range: {ensemble_chest_imagenome_range}')
+        if ensemble_chexpert_range is not None:
+            print(f'ensemble_chexpert_range: {ensemble_chexpert_range}')
+    if use_gt_labels:
         print_bold('Computing number of labels and ranges assuming ground truth labels as input ...')
-        num_input_labels = 0
-        num_output_labels = 0
+        gt_num_input_labels = 0
+        gt_num_output_labels = 0
         if use_gender:
-            num_input_labels += 2 # M, F
+            gt_num_input_labels += 2 # M, F
         if use_chest_imagenome:
             assert chest_imagenome_label_names_filename is not None
             n_chest_imagenome_labels = len(load_chest_imagenome_label_names(chest_imagenome_label_names_filename))
-            num_input_labels += n_chest_imagenome_labels
-            num_output_labels += n_chest_imagenome_labels
-            chest_imagenome_range = (num_output_labels - n_chest_imagenome_labels, num_output_labels)
-            print(f'chest_imagenome_range: {chest_imagenome_range}')
+            gt_num_input_labels += n_chest_imagenome_labels
+            gt_num_output_labels += n_chest_imagenome_labels
+            gt_chest_imagenome_range = (gt_num_output_labels - n_chest_imagenome_labels, gt_num_output_labels)
+            print(f'gt_chest_imagenome_range: {gt_chest_imagenome_range}')
         else:
-            chest_imagenome_range = None
+            gt_chest_imagenome_range = None
         if use_chexpert:
-            num_input_labels += len(CHEXPERT_LABELS)
-            num_output_labels += len(CHEXPERT_LABELS)
-            chexpert_range = (num_output_labels - len(CHEXPERT_LABELS), num_output_labels)
-            print(f'chexpert_range: {chexpert_range}')
+            gt_num_input_labels += len(CHEXPERT_LABELS)
+            gt_num_output_labels += len(CHEXPERT_LABELS)
+            gt_chexpert_range = (gt_num_output_labels - len(CHEXPERT_LABELS), gt_num_output_labels)
+            print(f'gt_chexpert_range: {gt_chexpert_range}')
         else:
-            chexpert_range = None
+            gt_chexpert_range = None
+    
+    support_two_label_sources = use_ensemble and use_gt_labels and not train_on_gt_and_eval_on_predictions
+    
+    if support_two_label_sources:
+        num_input_labels = ensemble_num_input_labels
+        num_output_labels = ensemble_num_output_labels
+        num_input_labels_2 = gt_num_input_labels
+        num_output_labels_2 = gt_num_output_labels
+        assert ensemble_chexpert_range == gt_chexpert_range
+        assert ensemble_chest_imagenome_range == gt_chest_imagenome_range
+        chexpert_range = ensemble_chexpert_range
+        chest_imagenome_range = ensemble_chest_imagenome_range
+    elif train_on_gt_and_eval_on_predictions:
+        assert ensemble_num_input_labels == gt_num_input_labels
+        assert ensemble_num_output_labels == gt_num_output_labels
+        assert ensemble_chexpert_range == gt_chexpert_range
+        assert ensemble_chest_imagenome_range == gt_chest_imagenome_range
+        num_input_labels = ensemble_num_input_labels
+        num_output_labels = ensemble_num_output_labels
+        num_input_labels_2 = None
+        num_output_labels_2 = None
+        chexpert_range = ensemble_chexpert_range
+        chest_imagenome_range = ensemble_chest_imagenome_range
+    elif use_ensemble:
+        num_input_labels = ensemble_num_input_labels
+        num_output_labels = ensemble_num_output_labels
+        num_input_labels_2 = None
+        num_output_labels_2 = None
+        chexpert_range = ensemble_chexpert_range
+        chest_imagenome_range = ensemble_chest_imagenome_range
+    elif use_gt_labels:
+        num_input_labels = gt_num_input_labels
+        num_output_labels = gt_num_output_labels
+        num_input_labels_2 = None
+        num_output_labels_2 = None
+        chexpert_range = gt_chexpert_range
+        chest_imagenome_range = gt_chest_imagenome_range
+    else: assert False
         
     model_kwargs = dict(
         gen_mode=generation_mode,
@@ -995,6 +1144,10 @@ def train_from_scratch(
         transf_dec_dim_forward=transf_dec_dim_forward,
         transf_dec_num_layers=transf_dec_num_layers,
         dropout_prob=dropout_prob,
+        support_two_label_sources=support_two_label_sources,
+        num_input_labels_2=num_input_labels_2,
+        labels_hidden_dim_2=labels_hidden_dim,
+        num_output_labels_2=num_output_labels_2,
     )
 
     optimizer_kwargs = dict(
@@ -1139,6 +1292,9 @@ def train_from_scratch(
         train_mimiccxr=train_mimiccxr,
         binary_loss_name=binary_loss_name,
         generation_mode=generation_mode,
+        support_two_label_sources=support_two_label_sources,
+        train_on_gt_and_eval_on_predictions=train_on_gt_and_eval_on_predictions,
+        randomly_drop_labels=randomly_drop_labels,
     )
 
     auxiliary_tasks_kwargs = dict(

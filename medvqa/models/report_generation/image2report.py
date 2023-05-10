@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from medvqa.models.nlp.text_decoder import TransformerTextDecoder
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
+from medvqa.utils.logging import print_orange
 
 class Image2ReportModel(MultiPurposeVisualModule):
 
@@ -27,13 +28,19 @@ class Image2ReportModel(MultiPurposeVisualModule):
                 classify_gender,
                 classify_chexpert,
                 classify_chest_imagenome,
+                chexpert_mlc_version,
+                chexpert_mlc_hidden_size,
                 predict_bboxes_chest_imagenome,
+                predict_labels_and_bboxes_chest_imagenome,
                 n_chest_imagenome_labels,
                 chest_imagenome_anatomy_to_labels,
                 chest_imagenome_anatomy_group_to_labels,
                 n_chest_imagenome_bboxes,
                 chest_imagenome_mlc_version,
                 chest_imagenome_mlc_hidden_size,
+                chest_imagenome_bbox_regressor_version,
+                chest_imagenome_bbox_hidden_size,
+                chest_imagenome_train_average_bbox_coords,
                 # Other args
                 dropout_prob,
                 **unused_kwargs,
@@ -54,6 +61,9 @@ class Image2ReportModel(MultiPurposeVisualModule):
         print('   transf_dec_num_layers:', transf_dec_num_layers)
         print('   transf_dec_hidden_dim:', transf_dec_hidden_dim)
 
+        if len(unused_kwargs) > 0:
+            print_orange(f'WARNING: Unused kwargs: {unused_kwargs}')
+
         # Init MultiPurposeVisualModule components (for image encoder and auxiliary tasks)
         super().__init__(
             # Image Encoder kwargs
@@ -68,13 +78,19 @@ class Image2ReportModel(MultiPurposeVisualModule):
             classify_gender=classify_gender,
             classify_chexpert=classify_chexpert,
             classify_chest_imagenome=classify_chest_imagenome,
+            chexpert_mlc_version=chexpert_mlc_version,
+            chexpert_mlc_hidden_size=chexpert_mlc_hidden_size,
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+            predict_labels_and_bboxes_chest_imagenome=predict_labels_and_bboxes_chest_imagenome,
             chest_imagenome_anatomy_to_labels=chest_imagenome_anatomy_to_labels,
             chest_imagenome_anatomy_group_to_labels=chest_imagenome_anatomy_group_to_labels,
             n_chest_imagenome_labels=n_chest_imagenome_labels,
             n_chest_imagenome_bboxes=n_chest_imagenome_bboxes,
             chest_imagenome_mlc_version=chest_imagenome_mlc_version,
             chest_imagenome_mlc_hidden_size=chest_imagenome_mlc_hidden_size,
+            chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
+            chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
+            chest_imagenome_train_average_bbox_coords=chest_imagenome_train_average_bbox_coords,
         )
 
         # Word embedding table

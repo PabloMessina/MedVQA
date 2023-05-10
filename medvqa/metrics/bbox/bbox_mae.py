@@ -48,14 +48,14 @@ class DatasetAwareBboxMAE(DatasetAwareMetric):
                     ae = torch.abs(pred_coords[i] - gt_coords[i])
                     for j in range(m):
                         if gt_presence[i, j] == 1:
-                            self._acc_score += ae[j*4:(j+1)*4].mean()
+                            self._acc_score += ae[j].mean()
                             self._count += 1
             else: # numpy
                 for i in range(n):
                     ae = np.abs(pred_coords[i] - gt_coords[i])
                     for j in range(m):
                         if gt_presence[i, j] == 1:
-                            self._acc_score += ae[j*4:(j+1)*4].mean()
+                            self._acc_score += ae[j].mean()
                             self._count += 1
 
     def compute(self):

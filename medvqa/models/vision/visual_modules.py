@@ -24,7 +24,7 @@ from medvqa.models.vision.bbox_regression import (
     BoundingBoxRegressorAndMultiLabelClassifier_v6,
 )
 from medvqa.models.vision.multilabel_classification import (
-    MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2,
+    MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2, MultilabelClassifier_v3,
 )
 from medvqa.utils.constants import (
     CHEST_IMAGENOME_GENDERS,
@@ -106,6 +106,8 @@ class MultiPurposeVisualModule(nn.Module):
                 classify_chexpert=False,
                 classify_questions=False,
                 classify_chest_imagenome=False,
+                chexpert_mlc_version=MLCVersion.DEFAULT,
+                chexpert_mlc_hidden_size=None,
                 predict_bboxes_chest_imagenome=False,
                 chest_imagenome_train_average_bbox_coords=None,
                 predict_labels_and_bboxes_chest_imagenome=False,
@@ -161,6 +163,8 @@ class MultiPurposeVisualModule(nn.Module):
         self.mlp_in_dim = mlp_in_dim
         self.mlp_out_dim = mlp_out_dim
         self.mlp_hidden_dims = mlp_hidden_dims
+        self.chexpert_mlc_version = chexpert_mlc_version
+        self.chexpert_mlc_hidden_size = chexpert_mlc_hidden_size
         self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
         self.chest_imagenome_bbox_hidden_size = chest_imagenome_bbox_hidden_size
         self.chest_imagenome_bbox_regressor_version = chest_imagenome_bbox_regressor_version
@@ -358,7 +362,18 @@ class MultiPurposeVisualModule(nn.Module):
             # 6) chexpert classifiction
             if self.classify_chexpert:
                 print(f'    Initializing chexpert classification task')
-                self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
+                print(f'    chexpert_mlc_version: {self.chexpert_mlc_version}')
+                if self.chexpert_mlc_version == MLCVersion.DEFAULT:
+                    self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
+                elif self.chexpert_mlc_version == MLCVersion.V3:
+                    self.MLC_chx = MultilabelClassifier_v3(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.chexpert_mlc_hidden_size,
+                        num_regions=self.num_regions,
+                        num_labels=len(CHEXPERT_LABELS),
+                    )
+                else: raise ValueError(f'Unknown chexpert_mlc_version: {self.chexpert_mlc_version}')
 
             # 7) CXR14 specific labels
             if self.use_cxr14:
@@ -383,12 +398,16 @@ class MultiPurposeVisualModule(nn.Module):
             assert self.classify_chest_imagenome
             assert not self.use_anaxnet_bbox_subset # Not supported yet for this combined approach
             assert self.chest_imagenome_anatomy_to_labels is not None
+            assert self.chest_imagenome_bbox_hidden_size is not None
             assert self.chest_imagenome_anatomy_group_to_labels is not None
-            assert len(self.chest_imagenome_anatomy_to_labels) == CHEST_IMAGENOME_NUM_BBOX_CLASSES
+            assert len(self.chest_imagenome_anatomy_to_labels) >= CHEST_IMAGENOME_NUM_BBOX_CLASSES, \
+                f'len(self.chest_imagenome_anatomy_to_labels)={len(self.chest_imagenome_anatomy_to_labels)}' \
+                f' != CHEST_IMAGENOME_NUM_BBOX_CLASSES={CHEST_IMAGENOME_NUM_BBOX_CLASSES}'
             assert self.n_chest_imagenome_bboxes is not None
             print(f'    Initializing Chest ImaGenome classification and bounding box regression'
                   f' tasks (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
             if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
+                assert self.chest_imagenome_train_average_bbox_coords is not None
                 self.bbox_regressor_and_classifier = BoundingBoxRegressorAndMultiLabelClassifier_v4(
                     local_feat_dim=self.local_feat_size,
                     global_feat_dim=self.global_feat_size,
@@ -783,7 +802,11 @@ class MultiPurposeVisualModule(nn.Module):
                 if self.classify_gender:
                     output['pred_gender'] = self.W_gender_chstimgn(global_feat)
                 if not self.merge_findings and self.classify_chexpert:
-                    output['pred_chexpert'] = self.W_chx(global_feat)
+                    if self.chexpert_mlc_version == MLCVersion.DEFAULT:
+                        output['pred_chexpert'] = self.W_chx(global_feat)
+                    elif self.chexpert_mlc_version == MLCVersion.V3:
+                        output['pred_chexpert'] = self.MLC_chx(local_feat_NxRxC, global_feat)
+                    else: assert False
                     output['pred_chexpert_probs'] = torch.sigmoid(output['pred_chexpert'])
                 if self.predict_labels_and_bboxes_chest_imagenome:
                     if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:

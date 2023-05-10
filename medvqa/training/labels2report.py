@@ -29,6 +29,8 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
+        # other args
+        return_predicted_binary_scores=False,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -75,6 +77,7 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                 'device': device,
                 'mode': 'train' if training else 'eval',
                 'predicted_binary_scores': predicted_binary_scores,
+                'is_second_label_source': batch['is_second_label_source'],
             }
             if training:
                 if shift_tokens_for_transformer:
@@ -133,8 +136,12 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
         output = {
             'idxs': idxs,
             'dataset_id': dataset_id,
+            'is_second_label_source': batch['is_second_label_source'],
         }
-
+        if 'flag' in batch:
+            output['flag'] = batch['flag']
+        if return_predicted_binary_scores:
+            output['predicted_binary_scores'] = predicted_binary_scores.detach().cpu()
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
         if classify_chexpert:
@@ -185,6 +192,7 @@ def get_engine(model, tokenizer, classify_chexpert, classify_chest_imagenome, de
                 training=False,
                 optimizer=None,
                 update_lr_batchwise=False, lr_scheduler=None,
+                return_predicted_binary_scores=False,
             ):
     
     # Criterion
@@ -237,6 +245,8 @@ def get_engine(model, tokenizer, classify_chexpert, classify_chest_imagenome, de
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,
+                            # other kwargs
+                            return_predicted_binary_scores=return_predicted_binary_scores,
                         )
     engine = Engine(step_fn)
     return engine

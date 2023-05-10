@@ -191,8 +191,10 @@ class MetricNames:
     ROUGE_L = 'rougeL'
     METEOR = 'meteor'
     CIDER_D = 'ciderD'
+    CIDER_D_GT = 'ciderD_gt'
     MEDCOMP = 'medcomp'
     WMEDCOMP = 'wmedcomp'
+    WMEDCOMP_GT = 'wmedcomp_gt'
     MEDTAGF1 = 'medtagf1'
     ORIENACC = 'orienacc'
     CHXLABELACC = 'chxlabelacc'
@@ -277,8 +279,10 @@ METRIC2SHORT = {
     'rougeL': 'rg-L',
     'meteor': 'met',
     'ciderD': 'cD',
+    'ciderD_gt': 'cD_gt',
     'medcomp': 'mdcmp',
     'wmedcomp': 'wmdcmp',
+    'wmedcomp_gt': 'wmdcmp_gt',
     'medtagf1': 'mtf1',
     'orienacc': 'oracc',
     'chxlabelacc': 'chxlacc',

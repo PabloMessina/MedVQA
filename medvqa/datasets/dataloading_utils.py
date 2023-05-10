@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
@@ -17,6 +18,7 @@ from medvqa.utils.constants import (
     VINBIG_DATASET_ID,
     PADCHEST_DATASET_ID,    
 )
+from medvqa.utils.logging import print_red
 
 INFINITE_DATASET_LENGTH = int(1e18)
 
@@ -464,12 +466,20 @@ def get_mae_collate_batch_fn(dataset_id):
     return mae_collate_batch_fn
 
 def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_chexpert, use_chest_imagenome,
-                                    use_ground_truth_as_prediction):
+                                    use_ground_truth_as_prediction, is_second_label_source=False, flag=None,
+                                    randomly_drop_labels=False):
     if dataset_id == MIMICCXR_DATASET_ID:
+        if randomly_drop_labels:
+            assert use_ground_truth_as_prediction
+        print_red(f'randomly_drop_labels = {randomly_drop_labels}', bold=True)
+
         def collate_batch_fn(batch):
             batch_dict = dict()
             batch_dict['dataset_id'] = dataset_id
+            batch_dict['is_second_label_source'] = is_second_label_source
             batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+            if flag is not None:
+                batch_dict['flag'] = flag
             if use_report:
                 batch_dict['report'] = nn.utils.rnn.pad_sequence(
                     sequences = [torch.tensor(x['report']) for x in batch],
@@ -481,14 +491,23 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
                 if use_gender:
                     batch_dict['g'] = torch.tensor([x['g'] for x in batch])
                     to_concat.append(batch_dict['g'])
-                if use_chest_imagenome:
-                    batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
-                    to_concat.append(batch_dict['chest_imagenome'])
                 if use_chexpert:
                     batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
                     to_concat.append(batch_dict['chexpert'])
+                if use_chest_imagenome:
+                    batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
+                    to_concat.append(batch_dict['chest_imagenome'])
                 assert len(to_concat) > 0
                 batch_dict['predicted_binary_scores'] = torch.cat(to_concat, dim=1).float()
+                if randomly_drop_labels:
+                     x = batch_dict['predicted_binary_scores']
+                     for i in range(x.shape[0]):
+                        if random.random() < 0.5:
+                            droppable_indices = [j for j in range(x.shape[1]) if x[i,j] == 1]
+                            if len(droppable_indices) > 1:
+                                n_to_drop = random.randint(1, len(droppable_indices)-1)
+                                for j in random.sample(droppable_indices, n_to_drop):
+                                    x[i,j] = 0
             else:
                 if use_chest_imagenome:
                     batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])

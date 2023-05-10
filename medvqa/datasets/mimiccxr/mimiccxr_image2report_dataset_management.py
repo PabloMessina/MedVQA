@@ -7,7 +7,7 @@ from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_dicomId2gender,
     load_chest_imagenome_silver_bboxes_as_numpy_array,
-    load_postprocessed_label_names,
+    load_chest_imagenome_label_names,
 )
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import (
@@ -218,9 +218,9 @@ class MIMICCXR_Image2ReportTrainer():
         self.use_yolov8 = use_yolov8
 
         if chest_imagenome_label_names_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(chest_imagenome_label_names_filename)
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         elif chest_imagenome_labels_filename is not None:
-            self.chest_imagenome_label_names = load_postprocessed_label_names(
+            self.chest_imagenome_label_names = load_chest_imagenome_label_names(
                 chest_imagenome_labels_filename.replace('imageId2labels', 'labels'))
         else:
             self.chest_imagenome_label_names = None

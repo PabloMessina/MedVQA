@@ -40,12 +40,13 @@ class DatasetAwareBboxIOU(DatasetAwareMetric):
         else:
             pred_coords, gt_coords, gt_presence = output
             n, m = gt_presence.shape
-            assert m * 4 == gt_coords.shape[1] # each bounding box is represented by 4 coordinates
+            assert len(pred_coords.shape) == 3
+            assert len(gt_coords.shape) == 3
             for i in range(n):
                 for j in range(0, m):
                     if gt_presence[i, j] == 1:
-                        pred = pred_coords[i, j*4:(j+1)*4]
-                        gt = gt_coords[i, j*4:(j+1)*4]
+                        pred = pred_coords[i, j]
+                        gt = gt_coords[i, j]
                         self._acc_score += compute_iou(pred, gt)
                         self._count += 1
 
