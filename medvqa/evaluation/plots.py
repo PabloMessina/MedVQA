@@ -15,6 +15,35 @@ from medvqa.utils.metrics import average_ignoring_nones_and_nans
 # List of 30 different colors
 _COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
 
+def _replace_nans_with_local_avgs(scores):
+    scores_ = []
+    for i, x in enumerate(scores):
+        if np.isnan(x):
+            # find first non-nan value to the left
+            x_left = None
+            for j in range(i-1, -1, -1):
+                if not np.isnan(scores[j]):
+                    x_left = scores[j]
+                    break
+            # find first non-nan value to the right
+            x_right = None
+            for j in range(i+1, len(scores)):
+                if not np.isnan(scores[j]):
+                    x_right = scores[j]
+                    break
+            # if both left and right are non-nan, take average
+            if x_left is not None and x_right is not None:
+                x = (x_left + x_right) / 2
+            # if only left is non-nan, take left
+            elif x_left is not None:
+                x = x_left
+            # if only right is non-nan, take right
+            elif x_right is not None:
+                x = x_right
+            assert x is not None
+        scores_.append(x)
+    return scores_
+
 def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
 
@@ -50,7 +79,20 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
                 train_scores.append(metric_scores[i])
             else:
                 val_scores.append(metric_scores[i])
+            
+        train_has_only_nans = all(np.isnan(x) for x in train_scores)
+        train_has_some_nans = any(np.isnan(x) for x in train_scores)
+        val_has_only_nans = all(np.isnan(x) for x in val_scores)
+        val_has_some_nans = any(np.isnan(x) for x in val_scores)
 
+        if train_has_some_nans and not train_has_only_nans:
+            train_scores = _replace_nans_with_local_avgs(train_scores)
+            print(f'WARNING: {metric_name} train_scores has some nans, but not all. Replacing nans with nearest non-nan values')
+
+        if val_has_some_nans and not val_has_only_nans:
+            val_scores = _replace_nans_with_local_avgs(val_scores)
+            print(f'WARNING: {metric_name} val_scores has some nans, but not all. Replacing nans with nearest non-nan values')
+        
         assert len(train_scores) == len(val_scores)
         
         epochs = list(range(1, len(train_scores)+1))        
@@ -60,17 +102,21 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
         ax = plt.subplot(nrows, ncols, j+1)
         ax.set_xlim(epochs[0]-eps, epochs[-1]+eps)
         ax.set_title(f'{metric_name} per epoch')
-        ax.plot(epochs, train_scores, label=f'{metric_name} (Training)')
-        ax.plot(epochs, val_scores, label=f'{metric_name} (Validation)')
+        if not train_has_only_nans:
+            ax.plot(epochs, train_scores, label=f'{metric_name} (Training)')
+        if not val_has_only_nans:
+            ax.plot(epochs, val_scores, label=f'{metric_name} (Validation)')
         ax.set_xlabel('Epoch')
-        ax.set_ylabel(metric_name)    
+        ax.set_ylabel(metric_name)
         ax.legend()
-        best_train_score, best_train_i = _agg_fn((a,i) for i,a in enumerate(train_scores))
-        ax.hlines(best_train_score, epochs[0], epochs[-1], colors=('green',), linestyles='dashed',
-                label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i}')
-        best_val_score, best_val_i = _agg_fn((a,i) for i,a in enumerate(val_scores))
-        ax.hlines(best_val_score, epochs[0], epochs[-1], colors=('red',), linestyles='dashed',
-                label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i}')
+        if not train_has_only_nans:
+            best_train_score, best_train_i = _agg_fn((a,i) for i,a in enumerate(train_scores))
+            ax.hlines(best_train_score, epochs[0], epochs[-1], colors=('green',), linestyles='dashed',
+                    label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i}')
+        if not val_has_only_nans:
+            best_val_score, best_val_i = _agg_fn((a,i) for i,a in enumerate(val_scores))
+            ax.hlines(best_val_score, epochs[0], epochs[-1], colors=('red',), linestyles='dashed',
+                    label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i}')
         ax.legend()
     
     plt.show()

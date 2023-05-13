@@ -1,11 +1,12 @@
 import torch.nn as nn
 from .wbce import WeigthedByClassBCELoss
 from .focal_loss import FocalLoss
-from .dataset_aware_loss import DatasetAwareLoss
+from .dataset_aware_loss import DatasetAwareLoss, ConditionAwareLoss
 
 __all__ = [
     'get_binary_multilabel_loss',
     'DatasetAwareLoss',
+    'ConditionAwareLoss',
 ]
 
 class Focal_BCE_WBCE_Loss(nn.Module):

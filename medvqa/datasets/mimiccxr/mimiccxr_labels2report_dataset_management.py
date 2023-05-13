@@ -38,7 +38,7 @@ class MIMICCXR_Labels2Report_Dataset(Dataset):
                 chest_imagenome_labels=None,
                 # ensemble predictions
                 use_ensemble_predictions=False,
-                get_ensemble_sigmoid_vector=None,
+                get_ensemble_prediction_vector=None,
                 dicom_ids=None,
             ):
         self.indices = indices
@@ -51,7 +51,7 @@ class MIMICCXR_Labels2Report_Dataset(Dataset):
         self.use_chest_imagenome = use_chest_imagenome
         self.chest_imagenome_labels = chest_imagenome_labels
         self.use_ensemble_predictions = use_ensemble_predictions
-        self.get_ensemble_sigmoid_vector = get_ensemble_sigmoid_vector
+        self.get_ensemble_prediction_vector = get_ensemble_prediction_vector
         self.dicom_ids = dicom_ids
 
         if shuffle:
@@ -78,13 +78,16 @@ class MIMICCXR_Labels2Report_Dataset(Dataset):
         if self.use_chest_imagenome:
             output['chest_imagenome'] = self.chest_imagenome_labels[rid]
         if self.use_ensemble_predictions:
-            output['ensemble_probs'] = self.get_ensemble_sigmoid_vector(self.dicom_ids[idx])
+            output['ensemble_predictions'] = self.get_ensemble_prediction_vector(self.dicom_ids[idx])
         return output
 
 class MIMICCXR_Labels2ReportTrainer():
 
     def __init__(self, 
-                qa_adapted_reports_filename, tokenizer, batch_size, collate_batch_fn, num_workers,
+                qa_adapted_reports_filename, batch_size, collate_batch_fn, num_workers,
+                pre_tokenize_reports=False,
+                pre_tokenize_reports_and_convert_back_to_text=False,
+                tokenizer=None,
                 train_collate_batch_fn=None,
                 eval_collate_batch_fn=None,
                 use_test_set=False,
@@ -114,6 +117,10 @@ class MIMICCXR_Labels2ReportTrainer():
         if use_gender:
             assert view_mode == MIMICCXR_ViewModes.CHEST_IMAGENOME
 
+        assert sum([pre_tokenize_reports, pre_tokenize_reports_and_convert_back_to_text]) <= 1 # at most one of these can be true
+        if pre_tokenize_reports or pre_tokenize_reports_and_convert_back_to_text:
+            assert tokenizer is not None
+
         if use_ensemble_predictions:
             assert precomputed_sigmoid_paths is not None
         if use_hard_predictions:
@@ -130,8 +137,7 @@ class MIMICCXR_Labels2ReportTrainer():
             self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
         else:
             self.chest_imagenome_label_names = None
-
-        self.tokenizer = tokenizer
+        
         self.batch_size = batch_size
         if collate_batch_fn is None:
             assert train_collate_batch_fn is not None
@@ -188,22 +194,26 @@ class MIMICCXR_Labels2ReportTrainer():
 
         max_idx_count = 0
 
-        if use_test_set or use_chest_imagenome_label_gold_set:
-            tokenize_func = tokenizer.string2ids
+        if pre_tokenize_reports or pre_tokenize_reports_and_convert_back_to_text:
+            if use_test_set or use_chest_imagenome_label_gold_set:
+                tokenize_func = tokenizer.string2ids
+            else:
+                tokenize_func = tokenizer.tokenize
         else:
-            tokenize_func = tokenizer.tokenize
+            tokenize_func = lambda x: x # identity
 
         for rid, (report, dicom_id_view_pairs, split) in \
             tqdm(enumerate(zip(
-                # mimiccxr_metadata['part_ids'],
-                # mimiccxr_metadata['subject_ids'],
-                # mimiccxr_metadata['study_ids'],
                 mimiccxr_metadata['reports'],
                 mimiccxr_metadata['dicom_id_view_pos_pairs'],
                 mimiccxr_metadata['splits'])), mininterval=2):
 
             max_idx_count += len(dicom_id_view_pairs)
-            reports[rid] = tokenize_func(report)
+            
+            report = tokenize_func(report)
+            if pre_tokenize_reports_and_convert_back_to_text:
+                report = tokenizer.ids2string(report, remove_special_tokens=True)
+            reports[rid] = report
 
             for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, view_mode, allowed_dicom_ids):
                 dicom_ids[idx] = dicom_id
@@ -232,9 +242,14 @@ class MIMICCXR_Labels2ReportTrainer():
             print(f'** NOTE: {max_idx_count - idx} images were skipped because they were not in the allowed DICOM IDs')
 
         # Print a random report to make sure the tokenization is correct
-        random_report = random.choice(reports)
-        print_bold('Random report:')
-        print_magenta(tokenizer.ids2string(random_report), bold=True)
+        random_rid = random.randint(0, len(reports) - 1)
+        random_report = reports[random_rid]
+        print_bold(f'Random report (rid = {random_rid}, type = {type(random_report)})')
+        print(f'filepath = {mimiccxr_metadata["filepaths"][random_rid]}')
+        if type(random_report) == str:
+            print_magenta(random_report, bold=True)
+        else: # list of tokens
+            print_magenta(tokenizer.ids2string(random_report), bold=True)
         
         self.reports = reports
         self.dicom_ids = np.array(dicom_ids[:idx])
@@ -333,6 +348,8 @@ class MIMICCXR_Labels2ReportTrainer():
             if use_chexpert:
                 self.ensemble_chexpert_sigmoids = []
                 self.ensemble_chexpert_did2idx_dicts = []
+                if filter_labels:
+                    self.ensemble_chexpert_label_indices = []
                 for i, x in enumerate(precomputed_sigmoid_paths):
                     assert 'chexpert_sigmoids_path' in x
                     print('  Loading', x['chexpert_sigmoids_path'])
@@ -352,7 +369,9 @@ class MIMICCXR_Labels2ReportTrainer():
                             _label_indices_filepath = self.precomputed_filtered_labels_paths[i]['chexpert_indices_path']
                             _label_indices = load_pickle(_label_indices_filepath)
                             print(f'    _label_indices.shape = {_label_indices.shape}')
-                            _probs = _probs[:, _label_indices]
+                            self.ensemble_chexpert_label_indices.append(_label_indices)
+                            _label_indices_complement = np.setdiff1d(np.arange(_probs.shape[1]), _label_indices)
+                            _probs[:, _label_indices_complement] = 0 # set to 0
                             print_red(f'    _probs has been filtered')
                     # sanity check did2idx
                     assert len(_did2idx) >= len(self.dicom_ids), \
@@ -367,6 +386,8 @@ class MIMICCXR_Labels2ReportTrainer():
                 self._load_ensemble_chest_imagenome_label_orders()
                 self.ensemble_chest_imagenome_sigmoids = []
                 self.ensemble_chest_imagenome_did2idx_dicts = []
+                if filter_labels:
+                    self.ensemble_chest_imagenome_label_indices = []
                 for x in precomputed_sigmoid_paths:
                     assert 'chest_imagenome_sigmoids_path' in x
                     print('  Loading', x['chest_imagenome_sigmoids_path'])
@@ -386,7 +407,9 @@ class MIMICCXR_Labels2ReportTrainer():
                             _label_indices_filepath = self.precomputed_filtered_labels_paths[i]['chest_imagenome_indices_path']
                             _label_indices = load_pickle(_label_indices_filepath)
                             print(f'    _label_indices.shape = {_label_indices.shape}')
-                            _probs = _probs[:, _label_indices]
+                            self.ensemble_chest_imagenome_label_indices.append(_label_indices)
+                            _label_indices_complement = np.setdiff1d(np.arange(_probs.shape[1]), _label_indices)
+                            _probs[:, _label_indices_complement] = 0 # set to 0
                             print_red(f'    _probs has been filtered')
                     # sanity check did2idx
                     assert len(_did2idx) >= len(self.dicom_ids), \
@@ -398,7 +421,7 @@ class MIMICCXR_Labels2ReportTrainer():
                 if use_hard_predictions:
                     self._sanity_check_chest_imagenome_labels()
             print('Done loading precomputed sigmoid paths for ensemble predictions')
-            def _get_ensemble_sigmoid_vector(did):
+            def _get_ensemble_prediction_vector(did):
                 # concatenate all sigmoid vectors
                 _sigmoid_vector = []
                 if use_chexpert:
@@ -427,7 +450,7 @@ class MIMICCXR_Labels2ReportTrainer():
                     for _probs, _did2idx in zip(self.ensemble_chest_imagenome_sigmoids, self.ensemble_chest_imagenome_did2idx_dicts):
                         output['chest_imagenome'].append(np.array([_probs[_did2idx[self.dicom_ids[idx]]] for idx in idxs]))
                 return output
-            self.get_ensemble_sigmoid_vector = _get_ensemble_sigmoid_vector # function pointer
+            self.get_ensemble_prediction_vector = _get_ensemble_prediction_vector # function pointer
             self.get_input_labels_breakdown = _get_input_labels_breakdown # function pointer
         else:
             def _get_input_labels_breakdown(idxs):
@@ -442,7 +465,7 @@ class MIMICCXR_Labels2ReportTrainer():
                     output['chest_imagenome'] = np.array([self.chest_imagenome_labels[self.report_ids[idx]] for idx in idxs])
                 return output            
             self.precomputed_sigmoid_paths = None
-            self.get_ensemble_sigmoid_vector = None
+            self.get_ensemble_prediction_vector = None
             self.get_input_labels_breakdown = _get_input_labels_breakdown # function pointer
 
         if use_test_set or use_chest_imagenome_label_gold_set:
@@ -498,8 +521,9 @@ class MIMICCXR_Labels2ReportTrainer():
                 assert len(label_order_list[i]) == _gt_labels.shape[1]
                 _gt_labels = _gt_labels[:, label_order_list[i]]
             if self.filter_labels:
-                _label_indices_filepath = self.precomputed_filtered_labels_paths[i][f'{label_name}_indices_path']
-                _label_indices = load_pickle(_label_indices_filepath)
+                _label_indices = getattr(self, f'ensemble_{label_name}_label_indices')[i]
+                print(f'    _label_indices.shape = {_label_indices.shape}')
+                _pred_labels = _pred_labels[:, _label_indices]
                 _gt_labels = _gt_labels[:, _label_indices]
             print(f'    f1_score(_gt_labels, _pred_labels, average="micro") = {f1_score(_gt_labels, _pred_labels, average="micro")}')
             print(f'    f1_score(_gt_labels, _pred_labels, average="macro") = {f1_score(_gt_labels, _pred_labels, average="macro")}')
@@ -527,7 +551,7 @@ class MIMICCXR_Labels2ReportTrainer():
             use_chest_imagenome=self.use_chest_imagenome,
             chest_imagenome_labels=self.chest_imagenome_labels,
             use_ensemble_predictions=self.use_ensemble_predictions,
-            get_ensemble_sigmoid_vector=self.get_ensemble_sigmoid_vector,
+            get_ensemble_prediction_vector=self.get_ensemble_prediction_vector,
             dicom_ids=self.dicom_ids,
         )
     

@@ -170,7 +170,10 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
         nonnull_metric_names = [m for m, s in zip(metric_names, scores) if s is not None]
         metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(nonnull_metric_names, nonnull_scores))
         duration = timer._elapsed()
-        print(f'{metrics_str}, {duration:.2f} secs')
+        if len(metrics_str) > 0:
+            print(f'{metrics_str}, {duration:.2f} secs')
+        else:
+            print(f'{duration:.2f} secs')
 
         if log_to_disk:
             metrics_logger.log_metrics(metric_names, scores)

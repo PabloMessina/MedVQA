@@ -100,13 +100,22 @@ CHEST_IMAGENOME_BBOX_NAME_TO_SHORT = {
     'left cardiac silhouette': 'LCS',
     'right cardiac silhouette': 'RCS',
     'cavoatrial junction': 'CAJ',
-    'right atrium': 'RA',
+    'right atrium': 'RAT',
     'descending aorta': 'DA',
     'carina': 'C',
     'left upper abdomen': 'LUA',
     'right upper abdomen': 'RUA',
     'abdomen': 'A',
     'left cardiophrenic angle': 'LCAA',
+    'neck': 'N',
+    'left chest wall': 'LCW',
+    'right chest wall': 'RCW',
+    'left shoulder': 'LS',
+    'right shoulder': 'RS',
+    'left arm': 'LA',
+    'right arm': 'RAR',
+    'left breast': 'LB',
+    'right breast': 'RB',
 }
 
 CHEST_IMAGENOME_SHORT_TO_BBOX_NAME = {}

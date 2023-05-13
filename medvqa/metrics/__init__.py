@@ -8,6 +8,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
+from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareT5ReportLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
@@ -27,7 +28,7 @@ from medvqa.metrics.classification import (
     DatasetAwareOrientationAccuracy,
     roc_auc_fn,
 )
-from medvqa.losses import DatasetAwareLoss
+from medvqa.losses import DatasetAwareLoss, ConditionAwareLoss
 
 from ignite.metrics import RunningAverage, EpochMetric
 import operator
@@ -452,12 +453,32 @@ def attach_dataset_aware_orientation_accuracy(engine, allowed_dataset_ids, recor
 def attach_dataset_aware_loss(engine, loss_name, allowed_dataset_ids):
     met = DatasetAwareLoss(
         output_transform=operator.itemgetter(loss_name),
-        allowed_dataset_ids=allowed_dataset_ids
+        allowed_dataset_ids=allowed_dataset_ids,
     )
     met.attach(engine, loss_name)
+
+def attach_condition_aware_loss(engine, loss_name, condition_function, metric_name=None):
+    if metric_name is None:
+        metric_name = loss_name
+    met = ConditionAwareLoss(
+        output_transform=operator.itemgetter(loss_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
 
 def attach_loss(loss_name, engine, device):
     met = RunningAverage(
         output_transform=operator.itemgetter(loss_name),
         alpha = 1, device = device)
     met.attach(engine, loss_name)
+
+# ---------------------------------------------
+# Logging
+# ---------------------------------------------
+def attach_condition_aware_t5_report_logger(engine, t5_tokenizer=None, condition_function=lambda _: True):
+    met = ConditionAwareT5ReportLogger(
+        output_transform=operator.itemgetter('pred_reports'),
+        condition_function=condition_function,
+        t5_tokenizer=t5_tokenizer,
+    )
+    met.attach(engine, 't5_report')

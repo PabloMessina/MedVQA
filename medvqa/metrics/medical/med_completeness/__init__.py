@@ -177,6 +177,11 @@ class WeightedMedicalCompletenessBase(MedicalCompletenessBase):
         self.ids2weight = ids2weight
     
     def score(self, gt_s, gen_s):
+
+        if type(gt_s) == str:
+            gt_s = self.tokenizer.string2ids(gt_s)
+        if type(gen_s) == str:
+            gen_s = self.tokenizer.string2ids(gen_s)
         
         # ground truth sequence
         gt_s = [self.id2synonym[x] for x in gt_s if x in self.id2synonym]
@@ -227,6 +232,7 @@ class WeightedMedicalCompleteness(WeightedMedicalCompletenessBase, Metric):
         self._acc_score = 0
         self._count = 0
         self.record_scores = record_scores
+        self.tokenizer = tokenizer
         self._load_medical_terms(tokenizer)
         self._load_medical_synonyms(tokenizer)
         self._load_weights(tokenizer)
@@ -263,6 +269,7 @@ class DatasetAwareWeightedMedicalCompleteness(WeightedMedicalCompletenessBase, D
         self._acc_score = 0
         self._count = 0
         self.record_scores = record_scores
+        self.tokenizer = tokenizer
         self._load_medical_terms(tokenizer)
         self._load_medical_synonyms(tokenizer)
         self._load_weights(tokenizer)
@@ -298,6 +305,7 @@ class ConditionAwareWeightedMedicalCompleteness(WeightedMedicalCompletenessBase,
         self._acc_score = 0
         self._count = 0
         self.record_scores = record_scores
+        self.tokenizer = tokenizer
         self._load_medical_terms(tokenizer)
         self._load_medical_synonyms(tokenizer)
         self._load_weights(tokenizer)

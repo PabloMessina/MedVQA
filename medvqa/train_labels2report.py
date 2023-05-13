@@ -19,7 +19,7 @@ from medvqa.evaluation.visual_module import calibrate_thresholds_on_mimiccxr_val
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
-from medvqa.models.report_generation.labels2report import GenerationMode, Labels2ReportModel
+from medvqa.models.report_generation.labels2report import GenerationMode, Labels2ReportModel, NLG_Models
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 
 from medvqa.training.utils import append_metric_name
@@ -33,6 +33,8 @@ from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
     attach_condition_aware_ciderd,
     attach_condition_aware_weighted_medical_completeness,
+    attach_condition_aware_loss,
+    attach_condition_aware_t5_report_logger,
     attach_dataset_aware_ciderd,
     attach_dataset_aware_weighted_medical_completeness,
     attach_dataset_aware_chest_imagenome_labels_auc,
@@ -104,6 +106,9 @@ def parse_args(args=None):
     parser.add_argument('--randomly-drop-labels', action='store_true', default=False)
 
     # Model arguments
+    parser.add_argument('--nlg-model', type=str, default=NLG_Models.PYTORCH_TRANSFORMER,
+                        choices=NLG_Models.get_all_models())
+    parser.add_argument('--t5-model-name', type=str, default='t5-small')
     parser.add_argument('--pretrained-checkpoint-folder-path', type=str, default=None)
     parser.add_argument('--labels-hidden-dim', type=int, default=256)
     parser.add_argument('--embedding-dim', type=int, default=256)
@@ -115,6 +120,9 @@ def parse_args(args=None):
     parser.add_argument('--dropout-prob', type=float, default=0)
 
     # Tokenizer arguments
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--pre-tokenize-reports', action='store_true', default=False)
+    group.add_argument('--pre-tokenize-reports-and-convert-back-to-text', action='store_true', default=False)
     parser.add_argument('--vocab-min-freq', type=int, default=10)
     parser.add_argument('--use-medical-tokenization', action='store_true', default=False)
     parser.add_argument('--medical-terms-frequency-filename', type=str, default=None)
@@ -186,6 +194,8 @@ _METRIC_WEIGHTS = {
     MetricNames.CHXLABEL_PRCAUC: 1,
     MetricNames.CHESTIMAGENOMELABELAUC: 1,
     MetricNames.CHESTIMAGENOMELABELPRCAUC: 1,
+    MetricNames.REPORT_LOSS: 1,
+    MetricNames.REPORT_LOSS_GT: 1,
 }
 
 def _metric_getter(metrics_dict, key):
@@ -195,6 +205,8 @@ def _metric_getter(metrics_dict, key):
         key == MetricNames.CHXLABEL_PRCAUC:
         scores = metrics_dict[key]
         return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
+    if '_loss' in key:
+        return 1 / (1 + metrics_dict[key]) # convert loss to score
     return metrics_dict[key]
 
 def _get_precomputed_sigmoids_filepath(model_checkpoint_path, mimiccxr_view_mode, label_name):
@@ -619,6 +631,7 @@ def train_model(
     support_two_label_sources = training_kwargs['support_two_label_sources']
     train_on_gt_and_eval_on_predictions = training_kwargs['train_on_gt_and_eval_on_predictions']
     randomly_drop_labels = training_kwargs['randomly_drop_labels']
+    use_t5 = training_kwargs['use_t5']
 
     if train_on_gt_and_eval_on_predictions:
         assert not support_two_label_sources
@@ -658,9 +671,15 @@ def train_model(
 
     # Create trainer and validator engines
     count_print('Creating trainer and validator engines ...')
-    trainer_engine = get_engine(model=model, tokenizer=tokenizer, optimizer=optimizer, device=device, 
+    if use_t5:
+        from transformers import T5Tokenizer
+        t5_tokenizer = T5Tokenizer.from_pretrained(model_kwargs['t5_model_name'])
+        _tokenizer = t5_tokenizer
+    else:
+        _tokenizer = tokenizer
+    trainer_engine = get_engine(model=model, tokenizer=_tokenizer, optimizer=optimizer, device=device, 
                                 update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
-    validator_engine = get_engine(model=model, tokenizer=tokenizer, device=device, **validator_engine_kwargs)
+    validator_engine = get_engine(model=model, tokenizer=_tokenizer, device=device, **validator_engine_kwargs)
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -703,6 +722,7 @@ def train_model(
             mimiccxr_trainer_kwargs_2['view_mode'] = MIMICCXR_ViewModes.ANY_SINGLE
             mimiccxr_trainer_kwargs_2['use_decent_images_only'] = False
             mimiccxr_trainer_kwargs_2['use_hard_predictions'] = False
+            mimiccxr_trainer_kwargs_2['filter_labels'] = False
             print_blue('Creating MIMIC-CXR_Labels2ReportTrainer for second label source ...', bold=True)
             reorder_labels = False
             if train_on_gt_and_eval_on_predictions:
@@ -795,32 +815,51 @@ def train_model(
             else:
                 src_cond_fn_1 = lambda output: output['dataset_id'] in _mim_datasets and output['flag'] == 'pred'
                 src_cond_fn_2 = lambda output: output['dataset_id'] in _mim_datasets and output['flag'] == 'gt'
-            if support_two_label_sources:
+            if not use_t5:
+                if support_two_label_sources:
+                    attach_condition_aware_weighted_medical_completeness(
+                        trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
                 attach_condition_aware_weighted_medical_completeness(
-                    trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
-            attach_condition_aware_weighted_medical_completeness(
-                trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
-            attach_condition_aware_weighted_medical_completeness(
-                validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
-            attach_condition_aware_weighted_medical_completeness(
-                validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
-            attach_condition_aware_ciderd(
-                validator_engine, field='reports', condition_function=src_cond_fn_1)
-            attach_condition_aware_ciderd(
-                validator_engine, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.CIDER_D_GT)
-            attach_dataset_aware_loss(trainer_engine, 'report_loss', _mim_datasets)
+                    trainer_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
+                attach_condition_aware_weighted_medical_completeness(
+                    validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_1)
+                attach_condition_aware_weighted_medical_completeness(
+                    validator_engine, tokenizer, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.WMEDCOMP_GT)
+                attach_condition_aware_ciderd(
+                    validator_engine, field='reports', condition_function=src_cond_fn_1)
+                attach_condition_aware_ciderd(
+                    validator_engine, field='reports', condition_function=src_cond_fn_2, metric_name=MetricNames.CIDER_D_GT)
+                attach_dataset_aware_loss(trainer_engine, 'report_loss', _mim_datasets)
+            else:
+                if support_two_label_sources:
+                    attach_condition_aware_loss(trainer_engine, 'report_loss', condition_function=src_cond_fn_1)
+                attach_condition_aware_loss(trainer_engine, 'report_loss', condition_function=src_cond_fn_2, metric_name='report_loss_gt')
+                attach_condition_aware_loss(validator_engine, 'report_loss', condition_function=src_cond_fn_1)
+                attach_condition_aware_loss(validator_engine, 'report_loss', condition_function=src_cond_fn_2, metric_name='report_loss_gt')
+                attach_condition_aware_t5_report_logger(trainer_engine, t5_tokenizer, condition_function=src_cond_fn_2)
+                attach_condition_aware_t5_report_logger(validator_engine, t5_tokenizer, condition_function=src_cond_fn_1)
             # for logging
             if support_two_label_sources:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
-                metrics_to_print.append(MetricNames.WMEDCOMP_GT)
-                metrics_to_print.append(MetricNames.CIDER_D_GT)
+                if not use_t5:
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
+                    metrics_to_print.append(MetricNames.WMEDCOMP_GT)
+                    metrics_to_print.append(MetricNames.CIDER_D_GT)
+                    metrics_to_print.append('report_loss')
+                else:
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'report_loss')
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'report_loss_gt')
             else:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP, train=False)
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP_GT)
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D_GT, train=False)
-            metrics_to_print.append('report_loss')
+                if not use_t5:
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP, train=False)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.WMEDCOMP_GT)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D, train=False)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CIDER_D_GT, train=False)
+                    metrics_to_print.append('report_loss')
+                else:
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'report_loss', train=False)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'report_loss_gt')
+            
         else:
             attach_dataset_aware_weighted_medical_completeness(trainer_engine, tokenizer, _mim_datasets, field='reports')
             attach_dataset_aware_weighted_medical_completeness(validator_engine, tokenizer, _mim_datasets, field='reports')
@@ -942,6 +981,8 @@ def train_model(
 
 def train_from_scratch(
     # Model args
+    nlg_model,
+    t5_model_name,
     pretrained_checkpoint_folder_path,
     embedding_dim,
     labels_hidden_dim,
@@ -952,6 +993,8 @@ def train_from_scratch(
     transf_dec_num_layers,
     dropout_prob,
     # Tokenizer args
+    pre_tokenize_reports,
+    pre_tokenize_reports_and_convert_back_to_text,
     vocab_min_freq,
     use_medical_tokenization,
     medical_terms_frequency_filename,
@@ -1019,6 +1062,11 @@ def train_from_scratch(
 
     assert use_ensemble or use_gt_labels, 'No label source selected for training'
 
+    use_t5 = nlg_model == NLG_Models.T5
+    
+    if use_t5:
+        assert t5_model_name is not None
+
     if use_ensemble:
         assert ensemble_model_checkpoint_folder_paths is not None
         assert ensemble_batch_size is not None
@@ -1040,6 +1088,7 @@ def train_from_scratch(
 
     if randomly_drop_labels:
         assert train_on_gt_and_eval_on_predictions
+        assert not use_t5
 
     if generation_mode == GenerationMode.PREDICTIONS_2_REFINED_PREDICTIONS_2_REPORT:
         classify_chexpert = use_chexpert
@@ -1133,6 +1182,8 @@ def train_from_scratch(
         
     model_kwargs = dict(
         gen_mode=generation_mode,
+        nlg_model=nlg_model,
+        t5_model_name=t5_model_name,
         pretrained_checkpoint_folder_path=pretrained_checkpoint_folder_path,
         embedding_dim=embedding_dim,
         num_input_labels=num_input_labels,
@@ -1169,18 +1220,7 @@ def train_from_scratch(
         batch_size=batch_size,
         mimiccxr_weight=mimiccxr_weight,
     )
-
-    _kwargs = dict(
-        use_gender=use_gender,
-        use_chexpert=use_chexpert,
-        use_chest_imagenome=use_chest_imagenome,
-        use_report=True,
-        use_ground_truth_as_prediction=not use_ensemble,
-    )
-    collate_batch_fn_kwargs = {}
-    if train_mimiccxr:
-        collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR] = { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs }
-    
+        
     if train_mimiccxr:
         mimiccxr_trainer_kwargs = dict(
             qa_adapted_reports_filename=mimiccxr_qa_adapted_reports_filename,
@@ -1195,6 +1235,8 @@ def train_from_scratch(
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
             balanced_batch_size=mimiccxr_balanced_batch_size,
             use_ensemble_predictions=use_ensemble,
+            pre_tokenize_reports=pre_tokenize_reports,
+            pre_tokenize_reports_and_convert_back_to_text=pre_tokenize_reports_and_convert_back_to_text,
         )
         # Precompute sigmoid activations for different models in ensemble
         if use_ensemble:
@@ -1261,13 +1303,28 @@ def train_from_scratch(
     else:
         mimiccxr_trainer_kwargs = None
 
+    _kwargs = dict(
+        use_gender=use_gender,
+        use_chexpert=use_chexpert,
+        use_chest_imagenome=use_chest_imagenome,
+        use_report=True,
+        use_ground_truth_as_prediction=not use_ensemble,
+        use_t5=use_t5,
+        t5_model_name=t5_model_name,
+        chest_imagenome_label_names_filename=chest_imagenome_label_names_filename,
+        apply_anatomy_reordering=True,
+    )
+    collate_batch_fn_kwargs = {}
+    if train_mimiccxr:
+        collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR] = { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs }
+
     trainer_engine_kwargs = dict(
         classify_chexpert=classify_chexpert,
         classify_chest_imagenome=classify_chest_imagenome,
         chexpert_range=chexpert_range,
         chest_imagenome_range=chest_imagenome_range,
         include_report=True,
-        shift_tokens_for_transformer=True,
+        shift_tokens_for_transformer=not use_t5,
         iters_to_accumulate=iters_to_accumulate,
         binary_loss_name=binary_loss_name,
         focal_loss_weight=focal_loss_weight,
@@ -1275,6 +1332,7 @@ def train_from_scratch(
         wbce_loss_weight=wbce_loss_weight,
         use_amp=use_amp,
         training=True,
+        use_t5=use_t5,
     )
     validator_engine_kwargs = dict(
         classify_chexpert=classify_chexpert,
@@ -1282,9 +1340,10 @@ def train_from_scratch(
         chexpert_range=chexpert_range,
         chest_imagenome_range=chest_imagenome_range,
         include_report=True,
-        shift_tokens_for_transformer=True,
+        shift_tokens_for_transformer=not use_t5,
         use_amp=use_amp,
-        training=False,
+        validating=True,
+        use_t5=use_t5,
     )
     
     training_kwargs = dict(
@@ -1295,6 +1354,7 @@ def train_from_scratch(
         support_two_label_sources=support_two_label_sources,
         train_on_gt_and_eval_on_predictions=train_on_gt_and_eval_on_predictions,
         randomly_drop_labels=randomly_drop_labels,
+        use_t5=use_t5,
     )
 
     auxiliary_tasks_kwargs = dict(

@@ -150,7 +150,9 @@ class Tokenizer:
             return self.string2medical_tag_ids(s)
         return self.string2ids(s)
 
-    def ids2string(self, ids):
+    def ids2string(self, ids, remove_special_tokens=False):
+        if remove_special_tokens:
+            ids = self.clean_sentence(ids)
         return ' '.join(self.id2token[i] for i in ids)
 
     def clean_sentence(self, sentence):

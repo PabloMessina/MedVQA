@@ -1,3 +1,6 @@
+from collections import OrderedDict
+from re import DEBUG
+from typing import Any
 import numpy as np
 import math
 import random
@@ -5,8 +8,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MultiLabelBinarizer
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAME_TO_SHORT
+from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
+from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v3
 
 from medvqa.utils.constants import (
+    CHEXPERT_LABELS,
     CXR14_DATASET_ID,
     CHEXPERT_DATASET_ID,
     IUXRAY_DATASET_ID__CHEXPERT_MODE,
@@ -18,7 +25,7 @@ from medvqa.utils.constants import (
     VINBIG_DATASET_ID,
     PADCHEST_DATASET_ID,    
 )
-from medvqa.utils.logging import print_red
+from medvqa.utils.logging import print_bold, print_red
 
 INFINITE_DATASET_LENGTH = int(1e18)
 
@@ -465,15 +472,129 @@ def get_mae_collate_batch_fn(dataset_id):
         return batch_dict
     return mae_collate_batch_fn
 
+class CheXpertPredictionsToText:
+
+    def __init__(self):
+        self.n_labels = len(CHEXPERT_LABELS)
+
+    def __call__(self, vector, s, e):
+        strings = []
+        for i in range(s, e):
+            if vector[i] == 1:
+                strings.append(TEMPLATES_CHEXPERT_v3[CHEXPERT_LABELS[i - s]][1])
+        return ', '.join(strings)
+
+class ChestImaGenomePredictionsToText:
+
+    def __init__(self, chest_imagenome_label_names_filename, apply_anatomy_reordering):
+        assert chest_imagenome_label_names_filename is not None
+        assert apply_anatomy_reordering is not None
+        self.label_names = load_chest_imagenome_label_names(
+            chest_imagenome_label_names_filename, apply_anatomy_reordering)
+        self.n_labels = len(self.label_names)
+        
+    def __call__(self, vector, s, e):
+        # create ordered dict
+        d = OrderedDict()
+        for i in range(s, e):
+            if vector[i] == 1:
+                label_name = self.label_names[i - s]
+                if len(label_name) == 2: # global label
+                    observation = label_name[1]
+                    if observation not in d:
+                        d[observation] = []
+                elif len(label_name) == 3: # local label
+                    observation = label_name[2]
+                    anatomy = label_name[0]
+                    if observation not in d:
+                        d[observation] = []
+                    d[observation].append(CHEST_IMAGENOME_BBOX_NAME_TO_SHORT[anatomy])
+                else: assert False, label_name
+        # create text
+        strings = []
+        for observation, anatomies in d.items():
+            anatomies = sorted(anatomies)
+            if len(anatomies) == 0:
+                strings.append(f'{observation}')
+            else:
+                strings.append(f'{observation} ({", ".join(anatomies)})')
+        return ', '.join(strings)
+    
+class BinaryPredictionsToText:
+
+    def __init__(self, chexp_pred_to_text=None, chstimg_pred_to_text=None):
+        self.chexp_pred_to_text = chexp_pred_to_text
+        self.chstimg_pred_to_text = chstimg_pred_to_text
+        self.n_labels = 0
+        if chexp_pred_to_text is not None:
+            self.n_labels += chexp_pred_to_text.n_labels
+        if chstimg_pred_to_text is not None:
+            self.n_labels += chstimg_pred_to_text.n_labels
+        assert self.n_labels > 0
+
+    def __call__(self, pred):
+        if len(pred.shape) == 1:
+            single = True
+            if torch.is_tensor(pred):
+                pred = pred.unsqueeze(0)
+            else: # numpy
+                pred = np.expand_dims(pred, axis=0)
+        else:
+            single = False
+        assert len(pred.shape) == 2
+        assert pred.shape[1] == self.n_labels
+        batch_size = pred.shape[0]
+        strings = [[] for _ in range(batch_size)]
+        offset = 0
+        if self.chexp_pred_to_text is not None:
+            for i in range(batch_size):
+                strings[i].append(self.chexp_pred_to_text(pred[i], offset, offset + self.chexp_pred_to_text.n_labels))
+            offset += self.chexp_pred_to_text.n_labels
+        if self.chstimg_pred_to_text is not None:
+            for i in range(batch_size):
+                strings[i].append(self.chstimg_pred_to_text(pred[i], offset, offset + self.chstimg_pred_to_text.n_labels))
+            offset += self.chstimg_pred_to_text.n_labels
+        for i in range(batch_size):
+            strings[i] = '; '.join(x for x in strings[i] if len(x) > 0)
+        if single:
+            return strings[0]
+        return strings
+
 def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_chexpert, use_chest_imagenome,
                                     use_ground_truth_as_prediction, is_second_label_source=False, flag=None,
-                                    randomly_drop_labels=False):
+                                    randomly_drop_labels=False, use_t5=False, t5_model_name=None,
+                                    chest_imagenome_label_names_filename=None, apply_anatomy_reordering=None):
     if dataset_id == MIMICCXR_DATASET_ID:
         if randomly_drop_labels:
             assert use_ground_truth_as_prediction
         print_red(f'randomly_drop_labels = {randomly_drop_labels}', bold=True)
 
+        if use_t5:
+            assert t5_model_name is not None
+            from transformers import T5Tokenizer
+            t5_tokenizer = T5Tokenizer.from_pretrained(t5_model_name)
+            assert not use_gender # TODO: implement this
+            if use_chexpert:
+                _chexpert_predictions_to_text = CheXpertPredictionsToText()
+                n_chexpert_labels = _chexpert_predictions_to_text.n_labels
+            else:
+                _chexpert_predictions_to_text = None
+            if use_chest_imagenome:
+                _chest_imagenome_predictions_to_text = ChestImaGenomePredictionsToText(
+                    chest_imagenome_label_names_filename, apply_anatomy_reordering)
+                n_chest_imagenome_labels = _chest_imagenome_predictions_to_text.n_labels
+            else:
+                _chest_imagenome_predictions_to_text = None
+            _predictions_to_text = BinaryPredictionsToText(
+                chexp_pred_to_text=_chexpert_predictions_to_text,
+                chstimg_pred_to_text=_chest_imagenome_predictions_to_text,
+            )
+        
+        DEBUG = False
+
         def collate_batch_fn(batch):
+            nonlocal DEBUG
+
             batch_dict = dict()
             batch_dict['dataset_id'] = dataset_id
             batch_dict['is_second_label_source'] = is_second_label_source
@@ -481,11 +602,23 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
             if flag is not None:
                 batch_dict['flag'] = flag
             if use_report:
-                batch_dict['report'] = nn.utils.rnn.pad_sequence(
-                    sequences = [torch.tensor(x['report']) for x in batch],
-                    batch_first=True,
-                    padding_value=0,
-                )
+                if use_t5:
+                    reports = [x['report'] for x in batch]
+                    assert type(reports[0]) == str, type(reports[0])
+                    target_encoding = t5_tokenizer(
+                        reports,
+                        padding="longest",
+                        return_tensors="pt",
+                    )
+                    labels = target_encoding.input_ids
+                    labels[labels == t5_tokenizer.pad_token_id] = -100
+                    batch_dict['report'] = labels
+                else:
+                    batch_dict['report'] = nn.utils.rnn.pad_sequence(
+                        sequences = [torch.tensor(x['report']) for x in batch],
+                        batch_first=True,
+                        padding_value=0,
+                    )
             if use_ground_truth_as_prediction:
                 to_concat = []
                 if use_gender:
@@ -494,9 +627,11 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
                 if use_chexpert:
                     batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
                     to_concat.append(batch_dict['chexpert'])
+                    if use_t5: assert batch_dict['chexpert'].shape[1] == n_chexpert_labels
                 if use_chest_imagenome:
                     batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
                     to_concat.append(batch_dict['chest_imagenome'])
+                    if use_t5: assert batch_dict['chest_imagenome'].shape[1] == n_chest_imagenome_labels
                 assert len(to_concat) > 0
                 batch_dict['predicted_binary_scores'] = torch.cat(to_concat, dim=1).float()
                 if randomly_drop_labels:
@@ -508,12 +643,42 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
                                 n_to_drop = random.randint(1, len(droppable_indices)-1)
                                 for j in random.sample(droppable_indices, n_to_drop):
                                     x[i,j] = 0
+                if use_t5:
+                    predicted_binary_scores = batch_dict['predicted_binary_scores']
+                    input_strings = _predictions_to_text(predicted_binary_scores)
+                    if DEBUG:
+                        print_bold('input_string (gt):')
+                        print(random.choice(input_strings))
+                        DEBUG = False # only print once
+
+                    input_encoding = t5_tokenizer(
+                        input_strings,
+                        padding="longest",
+                        return_tensors="pt",
+                    )
+                    batch_dict['input_ids'] = input_encoding.input_ids
+                    batch_dict['attention_mask'] = input_encoding.attention_mask
             else:
                 if use_chest_imagenome:
                     batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
                 if use_chexpert:
                     batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
-                batch_dict['predicted_binary_scores'] = torch.tensor([x['ensemble_probs'] for x in batch])
+                batch_dict['predicted_binary_scores'] = torch.tensor([x['ensemble_predictions'] for x in batch])
+                if use_t5:
+                    predicted_binary_scores = batch_dict['predicted_binary_scores']
+                    input_strings = _predictions_to_text(predicted_binary_scores)
+                    if DEBUG:
+                        print_bold('input_string (pred):')
+                        print(random.choice(input_strings))
+                        DEBUG = False # only print once
+                    
+                    input_encoding = t5_tokenizer(
+                        input_strings,
+                        padding="longest",
+                        return_tensors="pt",
+                    )
+                    batch_dict['input_ids'] = input_encoding.input_ids
+                    batch_dict['attention_mask'] = input_encoding.attention_mask
             return batch_dict
     else: assert False, f'Unknown dataset_id {dataset_id}'
     return collate_batch_fn

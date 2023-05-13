@@ -6,8 +6,6 @@ Chosen sentences from the dataset to represent each disease.
 
 - Some sentences do not appear explicitly in the dataset as GT,
     but have been tested with chexpert.
-- Noisy version uses the same sentences, but adds an adjective to each
-    positive sentence. Uses the most common adjective from the sentences.
 """
 
 TEMPLATES_CHEXPERT_v1 = {
@@ -74,6 +72,66 @@ TEMPLATES_CHEXPERT_v1 = {
 TEMPLATES_CHEXPERT_v2 = TEMPLATES_CHEXPERT_v1.copy()
 for key in TEMPLATES_CHEXPERT_v2.keys():
     TEMPLATES_CHEXPERT_v2[key][0] = ''
+
+# Minimal version: empty for all negatives, and just the observation name for positives
+TEMPLATES_CHEXPERT_v3 = {
+    'No Finding': {
+        0: '',
+        1: 'no findings',
+    },
+    'Cardiomegaly': {
+        0: '',
+        1: 'cardiomegaly',
+    },
+    'Enlarged Cardiomediastinum': {
+        0: '',
+        1: 'enlarged cardiomediastinum',
+    },
+    'Lung Lesion': {
+        0: '',
+        1: 'lung lesion',
+    },
+    'Lung Opacity': {
+        0: '',
+        1: 'lung opacity',
+    },
+    'Edema': {
+        0: '',
+        1: 'edema',
+    },
+    'Consolidation': {
+        0: '',
+        1: 'consolidation',
+    },
+    'Pneumonia': {
+        0: '',
+        1: 'pneumonia',
+    },
+    'Atelectasis': {
+        0: '',
+        1: 'atelectasis',
+    },
+    'Pneumothorax': {
+        0: '',
+        1: 'pneumothorax',
+    },
+    'Pleural Effusion': {
+        0: '',
+        1: 'pleural effusion',
+    },
+    'Pleural Other': {
+        0: '',
+        1: 'pleural other',
+    },
+    'Fracture': {
+        0: '',
+        1: 'fracture',
+    },
+    'Support Devices': {
+        0: '',
+        1: 'support devices',
+    },
+}
 
 # NOTE: Wrong chexpert labeler:
 # enlarged-cardiom == 1

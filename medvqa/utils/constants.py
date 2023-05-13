@@ -262,9 +262,13 @@ class MetricNames:
     YOLOV8_BOX_LOSS = 'yolov8_box_loss'
     YOLOV8_CLS_LOSS = 'yolov8_cls_loss'
     YOLOV8_DFL_LOSS = 'yolov8_dfl_loss'
+    REPORT_LOSS = 'report_loss'
+    REPORT_LOSS_GT = 'report_loss_gt'
 
 METRIC2SHORT = {
     'loss': 'loss',
+    'report_loss': 'rpt_loss',
+    'report_loss_gt': 'rpt_loss_gt',
     'chexpert_accuracy': 'chx_acc',
     'chexpert_prf1s': 'chx_prf1s',
     'exactmatch_question': 'emq',

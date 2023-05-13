@@ -19,6 +19,7 @@ from medvqa.utils.constants import (
 )
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
+    attach_condition_aware_t5_report_logger,
     attach_dataset_aware_ciderd,
     attach_dataset_aware_weighted_medical_completeness,
     attach_dataset_aware_chest_imagenome_labels_auc,
@@ -63,26 +64,40 @@ def parse_args(args=None):
     parser.add_argument('--save-reports', action='store_true', default=False, help='Save generated reports to disk')
     parser.add_argument('--save-input-labels', action='store_true', default=False, help='Save input labels to disk')
     parser.add_argument('--force-gt-input-labels', action='store_true', default=False, help='Force ground truth as input labels')
+    parser.add_argument('--num-beams', type=int, default=1, help='Number of beams for beam search')
     
     return parser.parse_args(args=args)
 
 def _compute_and_save_report_level_metrics__mimiccxr(results_dict, eval_dataset_name, tokenizer, qa_adapted_reports_filename,
                                                      results_folder_path, max_processes, save_reports=False,
                                                      save_input_labels=False, get_input_label_breakdown=None,
-                                                     force_gt_input_labels=False):
+                                                     force_gt_input_labels=False, use_t5=False, num_beams=None):
     idxs = results_dict['mimiccxr_metrics']['idxs']
     dataset = results_dict['mimiccxr_dataset']
-    gt_reports = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.reports[dataset.report_ids[idx]])) for idx in idxs]
-    gen_reports = [tokenizer.ids2string(x) for x in results_dict['mimiccxr_metrics']['pred_reports']]
+    if use_t5:
+        assert num_beams is not None
+        gt_reports = [dataset.reports[dataset.report_ids[idx]] for idx in idxs]
+        assert type(gt_reports[0]) == str
+        gen_reports = results_dict['mimiccxr_metrics']['pred_reports']
+        assert type(gen_reports[0]) == str
+    else:
+        gt_reports = [tokenizer.ids2string(tokenizer.clean_sentence(dataset.reports[dataset.report_ids[idx]])) for idx in idxs]
+        gen_reports = [tokenizer.ids2string(x) for x in results_dict['mimiccxr_metrics']['pred_reports']]
     report_metrics = compute_report_level_metrics(gt_reports, gen_reports, tokenizer, max_processes=max_processes)
     if force_gt_input_labels:
         eval_dataset_name = f'{eval_dataset_name}(gt)'
-    save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_report_level_metrics.pkl')
+    if use_t5:
+        save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_report_level_metrics(num_beams={num_beams}).pkl')
+    else:
+        save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_report_level_metrics.pkl')
     save_to_pickle(report_metrics, save_path)
     print(f'Report-level metrics successfully saved to ', end='')
     print_bold(save_path)
     if save_reports:
-        save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_reports.pkl')
+        if use_t5:
+            save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_reports(num_beams={num_beams}).pkl')
+        else:
+            save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_reports.pkl')
         metadata = load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename)
         gt_report_paths = [metadata['filepaths'][dataset.report_ids[idx]] for idx in idxs]
         to_save = { 'gen_reports': gen_reports, 'gt_reports': gt_reports, 'gt_report_paths': gt_report_paths }
@@ -92,10 +107,14 @@ def _compute_and_save_report_level_metrics__mimiccxr(results_dict, eval_dataset_
     if save_input_labels:
         assert get_input_label_breakdown is not None
         save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_input_labels.pkl')
-        input_label_breakdown = get_input_label_breakdown(idxs)
-        save_to_pickle(input_label_breakdown, save_path)
-        print(f'Input labels successfully saved to ', end='')
-        print_bold(save_path)
+        if os.path.exists(save_path):
+            print(f'Input labels already exist at ', end='')
+            print_bold(save_path)
+        else:
+            input_label_breakdown = get_input_label_breakdown(idxs)
+            save_to_pickle(input_label_breakdown, save_path)
+            print(f'Input labels successfully saved to ', end='')
+            print_bold(save_path)
     return report_metrics
 
 def evaluate_model(
@@ -111,6 +130,7 @@ def evaluate_model(
         device='GPU',
         checkpoint_folder_path=None,
         max_chexpert_labeler_processes=8,
+        num_beams=1,
         save_reports=False,
         save_input_labels=False,
         force_gt_input_labels=False,
@@ -121,6 +141,7 @@ def evaluate_model(
     batch_size = dataloading_kwargs['batch_size']
     eval_mimiccxr = training_kwargs['train_mimiccxr']
     assert eval_mimiccxr, 'MIMIC-CXR must be used for evaluation'
+    use_t5 = training_kwargs['use_t5']
     
     # auxiliary task: chexpert labels
     classify_chexpert = auxiliary_tasks_kwargs['classify_chexpert']
@@ -153,8 +174,20 @@ def evaluate_model(
 
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
-    evaluator_engine = get_engine(model=model, tokenizer=tokenizer, device=device,
-                                  return_predicted_binary_scores=True, **validator_engine_kwargs)
+    engine_kwargs = validator_engine_kwargs.copy()
+    engine_kwargs['validating'] = False
+    engine_kwargs['testing'] = True
+    engine_kwargs['model'] = model
+    engine_kwargs['device'] = device
+    engine_kwargs['num_beams'] = num_beams
+    if use_t5:
+        from transformers import T5Tokenizer
+        t5_tokenizer = T5Tokenizer.from_pretrained(model_kwargs['t5_model_name'])
+        _tokenizer = t5_tokenizer
+    else:
+        _tokenizer = tokenizer
+    engine_kwargs['tokenizer'] = _tokenizer
+    evaluator_engine = get_engine(**engine_kwargs)
     
     # Define collate_batch_fn
     count_print('Defining collate_batch_fn ...')
@@ -169,12 +202,13 @@ def evaluate_model(
     # Create MIMIC-CXR trainer
     if eval_mimiccxr:
         count_print('Creating MIMIC-CXR Labels2Report trainer ...')
+        mimiccxr_trainer_kwargs['use_test_set'] = True
         if force_gt_input_labels:
             mimiccxr_trainer_kwargs['use_ensemble_predictions'] = False
             mimiccxr_trainer_kwargs['precomputed_sigmoid_paths'] = None
             mimiccxr_trainer_kwargs['use_hard_predictions'] = False
             mimiccxr_trainer_kwargs['precomputed_thresholds_paths'] = None
-            mimiccxr_trainer_kwargs['use_test_set'] = True
+            mimiccxr_trainer_kwargs['filter_labels'] = False
             if mimiccxr_trainer_kwargs['use_chest_imagenome']:
                 mimiccxr_trainer_kwargs['reorder_chest_imagenome_labels'] = True
         mimiccxr_trainer = MIMICCXR_Labels2ReportTrainer(
@@ -192,11 +226,14 @@ def evaluate_model(
     _chexpert_labels_datasets = _mim_datasets
     metrics_to_print = []
     
-    attach_dataset_aware_ciderd(evaluator_engine, _mim_datasets, field='reports')
-    attach_dataset_aware_weighted_medical_completeness(evaluator_engine, tokenizer, _mim_datasets, field='reports')
-    # for logging
-    metrics_to_print.append(MetricNames.CIDER_D)
-    metrics_to_print.append(MetricNames.WMEDCOMP)
+    if use_t5:
+        attach_condition_aware_t5_report_logger(evaluator_engine)
+    else:
+        attach_dataset_aware_ciderd(evaluator_engine, _mim_datasets, field='reports')
+        attach_dataset_aware_weighted_medical_completeness(evaluator_engine, tokenizer, _mim_datasets, field='reports')
+        # for logging
+        metrics_to_print.append(MetricNames.CIDER_D)
+        metrics_to_print.append(MetricNames.WMEDCOMP)
     
     if classify_chexpert:
         attach_dataset_aware_chexpert_labels_auc(evaluator_engine, _chexpert_labels_datasets, 'cpu')
@@ -255,6 +292,7 @@ def evaluate_model(
             save_reports=save_reports, save_input_labels=save_input_labels,
             get_input_label_breakdown=mimiccxr_trainer.get_input_labels_breakdown,
             force_gt_input_labels=force_gt_input_labels,
+            use_t5=use_t5, num_beams=num_beams,
         )
         return results_dict
 
@@ -267,6 +305,7 @@ def evaluate(
         save_reports=False,
         save_input_labels=False,
         force_gt_input_labels=False,
+        num_beams=1,
         ):
     print_blue('----- Evaluating model ------', bold=True)
 
@@ -296,6 +335,7 @@ def evaluate(
                 device=device,
                 checkpoint_folder_path=checkpoint_folder,
                 max_chexpert_labeler_processes=max_chexpert_labeler_processes,
+                num_beams=num_beams,
                 save_reports=save_reports,
                 save_input_labels=save_input_labels,
                 force_gt_input_labels=force_gt_input_labels,
