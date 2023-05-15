@@ -244,6 +244,7 @@ def train_model(
                               start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
                               device=device, **model_kwargs)
     model = model.to(device)
+    print(model.get_name())
 
     # Check dataset weights
     if dataloading_kwargs['mimiccxr_weight'] == 0:

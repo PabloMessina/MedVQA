@@ -111,6 +111,7 @@ class Image2ReportModel(MultiPurposeVisualModule):
             start_idx=start_idx,
             vocab_size=vocab_size,
             dropout_prob=dropout_prob,
+            apply_pos_encoding_to_input=True,
         )
 
         # For projecting image features into a input memory for the report decoder

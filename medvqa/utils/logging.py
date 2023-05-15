@@ -1,6 +1,7 @@
 import os
-from medvqa.utils.files import make_dirs_in_filepath
 from termcolor import colored
+from medvqa.utils.files import make_dirs_in_filepath
+from medvqa.utils.constants import CHEXPERT_LABELS
 
 def _print_with_color(color, *args, bold=False):
     if bold:
@@ -59,3 +60,14 @@ class MetricsLogger:
                 f.write(','.join(metric_names) + '\n')        
         with open(self.metrics_logs_path, 'a') as f:
             f.write(','.join(f'{s:.5f}' if s is not None else '' for s in scores) + '\n')
+
+
+def chexpert_label_array_to_string(label_array):
+    return ', '.join(CHEXPERT_LABELS[i] for i, label in enumerate(label_array) if label == 1)
+
+def chest_imagenome_label_array_to_string(label_array, label_names):
+    return '\n'.join(f'({", ".join(label_names[i])})' for i, label in enumerate(label_array) if label == 1)
+
+def question_label_array_to_string(questions, label_array):
+    assert len(questions) == len(label_array)
+    return ', '.join(questions[i] for i, label in enumerate(label_array) if label == 1)

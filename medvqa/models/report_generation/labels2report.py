@@ -101,6 +101,7 @@ class Labels2ReportModel(nn.Module):
                 start_idx=start_idx,
                 vocab_size=vocab_size,
                 dropout_prob=dropout_prob,
+                apply_pos_encoding_to_input=True,
             )
             
             if gen_mode == GenerationMode.PREDICTIONS_2_REFINED_PREDICTIONS_2_REPORT:

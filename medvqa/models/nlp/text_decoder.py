@@ -54,6 +54,7 @@ class TransformerTextDecoder(nn.Module):
         start_idx,
         vocab_size,
         dropout_prob,
+        apply_pos_encoding_to_input,
     ):
         assert embed_size == hidden_size
         super().__init__()
@@ -66,6 +67,7 @@ class TransformerTextDecoder(nn.Module):
         self.dropout_prob = dropout_prob
         self.register_buffer('start_idx', torch.tensor(start_idx))
         self.vocab_size = vocab_size
+        self.apply_pos_encoding_to_input = apply_pos_encoding_to_input
         self.pos_encoder = PositionalEncoding(hidden_size, dropout_prob)
         self.decoder = nn.TransformerDecoder(
         nn.TransformerDecoderLayer(
@@ -83,6 +85,8 @@ class TransformerTextDecoder(nn.Module):
         text_embeddings = self.pos_encoder(self.embedding_table(texts.permute(1,0)))
         assert text_embeddings.shape == (max_text_length, batch_size, self.embed_size)
         tgt_mask = self.generate_square_subsequent_mask(max_text_length).to(device)
+        if self.apply_pos_encoding_to_input:
+            input_memory = self.pos_encoder(input_memory)
         input_memory = input_memory.permute(1,0,2)
         decoded = self.decoder(text_embeddings, input_memory, tgt_mask=tgt_mask)
         vocab_logits = self.W_vocab(decoded)
@@ -93,6 +97,8 @@ class TransformerTextDecoder(nn.Module):
     def greedy_search_decoding(self, input_memory, max_text_length, device):
         # print('DEBUG: greedy_search_decoding')
         batch_size = input_memory.size(0)
+        if self.apply_pos_encoding_to_input:
+            input_memory = self.pos_encoder(input_memory)
         input_memory = input_memory.permute(1,0,2)
         decoded_tokens = self.start_idx.expand(batch_size).unsqueeze(0)
         output = []
@@ -123,5 +129,6 @@ class TransformerTextDecoder(nn.Module):
             return self.greedy_search_decoding(input_memory, max_text_length, device)
         
     def get_name(self):
-        return (f'TransfTextDec(es={self.embed_size},hs={self.hidden_size},'
+        return (f'TransfTextDec({"posenc," if self.apply_pos_encoding_to_input else ""}'
+                f'es={self.embed_size},hs={self.hidden_size},'
                 f'nl={self.num_layers},nh={self.nhead},dff={self.dim_feedforward})')
