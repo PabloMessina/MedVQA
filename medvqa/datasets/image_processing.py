@@ -56,6 +56,7 @@ def get_image_transform(
     horizontal_flip_prob=0,
     use_detectron2_transform=False,
     for_yolov8=False,
+    for_vinbig=False,    
     # detectron2_cfg=None,
 ):
     print('get_image_transform()')
@@ -115,6 +116,10 @@ def get_image_transform(
         else:
             tf_normalize = T.Normalize(mean, std)
 
+        if for_vinbig:
+            assert for_yolov8
+            assert horizontal_flip_prob == 0
+
         def _default_transform(image_path, return_image_size=False):
             image = tf_load_image(image_path)
             if return_image_size:
@@ -171,93 +176,144 @@ def get_image_transform(
         flip_image = 'spatial' in augmentation_mode and horizontal_flip_prob > 0        
         # DEBUG = True
         # DEBUG_COUNT = 0
-        def _get_transform(tf_img_bbox_aug, tf_img_bbox_aug_2): # closure (needed to capture tf_img_bbox_aug)
-            def _transform(image_path, bboxes, albumentation_adapter, presence=None,
-                            flipped_bboxes=None, flipped_presence=None,
-                            pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
-                image = tf_load_image(image_path)
-                if return_image_size:
-                    size_before = image.shape[:2]
-                # image = tf_bgr2rgb(image)
-                image = tf_resize(image)
-                if return_image_size:
-                    size_after = image.shape[:2]
-                if flip_image:
-                    assert flipped_bboxes is not None
-                    if presence is not None:
-                        assert flipped_presence is not None
-                    if random.random() < horizontal_flip_prob:
-                        # nonlocal DEBUG_COUNT, DEBUG
-                        # if DEBUG:
-                        #     print('(DEBUG) image_processing.py: flipping image')
-                        #     DEBUG_COUNT += 1
-                        #     if DEBUG_COUNT > 10:
-                        #         DEBUG = False
-                        image = tf_hflip(image)
-                        bboxes = flipped_bboxes
-                        presence = flipped_presence
-                        if pred_bboxes is not None:
-                            assert flipped_pred_bboxes is not None
-                            pred_bboxes = flipped_pred_bboxes
-                bboxes = albumentation_adapter.encode(bboxes, presence)
-                if pred_bboxes is not None:
-                    pred_bboxes = albumentation_adapter.encode(pred_bboxes)
-                    augmented = tf_img_bbox_aug_2(image=image, bboxes=bboxes, bboxes2=pred_bboxes)
-                else:
+
+        if for_vinbig:
+            print('    for_vinbig: returning vinbig transform')
+            def _get_transform(tf_img_bbox_aug): # closure (needed to capture tf_img_bbox_aug)
+                def _transform(image_path, bboxes, classes, albumentation_adapter, return_image_size):
+                    image = tf_load_image(image_path)
+                    if return_image_size:
+                        size_before = image.shape[:2]
+                    image = tf_resize(image)
+                    if return_image_size:
+                        size_after = image.shape[:2]
+                    bboxes = albumentation_adapter.encode(bboxes, classes)
                     augmented = tf_img_bbox_aug(image=image, bboxes=bboxes)
-                image = augmented['image']
-                image = tf_totensor(image)
-                image = tf_normalize(image)
-                # assert len(image.shape) == 3 # (C, H, W)
-                bboxes = augmented['bboxes']
-                bboxes, presence = albumentation_adapter.decode(bboxes)
-                if pred_bboxes is not None:
-                    pred_bboxes = augmented['bboxes2']
-                    pred_bboxes = albumentation_adapter.decode(pred_bboxes, only_boxes=True)
+                    image = augmented['image']
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    # assert len(image.shape) == 3 # (C, H, W)
+                    bboxes = augmented['bboxes']
+                    bboxes, classes = albumentation_adapter.decode(bboxes)
                     if return_image_size:
-                        return image, bboxes, presence, pred_bboxes, size_before, size_after
-                    return image, bboxes, presence, pred_bboxes
-                else:
+                        return image, bboxes, classes, size_before, size_after
+                    return image, bboxes, classes
+                return _transform
+
+            _augmented_bbox_transforms = [_get_transform(tf) for tf in aug_transforms]
+            
+            print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
+            print('    augmentation_mode =', augmentation_mode)
+            print('    default_prob =', default_prob)
+            print('    horizontal_flip_prob =', horizontal_flip_prob)
+            print('    flip_image =', flip_image)
+
+            def transform_fn(image_path, bboxes, classes, albumentation_adapter, return_image_size):
+                # randomly choose between default transform and augmented transform
+                if random.random() < default_prob:
                     if return_image_size:
-                        return image, bboxes, presence, size_before, size_after
-                    return image, bboxes, presence
-            return _transform
+                        img, size_before, size_after = _default_transform(image_path, return_image_size=True)
+                        return img, bboxes, classes, size_before, size_after
+                    img = _default_transform(image_path)
+                    return img, bboxes, classes
+                return random.choice(_augmented_bbox_transforms)(
+                    image_path=image_path,
+                    bboxes=bboxes,
+                    classes=classes,
+                    albumentation_adapter=albumentation_adapter,
+                    return_image_size=return_image_size,
+                )
 
-        _augmented_bbox_transforms = [_get_transform(tf, tf2) for tf, tf2 in zip(aug_transforms, aug_transforms_2)]
-        
-        print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
-        print('    augmentation_mode =', augmentation_mode)
-        print('    default_prob =', default_prob)
-        print('    horizontal_flip_prob =', horizontal_flip_prob)
-        print('    flip_image =', flip_image)
-
-        def transform_fn(image_path, bboxes, albumentation_adapter, presence=None, flipped_bboxes=None, flipped_presence=None,
-                         pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
-            # randomly choose between default transform and augmented transform
-            if random.random() < default_prob:
-                if return_image_size:
-                    img, size_before, size_after = _default_transform(image_path, return_image_size=True)
+            print(f'    Returning augmented transforms with mode {augmentation_mode}')
+            return transform_fn
+        else:
+            def _get_transform(tf_img_bbox_aug, tf_img_bbox_aug_2): # closure (needed to capture tf_img_bbox_aug)
+                def _transform(image_path, bboxes, albumentation_adapter, presence=None,
+                                flipped_bboxes=None, flipped_presence=None,
+                                pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
+                    image = tf_load_image(image_path)
+                    if return_image_size:
+                        size_before = image.shape[:2]
+                    # image = tf_bgr2rgb(image)
+                    image = tf_resize(image)
+                    if return_image_size:
+                        size_after = image.shape[:2]
+                    if flip_image:
+                        assert flipped_bboxes is not None
+                        if presence is not None:
+                            assert flipped_presence is not None
+                        if random.random() < horizontal_flip_prob:
+                            # nonlocal DEBUG_COUNT, DEBUG
+                            # if DEBUG:
+                            #     print('(DEBUG) image_processing.py: flipping image')
+                            #     DEBUG_COUNT += 1
+                            #     if DEBUG_COUNT > 10:
+                            #         DEBUG = False
+                            image = tf_hflip(image)
+                            bboxes = flipped_bboxes
+                            presence = flipped_presence
+                            if pred_bboxes is not None:
+                                assert flipped_pred_bboxes is not None
+                                pred_bboxes = flipped_pred_bboxes
+                    bboxes = albumentation_adapter.encode(bboxes, presence)
                     if pred_bboxes is not None:
-                        return img, bboxes, presence, pred_bboxes, size_before, size_after
-                    return img, bboxes, presence, size_before, size_after
-                img = _default_transform(image_path)
-                if pred_bboxes is not None:
-                    return img, bboxes, presence, pred_bboxes
-                return img, bboxes, presence
-            return random.choice(_augmented_bbox_transforms)(
-                image_path=image_path,
-                albumentation_adapter=albumentation_adapter,
-                bboxes=bboxes,
-                presence=presence,
-                flipped_bboxes=flipped_bboxes,
-                flipped_presence=flipped_presence,
-                pred_bboxes=pred_bboxes,
-                flipped_pred_bboxes=flipped_pred_bboxes,
-                return_image_size=return_image_size,
-            )
+                        pred_bboxes = albumentation_adapter.encode(pred_bboxes)
+                        augmented = tf_img_bbox_aug_2(image=image, bboxes=bboxes, bboxes2=pred_bboxes)
+                    else:
+                        augmented = tf_img_bbox_aug(image=image, bboxes=bboxes)
+                    image = augmented['image']
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    # assert len(image.shape) == 3 # (C, H, W)
+                    bboxes = augmented['bboxes']
+                    bboxes, presence = albumentation_adapter.decode(bboxes)
+                    if pred_bboxes is not None:
+                        pred_bboxes = augmented['bboxes2']
+                        pred_bboxes = albumentation_adapter.decode(pred_bboxes, only_boxes=True)
+                        if return_image_size:
+                            return image, bboxes, presence, pred_bboxes, size_before, size_after
+                        return image, bboxes, presence, pred_bboxes
+                    else:
+                        if return_image_size:
+                            return image, bboxes, presence, size_before, size_after
+                        return image, bboxes, presence
+                return _transform
 
-        print(f'    Returning augmented transforms with mode {augmentation_mode}')
-        return transform_fn
+            _augmented_bbox_transforms = [_get_transform(tf, tf2) for tf, tf2 in zip(aug_transforms, aug_transforms_2)]
+            
+            print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
+            print('    augmentation_mode =', augmentation_mode)
+            print('    default_prob =', default_prob)
+            print('    horizontal_flip_prob =', horizontal_flip_prob)
+            print('    flip_image =', flip_image)
+
+            def transform_fn(image_path, bboxes, albumentation_adapter, presence=None, flipped_bboxes=None, flipped_presence=None,
+                            pred_bboxes=None, flipped_pred_bboxes=None, return_image_size=False):
+                # randomly choose between default transform and augmented transform
+                if random.random() < default_prob:
+                    if return_image_size:
+                        img, size_before, size_after = _default_transform(image_path, return_image_size=True)
+                        if pred_bboxes is not None:
+                            return img, bboxes, presence, pred_bboxes, size_before, size_after
+                        return img, bboxes, presence, size_before, size_after
+                    img = _default_transform(image_path)
+                    if pred_bboxes is not None:
+                        return img, bboxes, presence, pred_bboxes
+                    return img, bboxes, presence
+                return random.choice(_augmented_bbox_transforms)(
+                    image_path=image_path,
+                    albumentation_adapter=albumentation_adapter,
+                    bboxes=bboxes,
+                    presence=presence,
+                    flipped_bboxes=flipped_bboxes,
+                    flipped_presence=flipped_presence,
+                    pred_bboxes=pred_bboxes,
+                    flipped_pred_bboxes=flipped_pred_bboxes,
+                    return_image_size=return_image_size,
+                )
+
+            print(f'    Returning augmented transforms with mode {augmentation_mode}')
+            return transform_fn
 
     elif use_detectron2_transform:
         print(f'  Using detectron2 aware transforms')

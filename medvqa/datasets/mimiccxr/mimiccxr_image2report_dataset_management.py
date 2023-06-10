@@ -51,6 +51,9 @@ class MIMICCXR_Image2Report_Dataset(Dataset):
                 flipped_gt_bbox_coords=None, # for data augmentation
                 flipped_gt_bbox_presence=None, # for data augmentation
                 horizontal_flip=False,
+                # aux task: local feature coords
+                predict_local_feature_coords=False,
+                local_feature_coords=None,
                 # yolov8
                 use_yolov8=False,
             ):
@@ -74,6 +77,7 @@ class MIMICCXR_Image2Report_Dataset(Dataset):
         self.flipped_gt_bbox_coords = flipped_gt_bbox_coords
         self.flipped_gt_bbox_presence = flipped_gt_bbox_presence
         self.use_yolov8 = use_yolov8
+        self.predict_local_feature_coords = predict_local_feature_coords
 
         if self.predict_bboxes_chest_imagenome:
             assert self.gt_bbox_coords is not None
@@ -87,6 +91,11 @@ class MIMICCXR_Image2Report_Dataset(Dataset):
                         assert flipped_gt_bbox_presence is not None
                 num_bbox_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
                 self.albumentation_adapter = _AlbumentationAdapter(num_bbox_classes)
+
+        if self.predict_local_feature_coords:
+            assert local_feature_coords is not None
+            self.local_feature_coords = local_feature_coords
+
         if shuffle:
             random.shuffle(self.indices) # shuffle in place            
         self.infinite = infinite
@@ -153,6 +162,8 @@ class MIMICCXR_Image2Report_Dataset(Dataset):
             output['chexpert'] = self.chexpert_labels[rid]
         if self.classify_chest_imagenome:
             output['chest_imagenome'] = self.chest_imagenome_labels[rid]
+        if self.predict_local_feature_coords:
+            output['local_feature_coords'] = self.local_feature_coords
         if self.use_yolov8:
             # We need to adapt the output a little bit to make it compatible with YOLOv8
             output['im_file'] = image_path
@@ -191,6 +202,9 @@ class MIMICCXR_Image2ReportTrainer():
                 balanced_sampling_mode=None,
                 balanced_batch_size=None,
                 use_yolov8=False,
+                predict_local_feature_coords=False,
+                local_features_width=None,
+                local_features_height=None,
                 **unused_kwargs,
             ):
 
@@ -334,6 +348,18 @@ class MIMICCXR_Image2ReportTrainer():
         self.classify_chexpert = classify_chexpert
         self.classify_chest_imagenome = classify_chest_imagenome
         self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
+        self.predict_local_feature_coords = predict_local_feature_coords
+        if self.predict_local_feature_coords:
+            assert local_features_width is not None
+            assert local_features_height is not None
+            coords = []
+            for y in range(local_features_height):
+                for x in range(local_features_width):
+                    coords.append(((x + 0.5) / local_features_width, (y + 0.5) / local_features_height))
+            self.local_feature_coords = np.array(coords, dtype=np.float32)
+            print(f'local_feature_coords.shape: {self.local_feature_coords.shape}')
+        else:
+            self.local_feature_coords = None
         
         if classify_gender:
             print('Loading Chest Imagenome genders...')
@@ -442,6 +468,8 @@ class MIMICCXR_Image2ReportTrainer():
             flipped_gt_bbox_presence=self.flipped_bbox_presence,
             horizontal_flip=self.horizontal_flip,
             use_yolov8=self.use_yolov8,
+            predict_local_feature_coords=self.predict_local_feature_coords,
+            local_feature_coords=self.local_feature_coords,
         )
     
     def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False,

@@ -25,12 +25,15 @@ from medvqa.utils.constants import (
     CHEXPERT_LABEL2SHORT,
     CHEXPERT_LABELS,
     METRIC2SHORT,
-    VINBIG_DISEASES,
+    VINBIG_LABELS,
     ReportEvalMode,
 )
 from medvqa.utils.files import load_pickle, save_to_pickle
-from medvqa.utils.logging import print_blue, print_bold, print_magenta
-from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
+from medvqa.utils.logging import (
+    chest_imagenome_label_array_to_string,
+    chexpert_label_array_to_string,
+    print_blue, print_bold, print_magenta,
+)
 from medvqa.utils.common import CACHE_DIR, get_timestamp
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
@@ -69,10 +72,10 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
         def _get_q(i):
             q_id = dataset.questions[idxs[i]]
             return  CHEXPERT_LABELS[q_id]
-    elif report_eval_mode == ReportEvalMode.VINBIG_DISEASES:
+    elif report_eval_mode == ReportEvalMode.VINBIG_LABELS:
         def _get_q(i):
             q_id = dataset.questions[idxs[i]]
-            return VINBIG_DISEASES[q_id]
+            return VINBIG_LABELS[q_id]
     elif report_eval_mode == ReportEvalMode.CHEXPERT_AND_QUESTION_CLASSIFICATION:
         def _get_q(i):
             q_id = dataset.questions[idxs[i]]

@@ -24,6 +24,7 @@ class Image2ReportModel(MultiPurposeVisualModule):
                 transf_dec_dim_forward,
                 transf_dec_num_layers,
                 transf_dec_hidden_dim,
+                input_pos_encoding_mode,
                 # Auxiliary tasks args
                 classify_gender,
                 classify_chexpert,
@@ -41,6 +42,7 @@ class Image2ReportModel(MultiPurposeVisualModule):
                 chest_imagenome_bbox_regressor_version,
                 chest_imagenome_bbox_hidden_size,
                 chest_imagenome_train_average_bbox_coords,
+                predict_local_feature_coords,
                 # Other args
                 dropout_prob,
                 **unused_kwargs,
@@ -60,6 +62,7 @@ class Image2ReportModel(MultiPurposeVisualModule):
         print('   transf_dec_dim_forward:', transf_dec_dim_forward)
         print('   transf_dec_num_layers:', transf_dec_num_layers)
         print('   transf_dec_hidden_dim:', transf_dec_hidden_dim)
+        print('   input_pos_encoding_mode:', input_pos_encoding_mode)
 
         if len(unused_kwargs) > 0:
             print_orange(f'WARNING: Unused kwargs: {unused_kwargs}')
@@ -112,11 +115,16 @@ class Image2ReportModel(MultiPurposeVisualModule):
             vocab_size=vocab_size,
             dropout_prob=dropout_prob,
             apply_pos_encoding_to_input=True,
+            input_pos_encoding_mode=input_pos_encoding_mode,
         )
 
         # For projecting image features into a input memory for the report decoder
         self.W_local_feat = nn.Linear(self.local_feat_size, transf_dec_hidden_dim)
         self.W_global_feat = nn.Linear(self.global_feat_size, transf_dec_hidden_dim)
+    
+        self.predict_local_feature_coords = predict_local_feature_coords
+        if self.predict_local_feature_coords:
+            self.local_feature_coords_predictor = nn.Linear(transf_dec_hidden_dim, 2) # 2 for x, y coords
     
     def _get_image_memory(self, local_feat, global_feat):
         # merge local and global features
@@ -150,11 +158,25 @@ class Image2ReportModel(MultiPurposeVisualModule):
         # Report Decoder
         decoder_input_memory = self._get_image_memory(output['local_feat'], output['global_feat'])
         if mode == 'train':
-            pred_reports = self.report_decoder(input_memory=decoder_input_memory, device=device,
-                                            texts=reports, mode=mode)
+            if self.predict_local_feature_coords:
+                pred_reports, refined_input_memory = self.report_decoder(input_memory=decoder_input_memory, device=device,
+                            texts=reports, mode=mode, return_input_memory=True)
+            else:
+                pred_reports = self.report_decoder(input_memory=decoder_input_memory, device=device,
+                                                texts=reports, mode=mode)
         else:
-            pred_reports = self.report_decoder(input_memory=decoder_input_memory, device=device,
+            if self.predict_local_feature_coords:
+                pred_reports, refined_input_memory = self.report_decoder(input_memory=decoder_input_memory, device=device,
+                            max_text_length=max_report_length, mode=mode, return_input_memory=True)
+            else:
+                pred_reports = self.report_decoder(input_memory=decoder_input_memory, device=device,
                                             max_text_length=max_report_length, mode=mode)
         output['pred_reports'] = pred_reports
+        
+        if self.predict_local_feature_coords:
+            refined_local_features = refined_input_memory[:, :-1, :]
+            assert refined_local_features.shape[:2] == output['local_feat'].shape[:2] # batch_size, num_regions
+            pred_local_coords = self.local_feature_coords_predictor(refined_local_features)
+            output['pred_local_feature_coords'] = pred_local_coords
 
         return output

@@ -99,6 +99,9 @@ def evaluate_model(
 
     # Create model
     count_print('Creating instance of Image2ReportModel ...')
+    # temporary HACK: remove
+    if 'input_pos_encoding_mode' not in model_kwargs:
+        model_kwargs['input_pos_encoding_mode'] = 'sinusoidal'
     model = Image2ReportModel(vocab_size=tokenizer.vocab_size,
                               start_idx=tokenizer.token2id[tokenizer.START_TOKEN],
                               device=device, **model_kwargs)

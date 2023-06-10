@@ -369,3 +369,37 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     # Plot legend outside the plot
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.show()
+
+def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, class_names, figsize, format='xywh'):
+    from PIL import Image
+    import matplotlib.patches as patches
+
+    fig, ax = plt.subplots(1, figsize=figsize)
+
+    # Image
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+    ax.imshow(image)
+
+    # Predicted bounding boxes
+    for i in range(len(pred_classes)):
+        if format == 'xywh':
+            x_mid = pred_coords[i, 0] * width
+            y_mid = pred_coords[i, 1] * height
+            w = pred_coords[i, 2] * width
+            h = pred_coords[i, 3] * height
+            x1, y1, x2, y2 = x_mid - w / 2, y_mid - h / 2, x_mid + w / 2, y_mid + h / 2
+        elif format == 'xyxy':
+            x1 = pred_coords[i, 0] * width
+            y1 = pred_coords[i, 1] * height
+            x2 = pred_coords[i, 2] * width
+            y2 = pred_coords[i, 3] * height
+        else:
+            raise ValueError(f'Unknown format {format}')
+        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(pred_classes[i] % 20), facecolor='none', linestyle='dashed')
+        ax.add_patch(rect)
+        ax.text(x1, y1-3, class_names[pred_classes[i]], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+    
+    plt.show()

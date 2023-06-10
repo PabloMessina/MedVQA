@@ -36,7 +36,7 @@ from medvqa.metrics.nlp.bleu import DatasetAwareBleu
 from medvqa.metrics.nlp.cider import ConditionAwareCiderD, DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 
-from medvqa.utils.constants import MetricNames
+from medvqa.utils.constants import VINBIG_BBOX_NAMES, MetricNames
 
 def _get_output_transform(*keys, class_indices=None):
     if class_indices is None:
@@ -391,6 +391,36 @@ def attach_dataset_aware_vinbig_labels_microavgf1(engine, allowed_dataset_ids, c
     met = DatasetAwareMultiLabelMicroAvgF1(output_transform = _get_output_transform('pred_vinbig_labels', 'vinbig_labels', class_indices=class_indices),
                                         allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.VINBIGMICROAVGF1)
+
+def attach_dataset_aware_vinbig_labels_auc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=auc_fn,
+                                  output_transform=_get_output_transform('pred_vinbig_probs', 'vinbig_labels'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.VINBIGLABELAUC)
+
+def attach_dataset_aware_vinbig_labels_prcauc(engine, allowed_dataset_ids, device):
+    met = DatasetAwareEpochMetric(compute_fn=prc_auc_fn,
+                                  output_transform=_get_output_transform('pred_vinbig_probs', 'vinbig_labels'),
+                                  allowed_dataset_ids=allowed_dataset_ids,
+                                  device=device)
+    met.attach(engine, MetricNames.VINBIGLABELPRCAUC)
+
+def attach_dataset_aware_vinbig_bbox_iou(engine, allowed_dataset_ids):
+    met = DatasetAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
+                                                                     'vinbig_bbox_coords',
+                                                                     'vinbig_bbox_classes'),
+                            allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True, for_vinbig=True)
+    met.attach(engine, MetricNames.VINBIGBBOXIOU)
+
+def attach_dataset_aware_vinbig_bbox_meanf1(engine, allowed_dataset_ids):
+    met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'vinbig_bbox_coords',
+                                                                        'vinbig_bbox_classes'),
+                                allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True, for_vinbig=True,
+                                n_classes=len(VINBIG_BBOX_NAMES),
+                                iou_thresholds=[0.5])
+    met.attach(engine, MetricNames.VINBIGBBOXMEANF1)
 
 # ---------------------------------------------
 # CXR14 related metrics

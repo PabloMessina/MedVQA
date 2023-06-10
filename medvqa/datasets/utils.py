@@ -9,7 +9,7 @@ from medvqa.utils.constants import (
     CXR14_LABELS,
     CXR14_VINBIG_SYNONYMS,
     VINBIG_DATASET_ID,
-    VINBIG_DISEASES,
+    VINBIG_LABELS,
 )
 from medvqa.utils.data_structures import UnionFind
 from medvqa.utils.files import get_cached_json_file
@@ -39,8 +39,8 @@ def get_merged_findings(use_chexpert=True, use_cxr14=True, use_vinbig=True):
         n += len(CXR14_LABELS)
     if use_vinbig:
         offsets[VINBIG_DATASET_ID] = n
-        original_labels += VINBIG_DISEASES
-        n += len(VINBIG_DISEASES)   
+        original_labels += VINBIG_LABELS
+        n += len(VINBIG_LABELS)   
 
     uf = UnionFind(n)
     
@@ -55,7 +55,7 @@ def get_merged_findings(use_chexpert=True, use_cxr14=True, use_vinbig=True):
 
     uses = [use_chexpert, use_cxr14, use_vinbig]
     ids = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, VINBIG_DATASET_ID]
-    labels = [CHEXPERT_LABELS, CXR14_LABELS, VINBIG_DISEASES]
+    labels = [CHEXPERT_LABELS, CXR14_LABELS, VINBIG_LABELS]
     synonyms = [CHEXPERT_CXR14_SYNONYMS, CHEXPERT_VINBIG_SYNONYMS, CXR14_VINBIG_SYNONYMS]
     for i in range(len(uses)):
         for j in range(i+1, len(uses)):

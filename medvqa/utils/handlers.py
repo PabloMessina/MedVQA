@@ -4,11 +4,12 @@ from torch import Tensor
 
 from termcolor import colored
 import operator
+import os
 
 from medvqa.losses.schedulers import LRSchedulerNames
 from medvqa.utils.constants import METRIC2SHORT, MetricNames
 from medvqa.utils.metrics import average_ignoring_nones_and_nans
-from medvqa.utils.logging import MetricsLogger
+from medvqa.utils.logging import MetricsLogger, print_red
 
 def get_log_epoch_started_handler(model_wrapper):
     epoch_offset = model_wrapper.get_epoch()
@@ -150,6 +151,24 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
                 else:
                     scores.append(None)
                     scores.append(None)
+            elif m == MetricNames.VINBIGLABELAUC:
+                metric_names.append(MetricNames.VINBIGLABELAUC_MICRO)
+                metric_names.append(MetricNames.VINBIGLABELAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
+            elif m == MetricNames.VINBIGLABELPRCAUC:
+                metric_names.append(MetricNames.VINBIGLABELPRCAUC_MICRO)
+                metric_names.append(MetricNames.VINBIGLABELPRCAUC_MACRO)
+                if score is not None:
+                    scores.append(score['micro_avg'])
+                    scores.append(score['macro_avg'])
+                else:
+                    scores.append(None)
+                    scores.append(None)
             else:
                 metric_names.append(m)
                 if score is not None:
@@ -202,6 +221,20 @@ def get_checkpoint_handler(model_wrapper, folder_path, trainer, epoch_offset, sc
         greater_or_equal=True,
     )
     return checkpoint
+
+def get_log_checkpoint_saved_handler(folder_path):
+    last_checkpoint_names = set(f for f in os.listdir(folder_path) if f.endswith('.pt'))
+    def handler():
+        nonlocal last_checkpoint_names
+        checkpoint_names = set(f for f in os.listdir(folder_path) if f.endswith('.pt'))
+        new_checkpoint_names = checkpoint_names - last_checkpoint_names
+        if len(new_checkpoint_names) > 0:
+            assert len(new_checkpoint_names) == 1
+            checkpoint_name = new_checkpoint_names.pop()
+            print_red(f'New checkpoint saved: {checkpoint_name}', bold=True)
+        last_checkpoint_names = checkpoint_names
+    return handler
+        
 
 class Accumulator():
 

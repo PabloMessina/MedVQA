@@ -198,6 +198,9 @@ class LabelBasedVQAClass:
         if log_weighting:
             pos_counts = []
 
+        lines_to_print = []
+        max_label_name_len = max([len(ln) for ln in label_names])
+
         for i in range(len(label_names)):
             
             if i == break_loop_at_i:
@@ -236,10 +239,10 @@ class LabelBasedVQAClass:
                 else:
                     q_id = i
                 if should_print:
-                    print(f'    label = {i}, onehot={q_id}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+                    lines_to_print.append((len(pos_indices), f'{label_names[i].ljust(max_label_name_len)}, onehot={q_id}, #pos={len(pos_indices)}, #neg={len(neg_indices)}'))
             else:
                 if should_print:
-                    print(f'    label = {i}, len(pos_indices)={len(pos_indices)}, len(neg_indices)={len(neg_indices)}')
+                    lines_to_print.append((len(pos_indices), f'{label_names[i].ljust(max_label_name_len)}, #pos={len(pos_indices)}, #neg={len(neg_indices)}'))
 
             if log_weighting:
                 pos_counts.append(len(pos_indices))
@@ -278,7 +281,12 @@ class LabelBasedVQAClass:
                 disease_datasets.append(comp_dataset)
             else:
                 disease_datasets.append(pos_dataset if pos_dataset else neg_dataset)
-            assert disease_datasets[-1] is not None            
+            assert disease_datasets[-1] is not None
+
+        # sort by number of positive samples (descending) and print
+        lines_to_print.sort(key=lambda x: x[0], reverse=True)
+        for line in lines_to_print:
+            print(line[1])
         
         # final dataset
         if infinite:

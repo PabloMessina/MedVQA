@@ -215,6 +215,14 @@ _CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES = [
     MetricNames.CHESTIMAGENOMELABELPRCAUC,
 ]
 
+_CHEXPERT_MULTILABEL_CLASSIFICATION_METRIC_NAMES = [
+    MetricNames.CHXLABELACC,
+    MetricNames.CHXLABEL_PRF1,
+    MetricNames.CHXLABEL_ROCAUC,
+    MetricNames.CHXLABEL_AUC,
+    MetricNames.CHXLABEL_PRCAUC,
+]
+
 def get_chest_imagenome_multilabel_classification_metrics_dataframe(
         metrics_paths, metric_names=_CHEST_IMAGENOME_MULTILABEL_CLASSIFICATION_METRIC_NAMES):
 
@@ -327,6 +335,107 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(
             elif mn == MetricNames.CHESTIMAGENOMELABELROCAUC or\
                     mn == MetricNames.CHESTIMAGENOMELABELAUC or\
                     mn == MetricNames.CHESTIMAGENOMELABELPRCAUC:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met['macro_avg'] if met is not None else None
+                data[row_i][offset + 1] = met['micro_avg'] if met is not None else None
+                for i, label_name in enumerate(label_names_list[row_i]):
+                    label_idx = label_name_2_idx[label_name]
+                    data[row_i][offset + 2 + label_idx] = met['per_class'][i] if met is not None else None
+            
+    return pd.DataFrame(data=data, columns=columns)
+
+def get_chexpert_multilabel_classification_metrics_dataframe(
+        metrics_paths, metric_names=_CHEXPERT_MULTILABEL_CLASSIFICATION_METRIC_NAMES):
+
+    assert type(metrics_paths) == list or type(metrics_paths) == str
+    if type(metrics_paths) is str:
+        metrics_paths  = [metrics_paths]
+    columns = ['metrics_path', 'num_labels']
+    data = [[] for _ in range(len(metrics_paths))]
+    metrics_dict_list = [get_cached_pickle_file(metrics_path) for metrics_path in tqdm(metrics_paths)]
+    label_names_list = []
+    all_label_names = set()
+    for metrics_dict in metrics_dict_list:
+        label_names = CHEXPERT_LABELS
+        label_names_list.append(label_names)
+        all_label_names.update(label_names)
+    all_label_names = sorted(list(all_label_names))
+    label_name_2_idx = {label_name: idx for idx, label_name in enumerate(all_label_names)}
+
+    offset = 2
+    metric2offset = {}
+    for metric_name in metric_names:
+        if metric_name == MetricNames.CHXLABEL_PRF1:
+            metric2offset[metric_name] = offset
+            columns.append('f1(macro)')
+            columns.append('p(macro)')
+            columns.append('r(macro)')
+            columns.append('f1(micro)')
+            columns.append('p(micro)')
+            columns.append('r(micro)')
+            for label_name in all_label_names:
+                columns.append(f'f1({label_name})')
+                columns.append(f'p({label_name})')
+                columns.append(f'r({label_name})')
+            offset += 6 + 3 * len(all_label_names)
+        elif metric_name == MetricNames.CHXLABELACC:
+            metric2offset[metric_name] = offset
+            columns.append('acc')
+            offset += 1
+        elif metric_name == MetricNames.CHXLABEL_ROCAUC:
+            metric2offset[metric_name] = offset
+            columns.append('rocauc(macro)')
+            columns.append('rocauc(micro)')
+            for label_name in all_label_names:
+                columns.append(f'rocauc({label_name})')
+            offset += 2 + len(all_label_names)
+        elif metric_name == MetricNames.CHXLABEL_AUC:
+            metric2offset[metric_name] = offset
+            columns.append('auc(macro)')
+            columns.append('auc(micro)')
+            for label_name in all_label_names:
+                columns.append(f'auc({label_name})')
+            offset += 2 + len(all_label_names)
+        elif metric_name == MetricNames.CHXLABEL_PRCAUC:
+            metric2offset[metric_name] = offset
+            columns.append('prcauc(macro)')
+            columns.append('prcauc(micro)')
+            for label_name in all_label_names:
+                columns.append(f'prcauc({label_name})')
+            offset += 2 + len(all_label_names)
+        else:
+            assert False, f'unknown metric_name={metric_name}'
+
+    for row_i, metrics_path in enumerate(tqdm(metrics_paths)):
+        data[row_i] = [None] * len(columns)
+        data[row_i][0] = metrics_path
+        data[row_i][1] = len(label_names_list[row_i])
+        metrics_dict = metrics_dict_list[row_i]
+        
+        for mn in metric_names:
+            met = metrics_dict.get(mn, None)
+
+            if mn == MetricNames.CHXLABEL_PRF1:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met['f1_macro_avg'] if met is not None else None
+                data[row_i][offset + 1] = met['p_macro_avg'] if met is not None else None
+                data[row_i][offset + 2] = met['r_macro_avg'] if met is not None else None
+                data[row_i][offset + 3] = met['f1_micro_avg'] if met is not None else None
+                data[row_i][offset + 4] = met['p_micro_avg'] if met is not None else None
+                data[row_i][offset + 5] = met['r_micro_avg'] if met is not None else None
+                for i, label_name in enumerate(label_names_list[row_i]):
+                    label_idx = label_name_2_idx[label_name]
+                    data[row_i][offset + 6 + 3 * label_idx + 0] = met['f1'][i] if met is not None else None
+                    data[row_i][offset + 6 + 3 * label_idx + 1] = met['p'][i] if met is not None else None
+                    data[row_i][offset + 6 + 3 * label_idx + 2] = met['r'][i] if met is not None else None
+
+            elif mn == MetricNames.CHXLABELACC:
+                offset = metric2offset[mn]
+                data[row_i][offset + 0] = met if met is not None else None
+
+            elif mn == MetricNames.CHXLABEL_ROCAUC or\
+                    mn == MetricNames.CHXLABEL_AUC or\
+                    mn == MetricNames.CHXLABEL_PRCAUC:
                 offset = metric2offset[mn]
                 data[row_i][offset + 0] = met['macro_avg'] if met is not None else None
                 data[row_i][offset + 1] = met['micro_avg'] if met is not None else None
@@ -649,7 +758,8 @@ def _get_thresholds_filepath(results_folder_path, labeler_name, score_name):
     return os.path.join(results_folder_path, f'thresholds_{labeler_name}({score_name}).pkl')
 
 def calibrate_thresholds_on_mimiccxr_validation_set(
-        model_and_device_getter, use_amp, mimiccxr_vision_evaluator_kwargs, classify_chexpert, classify_chest_imagenome,
+        model_and_device_getter, use_amp, mimiccxr_vision_evaluator_kwargs, trainer_engine_kwargs,
+        classify_chexpert, classify_chest_imagenome,
         cache_thresholds=False, cache_probs=False, results_folder_path=None, score_name='f1',
         return_filepaths_instead=False):
 
@@ -705,11 +815,13 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
     assert mimiccxr_vision_evaluator_kwargs['use_val_set_only']
     mimiccxr_vision_evaluator = MIMICCXR_VisualModuleTrainer(**mimiccxr_vision_evaluator_kwargs)
     evaluator = get_engine(model=model, classify_tags=False, classify_orientation=False, classify_questions=False,
-                            classify_gender=False, predict_bboxes_chest_imagenome=False, 
+                            classify_gender=False, predict_bboxes_chest_imagenome=False, predict_bboxes_vinbig=False,
                             classify_chexpert=classify_chexpert, classify_chest_imagenome=classify_chest_imagenome,
                             pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
                             device=device, use_amp=use_amp, training=False,
-                            using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False))
+                            using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False),
+                            yolov8_use_multiple_detection_layers=trainer_engine_kwargs.get('yolov8_use_multiple_detection_layers', False))
+
     
     if classify_chexpert:
         attach_chexpert_labels_accuracy(evaluator, device)

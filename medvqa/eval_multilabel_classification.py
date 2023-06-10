@@ -9,8 +9,8 @@ import torch
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_postprocessed_label_names as load_chest_imagenome_postprocessed_label_names,
-    load_postprocessed_labels as load_chest_imagenome_postprocessed_labels,
+    load_chest_imagenome_label_names,
+    load_chest_imagenome_labels,
 )
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
@@ -282,24 +282,31 @@ def _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, num_workers,
     return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size, num_workers, eval_dataset_name)
 
 def _calibrate_thresholds_using_chexpert_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-                                                        save_probs=False, results_folder_path=None):
+                                                        trainer_engine_kwargs, save_probs=False, results_folder_path=None):
     print_blue('Calibrating thresholds using MIMICCXR validation dataset and CheXpert labels')
     return calibrate_thresholds_on_mimiccxr_validation_set(
-        model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
+        model_and_device_getter=lambda : (model, device),
+        use_amp=use_amp,
+        mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+        trainer_engine_kwargs=trainer_engine_kwargs,
         classify_chexpert=True, classify_chest_imagenome=False,
-        save_probs=save_probs, results_folder_path=results_folder_path)
+        cache_probs=save_probs, results_folder_path=results_folder_path)['chexpert']
 
 def _calibrate_thresholds_using_chest_imagenome_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
-                                                                save_probs=False, results_folder_path=None):
+                                                            trainer_engine_kwargs, save_probs=False, results_folder_path=None):
     print_blue('Calibrating thresholds using MIMICCXR validation dataset and Chest-ImaGenome labels')
     return calibrate_thresholds_on_mimiccxr_validation_set(
-        model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
+        model_and_device_getter=lambda : (model, device),
+        use_amp=use_amp,
+        mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+        trainer_engine_kwargs=trainer_engine_kwargs,
         classify_chexpert=False, classify_chest_imagenome=True,
-        save_probs=save_probs, results_folder_path=results_folder_path)
+        cache_probs=save_probs, results_folder_path=results_folder_path)['chest_imagenome']
         
 def _evaluate_model(
     eval_dataset_name,
     model_kwargs,
+    trainer_engine_kwargs,
     mimiccxr_vision_evaluator_kwargs,
     auxiliary_tasks_kwargs,
     device='GPU',
@@ -357,8 +364,8 @@ def _evaluate_model(
                 label_names_list.append(metrics['chest_imagenome_label_names'])
             # Collect ground truth labels
             print('Collecting ground truth labels')
-            dicom_id_2_gt_labels = load_chest_imagenome_postprocessed_labels(chest_imagenome_labels_filename)
-            gt_label_names = load_chest_imagenome_postprocessed_label_names(chest_imagenome_label_names_filename)
+            dicom_id_2_gt_labels = load_chest_imagenome_labels(chest_imagenome_labels_filename)
+            gt_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
             if not cheat:
                 # Calibrate thresholds on validation set
                 print('Calibrating thresholds on validation set')
@@ -429,6 +436,8 @@ def _evaluate_model(
     classify_chest_imagenome = auxiliary_tasks_kwargs['classify_chest_imagenome']
     # auxiliary task: chest imagenome bounding boxes
     predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
+    # auxiliary task: vinbig bounding boxes
+    predict_bboxes_vinbig = auxiliary_tasks_kwargs['predict_bboxes_vinbig']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
     
@@ -475,9 +484,11 @@ def _evaluate_model(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
         pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
         device=device, use_amp=use_amp, training=False,
         using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False),
+        yolov8_use_multiple_detection_layers=trainer_engine_kwargs.get('yolov8_use_multiple_detection_layers', False),
     )
     if eval_chest_imagenome_gold:
         _engine_kwargs['valid_chest_imagenome_label_indices'] = mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices
@@ -586,12 +597,12 @@ def _evaluate_model(
         # Calibrate thresholds
         if classify_chexpert and calibrate_thresholds:
             chexpert_thresholds = _calibrate_thresholds_using_chexpert_for_mimiccxr(
-                model, device, use_amp, kwargs, save_probs, results_folder_path)
+                model, device, use_amp, kwargs, trainer_engine_kwargs, save_probs, results_folder_path)
         else:
             chexpert_thresholds = None
         if classify_chest_imagenome and calibrate_thresholds:
             chest_imagenome_thresholds = _calibrate_thresholds_using_chest_imagenome_for_mimiccxr(
-                model, device, use_amp, kwargs, save_probs, results_folder_path)
+                model, device, use_amp, kwargs, trainer_engine_kwargs, save_probs, results_folder_path)
             if eval_chest_imagenome_gold:
                 print(f'chest_imagenome_thresholds.shape (before) = {chest_imagenome_thresholds.shape}')
                 chest_imagenome_thresholds = chest_imagenome_thresholds[mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices]
@@ -646,6 +657,7 @@ def evaluate_model(
         checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
         metadata = load_metadata(checkpoint_folder)        
         model_kwargs = _recover_model_kwargs(metadata)
+        trainer_engine_kwargs = metadata['trainer_engine_kwargs']
         auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
         if eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD]:
             mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
@@ -654,12 +666,18 @@ def evaluate_model(
             assert False, f'Unknown eval_dataset_name: {eval_dataset_name}'
     else:
         model_kwargs = None
+        trainer_engine_kwargs = None
         auxiliary_tasks_kwargs = None
         mimiccxr_vision_evaluator_kwargs = None
+
+    # from pprint import pprint
+    # print('mimiccxr_vision_evaluator_kwargs:')
+    # pprint(mimiccxr_vision_evaluator_kwargs)
 
     return _evaluate_model(
                 eval_dataset_name=eval_dataset_name,
                 model_kwargs=model_kwargs,
+                trainer_engine_kwargs=trainer_engine_kwargs,
                 mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
                 auxiliary_tasks_kwargs=auxiliary_tasks_kwargs,
                 device=device,

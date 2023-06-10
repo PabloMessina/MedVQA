@@ -16,6 +16,7 @@ from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
+from medvqa.models.nlp.positional_encoding import PositionalEncodingMode
 from medvqa.models.report_generation.image2report import Image2ReportModel
 from medvqa.models.vision.multilabel_classification import MLCVersion
 
@@ -28,10 +29,8 @@ from medvqa.utils.constants import (
 )
 from medvqa.utils.common import WORKSPACE_DIR
 from medvqa.metrics import (
-    attach_dataset_aware_chest_imagenome_bbox_mae,
     attach_dataset_aware_chest_imagenome_bbox_iou,
     attach_dataset_aware_chest_imagenome_labels_auc,
-    attach_dataset_aware_chest_imagenome_bbox_meanf1,
     attach_dataset_aware_chest_imagenome_labels_prcauc,
     attach_dataset_aware_chexpert_labels_auc,
     attach_dataset_aware_chexpert_labels_prcauc,
@@ -94,6 +93,8 @@ def parse_args(args=None):
     parser.add_argument('--transf-dec-dim-forward', type=int, default=256)
     parser.add_argument('--transf-dec-num-layers', type=int, default=2)
     parser.add_argument('--dropout-prob', type=float, default=0)
+    parser.add_argument('--input-pos-encoding-mode', type=str, default=PositionalEncodingMode.SINUSOIDAL,
+                        choices=PositionalEncodingMode.values())
     # Image encoder
     parser.add_argument('--raw-image-encoding', type=str, default=RawImageEncoding.DENSENET_121)
     parser.add_argument('--image-local-feat-size', type=int, default=1024)
@@ -168,6 +169,11 @@ def parse_args(args=None):
     parser.add_argument('--predict-bboxes-chest-imagenome', action='store_true', default=False)
     parser.add_argument('--chest-imagenome-bbox-loss-weight', type=float, default=1.0)
     parser.add_argument('--predict-labels-and-bboxes-chest-imagenome', action='store_true', default=False)
+    # local feature coordinate regression
+    parser.add_argument('--predict-local-feature-coords', action='store_true', default=False)
+    parser.add_argument('--local-features-width', type=int, default=None)
+    parser.add_argument('--local-features-height', type=int, default=None)
+
     
     return parser.parse_args(args=args)
 
@@ -178,8 +184,9 @@ _METRIC_WEIGHTS = {
     MetricNames.CHXLABEL_PRCAUC: 1,
     MetricNames.CHESTIMAGENOMELABELAUC: 1,
     MetricNames.CHESTIMAGENOMELABELPRCAUC: 1,
-    MetricNames.GENDER_ACC: 1,
     MetricNames.CHESTIMAGENOMEBBOXIOU: 1,
+    MetricNames.GENDER_ACC: 1,
+    MetricNames.LOCAL_FEATURE_COORDS_LOSS: 1,
 }
 
 def _metric_getter(metrics_dict, key):
@@ -189,6 +196,8 @@ def _metric_getter(metrics_dict, key):
             key == MetricNames.CHXLABEL_PRCAUC:
         scores = metrics_dict[key]
         return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
+    elif key == MetricNames.LOCAL_FEATURE_COORDS_LOSS:
+        return 1 / (1 + metrics_dict[key]) # convert loss to score between 0 and 1
     return metrics_dict[key]
 
 def train_model(
@@ -228,6 +237,8 @@ def train_model(
     # auxiliary task: chest imagenome labels
     classify_chest_imagenome = auxiliary_tasks_kwargs['classify_chest_imagenome']
     predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
+    # auxiliary task: predict local feature coordinates
+    predict_local_feature_coords = auxiliary_tasks_kwargs['predict_local_feature_coords']
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -402,6 +413,12 @@ def train_model(
         metrics_to_print.append(MetricNames.YOLOV8_CLS_LOSS)
         metrics_to_print.append(MetricNames.YOLOV8_DFL_LOSS)
 
+    if predict_local_feature_coords:
+        attach_dataset_aware_loss(trainer_engine, MetricNames.LOCAL_FEATURE_COORDS_LOSS, _mim_datasets)
+        attach_dataset_aware_loss(validator_engine, MetricNames.LOCAL_FEATURE_COORDS_LOSS, _mim_datasets)
+        # for logging
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.LOCAL_FEATURE_COORDS_LOSS)
+
     # Timer
     timer = Timer()
     timer.attach(trainer_engine, start=Events.EPOCH_STARTED)
@@ -500,6 +517,7 @@ def train_from_scratch(
     transf_dec_dim_forward,
     transf_dec_num_layers,
     transf_dec_hidden_dim,
+    input_pos_encoding_mode,
     dropout_prob,
     freeze_image_encoder,
     image_encoder_only_compute_features,
@@ -566,6 +584,9 @@ def train_from_scratch(
     predict_labels_and_bboxes_chest_imagenome,
     clamp_bboxes_chest_imagenome,
     chest_imagenome_bbox_loss_weight,
+    predict_local_feature_coords,
+    local_features_width,
+    local_features_height,
     # GPU
     device,
     # Other args
@@ -612,6 +633,7 @@ def train_from_scratch(
         transf_dec_dim_forward=transf_dec_dim_forward,
         transf_dec_num_layers=transf_dec_num_layers,
         transf_dec_hidden_dim=transf_dec_hidden_dim,
+        input_pos_encoding_mode=input_pos_encoding_mode,
         dropout_prob=dropout_prob,
         # Aux tasks
         classify_gender=classify_gender,
@@ -626,6 +648,7 @@ def train_from_scratch(
         chest_imagenome_mlc_hidden_size=chest_imagenome_mlc_hidden_size,
         chest_imagenome_bbox_regressor_version=chest_imagenome_bbox_regressor_version,
         chest_imagenome_bbox_hidden_size=chest_imagenome_bbox_hidden_size,
+        predict_local_feature_coords=predict_local_feature_coords,
     )
     if predict_bboxes_chest_imagenome:
         avg_coords = get_chest_imagenome_train_average_bbox_coords(
@@ -688,6 +711,7 @@ def train_from_scratch(
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         use_yolov8=use_yolov8,
+        predict_local_feature_coords=predict_local_feature_coords,
     )
     collate_batch_fn_kwargs = {}
     if train_mimiccxr:
@@ -717,6 +741,9 @@ def train_from_scratch(
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
             balanced_batch_size=mimiccxr_balanced_batch_size,
             use_yolov8=use_yolov8,
+            predict_local_feature_coords=predict_local_feature_coords,
+            local_features_width=local_features_width,
+            local_features_height=local_features_height,
         )
     else:
         mimiccxr_trainer_kwargs = None
@@ -726,6 +753,7 @@ def train_from_scratch(
         classify_chexpert=classify_chexpert,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_local_feature_coords=predict_local_feature_coords,
         binary_loss_name=binary_loss_name,
         focal_loss_weight=focal_loss_weight,
         bce_loss_weight=bce_loss_weight,
@@ -744,6 +772,7 @@ def train_from_scratch(
         classify_chexpert=classify_chexpert,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_local_feature_coords=predict_local_feature_coords,
         training=False,
         using_yolov8=use_yolov8,
         include_report=True,
@@ -765,6 +794,8 @@ def train_from_scratch(
         # chest imagenome labels
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        # local feature coordinates
+        predict_local_feature_coords=predict_local_feature_coords,
     )
 
     return train_model(

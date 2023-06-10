@@ -30,6 +30,9 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
         chest_imagenome_bbox_presence_criterion=None,
         chest_imagenome_bbox_loss_weight=1.0,
         valid_chest_imagenome_label_indices=None,
+        # local feature coordinates
+        predict_local_feature_coords=False,
+        local_feature_coords_criterion=None,
         # yolov8
         using_yolov8=False,
         yolov8_criterion=None,
@@ -90,6 +93,8 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
             if (using_yolov8 and not training) or not using_yolov8:
                 chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
                 chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
+        if predict_local_feature_coords:
+            local_feature_coords = batch['local_feature_coords'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -140,6 +145,8 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                         bs = pred_chest_imagenome_bbox_coords.size(0)
                         pred_chest_imagenome_bbox_coords = pred_chest_imagenome_bbox_coords.view(bs, -1, 4)
                         pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
+                if predict_local_feature_coords:
+                    pred_local_feature_coords = model_output['pred_local_feature_coords']
 
                 if not use_visual_module_only:
                     if training:
@@ -148,8 +155,8 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                     else:
                         pred_reports = model_output['pred_reports']
 
+                # Compute losses
                 if training:
-                    # Compute losses
                     losses = []
                     if classify_gender:
                         gender_loss = chest_imagenome_gender_criterion(pred_gender_logits, genders)
@@ -175,6 +182,9 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                             chest_imagenome_bbox_loss = chest_imagenome_bbox_coords_loss + chest_imagenome_bbox_presence_loss
                             chest_imagenome_bbox_loss = chest_imagenome_bbox_loss * chest_imagenome_bbox_loss_weight # weight the loss
                             losses.append(chest_imagenome_bbox_loss)
+                    if predict_local_feature_coords:
+                        local_feature_coords_loss = local_feature_coords_criterion(pred_local_feature_coords, local_feature_coords.float())
+                        losses.append(local_feature_coords_loss)
                     if not use_visual_module_only:
                         if include_report:
                             if shift_tokens_for_transformer:
@@ -188,6 +198,9 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
 
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss)
+                else:
+                    if predict_local_feature_coords:
+                        local_feature_coords_loss = local_feature_coords_criterion(pred_local_feature_coords, local_feature_coords.float())
 
         # Prepare output
         output = {
@@ -240,6 +253,10 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
                 output['pred_chest_imagenome_bbox_presence'] = pred_chest_imagenome_bbox_presence.detach().cpu()
                 if training:
                     output[MetricNames.CHEST_IMAGENOME_BBOX_LOSS] = chest_imagenome_bbox_loss.detach()
+        if predict_local_feature_coords:
+            output['local_feature_coords'] = local_feature_coords.detach().cpu()
+            output['pred_local_feature_coords'] = pred_local_feature_coords.detach().cpu()
+            output[MetricNames.LOCAL_FEATURE_COORDS_LOSS] = local_feature_coords_loss.detach()
 
         if not use_visual_module_only:
             output['pred_reports'] = tokenizer.clean_batch(pred_reports.detach())
@@ -262,7 +279,7 @@ def get_step_fn(model, optimizer, tokenizer, training, device,
     return step_fn
 
 def get_engine(model, classify_gender, classify_chexpert, classify_chest_imagenome,
-                predict_bboxes_chest_imagenome, device,
+                predict_bboxes_chest_imagenome, predict_local_feature_coords, device,
                 include_report=True,
                 tokenizer=None,
                 shift_tokens_for_transformer=True,
@@ -327,6 +344,11 @@ def get_engine(model, classify_gender, classify_chexpert, classify_chest_imageno
         chest_imagenome_bbox_coords_criterion = None
         chest_imagenome_bbox_presence_criterion = None
 
+    if predict_local_feature_coords:
+        local_feature_coords_criterion = nn.MSELoss()
+    else:
+        local_feature_coords_criterion = None
+
     if training and using_yolov8:
         assert model_for_yolov8 is not None
         from ultralytics.yolo.v8.detect.train import Loss
@@ -358,6 +380,9 @@ def get_engine(model, classify_gender, classify_chexpert, classify_chest_imageno
                         chest_imagenome_bbox_presence_criterion=chest_imagenome_bbox_presence_criterion,
                         chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
                         valid_chest_imagenome_label_indices=valid_chest_imagenome_label_indices,
+                        # local feature coordinates
+                        predict_local_feature_coords=predict_local_feature_coords,
+                        local_feature_coords_criterion=local_feature_coords_criterion,
                         # yolov8
                         using_yolov8=using_yolov8,
                         yolov8_criterion=yolov8_criterion,

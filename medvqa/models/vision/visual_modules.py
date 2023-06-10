@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -35,12 +36,15 @@ from medvqa.utils.constants import (
     PADCHEST_NUM_LABELS,
     PADCHEST_NUM_LOCALIZATIONS,
     PADCHEST_PROJECTIONS,
-    VINBIG_DISEASES,
+    VINBIG_BBOX_NAMES,
+    VINBIG_LABELS,
 )
 from transformers import AutoModel, ViTModel
 from ultralytics.yolo.utils.ops import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
 import re
+
+from medvqa.utils.logging import print_bold
 
 class RawImageEncoding:
     DENSENET_121 = 'densenet-121'
@@ -93,6 +97,7 @@ class MultiPurposeVisualModule(nn.Module):
                 roi_align_output_size=None,
                 yolov8_model_name_or_path=None,
                 yolov8_model_alias=None,
+                yolov8_use_one_detector_per_dataset=False,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -122,6 +127,8 @@ class MultiPurposeVisualModule(nn.Module):
                 chest_imagenome_mlc_version=MLCVersion.DEFAULT,
                 chest_imagenome_mlc_hidden_size=None,
                 use_anaxnet_bbox_subset=False,
+                predict_bboxes_vinbig=False,
+                vinbig_mlc_hidden_size=None,
                 merge_findings=False,
                 n_findings=None,
                 # Other kwargs
@@ -179,8 +186,11 @@ class MultiPurposeVisualModule(nn.Module):
         self.roi_align_output_size = roi_align_output_size
         self.yolov8_model_name_or_path = yolov8_model_name_or_path
         self.yolov8_model_alias = yolov8_model_alias
+        self.yolov8_use_one_detector_per_dataset = yolov8_use_one_detector_per_dataset
         self.chest_imagenome_mlc_version = chest_imagenome_mlc_version
         self.chest_imagenome_mlc_hidden_size = chest_imagenome_mlc_hidden_size
+        self.predict_bboxes_vinbig = predict_bboxes_vinbig
+        self.vinbig_mlc_hidden_size = vinbig_mlc_hidden_size
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -304,16 +314,53 @@ class MultiPurposeVisualModule(nn.Module):
                                                              roi_heads_batch_size_per_image=self.roi_heads_batch_size_per_image,
                                                              rpn_batch_size_per_image=self.rpn_batch_size_per_image)
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
-            if self.use_anaxnet_bbox_subset:
-                num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
-                class_names = {i:CHEST_IMAGENOME_BBOX_NAMES[idx] for i, idx in \
-                                enumerate(get_anaxnet_bbox_sorted_indices())}
+            assert self.predict_bboxes_chest_imagenome or self.predict_bboxes_vinbig
+            if self.yolov8_use_one_detector_per_dataset:
+                assert self.predict_bboxes_chest_imagenome and self.predict_bboxes_vinbig # at least two datasets
+                class_names_list = []
+                nc_list = []
+                self.num_bbox_classes = []
+                if self.predict_bboxes_chest_imagenome:
+                    class_names = {}
+                    if self.use_anaxnet_bbox_subset:
+                        for i, idx in enumerate(get_anaxnet_bbox_sorted_indices()):
+                            class_names[i] = CHEST_IMAGENOME_BBOX_NAMES[idx]
+                    else:
+                        for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+                            class_names[i] = name
+                    class_names_list.append(class_names)
+                    nc_list.append(len(class_names))
+                    self.num_bbox_classes.append(len(class_names))
+                if self.predict_bboxes_vinbig:
+                    class_names = {}
+                    for i, name in enumerate(VINBIG_BBOX_NAMES):
+                        class_names[i] = name
+                    class_names_list.append(class_names)
+                    nc_list.append(len(class_names))
+                    self.num_bbox_classes.append(len(class_names))
+                print(f'  nc_list: {nc_list}')
+                self.raw_image_encoder = create_yolov8_model_for_multiple_datasets(
+                    model_name_or_path=model_name, nc_list=nc_list, class_names_list=class_names_list
+                )
             else:
-                num_classes = CHEST_IMAGENOME_NUM_BBOX_CLASSES
-                class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
-            self.num_bbox_classes = num_classes
-            self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=num_classes,
-                                                         class_names=class_names)
+                offset = 0
+                class_names = {}
+                if self.predict_bboxes_chest_imagenome:
+                    if self.use_anaxnet_bbox_subset:
+                        for i, idx in enumerate(get_anaxnet_bbox_sorted_indices()):
+                            class_names[i+offset] = CHEST_IMAGENOME_BBOX_NAMES[idx]
+                        offset += CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+                    else:
+                        for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+                            class_names[i+offset] = name
+                        offset += CHEST_IMAGENOME_NUM_BBOX_CLASSES
+                if self.predict_bboxes_vinbig:
+                    for i, name in enumerate(VINBIG_BBOX_NAMES):
+                        class_names[i+offset] = name
+                    offset += len(VINBIG_BBOX_NAMES)
+                print(f'  num_bbox_classes: {offset}')
+                self.num_bbox_classes = offset
+                self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=offset, class_names=class_names)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -383,7 +430,13 @@ class MultiPurposeVisualModule(nn.Module):
             # 8) VinBig specific labels
             if self.use_vinbig:
                 print(f'    Initializing VinBig classification task')
-                self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_DISEASES))
+                self.MLC_vinbig = MultilabelClassifier_v3(
+                    local_feat_dim=self.local_feat_size,
+                    global_feat_dim=self.global_feat_size,
+                    hidden_dim=self.vinbig_mlc_hidden_size,
+                    num_regions=self.num_regions,
+                    num_labels=len(VINBIG_LABELS),
+                )
 
         # 9) PadChest specific tasks
         if self.use_padchest:
@@ -584,6 +637,7 @@ class MultiPurposeVisualModule(nn.Module):
         return_local_features=False,
         return_global_features=False,
         skip_mlc=False,
+        yolov8_detection_layer_index=None,
         **unused_kwargs,
     ):
 
@@ -620,6 +674,10 @@ class MultiPurposeVisualModule(nn.Module):
                 compute_global_features = True
             if self.chest_imagenome_mlc_version == MLCVersion.V1:
                 permute_and_flatten_local_feat = True
+        
+        if vinbig_forward:
+            compute_global_features = True
+            permute_and_flatten_local_feat = True
 
         if compute_global_features:
             global_list = []
@@ -696,7 +754,13 @@ class MultiPurposeVisualModule(nn.Module):
 
             elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
                 batch_size = raw_images.size(0)
-                local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(raw_images)
+                if yolov8_detection_layer_index is None:
+                    local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(raw_images)
+                else:
+                    local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(
+                        x=raw_images,
+                        detection_layer_index=yolov8_detection_layer_index,
+                    )
                 assert local_feat_NxCxHxW.shape == (batch_size, self.local_feat_size,
                                                     self.num_regions_sqrt, self.num_regions_sqrt), \
                  f'local_feat_NxCxHxW.shape = {local_feat_NxCxHxW.shape}, but expected {(batch_size, self.local_feat_size, self.num_regions_sqrt, self.num_regions_sqrt)}'
@@ -708,9 +772,13 @@ class MultiPurposeVisualModule(nn.Module):
                     if not self.only_compute_features:
                         yolov8_predictions = detection_output[0]
                         # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
+                        if yolov8_detection_layer_index is None:
+                            num_bbox_classes = self.num_bbox_classes
+                        else:
+                            num_bbox_classes = self.num_bbox_classes[yolov8_detection_layer_index]
                         yolov8_predictions = non_max_suppression(yolov8_predictions.detach(),
                                                                 conf_thres=0.1, iou_thres=0.1,
-                                                                max_det=self.num_bbox_classes)
+                                                                max_det=num_bbox_classes)
                         # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
                 else: # this is the case when the model is in training mode
                     # print('YOLOv8 output in training mode')
@@ -768,8 +836,13 @@ class MultiPurposeVisualModule(nn.Module):
                     output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
             elif vinbig_forward:
                 if not self.merge_findings:
-                    output['pred_vinbig'] = self.W_vinbig(global_feat)
+                    output['pred_vinbig'] = self.MLC_vinbig(local_feat_NxRxC, global_feat)
                     output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+                if self.predict_bboxes_vinbig:
+                    assert self.raw_image_encoding == RawImageEncoding.YOLOV8
+                    output['yolov8_features'] = yolov8_features
+                    if yolov8_predictions is not None:
+                        output['yolov8_predictions'] = yolov8_predictions
             elif padchest_forward:
                 if self.classify_orientation:
                     output['pred_orientation'] = self.W_padchest_ori(global_feat)
@@ -1275,30 +1348,97 @@ def create_detectron2_model(
     return model
 
 class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
-    def __init__(self, cfg='yolov8n.yaml', ch=3, nc=None, verbose=True):  # model, input channels, number of classes
+    def __init__(self, cfg='yolov8n.yaml', ch=3, nc=None, verbose=True, detection_layers=None):
+        
         super().__init__(cfg, ch, nc, verbose)
+        
+        if detection_layers is not None:
+            assert type(detection_layers) == list
+            assert len(detection_layers) > 0
+            # Create a module list containing only the detection layers
+            self.detection_layers = nn.ModuleList(detection_layers)
+            self.using_multiple_detection_layers = True
+            # Remove the original detection layer (last layer) from the model
+            # NOTE: self.model is a nn.Sequential object
+            self.model = self.model[:-1]
+        else:
+            self.detection_layers = None
+            self.using_multiple_detection_layers = False
     
-    def custom_forward(self, x):
+    def custom_forward(self, x, detection_layer_index=None, detection_layer_indexes=None):
         """
         This is a modified version of the original _forward_once() method in BaseModel,
         found in ultralytics/nn/tasks.py.
         The original method returns only the detection output, while this method returns
         both the detection output and the features extracted by the last convolutional layer.
+        We also added the option to return the detection output of multiple detection layers,
+        each one with a different number of classes. This can be useful for example when
+        training a model with multiple datasets, each one with a different number of classes.
         """
-        y = []
-        features = None
-        for m in self.model:
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+        
+        if self.using_multiple_detection_layers:
+            assert detection_layer_index is not None or detection_layer_indexes is not None
+            if detection_layer_index is not None:
+                assert type(detection_layer_index) == int
+                assert detection_layer_index >= 0 and detection_layer_index < len(self.detection_layers)
+                detection_layer_indexes = [detection_layer_index]
+                return_list = False
+            else:
+                assert type(detection_layer_indexes) == list
+                assert len(detection_layer_indexes) > 0
+                assert all([type(i) == int for i in detection_layer_indexes])
+                assert all([i >= 0 and i < len(self.detection_layers) for i in detection_layer_indexes])
+                return_list = True
+            
+            # Run the model up to the last convolutional layer
+            y = []
+            features = None
+            for m in self.model:
+                # print('----')
+                # print(m)
+                if m.f != -1:  # if not from previous layer
+                    x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                x = m(x) # run
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                y.append(x if m.i in self.save else None)  # save output
             if torch.is_tensor(x):
                 features = x # keep the last tensor as features
-            x = m(x)  # run
+            # Run the detection layers
+            detection_output = []
+            xx = x
+            for i in detection_layer_indexes:
+                m = self.detection_layers[i]
+                # print('$$$$$$$$$$$$$$$$$$$$$$$')
+                # print(m)
+                if m.f != -1:  # if not from previous layer
+                    x = y[m.f] if isinstance(m.f, int) else [xx if j == -1 else y[j] for j in m.f]  # from earlier layers
+                else:
+                    x = xx
+                x = m(x) # run
+                detection_output.append(x)
+            if not return_list:
+                detection_output = detection_output[0]
+            return features, detection_output # return features and detection output
+        else:
+            y = []
+            features = None
+            for m in self.model:
+                # print('----')
+                # print(m)
+                if m.f != -1:  # if not from previous layer
+                    x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                x = m(x)  # run
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                y.append(x if m.i in self.save else None)  # save output
             if torch.is_tensor(x):
                 features = x # keep the last tensor as features
-            y.append(x if m.i in self.save else None)  # save output
-        if torch.is_tensor(x):
-            features = x # keep the last tensor as features
-        return features, x # return features and detection output
+            return features, x # return features and detection output
 
 def create_yolov8_model(model_name_or_path, nc, class_names):
     from ultralytics.nn.tasks import attempt_load_one_weight
@@ -1314,6 +1454,53 @@ def create_yolov8_model(model_name_or_path, nc, class_names):
         model.load(weights)
     model.nc = nc
     model.names = class_names  # attach class names to model
+    args = get_cfg(overrides={'model': model_name_or_path})
+    model.args = args  # attach hyperparameters to model
+    return model
+
+def create_yolov8_model_for_multiple_datasets(model_name_or_path, nc_list, class_names_list, verbose=True):
+    from ultralytics.nn.tasks import attempt_load_one_weight
+    from ultralytics.yolo.cfg import get_cfg
+    import time
+    
+    assert type(nc_list) == list
+    assert type(class_names_list) == list
+    assert len(nc_list) == len(class_names_list)
+
+    print_bold('Creating YOLOv8 model for multiple datasets')
+    
+    # Load weights and config
+    ckpt = None
+    if str(model_name_or_path).endswith('.pt'):
+        weights, ckpt = attempt_load_one_weight(model_name_or_path)
+        cfg = ckpt['model'].yaml
+    else:
+        cfg = model_name_or_path
+
+    # Create one DetectionModel for each dataset and extract its last Detection layer
+    detection_layers = []
+    for i, nc in enumerate(nc_list):
+        # (cfg, ch, nc, verbose)
+        if verbose:
+            print_bold(f'   {i+1}. Creating DetectionModel for {nc} classes')
+            time.sleep(0.2) # to avoid colliding prints
+        # clone cfg
+        cfg_ = copy.deepcopy(cfg)
+        model = DetectionModel(cfg_, ch=3, nc=nc, verbose=verbose)
+        if weights:
+            model.load(weights)
+        detection_layers.append(model.model[-1])
+
+    # Create a new model with the detection layers from the previous models
+    if verbose:
+        print_bold(f'   Creating final YOLOv8 model with {len(detection_layers)} detection layers')
+        time.sleep(0.2) # to avoid colliding prints
+    model = YOLOv8DetectionAndFeatureExtractorModel(cfg, nc=nc_list[0], verbose=verbose, detection_layers=detection_layers)
+    if weights:
+        model.load(weights)
+
+    model.nc = nc_list[0]
+    model.names = class_names_list[0]  # attach class names to model
     args = get_cfg(overrides={'model': model_name_or_path})
     model.args = args  # attach hyperparameters to model
     return model

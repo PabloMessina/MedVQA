@@ -55,6 +55,7 @@ class TransformerTextDecoder(nn.Module):
         vocab_size,
         dropout_prob,
         apply_pos_encoding_to_input,
+        input_pos_encoding_mode,
     ):
         assert embed_size == hidden_size
         super().__init__()
@@ -68,38 +69,46 @@ class TransformerTextDecoder(nn.Module):
         self.register_buffer('start_idx', torch.tensor(start_idx))
         self.vocab_size = vocab_size
         self.apply_pos_encoding_to_input = apply_pos_encoding_to_input
+        self.input_pos_encoding_mode = input_pos_encoding_mode
         self.pos_encoder = PositionalEncoding(hidden_size, dropout_prob)
         self.decoder = nn.TransformerDecoder(
         nn.TransformerDecoderLayer(
             d_model=hidden_size, nhead=nhead, dim_feedforward=dim_feedforward
         ), num_layers=num_layers)
         self.W_vocab = nn.Linear(hidden_size, vocab_size)
+        if self.apply_pos_encoding_to_input:
+            assert input_pos_encoding_mode is not None
+            self.input_pos_encoder = PositionalEncoding(d_model=hidden_size, dropout=dropout_prob,
+                                                        mode=input_pos_encoding_mode)
 
     def generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
     
-    def teacher_forcing_decoding(self, input_memory, texts, device):
+    def teacher_forcing_decoding(self, input_memory, texts, device, return_input_memory=False):
         batch_size, max_text_length = texts.shape
         text_embeddings = self.pos_encoder(self.embedding_table(texts.permute(1,0)))
         assert text_embeddings.shape == (max_text_length, batch_size, self.embed_size)
         tgt_mask = self.generate_square_subsequent_mask(max_text_length).to(device)
-        if self.apply_pos_encoding_to_input:
-            input_memory = self.pos_encoder(input_memory)
         input_memory = input_memory.permute(1,0,2)
+        if self.apply_pos_encoding_to_input:
+            input_memory = self.input_pos_encoder(input_memory)
         decoded = self.decoder(text_embeddings, input_memory, tgt_mask=tgt_mask)
         vocab_logits = self.W_vocab(decoded)
         vocab_logits = vocab_logits.permute(1, 0, 2)
         assert vocab_logits.shape == (batch_size, max_text_length, self.vocab_size)
-        return vocab_logits
+        if return_input_memory:
+            return vocab_logits, input_memory.permute(1,0,2)
+        else:
+            return vocab_logits
 
-    def greedy_search_decoding(self, input_memory, max_text_length, device):
+    def greedy_search_decoding(self, input_memory, max_text_length, device, return_input_memory=False):
         # print('DEBUG: greedy_search_decoding')
         batch_size = input_memory.size(0)
-        if self.apply_pos_encoding_to_input:
-            input_memory = self.pos_encoder(input_memory)
         input_memory = input_memory.permute(1,0,2)
+        if self.apply_pos_encoding_to_input:
+            input_memory = self.input_pos_encoder(input_memory)
         decoded_tokens = self.start_idx.expand(batch_size).unsqueeze(0)
         output = []
 
@@ -118,17 +127,20 @@ class TransformerTextDecoder(nn.Module):
 
         output = torch.stack(output, 1)
         assert output.shape == (batch_size, max_text_length)
-        return output
+        if return_input_memory:
+            return output, input_memory.permute(1,0,2)
+        else:
+            return output
 
-    def forward(self, input_memory, device, texts=None, max_text_length=None, mode='train'):
+    def forward(self, input_memory, device, texts=None, max_text_length=None, mode='train', return_input_memory=False):
         if mode == 'train':
             assert texts is not None
-            return self.teacher_forcing_decoding(input_memory, texts, device)
+            return self.teacher_forcing_decoding(input_memory, texts, device, return_input_memory=return_input_memory)
         else:
             assert max_text_length is not None
-            return self.greedy_search_decoding(input_memory, max_text_length, device)
+            return self.greedy_search_decoding(input_memory, max_text_length, device, return_input_memory=return_input_memory)
         
     def get_name(self):
-        return (f'TransfTextDec({"posenc," if self.apply_pos_encoding_to_input else ""}'
+        return (f'TransfTextDec({f"posenc({self.input_pos_encoding_mode})," if self.apply_pos_encoding_to_input else ""}'
                 f'es={self.embed_size},hs={self.hidden_size},'
                 f'nl={self.num_layers},nh={self.nhead},dff={self.dim_feedforward})')

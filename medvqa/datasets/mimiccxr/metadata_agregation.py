@@ -15,6 +15,20 @@ from medvqa.utils.logging import chest_imagenome_label_array_to_string, chexpert
 import re
 w_regex = re.compile(r'\s')
 
+def _clean_intervals(intervals):
+    # merge intervals when there is overlap
+    intervals = sorted(intervals, key=lambda x: x[0])
+    merged_intervals = []
+    for i in range(len(intervals)):
+        if i == 0:
+            merged_intervals.append(intervals[i])
+        else:
+            if intervals[i][0] <= merged_intervals[-1][1]:
+                merged_intervals[-1] = (merged_intervals[-1][0], intervals[i][1])
+            else:
+                merged_intervals.append(intervals[i])
+    return merged_intervals
+
 class MIMICCXR_MetadataAgregator:
     def __init__(self, qa_adapted_reports_filename, chexpert_labels_filename,
                  chest_imagenome_label_names_filename, chest_imagenome_labels_filename):
@@ -80,18 +94,8 @@ class MIMICCXR_MetadataAgregator:
                         intervals.append((x[1], x[2]))
                     for x in chest_label2phrases[label]:
                         intervals.append((x[1], x[2]))
-                    # merge intervals when there is overlap
-                    intervals = sorted(intervals, key=lambda x: x[0])
-                    merged_intervals = []
-                    for i in range(len(intervals)):
-                        if i == 0:
-                            merged_intervals.append(intervals[i])
-                        else:
-                            if intervals[i][0] <= merged_intervals[-1][1]:
-                                merged_intervals[-1] = (merged_intervals[-1][0], intervals[i][1])
-                            else:
-                                merged_intervals.append(intervals[i])
-                    print(merged_intervals)
+                    intervals = _clean_intervals(intervals)
+                    print(intervals)
 
     def integrate_metadata(self, rid, save_path=None):
         output = {
@@ -128,30 +132,20 @@ class MIMICCXR_MetadataAgregator:
                         intervals.append(x)
                     for x in chest_label2phrases[label]:
                         intervals.append(x)
-                    # merge intervals when there is overlap
-                    intervals = sorted(intervals, key=lambda x: x[0])
-                    merged_intervals = []
-                    for i in range(len(intervals)):
-                        if i == 0:
-                            merged_intervals.append(intervals[i])
-                        else:
-                            if intervals[i][0] <= merged_intervals[-1][1]:
-                                merged_intervals[-1] = (merged_intervals[-1][0], intervals[i][1])
-                            else:
-                                merged_intervals.append(intervals[i])
-                    output['common_labels'][label] = merged_intervals
+                    intervals = _clean_intervals(intervals)
+                    output['common_labels'][label] = intervals
             # add chexpert labels
             for label in chexp_label2phrases:
                 if label not in common_labels:
-                    output['chexpert_labels'][label] = chexp_label2phrases[label]
+                    output['chexpert_labels'][label] = _clean_intervals(chexp_label2phrases[label])
             # add chest imagenome labels
             for label in chest_label2phrases:
                 if label not in common_labels:
-                    output['chest_imagenome_labels'][label] = chest_label2phrases[label]
+                    output['chest_imagenome_labels'][label] = _clean_intervals(chest_label2phrases[label])
         else:
             # add chexpert labels
             for label in chexp_label2phrases:
-                output['chexpert_labels'][label] = chexp_label2phrases[label]
+                output['chexpert_labels'][label] = _clean_intervals(chexp_label2phrases[label])
         if save_path is not None:
             with open(save_path, 'w') as f:
                 json.dump(output, f, indent=4)

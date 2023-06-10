@@ -10,7 +10,7 @@ def freeze_parameters(model, ignore_name_regex=None):
             continue
         param.requires_grad = False
 
-def load_model_state_dict(model, state_dict, ignore_size_mismatch=True):
+def load_model_state_dict(model, state_dict, ignore_size_mismatch=True, strict=False):
     if ignore_size_mismatch:
         model_state_dict = model.state_dict()
         to_delete = []
@@ -23,4 +23,4 @@ def load_model_state_dict(model, state_dict, ignore_size_mismatch=True):
                     to_delete.append(k)
         for k in to_delete:
             del state_dict[k]
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict, strict=strict)

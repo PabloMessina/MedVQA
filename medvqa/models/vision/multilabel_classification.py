@@ -7,6 +7,10 @@ class MLCVersion:
     V1 = 'v1'
     V2 = 'v2'
     V3 = 'v3'
+    
+    @staticmethod
+    def get_versions():
+        return [MLCVersion.DEFAULT, MLCVersion.V1, MLCVersion.V2, MLCVersion.V3]
 
 class MultilabelClassifier_v1(nn.Module):
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_bboxes, num_regions,

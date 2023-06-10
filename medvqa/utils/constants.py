@@ -70,7 +70,7 @@ CXR14_LABEL2SHORT = {
     'Pneumothorax': 'Ptho',
 }
 
-VINBIG_DISEASES = [
+VINBIG_LABELS = [
     'Aortic enlargement', 'Atelectasis', 'Calcification',
     'Cardiomegaly', 'Clavicle fracture', 'Consolidation', 'Edema',
     'Emphysema', 'Enlarged PA', 'ILD', 'Infiltration', 'Lung Opacity',
@@ -80,6 +80,32 @@ VINBIG_DISEASES = [
     'Lung tumor', 'Pneumonia', 'Tuberculosis', 'Other disease',
     'No finding',
 ]
+
+VINBIG_BBOX_NAMES = [
+    'Aortic enlargement',
+    'Atelectasis',
+    'Calcification',
+    'Cardiomegaly',
+    'Clavicle fracture',
+    'Consolidation',
+    'Edema',
+    'Emphysema',
+    'Enlarged PA',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Lung cavity',
+    'Lung cyst',
+    'Mediastinal shift',
+    'Nodule/Mass',
+    'Other lesion',
+    'Pleural effusion',
+    'Pleural thickening',
+    'Pneumothorax',
+    'Pulmonary fibrosis',
+    'Rib fracture',
+]
+assert all([l in VINBIG_LABELS for l in VINBIG_BBOX_NAMES])
 
 CHEXPERT_CXR14_SYNONYMS = [
     ('No Finding', 'No Finding'),
@@ -217,6 +243,14 @@ class MetricNames:
     QLABELS_MICROAVGF1 = 'qlabels_microavgf1'
     VINBIGMACROAVGF1 = 'vinbigmacroavgf1'
     VINBIGMICROAVGF1 = 'vinbigmicroavgf1'
+    VINBIGBBOXIOU = 'vinbig_bbox_iou'
+    VINBIGBBOXMEANF1 = 'vinbig_bbox_meanf1'
+    VINBIGLABELAUC = 'vinbig_label_auc'
+    VINBIGLABELAUC_MICRO = 'vinbig_label_auc_micro'
+    VINBIGLABELAUC_MACRO = 'vinbig_label_auc_macro'
+    VINBIGLABELPRCAUC = 'vinbig_label_prcauc'
+    VINBIGLABELPRCAUC_MICRO = 'vinbig_label_prcauc_micro'
+    VINBIGLABELPRCAUC_MACRO = 'vinbig_label_prcauc_macro'
     CXR14MACROAVGF1 = 'cxr14_macroavgf1'
     CXR14MICROAVGF1 = 'cxr14_microavgf1'
     PADCHEST_LABEL_MACROAVGF1 = 'padchest_label_macroavgf1'
@@ -244,7 +278,7 @@ class MetricNames:
     BACKGROUND_LOSS = 'background_loss'
     ORIENTATION_LOSS = 'orientation_loss'
     CHEXPERT_LOSS = 'chexpert_loss'
-    VINBIG_LOSS = 'vinbig_loss'
+    VINBIG_LABEL_LOSS = 'vinbig_label_loss'
     CXR14_LOSS = 'cxr14_loss'
     PADCHEST_LABEL_LOSS = 'padchest_label_loss'
     PADCHEST_LOCALIZATION_LOSS = 'padchest_loc_loss'
@@ -264,6 +298,7 @@ class MetricNames:
     YOLOV8_DFL_LOSS = 'yolov8_dfl_loss'
     REPORT_LOSS = 'report_loss'
     REPORT_LOSS_GT = 'report_loss_gt'
+    LOCAL_FEATURE_COORDS_LOSS = 'local_feature_coords_loss'
 
 METRIC2SHORT = {
     'loss': 'loss',
@@ -309,6 +344,14 @@ METRIC2SHORT = {
     'qlabels_microavgf1': 'qlmicf1',
     'vinbigmacroavgf1': 'vnbgmacf1',
     'vinbigmicroavgf1': 'vnbgmicf1',
+    'vinbig_bbox_iou': 'vnbgbbiou',
+    'vinbig_label_auc': 'vnbglauc',
+    'vinbig_label_auc_micro': 'vnbglaucmic',
+    'vinbig_label_auc_macro': 'vnbglaucmac',
+    'vinbig_label_prcauc': 'vnbgprcauc',
+    'vinbig_label_prcauc_micro': 'vnbgprcaucmic',
+    'vinbig_label_prcauc_macro': 'vnbgprcaucmac',
+    'vinbig_bbox_meanf1': 'vnbgbbmf1',
     'cxr14_macroavgf1': 'cxr14macf1',
     'cxr14_microavgf1': 'cxr14micf1',
     'padchest_label_macroavgf1': 'padchxlmacf1',
@@ -344,7 +387,7 @@ METRIC2SHORT = {
     'background_loss': 'bg_loss',
     'orientation_loss': 'orien_loss',
     'chexpert_loss': 'chx_loss',
-    'vinbig_loss': 'vnbg_loss',
+    'vinbig_label_loss': 'vnbgl_loss',
     'cxr14_loss': 'cxr14_loss',
     'qlabels_loss': 'ql_loss',
     'gender_loss': 'gloss',
@@ -353,6 +396,7 @@ METRIC2SHORT = {
     'yolov8_box_loss': 'y8box_loss',
     'yolov8_cls_loss': 'y8cls_loss',
     'yolov8_dfl_loss': 'y8dfl_loss',
+    'local_feature_coords_loss': 'lfcoords_loss',
 }
 
 IUXRAY_DATASET_ID = 0

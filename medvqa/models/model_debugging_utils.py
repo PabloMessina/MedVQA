@@ -1,79 +1,146 @@
 import os
 import numpy as np
+from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
+from medvqa.models.common import load_model_state_dict
+from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.logging import print_bold
 
-def visualize_chest_imagenome_yolov8_predictions(
-        model_name_or_path, dicom_id, image_size, conf_thres=0.25, iou_thres=0.45, figsize=(10, 10),
+def visualize_yolov8_predictions(
+        model_name_or_path, checkpoint_folder_path, num_classes, class_names, image_path,
+        detection_layer_indexes=None,
+        max_det=36, conf_thres=0.1, iou_thres=0.1, figsize=(10, 10),
+        dataset_name=DATASET_NAMES.MIMICCXR,
+        verbose=True,
     ):
+    
+    # Device
+    import torch
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     # Load model
-    from medvqa.models.vision.visual_modules import create_yolov8_model
-    from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, CHEST_IMAGENOME_BBOX_NAMES
-    class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
-    model = create_yolov8_model(
-        model_name_or_path=model_name_or_path,
-        nc=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-        class_names=class_names,
-    )
+    if detection_layer_indexes is None:
+        from medvqa.models.vision.visual_modules import create_yolov8_model
+        # from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, CHEST_IMAGENOME_BBOX_NAMES
+        # class_names = {i:x for i, x in enumerate(CHEST_IMAGENOME_BBOX_NAMES)}
+        model = create_yolov8_model(
+            model_name_or_path=model_name_or_path,
+            nc=num_classes,
+            class_names=class_names,
+            verbose=verbose,
+        )
+    else:
+        from medvqa.models.vision.visual_modules import create_yolov8_model_for_multiple_datasets
+        assert isinstance(detection_layer_indexes, list)
+        assert len(detection_layer_indexes) > 0
+        assert all([isinstance(x, int) for x in detection_layer_indexes])
+        assert isinstance(num_classes, list)
+        assert isinstance(class_names, list)
+        model = create_yolov8_model_for_multiple_datasets(
+            model_name_or_path=model_name_or_path,
+            nc_list=num_classes,
+            class_names_list=class_names,
+            verbose=verbose,
+        )
+
+    # Load pretrained weights from checkpoint
+    pretrained_checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+    print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
+    checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
+    model_weights_dict = checkpoint['model']
+    clean_model_weights_dict = {}
+    for k, v in model_weights_dict.items(): # HACK: Remove 'raw_image_encoder.' prefix from keys
+        if k.startswith('raw_image_encoder.'):
+            k = k.replace('raw_image_encoder.', '')
+            clean_model_weights_dict[k] = v
+    load_model_state_dict(model, clean_model_weights_dict, strict=True)
+    print('Checkpoint successfully loaded!')
+    
     # Load image
-    from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_mimiccxr_medium_image_path
-    imageId2PartPatientStudy = get_imageId2PartPatientStudy()    
-    part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
-    image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
-    print(f'dicom_id = {dicom_id}')
     print(f'image_path = {image_path}')
     from medvqa.datasets.image_processing import get_image_transform
-    transform = get_image_transform(
-        image_size=image_size,
-        use_bbox_aware_transform=True,
-    )
+    metadata = load_metadata(checkpoint_folder_path)
+    image_transform_kwargs = metadata['val_image_transform_kwargs']
+    print(f'image_transform_kwargs = {image_transform_kwargs}')
+    transform = get_image_transform(**image_transform_kwargs[dataset_name])
     image, image_size_before, image_size_after = transform(image_path, return_image_size=True)
     print(f'image.shape = {image.shape}')
     print(f'image_size_before = {image_size_before}')
     print(f'image_size_after = {image_size_after}')
+    
     # Run model in inference mode
-    import torch
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     model.eval()
     with torch.no_grad():
         image = image.to(device)
-        results = model(image.unsqueeze(0))
-        assert len(results) == 2
-        print(f'results[0].shape = {results[0].shape}')
-        assert len(results[1]) == 3
+        if detection_layer_indexes is None:
+            _, results = model.custom_forward(image.unsqueeze(0))
+            assert len(results) == 2
+            print(f'results[0].shape = {results[0].shape}')
+            assert len(results[1]) == 3
+        else:
+            _, results = model.custom_forward(image.unsqueeze(0), detection_layer_indexes=detection_layer_indexes)
+            assert len(results) == len(detection_layer_indexes)
+            assert len(results[0]) == 2
+            print(f'results[0][0].shape = {results[0][0].shape}')
+            assert len(results[0][1]) == 3
+    
     # Obtain predictions
     from ultralytics.yolo.utils.ops import non_max_suppression
     import numpy as np
-    predictions = results[0].detach().cpu()
-    predictions = non_max_suppression(predictions, conf_thres=conf_thres, iou_thres=iou_thres,
-                                      max_det=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
-    print(f'len(predictions) (after NMS) = {len(predictions)}')
-    predictions = predictions[0].numpy()
-    print(f'predictions.shape = {predictions.shape}')
-    pred_coords = predictions[:, :4]
-    pred_coords /= np.array([image_size_after[1], image_size_after[0], image_size_after[1], image_size_after[0]])
-    pred_classes = predictions[:, 5].astype(int)
-    print(f'pred_coords.shape = {pred_coords.shape}')
-    print(f'pred_classes.shape = {pred_classes.shape}')
+    if detection_layer_indexes is None:
+        predictions = results[0].detach().cpu()
+        predictions = non_max_suppression(predictions, conf_thres=conf_thres, iou_thres=iou_thres, max_det=max_det)
+        print(f'len(predictions) (after NMS) = {len(predictions)}')
+        predictions = predictions[0].numpy()
+        print(f'predictions.shape = {predictions.shape}')
+        pred_coords = predictions[:, :4]
+        pred_coords /= np.array([image_size_after[1], image_size_after[0], image_size_after[1], image_size_after[0]])
+        pred_classes = predictions[:, 5].astype(int)
+        print(f'pred_coords.shape = {pred_coords.shape}')
+        print(f'pred_classes.shape = {pred_classes.shape}')
+    else:
+        pred_coords_list = []
+        pred_classes_list = []
+        class_names_list = []
+        for i, idx in enumerate(detection_layer_indexes):
+            print(f'-------- detection_layer_index = {idx}')
+            predictions = results[i][0].detach().cpu()
+            predictions = non_max_suppression(predictions, conf_thres=conf_thres, iou_thres=iou_thres, max_det=max_det)
+            print(f'len(predictions) (after NMS) = {len(predictions)}')
+            predictions = predictions[0].numpy()
+            print(f'predictions.shape = {predictions.shape}')
+            pred_coords = predictions[:, :4]
+            pred_coords /= np.array([image_size_after[1], image_size_after[0], image_size_after[1], image_size_after[0]])
+            pred_classes = predictions[:, 5].astype(int)
+            print(f'pred_coords.shape = {pred_coords.shape}')
+            print(f'pred_classes.shape = {pred_classes.shape}')
+            pred_coords_list.append(pred_coords)
+            pred_classes_list.append(pred_classes)
+            class_names_list.append(class_names[idx])
+        pred_coords = np.concatenate(pred_coords_list, axis=0)
+        pred_classes = np.concatenate(pred_classes_list, axis=0)
+        class_names = [item for sublist in class_names_list for item in sublist]
+        print('--- after concatenation ---')
+        print(f'pred_coords.shape = {pred_coords.shape}')
+        print(f'pred_classes.shape = {pred_classes.shape}')
+        print(f'len(class_names) = {len(class_names)}')
+    
     # Visualize predictions
-    from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import _visualize_predicted_bounding_boxes__yolo    
-    _visualize_predicted_bounding_boxes__yolo(
-        dicom_id=dicom_id,
+    from medvqa.evaluation.plots import visualize_predicted_bounding_boxes__yolo
+    visualize_predicted_bounding_boxes__yolo(
+        image_path=image_path,
         pred_coords=pred_coords,
         pred_classes=pred_classes,
+        class_names=class_names,
         figsize=figsize,
         format='xyxy',
     )
+
     # Release GPU memory
     del model
     del image
     torch.cuda.empty_cache()
-    return {
-        'dicom_id': dicom_id,
-        'pred_coords': pred_coords,
-        'pred_classes': pred_classes,
-    }
 
 def get_gt_labels_for_dicom_id(dicom_id, use_chexpert=True, use_chest_imagenome=True,
                                chexpert_labels_filename=None, chest_imagenome_labels_filename=None,

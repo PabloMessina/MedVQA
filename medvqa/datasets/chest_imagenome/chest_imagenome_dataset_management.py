@@ -504,7 +504,7 @@ def get_labels_per_anatomy_and_anatomy_group(label_names_filename, for_training=
         # 1) Use indices instead of anatomy names
         # 2) Use only lists instead of dictionaries
         # 3) Have a consinstent order of the labels
-        anatomy_names = CHEST_IMAGENOME_BBOX_NAMES
+        anatomy_names = CHEST_IMAGENOME_BBOX_NAMES[:] # copy
         anatomy_names += sorted([x for x in anatomy_to_localized_labels if x not in anatomy_names])
         anatomy_to_localized_labels = [[i, sorted(anatomy_to_localized_labels[x])]\
                                        for i, x in enumerate(anatomy_names) if x in anatomy_to_localized_labels]

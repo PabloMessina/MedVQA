@@ -198,6 +198,7 @@ def get_vqa_collate_batch_fn(
         classify_tags=False, n_tags=None, classify_orientation=False, classify_gender=False,
         classify_chexpert=False, classify_questions=False, classify_chest_imagenome=False,
         predict_bboxes_chest_imagenome=False, pass_pred_bbox_coords_as_input=False, use_yolov8=False,
+        predict_bboxes_vinbig=False,
     ):
 
     if classify_tags:
@@ -339,16 +340,46 @@ def get_vqa_collate_batch_fn(
             return batch_dict
 
     elif dataset_id == VINBIG_DATASET_ID:
-        def collate_batch_fn(batch):
+        def collate_batch_fn(batch, training_mode):
             indexes = list(range(len(batch)))        
             batch_dict = dict()
             batch_dict['dataset_id'] = dataset_id
             batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])            
             batch_dict['l'] = torch.tensor([batch[i]['l'] for i in indexes])            
             if include_image:
-                batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+                if use_yolov8:
+                    batch_dict['img'] = torch.stack([batch[i]['img'] for i in indexes])
+                else:
+                    batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
             if include_visual_features:
                 batch_dict['vf'] = torch.tensor([batch[i]['vf'] for i in indexes]).float()
+            if predict_bboxes_vinbig:
+                assert use_yolov8
+                if training_mode:
+                    batch_dict['im_file'] = [batch[i]['im_file'] for i in indexes]
+                    batch_dict['ori_shape'] = [batch[i]['ori_shape'] for i in indexes]
+                    batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in indexes]
+                    bboxes_list, cls_list, batch_idx_list = [], [], []
+                    for i, idx in enumerate(indexes):
+                        bboxes = batch[idx]['bboxes']
+                        classes = batch[idx]['classes']
+                        for bbox, cls in zip(bboxes, classes):
+                            # convert bbox from xyxy to x_c, y_c, w, h
+                            bboxes_list.append(torch.tensor([
+                                (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2, bbox[2] - bbox[0], bbox[3] - bbox[1],
+                            ]))
+                            cls_list.append(cls)
+                            batch_idx_list.append(i)
+                    batch_dict['bboxes'] = torch.stack(bboxes_list)
+                    assert batch_dict['bboxes'].shape == (len(bboxes_list), 4)
+                    batch_dict['cls'] = torch.tensor(cls_list)
+                    batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
+                    assert batch_dict['cls'].shape == (len(cls_list), 1)
+                    batch_dict['batch_idx'] = torch.tensor(batch_idx_list)
+                else:
+                    batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in indexes]
+                    batch_dict['bboxes'] = [batch[i]['bboxes'] for i in indexes]
+                    batch_dict['classes'] = [batch[i]['classes'] for i in indexes]
             if not use_visual_module_only:
                 batch_dict['q'] = torch.tensor([batch[i]['q'] + one_hot_question_offset for i in indexes])
                 if include_answer:
@@ -685,7 +716,7 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
 
 def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visual_module_only=False,
         classify_gender=False, classify_chexpert=False, classify_chest_imagenome=False,
-        predict_bboxes_chest_imagenome=False, use_yolov8=False,
+        predict_bboxes_chest_imagenome=False, predict_local_feature_coords=False, use_yolov8=False,
     ):
     if dataset_id == MIMICCXR_DATASET_ID:
         def collate_batch_fn(batch, training_mode=True):
@@ -710,6 +741,8 @@ def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visua
                 batch_dict['chexpert'] = torch.tensor([x['chexpert'] for x in batch])
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([x['chest_imagenome'] for x in batch])
+            if predict_local_feature_coords:
+                batch_dict['local_feature_coords'] = torch.tensor([x['local_feature_coords'] for x in batch])
             if predict_bboxes_chest_imagenome:
                 if use_yolov8:
                     if training_mode:

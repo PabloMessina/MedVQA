@@ -56,7 +56,20 @@ def collect_chest_imagenome_multilabel_classification_results(dataset_name):
         for exp_name in dirs:
             exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
                                     if dataset_name in x and 'multilabel_classification_metrics' in x and\
-                                        ('chest-imagenome' in x or 'chest-imagenome' in x)]
+                                        ('chest-imagenome' in x or 'chest_imagenome' in x)]
+            for filename in exp_result_filenames:
+                results.append((kind, exp_name, filename))
+    return results
+
+def collect_chexpert_multilabel_classification_results(dataset_name):
+    vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
+    vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
+    results = []
+    for dirs, kind in zip([vqa_dirs, vm_dirs], ['vqa', 'visual_module']):
+        for exp_name in dirs:
+            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
+                                    if dataset_name in x and 'multilabel_classification_metrics' in x and\
+                                        ('chexp' in x)]
             for filename in exp_result_filenames:
                 results.append((kind, exp_name, filename))
     return results
@@ -503,6 +516,21 @@ def _append_method_columns__chest_imagenome_multilabel_classification(df, result
     _append_ensemble_cheating_column(df, results)
     _append_num_ensembled_models_column(df, metrics_paths)
 
+def _append_method_columns__chexpert_multilabel_classification(df, results, metrics_paths):
+    df['folder'] = [x[0] for x in results]
+    _append_experiment_timestamp_column(df, results)
+    _append_datasets_column(df, results)
+    _append_model_column(df, results)
+    _append_chest_imagenome_bbox_regressor_version_column(df, results)
+    _append_chest_imagenome_mlc_version_column(df, results)
+    _append_data_augmentation_column(df, results)
+    _append_decent_images_column(df, results)
+    _append_binary_loss_name_column(df, results)
+    _append_mimiccxr_balanced_sampling_mode_column(df, results)
+    _append_training_history_column(df, results)
+    _append_ensemble_cheating_column(df, results)
+    _append_num_ensembled_models_column(df, metrics_paths)
+
 def _append_method_columns__chest_imagenome_bbox(df, results):
     df['folder'] = [x[0] for x in results]
     _append_experiment_timestamp_column(df, results)
@@ -541,6 +569,13 @@ def get_chest_imagenome_multilabel_classification_metrics_dataframe(dataset_name
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = visual_module.get_chest_imagenome_multilabel_classification_metrics_dataframe(metrics_paths)
     _append_method_columns__chest_imagenome_multilabel_classification(df, results, metrics_paths)
+    return df
+
+def get_chexpert_multilabel_classification_metrics_dataframe(dataset_name):
+    results = collect_chexpert_multilabel_classification_results(dataset_name)
+    metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
+    df = visual_module.get_chexpert_multilabel_classification_metrics_dataframe(metrics_paths)
+    _append_method_columns__chexpert_multilabel_classification(df, results, metrics_paths)
     return df
 
 def get_chest_imagenome_bbox_metrics_dataframe(dataset_name):

@@ -58,6 +58,10 @@ CHEST_IMAGENOME_BBOX_NAMES = [
     'left cardiophrenic angle',
 ]
 
+# print('CHEST_IMAGENOME_BBOX_NAMES:', CHEST_IMAGENOME_BBOX_NAMES)
+# print('len(CHEST_IMAGENOME_BBOX_NAMES):', len(CHEST_IMAGENOME_BBOX_NAMES))
+# print('CHEST_IMAGENOME_NUM_BBOX_CLASSES:', CHEST_IMAGENOME_NUM_BBOX_CLASSES)
+
 CHEST_IMAGENOME_OTHER_REGIONS = [ # these do not come with bounding boxes
     'neck',
     'left chest wall',
@@ -335,4 +339,6 @@ CHEST_IMAGENOME_ATTRIBUTES_DICT = {
         'calcified',
         'lucency',
     ],
-}   
+}
+
+assert len(CHEST_IMAGENOME_BBOX_NAMES) == CHEST_IMAGENOME_NUM_BBOX_CLASSES

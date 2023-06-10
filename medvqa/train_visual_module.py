@@ -5,7 +5,7 @@ import torch
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-from medvqa.datasets.chest_imagenome import get_anaxnet_bbox_sorted_indices
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES, get_anaxnet_bbox_sorted_indices
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     get_chest_imagenome_train_average_bbox_coords,
     get_labels_per_anatomy_and_anatomy_group,
@@ -17,7 +17,7 @@ from medvqa.datasets.chexpert.chexpert_dataset_management import (
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.utils import get_merged_findings
-from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer, VinBigTrainingMode
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.common import load_model_state_dict
@@ -46,20 +46,20 @@ from medvqa.metrics import (
     attach_dataset_aware_chest_imagenome_bbox_iou,
     attach_dataset_aware_chest_imagenome_labels_auc,
     attach_dataset_aware_chest_imagenome_bbox_meanf1,
-    attach_dataset_aware_chest_imagenome_labels_prcauc,    
-    attach_dataset_aware_vinbig_labels_macroavgf1,
-    attach_dataset_aware_vinbig_labels_microavgf1,
+    attach_dataset_aware_chest_imagenome_labels_prcauc,
+    attach_dataset_aware_chexpert_labels_auc,
+    attach_dataset_aware_chexpert_labels_prcauc,
+    attach_dataset_aware_vinbig_bbox_iou,
+    attach_dataset_aware_vinbig_bbox_meanf1,
     attach_dataset_aware_cxr14_labels_macroavgf1,
     attach_dataset_aware_cxr14_labels_microavgf1,
     attach_dataset_aware_padchest_labels_macroavgf1,
     attach_dataset_aware_padchest_labels_microavgf1,
     attach_dataset_aware_padchest_localization_macroavgf1,
     attach_dataset_aware_padchest_localization_microavgf1,
+    attach_dataset_aware_vinbig_labels_auc,
+    attach_dataset_aware_vinbig_labels_prcauc,
     attach_medical_tags_f1score,
-    attach_dataset_aware_chexpert_labels_accuracy,
-    attach_dataset_aware_chexpert_labels_macroavgf1,
-    attach_dataset_aware_chexpert_labels_microavgf1,
-    attach_dataset_aware_chexpert_labels_roc_auc,
     attach_dataset_aware_orientation_accuracy,
     attach_dataset_aware_question_labels_macroavgf1,
     attach_dataset_aware_question_labels_microavgf1,
@@ -80,6 +80,7 @@ from medvqa.utils.handlers import (
     get_log_epoch_started_handler,
     get_lr_sch_handler,
     get_checkpoint_handler,
+    get_log_checkpoint_saved_handler,
 )
 from medvqa.utils.files import (
     get_checkpoint_folder_path,
@@ -97,7 +98,7 @@ from medvqa.metrics.utils import (
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_VisualModuleTrainer
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_red
+from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_red
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -118,10 +119,8 @@ def parse_args(args=None):
     parser.add_argument('--image-local-feat-size', type=int, default=1024,
                         help='Size of local feature vectors from the CNN. They must match the actual vectors output by the CNN')
     parser.add_argument('--image-encoder-pretrained-weights-path', type=str, default=None)
-    parser.add_argument('--freeze-image-encoder', dest='freeze_image_encoder', action='store_true')
-    parser.set_defaults(freeze_image_encoder=False)
-    parser.add_argument('--imagenet-pretrained', dest='imagenet_pretrained', action='store_true')
-    parser.set_defaults(imagenet_pretrained=False)
+    parser.add_argument('--freeze-image-encoder', action='store_true', default=False)
+    parser.add_argument('--imagenet-pretrained', action='store_true', default=False)
     parser.add_argument('--visual-features-mlp-in-dim', type=int, default=None)
     parser.add_argument('--visual-features-mlp-out-dim', type=int, default=None)
     parser.add_argument('--visual-features-mlp-hidden-dims', nargs='+', type=int, default=None)
@@ -131,12 +130,13 @@ def parse_args(args=None):
     parser.add_argument('--vinbig-precomputed-visual-features-path', type=str, default=None)
     parser.add_argument('--clip-version', type=str, default=None)
     parser.add_argument('--huggingface-model-name', type=str, default=None)
-    parser.add_argument('--chexpert-mlc-version', type=str, default=None)
+    parser.add_argument('--chexpert-mlc-version', type=str, default=None, choices=MLCVersion.get_versions())
     parser.add_argument('--chexpert-mlc-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-hidden-size', type=int, default=128)
     parser.add_argument('--chest-imagenome-bbox-regressor-version', type=str, default=None)
     parser.add_argument('--chest-imagenome-mlc-version', type=str, default=None)
     parser.add_argument('--chest-imagenome-mlc-hidden-size', type=int, default=128)
+    parser.add_argument('--vinbig-mlc-hidden-size', type=int, default=128)
     parser.add_argument('--torchxrayvision-weights-name', type=str, default=None)
     parser.add_argument('--detectron2-model-yaml', type=str, default=None)
     parser.add_argument('--num-regions', type=int, default=None)
@@ -145,6 +145,7 @@ def parse_args(args=None):
     parser.add_argument('--roi-align-output-size', type=int, default=None)
     parser.add_argument('--yolov8-model-name-or-path', type=str, default=None)
     parser.add_argument('--yolov8-model-alias', type=str, default=None)
+    parser.add_argument('--yolov8-use-one-detector-per-dataset', action='store_true', default=False)
     
     parser.add_argument('--optimizer-name', type=str, default='adam')
     
@@ -174,6 +175,7 @@ def parse_args(args=None):
 
     parser.add_argument('--mimiccxr-view-mode', type=str, default='any_single')    
     parser.add_argument('--mimiccxr-balanced-sampling-mode', type=str, default=None)
+    parser.add_argument('--mimiccxr-balanced-batch-size', type=int, default=None)
     
     parser.add_argument('--chest-imagenome-labels-filename', type=str, default=None)
     parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
@@ -196,7 +198,7 @@ def parse_args(args=None):
     
     # VinBigData arguments
     parser.add_argument('--use-vinbig', dest='train_vinbig', action='store_true', default=False)
-    parser.add_argument('--vinbig-training-data-mode', type=str, default='all')
+    parser.add_argument('--vinbig-training-data-mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_all())
     parser.add_argument('--vinbig-use-validation', action='store_true', default=False)
 
     # PadChest arguments
@@ -236,7 +238,8 @@ def parse_args(args=None):
     parser.add_argument('--chest-imagenome-bbox-loss-weight', type=float, default=1.0)
     parser.add_argument('--pass-pred-bbox-coords-as-input', action='store_true', default=False)
     parser.add_argument('--use-gt-bboxes-as-predictions', action='store_true', default=False)
-
+    # vinbig labels
+    parser.add_argument('--predict-bboxes-vinbig', action='store_true', default=False)
     # question classification
     parser.add_argument('--classify-questions', action='store_true', default=False)
     parser.add_argument('--n-mined-questions', type=int, default=None)
@@ -248,15 +251,12 @@ def parse_args(args=None):
     return parser.parse_args(args=args)
 
 _METRIC_WEIGHTS = {
-    MetricNames.EXACTMATCH_QUESTION: 1,
-    MetricNames.EXACTMATCH_ANSWER: 2,
-    MetricNames.CIDER_D: 0.1,
-    MetricNames.WMEDCOMP: 1,
-    MetricNames.BLEU: 1,
     MetricNames.MEDTAGF1: 1,
     MetricNames.ORIENACC: 1,
     MetricNames.CHXLABELMICROAVGF1: 1,
     MetricNames.CHXLABELMACROAVGF1: 1,
+    MetricNames.CHXLABEL_AUC: 1,
+    MetricNames.CHXLABEL_PRCAUC: 1,
     MetricNames.CXR14MACROAVGF1: 0.5,
     MetricNames.CXR14MICROAVGF1: 0.5,
     MetricNames.QLABELS_MICROAVGF1: 0.5,
@@ -273,17 +273,20 @@ _METRIC_WEIGHTS = {
     MetricNames.CHESTIMAGENOMELABELAUC: 1,
     MetricNames.CHESTIMAGENOMELABELPRCAUC: 1,
     MetricNames.CHESTIMAGENOMEBBOXMEANF1: 1,
+    MetricNames.CHESTIMAGENOMEBBOXIOU: 1,
+    MetricNames.VINBIGLABELAUC: 1,
+    MetricNames.VINBIGLABELPRCAUC: 1,
+    MetricNames.VINBIGBBOXIOU: 1,
+    MetricNames.VINBIGBBOXMEANF1: 1,
 }
 
 def _metric_getter(metrics_dict, key):
-    if key == MetricNames.BLEU:
-        scores = metrics_dict[key]
-        assert len(scores) == 4
-        return sum(scores) / len(scores)
-    if key == MetricNames.CHESTIMAGENOMELABELAUC:
-        scores = metrics_dict[key]
-        return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
-    if key == MetricNames.CHESTIMAGENOMELABELPRCAUC:
+    if key == MetricNames.CHESTIMAGENOMELABELAUC or\
+        key == MetricNames.CHESTIMAGENOMELABELPRCAUC or\
+        key == MetricNames.CHXLABEL_AUC or\
+        key == MetricNames.CHXLABEL_PRCAUC or\
+        key == MetricNames.VINBIGLABELAUC or\
+        key == MetricNames.VINBIGLABELPRCAUC:
         scores = metrics_dict[key]
         return 0.5 * (scores['macro_avg'] + scores['micro_avg'])
     return metrics_dict[key]
@@ -326,8 +329,9 @@ def train_model(
     train_vinbig = training_kwargs['train_vinbig']
     train_padchest = training_kwargs['train_padchest']  
     use_merged_findings = trainer_engine_kwargs.get('use_merged_findings', False)
-    use_detectron2 = mimiccxr_trainer_kwargs.get('use_detectron2', False)
-    use_yolov8 = mimiccxr_trainer_kwargs.get('use_yolov8', False)
+    use_detectron2 = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_detectron2', False)
+    use_yolov8 = (mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_yolov8', False)) or\
+                 (vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_yolov8', False))
     
     visual_input_mode = model_kwargs['visual_input_mode']
     include_image = does_include_image(visual_input_mode)
@@ -345,6 +349,8 @@ def train_model(
     # auxiliary task: chest imagenome labels
     classify_chest_imagenome = auxiliary_tasks_kwargs['classify_chest_imagenome']
     predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
+    # auxiliary task: vinbig labels
+    predict_bboxes_vinbig = auxiliary_tasks_kwargs['predict_bboxes_vinbig']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
     n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
@@ -566,6 +572,7 @@ def train_model(
     _orientation_datasets = _iu_mim_datasets + [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, PADCHEST_DATASET_ID]
     _chexpert_labels_datasets = _iu_mim_datasets + [CHEXPERT_DATASET_ID]
     _gender_datasets = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID, PADCHEST_DATASET_ID, MIMICCXR_DATASET_ID]
+    _yolov8_datasets = [MIMICCXR_DATASET_ID, VINBIG_DATASET_ID]
 
     if use_merged_findings:
         _findings_remapper = trainer_engine_kwargs['findings_remapper']
@@ -611,35 +618,24 @@ def train_model(
         metrics_to_print.append(MetricNames.QLABELS_LOSS)
     
     if classify_chexpert:
-        attach_dataset_aware_chexpert_labels_accuracy(trainer_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_accuracy(validator_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_macroavgf1(trainer_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_macroavgf1(validator_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_microavgf1(trainer_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_microavgf1(validator_engine, _chexpert_labels_datasets, _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_roc_auc(trainer_engine, _chexpert_labels_datasets, 'cpu', _chexpert_class_indices)
-        attach_dataset_aware_chexpert_labels_roc_auc(validator_engine, _chexpert_labels_datasets, 'cpu', _chexpert_class_indices)
+        attach_dataset_aware_chexpert_labels_auc(validator_engine, _chexpert_labels_datasets, 'cpu')
+        attach_dataset_aware_chexpert_labels_prcauc(trainer_engine, _chexpert_labels_datasets, 'cpu')
+        attach_dataset_aware_chexpert_labels_prcauc(validator_engine, _chexpert_labels_datasets, 'cpu')        
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEXPERT_LOSS, _chexpert_labels_datasets)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABELMICROAVGF1)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABELMACROAVGF1)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABEL_AUC, train=False)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHXLABEL_PRCAUC)
         metrics_to_print.append(MetricNames.CHEXPERT_LOSS)
-        metrics_to_print.append(MetricNames.CHXLABELACC)
-        metrics_to_print.append(MetricNames.CHXLABEL_ROCAUC)
 
     if classify_chest_imagenome:
-        attach_dataset_aware_chest_imagenome_labels_auc(trainer_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_chest_imagenome_labels_auc(validator_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_chest_imagenome_labels_prcauc(trainer_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_chest_imagenome_labels_prcauc(validator_engine, _mim_datasets, 'cpu')
         attach_dataset_aware_loss(trainer_engine, MetricNames.CHEST_IMAGENOME_LABEL_LOSS, _mim_datasets)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC)        
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELAUC, train=False)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMELABELPRCAUC)
         metrics_to_print.append(MetricNames.CHEST_IMAGENOME_LABEL_LOSS)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMACROAVGF1)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELMICROAVGF1)
 
     if predict_bboxes_chest_imagenome and not use_detectron2 and not use_yolov8:
         attach_dataset_aware_chest_imagenome_bbox_mae(trainer_engine, _mim_datasets)
@@ -656,18 +652,22 @@ def train_model(
         metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
     
     if use_yolov8:
-        assert predict_bboxes_chest_imagenome
-        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _mim_datasets)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _mim_datasets)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _mim_datasets)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _mim_datasets)
-        attach_dataset_aware_chest_imagenome_bbox_mae(validator_engine, _mim_datasets, use_yolov8=True)
-        attach_dataset_aware_chest_imagenome_bbox_iou(validator_engine, _mim_datasets, use_yolov8=True)
-        attach_dataset_aware_chest_imagenome_bbox_meanf1(validator_engine, _mim_datasets, use_yolov8=True)
+        assert predict_bboxes_chest_imagenome or predict_bboxes_vinbig
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _yolov8_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _yolov8_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _yolov8_datasets)
+        attach_dataset_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _yolov8_datasets)
+        if predict_bboxes_chest_imagenome:
+            attach_dataset_aware_chest_imagenome_bbox_iou(validator_engine, _mim_datasets, use_yolov8=True)
+        if predict_bboxes_vinbig:
+            attach_dataset_aware_vinbig_bbox_iou(validator_engine, [VINBIG_DATASET_ID])
+            attach_dataset_aware_vinbig_bbox_meanf1(validator_engine, [VINBIG_DATASET_ID])
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXMEANF1, train=False)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
-        metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXMAE)
+        if predict_bboxes_chest_imagenome:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.CHESTIMAGENOMEBBOXIOU, train=False)
+        if predict_bboxes_vinbig:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGBBOXIOU, train=False)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGBBOXMEANF1, train=False)
         metrics_to_print.append(MetricNames.YOLOV8_LOSS)
         metrics_to_print.append(MetricNames.YOLOV8_BOX_LOSS)
         metrics_to_print.append(MetricNames.YOLOV8_CLS_LOSS)
@@ -712,17 +712,16 @@ def train_model(
         metrics_to_print.append(MetricNames.CXR14_LOSS)
 
     if train_vinbig:
-        attach_dataset_aware_vinbig_labels_macroavgf1(trainer_engine, [VINBIG_DATASET_ID], _vinbig_class_indices)
-        attach_dataset_aware_vinbig_labels_microavgf1(trainer_engine, [VINBIG_DATASET_ID], _vinbig_class_indices)
-        attach_dataset_aware_loss(trainer_engine, MetricNames.VINBIG_LOSS, [VINBIG_DATASET_ID])
         in_val = vinbig_trainer.use_validation_set
+        attach_dataset_aware_vinbig_labels_prcauc(trainer_engine, [VINBIG_DATASET_ID], 'cpu')
+        attach_dataset_aware_loss(trainer_engine, MetricNames.VINBIG_LABEL_LOSS, [VINBIG_DATASET_ID])
         if in_val:
-            attach_dataset_aware_vinbig_labels_macroavgf1(validator_engine, [VINBIG_DATASET_ID], _vinbig_class_indices)
-            attach_dataset_aware_vinbig_labels_microavgf1(validator_engine, [VINBIG_DATASET_ID], _vinbig_class_indices)
+            attach_dataset_aware_vinbig_labels_auc(validator_engine, [VINBIG_DATASET_ID], 'cpu')
+            attach_dataset_aware_vinbig_labels_prcauc(validator_engine, [VINBIG_DATASET_ID], 'cpu')
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGMICROAVGF1, val=in_val)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGMACROAVGF1, val=in_val)
-        metrics_to_print.append(MetricNames.VINBIG_LOSS)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGLABELAUC, train=False, val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, MetricNames.VINBIGLABELPRCAUC, val=in_val)
+        metrics_to_print.append(MetricNames.VINBIG_LABEL_LOSS)
     
     if train_padchest:        
         attach_dataset_aware_padchest_labels_macroavgf1(trainer_engine, [PADCHEST_DATASET_ID])
@@ -818,7 +817,8 @@ def train_model(
                                                    metrics_to_print=metrics_to_print,
                                                    log_to_disk=save,
                                                    checkpoint_folder=checkpoint_folder_path)
-    log_iteration_handler = get_log_iteration_handler()    
+    log_iteration_handler = get_log_iteration_handler()
+    log_checkpoint_saved_handler = get_log_checkpoint_saved_handler(checkpoint_folder_path)
     
     # Attach handlers
     trainer_engine.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
@@ -834,6 +834,7 @@ def train_model(
         validator_engine.add_event_handler(Events.EPOCH_COMPLETED, lr_sch_handler)
     if save: # only if we want to save checkpoints to disk
         validator_engine.add_event_handler(Events.EPOCH_COMPLETED, checkpoint_handler)
+        validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_checkpoint_saved_handler)
 
     # Start training
     count_print('Running trainer engine ...')
@@ -868,6 +869,8 @@ def train_from_scratch(
     roi_align_output_size,
     yolov8_model_name_or_path,
     yolov8_model_alias,
+    yolov8_use_one_detector_per_dataset,
+    vinbig_mlc_hidden_size,
     # Optimizer args
     optimizer_name,
     lr,
@@ -904,6 +907,7 @@ def train_from_scratch(
     img_aug_mode,
     horizontal_flip_prob,
     mimiccxr_balanced_sampling_mode,
+    mimiccxr_balanced_batch_size,
     # Fixed traning args
     train_mimiccxr,
     train_iuxray,
@@ -946,6 +950,7 @@ def train_from_scratch(
     clamp_bboxes_chest_imagenome,
     chest_imagenome_bbox_loss_weight,
     use_anaxnet_bbox_subset,
+    predict_bboxes_vinbig,
     merge_findings,
     # GPU
     device,
@@ -970,9 +975,12 @@ def train_from_scratch(
         RawImageEncoding.RESNET__TORCHXRAYVISION,
         RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
     )
-    use_bbox_aware_transform = predict_bboxes_chest_imagenome or pass_pred_bbox_coords_as_input
+    use_bbox_aware_transform = predict_bboxes_chest_imagenome or pass_pred_bbox_coords_as_input or predict_bboxes_vinbig
     use_detectron2 = raw_image_encoding == RawImageEncoding.DETECTRON2
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
+
+    if use_yolov8:
+        assert predict_bboxes_vinbig or predict_bboxes_chest_imagenome
     
     if use_clip or use_huggingface_vitmodel:
         if use_clip: assert clip_version is not None
@@ -1015,6 +1023,7 @@ def train_from_scratch(
         roi_align_output_size=roi_align_output_size,
         yolov8_model_name_or_path=yolov8_model_name_or_path,
         yolov8_model_alias=yolov8_model_alias,
+        yolov8_use_one_detector_per_dataset=yolov8_use_one_detector_per_dataset,
         # Aux tasks
         n_medical_tags=n_medical_tags,
         classify_orientation=classify_orientation,
@@ -1036,6 +1045,8 @@ def train_from_scratch(
         use_cxr14=train_cxr14,
         use_vinbig=train_vinbig,
         use_padchest=train_padchest,
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
+        vinbig_mlc_hidden_size=vinbig_mlc_hidden_size,
         merge_findings=merge_findings,
         n_findings=n_findings,
     )
@@ -1092,22 +1103,28 @@ def train_from_scratch(
     # Image transforms
     train_image_transform_kwargs = {}
     val_image_transform_kwargs = {}
+    _kwargs = dict(
+        image_size=image_size,
+        augmentation_mode=img_aug_mode,
+        use_clip_transform=use_clip,
+        clip_version=clip_version,
+        use_huggingface_vitmodel_transform=use_huggingface_vitmodel,
+        huggingface_vitmodel_name=huggingface_model_name,
+        use_torchxrayvision_transform=use_torchxrayvision_transform,
+        use_bbox_aware_transform=use_bbox_aware_transform,
+        horizontal_flip_prob=horizontal_flip_prob,
+        use_detectron2_transform=use_detectron2,
+        for_yolov8=use_yolov8,
+    )
     if train_mimiccxr:
-        train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = dict(
-            image_size=image_size,
-            augmentation_mode=img_aug_mode,
-            use_clip_transform=use_clip,
-            clip_version=clip_version,
-            use_huggingface_vitmodel_transform=use_huggingface_vitmodel,
-            huggingface_vitmodel_name=huggingface_model_name,
-            use_torchxrayvision_transform=use_torchxrayvision_transform,
-            use_bbox_aware_transform=use_bbox_aware_transform,
-            horizontal_flip_prob=horizontal_flip_prob,
-            use_detectron2_transform=use_detectron2,
-            for_yolov8=use_yolov8,
-        )
+        train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = _kwargs.copy()
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]['augmentation_mode'] = None # no augmentation for validation
+    if train_vinbig:
+        train_image_transform_kwargs[DATASET_NAMES.VINBIG] = _kwargs.copy()
+        train_image_transform_kwargs[DATASET_NAMES.VINBIG]['for_vinbig'] = True
+        val_image_transform_kwargs[DATASET_NAMES.VINBIG] = train_image_transform_kwargs[DATASET_NAMES.VINBIG].copy()
+        val_image_transform_kwargs[DATASET_NAMES.VINBIG]['augmentation_mode'] = None # no augmentation for validation
 
     include_image = does_include_image(visual_input_mode)
     include_visual_features = does_include_visual_features(visual_input_mode)
@@ -1128,6 +1145,7 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
         pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
         use_yolov8=use_yolov8,
     )
@@ -1181,6 +1199,7 @@ def train_from_scratch(
             data_augmentation_enabled=img_aug_mode is not None,
             use_detectron2=use_detectron2,
             balanced_sampling_mode=mimiccxr_balanced_sampling_mode,
+            balanced_batch_size=mimiccxr_balanced_batch_size,
             pass_pred_bbox_coords_to_model=pass_pred_bbox_coords_as_input,
             use_gt_bboxes_as_pred=use_gt_bboxes_as_predictions,
             use_yolov8=use_yolov8,
@@ -1215,36 +1234,53 @@ def train_from_scratch(
     else:
         iuxray_trainer_kwargs = None
 
-    chexpert_trainer_kwargs = dict(
-        include_image = include_image,
-        use_precomputed_visual_features = include_visual_features,
-        precomputed_visual_features_path = chexpert_precomputed_visual_features_path,
-    )
-    if merge_findings:
-        chexpert_trainer_kwargs.update(_merged_findings_kwargs)
+    if train_chexpert:
+        chexpert_trainer_kwargs = dict(
+            include_image = include_image,
+            use_precomputed_visual_features = include_visual_features,
+            precomputed_visual_features_path = chexpert_precomputed_visual_features_path,
+        )
+        if merge_findings:
+            chexpert_trainer_kwargs.update(_merged_findings_kwargs)
+    else:
+        chexpert_trainer_kwargs = None
 
-    cxr14_trainer_kwargs = {}
-    if merge_findings:
-        cxr14_trainer_kwargs.update(_merged_findings_kwargs)
+    if train_cxr14:
+        cxr14_trainer_kwargs = {}
+        if merge_findings:
+            cxr14_trainer_kwargs.update(_merged_findings_kwargs)
+    else:
+        cxr14_trainer_kwargs = None
 
-    vinbig_trainer_kwargs = dict(
-        include_image=include_image,
-        use_precomputed_visual_features=include_visual_features,
-        precomputed_visual_features_path=vinbig_precomputed_visual_features_path,
-        training_data_mode=vinbig_training_data_mode,
-        use_validation=vinbig_use_validation,
-    )
-    if merge_findings:
-        vinbig_trainer_kwargs.update(_merged_findings_kwargs)
+    if train_vinbig:
+        vinbig_class_id_offset = 0
+        if predict_bboxes_chest_imagenome and not yolov8_use_one_detector_per_dataset:
+            vinbig_class_id_offset += CHEST_IMAGENOME_NUM_BBOX_CLASSES
+        print_magenta(f'vinbig_class_id_offset: {vinbig_class_id_offset}', bold=True)
+        vinbig_trainer_kwargs = dict(
+            training_data_mode=vinbig_training_data_mode,
+            use_validation_set=vinbig_use_validation,
+            data_augmentation_enabled=img_aug_mode is not None,
+            use_bounding_boxes=predict_bboxes_vinbig,
+            use_yolov8=use_yolov8,
+            class_id_offset=vinbig_class_id_offset,
+        )
+        if merge_findings:
+            vinbig_trainer_kwargs.update(_merged_findings_kwargs)
+    else:
+        vinbig_trainer_kwargs = None
 
-    padchest_trainer_kwargs = dict(
-        include_image=include_image,
-        train_study_ids_path=padchest_train_study_ids_path,
-        val_study_ids_path=padchest_val_study_ids_path,
-        test_study_ids_path=padchest_test_study_ids_path,
-        training_data_mode=padchest_training_data_mode,
-        use_validation_set=padchest_use_validation,
-    )
+    if train_padchest:
+        padchest_trainer_kwargs = dict(
+            include_image=include_image,
+            train_study_ids_path=padchest_train_study_ids_path,
+            val_study_ids_path=padchest_val_study_ids_path,
+            test_study_ids_path=padchest_test_study_ids_path,
+            training_data_mode=padchest_training_data_mode,
+            use_validation_set=padchest_use_validation,
+        )
+    else:
+        padchest_trainer_kwargs = None
 
     trainer_engine_kwargs = dict(
         classify_tags=classify_tags,
@@ -1254,6 +1290,7 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
         pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
         binary_loss_name=binary_loss_name,
         focal_loss_weight=focal_loss_weight,
@@ -1270,6 +1307,7 @@ def train_from_scratch(
         iters_to_accumulate=iters_to_accumulate,
         chest_imagenome_bbox_loss_weight=chest_imagenome_bbox_loss_weight,
         using_yolov8=use_yolov8,
+        yolov8_use_multiple_detection_layers=yolov8_use_one_detector_per_dataset,
     )
     if use_detectron2:
         trainer_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]
@@ -1284,6 +1322,7 @@ def train_from_scratch(
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
         pass_pred_bbox_coords_as_input=pass_pred_bbox_coords_as_input,
         include_image=include_image,
         include_visual_features=include_visual_features,        
@@ -1292,6 +1331,7 @@ def train_from_scratch(
         use_padchest_dataset=train_padchest,
         use_merged_findings=merge_findings,
         using_yolov8=use_yolov8,
+        yolov8_use_multiple_detection_layers=yolov8_use_one_detector_per_dataset,
     )
     if use_detectron2:
         validator_engine_kwargs['detectron2_includes_rpn'] = DETECTRON2_HAS_RPN[detectron2_model_yaml]
@@ -1329,6 +1369,8 @@ def train_from_scratch(
         # chest imagenome labels
         classify_chest_imagenome=classify_chest_imagenome,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+        # vinbig labels
+        predict_bboxes_vinbig=predict_bboxes_vinbig,
     )
 
     return train_model(
