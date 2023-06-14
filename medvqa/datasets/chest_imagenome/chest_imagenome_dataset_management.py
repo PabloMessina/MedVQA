@@ -37,12 +37,12 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
-from medvqa.utils.files import get_cached_pickle_file, load_json_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_json, load_pickle, save_pickle
 from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.utils.logging import print_blue, print_red
 
 def _load_scene_graph(scene_graph_path):
-    return load_json_file(scene_graph_path)
+    return load_json(scene_graph_path)
 
 def load_scene_graph(dicom_id):
     scene_graph_path = os.path.join(CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR, f'{dicom_id}_SceneGraph.json')
@@ -95,7 +95,7 @@ def get_dicomId2gender(num_workers=4):
         return dicomId2gender
     scene_graphs = load_scene_graphs_in_parallel(num_workers=num_workers)
     dicomId2gender = { x['image_id'] : x['gender'] for x in scene_graphs }
-    save_to_pickle(dicomId2gender, cache_path)
+    save_pickle(dicomId2gender, cache_path)
     return dicomId2gender
 
 def _load_pickle_from_cache_dir(filename):
@@ -168,7 +168,7 @@ def load_chest_imagenome_horizontally_flipped_silver_bboxes():
         }
 
     print('  Saving horizontally flipped bboxes...')
-    save_to_pickle(flipped_bboxes, CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH)
+    save_pickle(flipped_bboxes, CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH)
     print('  Done.')
     return flipped_bboxes
 
@@ -207,7 +207,7 @@ def load_nongold_dicom_ids():
     dicom_ids_set = set(load_chest_imagenome_silver_bboxes().keys())
     gold_ids_set = set(load_gold_standard_related_dicom_ids())
     dicom_ids = list(dicom_ids_set - gold_ids_set)
-    save_to_pickle(dicom_ids, cache_path)
+    save_pickle(dicom_ids, cache_path)
     return dicom_ids
 
 def load_chest_imagenome_silver_bboxes_as_numpy_array(dicom_ids_list, clamp=False, flipped=False, use_anaxnet_bbox_subset=False,
@@ -253,7 +253,7 @@ def load_chest_imagenome_dicom_ids(decent_images_only=False, avg_coef=0.4, std_c
         unfiltered_average = get_chest_imagenome_average_bbox_coords()
         dicom_ids = [did for did in dicom_ids if determine_if_image_is_decent(
             did, unfiltered_average, avg_coef=avg_coef, std_coef=std_coef)]
-    save_to_pickle(dicom_ids, cache_path)
+    save_pickle(dicom_ids, cache_path)
     return dicom_ids
 
 def load_chest_imagenome_gold_bboxes():
@@ -290,7 +290,7 @@ def load_chest_imagenome_gold_bboxes():
         bboxes['coords'][idx*4+2] = x2 / width
         bboxes['coords'][idx*4+3] = y2 / height
         bboxes['presence'][idx] = 1
-    save_to_pickle(imageId2bboxes, cache_path)
+    save_pickle(imageId2bboxes, cache_path)
     return imageId2bboxes
 
 def get_chest_imagenome_gold_bbox_names():
@@ -305,7 +305,7 @@ def get_chest_imagenome_gold_bbox_names():
                 bbox_names.add(CHEST_IMAGENOME_BBOX_NAMES[i])
     bbox_names = list(bbox_names)
     bbox_names.sort()
-    save_to_pickle(bbox_names, cache_path)    
+    save_pickle(bbox_names, cache_path)    
     return bbox_names
 
 def get_chest_imagenome_train_average_bbox_coords(clamp_bbox_coords=True, use_decent_images_only=False, avg_coef=0.4, std_coef=0.5):
@@ -353,7 +353,7 @@ def get_chest_imagenome_train_average_bbox_coords(clamp_bbox_coords=True, use_de
     if use_decent_images_only:
         print(f'Skipped {skipped} images')
     # Save the average bbox coords
-    save_to_pickle(avg_bbox_coords, output_path)
+    save_pickle(avg_bbox_coords, output_path)
     print(f'Saved {output_path}')
     # Return the average bbox coords
     return avg_bbox_coords
@@ -387,7 +387,7 @@ def get_chest_imagenome_average_bbox_coords(clamp_bbox_coords=True):
                         bbox_counts[s:e] += 1
     avg_bbox_coords /= bbox_counts
     # Save the average bbox coords
-    save_to_pickle(avg_bbox_coords, output_path)
+    save_pickle(avg_bbox_coords, output_path)
     print(f'Saved {output_path}')
     # Return the average bbox coords
     return avg_bbox_coords
@@ -983,7 +983,7 @@ def get_train_val_test_stats_per_label(label_names_filename, labels_filename, nu
         stats = pool.map(_get_train_val_test_summary_stats_for_label, train_val_label_names)
     
     label2stats = {name:stat for name, stat in zip(train_val_label_names, stats)}
-    save_to_pickle(label2stats, cache_path)
+    save_pickle(label2stats, cache_path)
     return label2stats
 
 def _get_train_val_test_summary_stats_for_label(label):

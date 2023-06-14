@@ -1,10 +1,10 @@
 from dotenv import load_dotenv
 from pathlib import Path
 from medvqa.utils.constants import CHEXPERT_LABELS
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_pickle
 load_dotenv()
 
-from medvqa.utils.common import CACHE_DIR
+from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, FAST_TMP_DIR
 
 import os
 import re
@@ -21,6 +21,8 @@ MIMICCXR_JPG_DIR = os.environ['MIMICCXR_JPG_DIR']
 MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-metadata.csv')
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
+MIMICCXR_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'mimiccxr')
+MIMICCXR_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO', 'RAO', 
                                     'AP LLD', 'AP AXIAL', 'SWIMMERS', 'PA LLD', 'XTABLE LATERAL',
@@ -217,7 +219,7 @@ def get_reports_txt_paths():
     for i, rp in tqdm(enumerate(report_paths_generator())):
         report_paths[i] = rp.as_posix()
     report_paths = report_paths[:i+1]
-    save_to_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
+    save_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
     print('reports txt paths saved to', MIMICCXR_REPORTS_TXT_PATHS)
     return report_paths
 
@@ -240,7 +242,7 @@ def get_imageId2partId():
         image_path = str(image_path)
         partId, _, _, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
         imageId2partId[imageId] = partId
-    save_to_pickle(imageId2partId, cache_path)
+    save_pickle(imageId2partId, cache_path)
     return imageId2partId
 
 def get_imageId2reportId():
@@ -252,7 +254,7 @@ def get_imageId2reportId():
     for rid, dicom_id_view_pos_pairs in enumerate(metadata['dicom_id_view_pos_pairs']):
         for dicom_id, _ in dicom_id_view_pos_pairs:
             imageId2reportId[dicom_id] = rid
-    save_to_pickle(imageId2reportId, cache_path)
+    save_pickle(imageId2reportId, cache_path)
     return imageId2reportId
 
 def get_imageId2PartPatientStudy():
@@ -264,7 +266,7 @@ def get_imageId2PartPatientStudy():
         image_path = str(image_path)
         partId, patientId, studyId, imageId = MIMICCXR_IMAGE_REGEX.findall(image_path)[0]
         imageId2partpatstud[imageId] = (partId, patientId, studyId)
-    save_to_pickle(imageId2partpatstud, cache_path)
+    save_pickle(imageId2partpatstud, cache_path)
     return imageId2partpatstud
 
 def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
@@ -461,7 +463,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
                 assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
             filepaths[i] = report_path
 
-    save_to_pickle(report_metadata, cache_path)
+    save_pickle(report_metadata, cache_path)
     print(f'Saved detailed metadata to {cache_path}')
     return report_metadata
 
@@ -540,7 +542,7 @@ def get_train_val_test_stats_per_chexpert_label(chexpert_labels_filename):
             'test': {'positive': test_pos_count, 'negative': test_neg_count},
         }
 
-    save_to_pickle(label2stats, cache_path)
+    save_pickle(label2stats, cache_path)
     return label2stats
 
 def get_train_val_test_summary_text_for_chexpert_label(label, labels_filename):

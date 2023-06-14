@@ -3,7 +3,7 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from sklearn.metrics import f1_score
-from medvqa.utils.files import get_cached_pickle_file, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, save_pickle
 from medvqa.utils.common import CACHE_DIR, TMP_DIR
 from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.hashing import hash_string
@@ -228,7 +228,7 @@ class ChexpertLabeler:
                 self.cache[hash] = label
             
             if update_cache_on_disk and len(unlabeled_texts) > 10:
-                save_to_pickle(self.cache, self.cache_path)
+                save_pickle(self.cache, self.cache_path)
                 if self.verbose:
                     print(f'Cache successfully updated and saved to {self.cache_path}')
             

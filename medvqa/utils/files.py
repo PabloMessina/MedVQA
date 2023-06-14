@@ -18,7 +18,7 @@ def get_cached_json_file(path):
     try:
         file = _json_cache[path]
     except KeyError:
-        file = _json_cache[path] = load_json_file(path)
+        file = _json_cache[path] = load_json(path)
     return file
 
 def get_cached_pickle_file(path):
@@ -30,9 +30,13 @@ def get_cached_pickle_file(path):
         file = _pickle_cache[path] = load_pickle(path)
     return file
 
-def load_json_file(path):
+def load_json(path):
     with open(path, 'r') as f:
         return json.load(f)
+
+def load_jsonl(path):
+    with open(path, 'r') as f:
+        return [json.loads(line) for line in f]
 
 def load_pickle(path):
     try:
@@ -57,17 +61,26 @@ def read_lines_from_txt(path):
 def make_dirs_in_filepath(filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-def save_to_pickle(obj, path):
+def save_pickle(obj, path):
     make_dirs_in_filepath(path)
     with open(path, 'wb') as f:
         pickle.dump(obj, f)
 
-def save_to_json(obj, path):
+def save_json(obj, path):
     make_dirs_in_filepath(path)
     with open(path, 'w') as f:
         json.dump(obj, f)
 
-def save_to_txt(strings_list, path):
+def save_jsonl(obj_list, path, append=False):
+    assert isinstance(obj_list, list)
+    make_dirs_in_filepath(path)
+    mode = 'a' if append else 'w'
+    with open(path, mode) as f:
+        for obj in obj_list:
+            json_string = json.dumps(obj)
+            f.write(json_string + "\n")
+
+def save_txt(strings_list, path):
     make_dirs_in_filepath(path)
     with open(path, 'w') as f:
         for s in strings_list:

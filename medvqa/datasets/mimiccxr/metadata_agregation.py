@@ -6,11 +6,12 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_labels,
     load_scene_graph,
 )
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, load_mimiccxr_reports_detailed_metadata
+from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, get_mimiccxr_large_image_path, load_mimiccxr_reports_detailed_metadata
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file
 from medvqa.utils.logging import chest_imagenome_label_array_to_string, chexpert_label_array_to_string, print_bold
+import imagesize
 
 import re
 w_regex = re.compile(r'\s')
@@ -98,6 +99,7 @@ class MIMICCXR_MetadataAgregator:
                     print(intervals)
 
     def integrate_metadata(self, rid, save_path=None):
+        is_nan = lambda x: x != x
         output = {
             'report_id': rid,
             'report_filepath': self.reports_metadata['filepaths'][rid],
@@ -105,8 +107,15 @@ class MIMICCXR_MetadataAgregator:
             'part_id': self.reports_metadata['part_ids'][rid],
             'subject_id': self.reports_metadata['subject_ids'][rid],
             'study_id': self.reports_metadata['study_ids'][rid],
-            'dicom_id_view_pos_pairs': self.reports_metadata['dicom_id_view_pos_pairs'][rid],
+            'dicom_id_view_pos_pairs': [ x if not is_nan(x[1]) else (x[0], "UNK") \
+                                         for x in self.reports_metadata['dicom_id_view_pos_pairs'][rid] ],
         }
+        
+        output['original_image_sizes'] = {}
+        for did, _ in output['dicom_id_view_pos_pairs']:
+            output['original_image_sizes'][did] = imagesize.get(get_mimiccxr_large_image_path(
+                output['part_id'], output['subject_id'], output['study_id'], did))
+            
         dids = [did for did, _ in self.reports_metadata['dicom_id_view_pos_pairs'][rid] \
                 if did in self.chest_imagenome_labels]
         for i in range(1, len(dids)):
@@ -118,14 +127,14 @@ class MIMICCXR_MetadataAgregator:
         chexp_label2phrases = self._find_text_grounding_for_chexpert_labels(rid, orig_report)
         common_labels = set(chexp_label2phrases.keys())
         output['chexpert_labels'] = {}
+        output['chest_imagenome_labels'] = {}
+        output['common_labels'] = {}
         if len(dids) > 0:
             chest_label2phrases = self._find_text_grounding_for_chest_imagenome_labels(dids[0], orig_report)
             common_labels &= set(chest_label2phrases.keys())
-            output['chest_imagenome_labels'] = {}
             if len(common_labels) > 0:
                 common_labels = list(common_labels)
                 common_labels.sort()
-                output['common_labels'] = {}
                 for label in common_labels:
                     intervals = []
                     for x in chexp_label2phrases[label]:

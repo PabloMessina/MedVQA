@@ -11,6 +11,7 @@ FAST_WORKSPACE_DIR = os.environ['MEDVQA_FAST_WORKSPACE_DIR']
 CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
 FAST_CACHE_DIR = os.path.join(FAST_WORKSPACE_DIR, 'cache')
 TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
+FAST_TMP_DIR = os.path.join(FAST_WORKSPACE_DIR, 'tmp')
 RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
 
 # NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem

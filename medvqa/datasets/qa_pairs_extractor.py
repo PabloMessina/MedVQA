@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 from nltk.corpus import stopwords
 
 from medvqa.utils.common import SOURCE_DIR
-from medvqa.utils.files import load_json_file, read_lines_from_txt
+from medvqa.utils.files import load_json, read_lines_from_txt
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 
 REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
@@ -33,7 +33,7 @@ class QuestionAnswerExtractor:
     
     def reload(self, debug=False):
         # load question specifications
-        questions = load_json_file(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
+        questions = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
         
         if debug: print(questions)
         

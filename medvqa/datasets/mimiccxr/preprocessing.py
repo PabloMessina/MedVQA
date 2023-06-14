@@ -8,39 +8,8 @@ from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 from medvqa.utils.files import read_lines_from_txt
 
-# _re_header = re.compile(r'[A-Z]+( +[A-Z]+)*?:')
 _re_header = re.compile(r'(^|\n)\s*([A-Z][a-zA-Z]*(( |-|&)+[a-zA-Z]+)*?:)')
 _re_paragraph_breaks = re.compile(r'(\s*\n(\s*\n\s*)+)|(\n\s*_+\s*\n)')
-
-# def extract_findings_and_impression(report_path, debug=False):
-#     with open(report_path) as f:
-#         text = f.read()    
-#     if debug:
-#         print(text)
-#     text = text.replace('_', '')
-#     spans = [i.span() for i in _re_header.finditer(text)]    
-#     report = ''
-#     for i, span in enumerate(spans):
-#         match = text[span[0]:span[1]]        
-#         if ((len(match) > 20 and not match == 'REASON FOR EXAMINATION:') or match == 'FINDINGS:' or
-#                 match == 'IMPRESSION:' or match == 'CONCLUSION:'):
-#             if i+1 == len(spans):
-#                 x = text[span[1]:]
-#             else:
-#                 x = text[span[1]:spans[i+1][0]]
-#             x = ' '.join(x.split())
-#             if x:
-#                 if report:
-#                     report += ' ' if report[-1] == '.' else '. '
-#                 report += x
-#     if not report:
-#         for part in re.split('\s*\n\s*\n\s*', text):
-#             part = ' '.join(part.split())
-#             if len(part) > 150:
-#                 if report:
-#                     report += ' ' if report[-1] == '.' else '. '
-#                 report += part
-#     return report
 
 def extract_report_and_patient_background(report_path, debug=False):
     sections = _split_report_into_sections(report_path, debug=debug)
@@ -130,6 +99,118 @@ def extract_report_and_patient_background(report_path, debug=False):
         background = background,
     )
 
+def extract_background_findings_and_impression(report_path, debug=False):
+    sections = _split_report_into_sections(report_path, debug=debug)
+    
+    if debug: pprint(sections)
+    
+    background_chunks = []
+    findings_chunks = []
+    impression_chunks = []
+    
+    if debug: print('===================================================')
+    
+    for k_, v in sections.items():
+        k = k_.lower()
+        
+        if k in _SECTION_HEADERS_FOR_PATIENT_BACKGROUND:
+            
+            if type(v) is list:
+                for i in range(len(v)):
+                    v[i] = v[i].replace('_', ' ')
+                    v[i] = v[i].strip()
+                    if len(v[i]) > 0 and v[i][-1] != '.': v[i] += '.'
+                v = ' '.join(x for x in v if len(x) > 0)
+            else:
+                v = v.replace('_', ' ').strip()
+            v = ' '.join(v.split())
+            if len(v) == 0 or v == '.': continue
+            if v[-1] != '.': v += '.'
+            background_chunks.append((k, v))
+            
+        elif k in _SECTION_HEADERS_FOR_FINDINGS:
+            
+            if type(v) is list:
+                for i in range(len(v)):
+                    v[i] = v[i].replace('_', ' ')
+                    v[i] = v[i].strip()
+                    if len(v[i]) > 0 and v[i][-1] != '.': v[i] += '.'
+                if k == '(after) wet read:':
+                    v = ' '.join(x for x in v if len(x) > 0 and _contains_medical_terms(x, 1))
+                else:
+                    v = ' '.join(x for x in v if len(x) > 0)
+            else:
+                v = v.replace('_', ' ').strip()
+                if k == '(after) wet read:' and not _contains_medical_terms(v, 1):
+                    v = ''
+            v = ' '.join(v.split())
+            if len(v) == 0 or v == '.': continue
+            if v[-1] != '.': v += '.'
+            findings_chunks.append((k, v))
+
+        elif k in _SECTION_HEADERS_FOR_IMPRESSION:
+
+            if type(v) is list:
+                for i in range(len(v)):
+                    v[i] = v[i].replace('_', ' ')
+                    v[i] = v[i].strip()
+                    if len(v[i]) > 0 and v[i][-1] != '.': v[i] += '.'
+                v = ' '.join(x for x in v if len(x) > 0)
+            else:
+                v = v.replace('_', ' ').strip()
+            v = ' '.join(v.split())
+            if len(v) == 0 or v == '.': continue
+            if v[-1] != '.': v += '.'
+            impression_chunks.append((k, v))
+            
+        elif k not in _IGNORABLE_HEADERS:
+            
+            if type(v) is list:
+                for i in range(len(v)):
+                    v[i] = v[i].replace('_', ' ')
+                    v[i] = v[i].strip()
+                v = ' '.join(x for x in v if len(x) > 0 and\
+                             _contains_medical_terms(x, 2))
+            elif _contains_medical_terms(v, 2):
+                v = v.replace('_', ' ').strip()
+            else:
+                v = ''
+            v = ' '.join(v.split())
+            if len(v) == 0 or v == '.': continue
+            if v[-1] != '.': v += '.'
+                
+            if (not k.startswith('(after)') and _contains_medical_terms(k, 1)):
+                v = f'{k_} {v}'
+            
+            findings_chunks.append((k, v))
+            
+    if len(findings_chunks) == 0 and len(impression_chunks) == 0:
+        for i, p in enumerate(background_chunks):
+            if _contains_medical_terms(p[1], 4):
+                findings_chunks.append(p)
+                background_chunks[i] = None
+        background_chunks = [p for p in background_chunks if p is not None]
+
+    len_findings = sum(len(x[1]) for x in findings_chunks)
+    len_impression = sum(len(x[1]) for x in impression_chunks)
+    if len_findings < 0.5 * len_impression:
+        # Move impression to findings
+        findings_chunks += impression_chunks
+        impression_chunks = []
+
+    # Final background
+    background = ' '.join(v if k.startswith('(after)') else f'{k} {v}' for k, v in background_chunks)
+    # Final findings
+    findings = ' '.join(x[1] for x in findings_chunks)
+    # Final impression
+    impression = ' '.join(x[1] for x in impression_chunks)
+
+    return dict(
+        background = background,
+        findings = findings,
+        impression = impression,
+    )
+
 def _split_report_into_sections(report_path, debug=False):
     with open(report_path) as f:
         text = f.read()
@@ -198,7 +279,24 @@ def _contains_medical_terms(text, k):
 def _contains_no_invalid_patterns(text):
     return not _re_invalid.search(text)
 
-_SECTION_HEADERS_FOR_REPORT = set([
+_SECTION_HEADERS_FOR_IMPRESSION = set([
+    'MPRESSION:',
+    'IMPRESSION:',
+    'IMPRESSON:',
+    'IMPRESSIONS:',
+    'IMPRESION:',
+    'IMPESSION:',
+    'IMPRSSION:',
+    'IMPRESSOIN:',
+    'Impression:',
+    'CONCLUSION:',
+    'Conclusion:',
+])
+_SECTION_HEADERS_FOR_IMPRESSION.update([
+    f'(AFTER) {key}' for key in _SECTION_HEADERS_FOR_IMPRESSION
+])
+
+_SECTION_HEADERS_FOR_FINDINGS = set([
     'FINDINGS:',
     'FINDNINGS:',
     'FINGDINGS:',
@@ -211,20 +309,9 @@ _SECTION_HEADERS_FOR_REPORT = set([
     'FINSINGS:',
     'FINDIGNS:',
     'FINDINGS and IMPRESSION:',
-    'MPRESSION:',
-    'IMPRESSION:',
-    'IMPRESSON:',
-    'IMPRESSIONS:',
-    'IMPRESION:',
-    'IMPESSION:',
-    'IMPRSSION:',
-    'IMPRESSOIN:',
     'Findings and Impression:',
     'FINDINGS AND IMPRESSION:',
-    'Impression:',
     'REPORT:',
-    'CONCLUSION:',
-    'Conclusion:',
     'THEY REPORT TEXT FOLLOWS:',
     'PORTABLE SUPINE FRONTAL VIEW OF THE CHEST:',
     'FRONTAL AND LATERAL CHEST RADIOGRAPHS:',
@@ -454,9 +541,21 @@ _SECTION_HEADERS_FOR_REPORT = set([
     'AP chest reviewed in the absence of prior chest radiographs:',
     'PA and lateral chest reviewed in the absence of prior chest radiographs:',
 ])
-_SECTION_HEADERS_FOR_REPORT.update([
-    f'(AFTER) {key}' for key in _SECTION_HEADERS_FOR_REPORT
+_SECTION_HEADERS_FOR_FINDINGS.update([
+    f'(AFTER) {key}' for key in _SECTION_HEADERS_FOR_FINDINGS
 ])
+_SECTION_HEADERS_FOR_FINDINGS.update([
+    'WET READ:',
+    '(AFTER) WET READ:',
+    'RESIDENT WET READ:',
+    'PRELIMINARY RESIDENT WET READ:',
+    'PRELIMINARY REPORT:',
+])
+
+# make the union of the above two sets
+_SECTION_HEADERS_FOR_REPORT = set()
+_SECTION_HEADERS_FOR_REPORT.update(_SECTION_HEADERS_FOR_IMPRESSION)
+_SECTION_HEADERS_FOR_REPORT.update(_SECTION_HEADERS_FOR_FINDINGS)
 
 _SECTION_HEADERS_FOR_PATIENT_BACKGROUND = set([
     'REASON FOR EXAMINATION:',
@@ -472,11 +571,6 @@ _SECTION_HEADERS_FOR_PATIENT_BACKGROUND = set([
     'INDICATIONS:',
     'Indication:',
     'ADDENDUM Indication:',
-    'WET READ:',
-    '(AFTER) WET READ:',
-    'RESIDENT WET READ:',
-    'PRELIMINARY RESIDENT WET READ:',
-    'PRELIMINARY REPORT:',
     'CLINICAL HISTORY:',
     'CLINICAL HISTORY History:',
     'CLINICAL INDICATION:',
@@ -519,6 +613,8 @@ _IGNORABLE_HEADERS = set([
     'CC:', 'Compressing:', 'Contact name:', 'Common:',
 ])
 
-_SECTION_HEADERS_FOR_PATIENT_BACKGROUND.update([x.lower() for x in _SECTION_HEADERS_FOR_PATIENT_BACKGROUND])
+_SECTION_HEADERS_FOR_IMPRESSION.update([x.lower() for x in _SECTION_HEADERS_FOR_IMPRESSION])
+_SECTION_HEADERS_FOR_FINDINGS.update([x.lower() for x in _SECTION_HEADERS_FOR_FINDINGS])
 _SECTION_HEADERS_FOR_REPORT.update([x.lower() for x in _SECTION_HEADERS_FOR_REPORT])
+_SECTION_HEADERS_FOR_PATIENT_BACKGROUND.update([x.lower() for x in _SECTION_HEADERS_FOR_PATIENT_BACKGROUND])
 _IGNORABLE_HEADERS.update([x.lower() for x in _IGNORABLE_HEADERS])
