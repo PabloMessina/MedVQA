@@ -1,105 +1,79 @@
 from dotenv import load_dotenv
+
+from medvqa.utils.logging import get_console_logger
 load_dotenv()
 
+import random
 import os
 import argparse
-import logging
 import tiktoken
 import re
 import sys
 import json
 import numpy as np
+from tqdm import tqdm
+from nltk.tokenize import sent_tokenize, word_tokenize
 
 from medvqa.datasets.mimiccxr import (
+    MIMICCXR_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
-    load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.openai_api import process_api_requests_from_file
-from medvqa.utils.files import load_jsonl, save_jsonl
+from medvqa.utils.files import load_json, load_jsonl, save_jsonl
 from medvqa.utils.common import get_timestamp
 
-INSTRUCTIONS = """Given a sentence from a chest x-ray report, generate a JSON list of strings.
-Each string must be a fact extracted from the sentence. Facts must go from general to specific and should only include
-positive observations of abnormalities, diseases, strange visual patterns, devices, and foreign bodies (observable things
-that are meaningful for a radiologist). Negative facts (absences) or facts describing normal or healthy appearances should be excluded.
-Facts should be stated as short phrases, almost like labels, and should avoid unnecessary verbosity.
+INSTRUCTIONS = """Relevant facts:
 
-Anatomical locations should not be standalone facts but can be included as descriptors within a fact about an observation.
-For example, "Lower cervical spine" is wrong, but "Metallic hardware in the lower cervical spine" is fine.
+1. observations of abnormalities
+2. observations of diseases
+3. observations of strange visual patterns
+4. observations of devices
+5. observations of foreign bodies
+6. observations of specific anatomical regions that look normal or healthy
+7. absences of abnormalities (usually expressed with a negation)
+8. comparisons with respect to a previous study (something changed or remained the same)
 
-If no positive facts meeting the criteria are found, return an empty list.
+Task:
 
-Easy examples:
+Given a sentence taken from a chest x-ray report, generate a JSON list of relevant facts.
+Each fact should be about one observation. If a sentence mentions multiple observations,
+each observation should be extracted as a separate fact.
+Each fact should include the anatomical location where it was observed. If multiple facts
+occur in the same location, repeat the location in each fact.
 
-Extensive pleural calcification is noted
+If no relevant facts are mentioned, return [] (an empty array).
+
+Examples:
+
+Opacity and density in the right lobe
 [
-"Calcification",
-"Pleural calcification"
+"opacity in the right lobe",
+"density in the right lobe"
 ]
 
-Support lines and tubes are unchanged
+Lungs are well inflated without evidence of focal airspace consolidation to suggest pneumonia.
 [
-"Lines",
-"Tubes",
-"Support lines",
-"Support tubes",
+"well inflated lungs",
+"lungs without evidence of focal airspace consolidation",
+"lungs without evidence of pneumonia"
 ]
 
-New left basilar opacity and small to moderate size left pleural effusion
+Taken together, compared with less than 1 hr earlier, the findings are suggestive of worsening of CHF, with new or significantly increased left greater right pleural effusions and underlying bibasilar collapse and/or  consolidation, particularly on the left.
 [
-"Opacity",
-"Basilar opacity",
-"Left basilar opacity",
-"Pleural effusion",
-"Left pleural effusion",
-"Small to moderate size left pleural effusion"
+"worsening of CHF",
+"new or significantly increased left pleural effusions",
+"new or significantly increased right pleural effusions",
+"underlying bibasilar collapse on the left",
+"underlying consolidation on the left",
 ]
 
-Little overall change in interstitial appearance in right lung
+No acute cardiopulmonary abnormality
 [
-"Interstitial appearance",
-"Interstitial appearance in right lung"
-]
-
-Bilateral heterogeneous consolidations concerning for multi focal pneumonia
-[
-"Consolidations",
-"Heterogeneous consolidations",
-"Bilateral consolidations",
-"Pneumonia",
-"Multi focal pneumonia"
-]
-
-Examples of empty list (no positive observations)
-
-Clearing of both bases
-[]
-
-Manometry device has been removed
-[]
-
-Unremarkable cardiac and mediastinal silhouettes
-[]
-
-No evidence of consolidation or pleural effusion
-[]
-
-No evidence of pneumothorax
-[]
-
-Normal cardiac silhouette
-[]
-
-Complex example (combining negative and positive facts, the negative is excluded):
-
-No evidence of CHF except mild prominence of the cardiomediastinal silhouette
-[
-"Prominence of the cardiomediastinal silhouette",
-"Mild prominence of the cardiomediastinal silhouette"
+"no acute cardiopulmonary abnormality"
 ]"""
 
-ALLOWED_GPT_CHAT_MODELS = ("gpt-3.5-turbo", "gpt-4", "gpt-4-0613")
+ALLOWED_GPT_CHAT_MODELS = ("gpt-3.5-turbo", "gpt-3.5-turbo-0301", "gpt-3.5-turbo-0613", "gpt-4", "gpt-4-0613")
 
 def generate_request(sentence, model_name, max_tokens, temperature=0.0):
     assert len(sentence) > 0, f"Sentence is empty: {sentence}"
@@ -123,23 +97,54 @@ def generate_request(sentence, model_name, max_tokens, temperature=0.0):
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
+_JSON_STRING_ARRAY_REGEX = re.compile(r"\[\s*(\".+?\",?\s*)*\]")
+_GPT_IS_PROTESTING_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please)\b")
+
 def parse_openai_model_output(text):
     """
     Parse the output of the OpenAI API call.
     """
-    match = re.search(r"\[\s*(\".+?\",?\s*)*\]", text) # match a JSON list of strings
+    match = _JSON_STRING_ARRAY_REGEX.search(text) # match a JSON list of strings
+    if not match:
+        if _GPT_IS_PROTESTING_REGEX.search(text):
+            logger.warning(f"GPT is protesting: {text}, returning []")
+            return []
     assert match, f"Could not parse output: {text}"
     list_of_facts = json.loads(match.group(0))
     assert isinstance(list_of_facts, list), f"Could not parse output: {text}"
     assert all(isinstance(fact, str) for fact in list_of_facts), f"Could not parse output: {text}"
     return list_of_facts
 
+def sort_sentences(sentences, by_difficulty=False):
+    assert type(sentences) == list, f"Expected list, got {type(sentences)}"
+    if by_difficulty:
+        logger.info("Sorting sentences by difficulty...")
+        tokenized_sentences = [word_tokenize(x) for x in tqdm(sentences, mininterval=2)]
+        logger.info("Counting word frequencies...")
+        vocab_freq = dict()        
+        for tokens in tqdm(tokenized_sentences, mininterval=2):
+            for word in tokens:
+                vocab_freq[word] = vocab_freq.get(word, 0) + 1
+        def _difficulty(i):
+            return sum(1 / vocab_freq[word] for word in tokenized_sentences[i])
+        ranked_indices = sorted(range(len(tokenized_sentences)), key=_difficulty, reverse=True)
+        ranked_sentences = [sentences[i] for i in ranked_indices]
+    else:
+        logger.info("Sorting sentences by length...")
+        ranked_sentences = sorted(sentences, key=len, reverse=True)
+    logger.info("Done sorting sentences.")
+    logger.info(f"First sentence: {ranked_sentences[0]}")
+    logger.info(f"Last sentence: {ranked_sentences[-1]}")
+    return ranked_sentences
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--extracted_sentences_jsonl_filepaths", nargs="+", required=True)
-    parser.add_argument("--preprocessed_sentences_to_skip_filename", type=str, default=None)
+    parser.add_argument("--preprocessed_sentences_to_skip_filenames", nargs="+", default=None)
+    parser.add_argument("--preprocessed_reports_filename", type=str, required=True)
+    parser.add_argument("--offset", type=int, required=True)
     parser.add_argument("--num_sentences", type=int, required=True)
+    parser.add_argument("--rank_sentences_by_difficulty", action="store_true", default=False)
     parser.add_argument("--sample_sentences_uniformly", action="store_true", default=False)
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--openai_request_url", type=str, default="https://api.openai.com/v1/chat/completions")
@@ -148,30 +153,14 @@ if __name__ == '__main__':
     parser.add_argument("--max_tokens_per_minute", type=int, required=True)
     parser.add_argument("--max_tokens_per_request", type=int, required=True)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    parser.add_argument("--alias", type=str, default="")
     args = parser.parse_args()
 
     # Set up logging
-    logger = logging.getLogger()
-    logging_level = logging.getLevelName(args.logging_level)
-    logger.setLevel(logging_level)
-    # configure a different color for each level
-    logging.addLevelName(logging.DEBUG, "\033[1;34m%s\033[1;0m" % logging.getLevelName(logging.DEBUG))
-    logging.addLevelName(logging.INFO, "\033[1;32m%s\033[1;0m" % logging.getLevelName(logging.INFO))
-    logging.addLevelName(logging.WARNING, "\033[1;33m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
-    logging.addLevelName(logging.ERROR, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
-    logging.addLevelName(logging.CRITICAL, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.CRITICAL))
-    # create console handler and set level to debug
-    ch = logging.StreamHandler()
-    ch.setLevel(logging_level)
-    # create formatter
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    # add formatter to ch
-    ch.setFormatter(formatter)
-    # add ch to logger
-    logger.addHandler(ch)
+    logger = get_console_logger(args.logging_level)
 
     # Load parsed sentences if they exist
-    parsed_sentences_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_parsed_sentences.jsonl")
+    parsed_sentences_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_parsed_sentences{args.alias}.jsonl")
     already_parsed_sentences = set()
     if os.path.exists(parsed_sentences_filepath):
         parsed_sentences = load_jsonl(parsed_sentences_filepath)
@@ -180,58 +169,71 @@ if __name__ == '__main__':
         logger.info(f"Loaded {len(already_parsed_sentences)} already parsed sentences from {parsed_sentences_filepath}")
 
     # Load preprocessed sentences to skip if they exist
-    if args.preprocessed_sentences_to_skip_filename is not None:
-        preprocessed_sentences_to_skip_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", args.preprocessed_sentences_to_skip_filename)
-        assert os.path.exists(preprocessed_sentences_to_skip_filepath)
-        logger.info(f"Loading preprocessed sentences to skip from {preprocessed_sentences_to_skip_filepath}")
-        sentences_to_skip = load_jsonl(preprocessed_sentences_to_skip_filepath)
-        logger.info(f"Loaded {len(sentences_to_skip)} sentences to skip")
-        for row in sentences_to_skip:
-            already_parsed_sentences.add(row['metadata']['sentence'])
-        logger.info(f"Total number of sentences to skip: {len(already_parsed_sentences)}")
+    if args.preprocessed_sentences_to_skip_filenames is not None:
+        for filename in args.preprocessed_sentences_to_skip_filenames:
+            preprocessed_sentences_to_skip_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", filename)
+            assert os.path.exists(preprocessed_sentences_to_skip_filepath)
+            logger.info(f"Loading preprocessed sentences to skip from {preprocessed_sentences_to_skip_filepath}")
+            sentences_to_skip = load_jsonl(preprocessed_sentences_to_skip_filepath)
+            logger.info(f"Loaded {len(sentences_to_skip)} sentences to skip")
+            for row in sentences_to_skip:
+                already_parsed_sentences.add(row['metadata']['sentence'])
+            logger.info(f"Total number of sentences to skip: {len(already_parsed_sentences)}")
 
-    # Collect unparsed sentences from input files
-    assert len(args.extracted_sentences_jsonl_filepaths) > 0
-    sentences_to_parse = set()
-    for filepath in args.extracted_sentences_jsonl_filepaths:
-        logger.info(f"Loading sentences from {filepath}")
-        rows = load_jsonl(filepath)
-        logger.info(f"Loaded {len(rows)} reports with extracted sentences from {filepath}")
-        for row in rows:
-            for s, _ in row['parsed_response']:
-                if s not in already_parsed_sentences:
-                    sentences_to_parse.add(s)
-    logger.info(f"Found {len(sentences_to_parse)} unique sentences to parse")
+    # Collect unparsed sentences from reports
+    unique_sentences = set()
+    preprocessed_reports_filepath = os.path.join(MIMICCXR_CACHE_DIR, args.preprocessed_reports_filename)
+    assert os.path.exists(preprocessed_reports_filepath)
+    logger.info(f"Loading preprocessed reports from {preprocessed_reports_filepath}")
+    reports = load_json(preprocessed_reports_filepath)
+    for r in tqdm(reports, total=len(reports), mininterval=2):
+        impression = r['impression']
+        findings = r['findings']
+        if len(impression) > 0:
+            for s in sent_tokenize(impression):
+                unique_sentences.add(s)
+        if len(findings) > 0:
+            for s in sent_tokenize(findings):
+                unique_sentences.add(s)
+    logger.info(f"Loaded {len(reports)} reports from {preprocessed_reports_filepath}")
+    
+    logger.info(f"Found {len(unique_sentences)} unique sentences to parse")
+    assert len(unique_sentences) > 0
+
+    # Sort sentences
+    unique_sentences = list(unique_sentences)
+    unique_sentences = sort_sentences(unique_sentences, args.rank_sentences_by_difficulty)
+
+    # Adjust number of sentences to parse if necessary
+    assert 0 <= args.offset < len(unique_sentences)
+    if args.offset + args.num_sentences > len(unique_sentences):
+        logger.warning(f"Requested {args.num_sentences} sentences but only {len(unique_sentences) - args.offset} are available."
+                       f" Using {len(unique_sentences) - args.offset} instead.")
+        args.num_sentences = len(unique_sentences) - args.offset
+        assert args.num_sentences > 0
+
+    # Sample sentences to parse (if requested)
+    if args.sample_sentences_uniformly:
+        indices = random.sample(range(args.offset, len(unique_sentences)), args.num_sentences)
+    else: # First arg.num_sentences sentences
+        indices = [i for i in range(args.offset, args.offset + args.num_sentences)]
+
+    # Remove already parsed sentences
+    sentences_to_parse = [unique_sentences[i] for i in indices if unique_sentences[i] not in already_parsed_sentences]
     if len(sentences_to_parse) == 0:
-        logger.info("Nothing to do. Exiting.")
+        logger.info(f"All {len(indices)} sentences have already been parsed. Nothing to do. Exiting.")
         sys.exit(0)
 
-    sentences_to_parse = list(sentences_to_parse)
-    sentences_to_parse.sort(key=lambda s: len(s), reverse=True) # prioritize longer sentences
-
-    if args.num_sentences > len(sentences_to_parse):
-        logger.warning(f"Requested {args.num_sentences} sentences but only {len(sentences_to_parse)} are available. Using {len(sentences_to_parse)} sentences.")
-        args.num_sentences = len(sentences_to_parse)
+    logger.info(f"Total number of sentences to parse: {len(sentences_to_parse)}")    
     
     # Print example sentences
     logger.info(f"Example sentences to parse:")
-    # First 5 sentences
-    for i in range(min(args.num_sentences, 5)):
-        logger.info(f"{i+1}. {sentences_to_parse[i]}")
-    # Last 5 sentences
-    for i in range(max(5, args.num_sentences-5), args.num_sentences):
+    for i in np.linspace(0, len(sentences_to_parse)-1, min(10, len(sentences_to_parse)), dtype=int):
         logger.info(f"{i+1}. {sentences_to_parse[i]}")
 
     # Prepare API requests
-    detailed_metadata = load_mimiccxr_reports_detailed_metadata()
     jobs = []
-    if args.sample_sentences_uniformly:
-        indices = np.linspace(0, len(sentences_to_parse)-1, args.num_sentences, dtype=int)
-    else: # First arg.num_sentences sentences
-        indices = [i for i in range(args.num_sentences)]
-
-    for i in indices:
-        sentence = sentences_to_parse[i]
+    for sentence in sentences_to_parse:
         jobs.append(generate_request(
             sentence=sentence,
             model_name=args.openai_model_name,
@@ -257,7 +259,7 @@ if __name__ == '__main__':
         max_tokens_per_minute=args.max_tokens_per_minute,
         token_encoding_name=tiktoken.encoding_for_model(args.openai_model_name).name,
         max_attempts=5,
-        logging_level=logging_level,
+        logging_level=args.logging_level,
         log_info_every_n_requests=20,
     )
 

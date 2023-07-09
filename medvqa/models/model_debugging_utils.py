@@ -306,3 +306,103 @@ def load_and_run_labels2report_gen_model_in_inference_mode(
     
     # Return predicted report
     return pred_report
+
+
+def load_and_run_seq2seq_model_in_inference_mode(
+        input_text, model_folder_path=None, model_checkpoint_path=None, max_output_length=100,
+        num_beams=1, use_amp=False, device='GPU'):
+    
+    from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
+    from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
+    from torch.cuda.amp.autocast_mode import autocast
+    import torch
+
+    if model_folder_path is None:
+        assert model_checkpoint_path is not None
+        model_folder_path = os.path.dirname(model_checkpoint_path)
+    
+    metadata = load_metadata(model_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    use_t5 = model_kwargs['seq2seq_model_name'] == Seq2SeqModels.T5
+    use_bart = model_kwargs['seq2seq_model_name'] == Seq2SeqModels.BART
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    
+    # Create model
+    print_bold('Create model')
+    model = Seq2SeqModel(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    if model_checkpoint_path is None:
+        assert model_folder_path is not None
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('model_checkpoint_path = ', model_checkpoint_path)
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Prepare input text
+    print_bold('Prepare input text')
+    if use_t5 or use_bart:
+        if use_t5:
+            from transformers import T5TokenizerFast
+            tokenizer = T5TokenizerFast.from_pretrained(model_kwargs['model_name'])
+        else:
+            from transformers import BartTokenizerFast
+            tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
+        assert type(input_text) == str or (type(input_text) == list and type(input_text[0]) == str)
+        if type(input_text) == str:
+            input_text = [input_text] # To make it a list
+        input_encoding = tokenizer(
+            input_text,
+            padding="longest",
+            return_tensors="pt",
+        )
+        input_ids = input_encoding.input_ids.to(device)
+        attention_mask = input_encoding.attention_mask.to(device)
+    else:
+        raise NotImplementedError
+    
+    # Run model in inference mode
+    print_bold('Run model in inference mode')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        # Prepare args for model forward
+        model_input_kwargs = {
+            'mode': 'test',
+            'max_len': max_output_length,
+        }
+        if use_t5 or use_bart:
+            model_input_kwargs['input_ids'] = input_ids
+            model_input_kwargs['attention_mask'] = attention_mask
+            model_input_kwargs['num_beams'] = num_beams
+        else:
+            raise NotImplementedError
+
+        # Forward pass
+        with autocast(enabled=use_amp): # automatic mixed precision
+            model_output = model(**model_input_kwargs)
+            if use_t5 or use_bart:
+                output_ids = model_output
+            else:
+                raise NotImplementedError
+
+    # Convert ids to string
+    print_bold('Convert ids to string')
+    if use_t5 or use_bart:
+        output_text = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+    else:
+        raise NotImplementedError
+    
+    # Release GPU memory
+    del model
+    torch.cuda.empty_cache()
+    
+    # Return predicted text
+    assert type(output_text) == list
+    if len(output_text) == 1:
+        return output_text[0]
+    return output_text

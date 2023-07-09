@@ -403,3 +403,33 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
         ax.text(x1, y1-3, class_names[pred_classes[i]], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
     
     plt.show()
+
+
+def plot_embeddings_and_clusters(X_dataset, X_clusters):
+    # Apply PCA to reduce dimensionality to 2
+    import sklearn.decomposition
+    pca = sklearn.decomposition.PCA(n_components=2)
+    X_dataset_2d = pca.fit_transform(X_dataset)
+    X_clusters_2d = pca.transform(X_clusters)
+
+    # Plot dataset and clusters
+    plt.figure(figsize=(10, 10))
+    plt.title('Dataset and clusters')
+    plt.scatter(X_dataset_2d[:, 0], X_dataset_2d[:, 1], s=1, c='black', alpha=0.5)
+    plt.scatter(X_clusters_2d[:, 0], X_clusters_2d[:, 1], s=10, c='red')
+    plt.show()   
+
+
+def plot_embeddings(X):
+    # Apply PCA to reduce dimensionality to 2
+    import sklearn.decomposition
+    pca = sklearn.decomposition.PCA(n_components=2)
+    X_2d = pca.fit_transform(X)
+
+    # Plot embeddings
+    plt.figure(figsize=(10, 10))
+    plt.title('Dataset')
+    plt.scatter(X_2d[:, 0], X_2d[:, 1], s=1, c='black', alpha=0.5)
+    
+    # Show plot
+    plt.show()

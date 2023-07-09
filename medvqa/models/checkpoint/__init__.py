@@ -1,9 +1,8 @@
 from collections import namedtuple
 import os
 import re
-from pprint import pprint
 
-from medvqa.utils.files import get_cached_json_file, load_json_file, save_to_json
+from medvqa.utils.files import get_cached_json_file, save_json
 
 _CHECKPOINT_REGEX = re.compile(r'^[A-Za-z]+_(\d+)(?:_((.+)=)?([\d\.]+)\.pt)?$')
 CheckpointInfo = namedtuple('CheckpointInfo', ('name', 'epoch', 'metric', 'value'))
@@ -66,7 +65,7 @@ def load_metadata(folder, verbose=True):
 def save_metadata(folder, verbose=True, **kwargs):
     data = dict(kwargs)
     fpath = os.path.join(folder, 'metadata.json')
-    save_to_json(data, fpath)
+    save_json(data, fpath)
     if verbose:
         print('metadata saved to', fpath)
 

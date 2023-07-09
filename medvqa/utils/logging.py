@@ -71,3 +71,26 @@ def chest_imagenome_label_array_to_string(label_array, label_names):
 def question_label_array_to_string(questions, label_array):
     assert len(questions) == len(label_array)
     return ', '.join(questions[i] for i, label in enumerate(label_array) if label == 1)
+
+def get_console_logger(logging_level='INFO'):
+    import logging
+    # Set up logging
+    logger = logging.getLogger()
+    logging_level = logging.getLevelName(logging_level)
+    logger.setLevel(logging_level)
+    # configure a different color for each level
+    logging.addLevelName(logging.DEBUG, "\033[1;34m%s\033[1;0m" % logging.getLevelName(logging.DEBUG))
+    logging.addLevelName(logging.INFO, "\033[1;32m%s\033[1;0m" % logging.getLevelName(logging.INFO))
+    logging.addLevelName(logging.WARNING, "\033[1;33m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
+    logging.addLevelName(logging.ERROR, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
+    logging.addLevelName(logging.CRITICAL, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.CRITICAL))
+    # create console handler and set level to debug
+    ch = logging.StreamHandler()
+    ch.setLevel(logging_level)
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    # add formatter to ch
+    ch.setFormatter(formatter)
+    # add ch to logger
+    logger.addHandler(ch)
+    return logger

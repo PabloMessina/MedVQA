@@ -299,6 +299,7 @@ class MetricNames:
     REPORT_LOSS = 'report_loss'
     REPORT_LOSS_GT = 'report_loss_gt'
     LOCAL_FEATURE_COORDS_LOSS = 'local_feature_coords_loss'
+    SEQ2SEQ_LOSS = 'seq2seq_loss'
 
 METRIC2SHORT = {
     'loss': 'loss',
@@ -397,6 +398,7 @@ METRIC2SHORT = {
     'yolov8_cls_loss': 'y8cls_loss',
     'yolov8_dfl_loss': 'y8dfl_loss',
     'local_feature_coords_loss': 'lfcoords_loss',
+    'seq2seq_loss': 's2s_loss',
 }
 
 IUXRAY_DATASET_ID = 0

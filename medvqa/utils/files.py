@@ -58,6 +58,10 @@ def read_lines_from_txt(path):
     clean_lines = clean_lines[:i]
     return clean_lines
 
+def read_txt(path):
+    with open(path, 'r') as f:
+        return f.read()
+
 def make_dirs_in_filepath(filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 

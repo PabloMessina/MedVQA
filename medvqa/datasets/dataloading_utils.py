@@ -714,6 +714,46 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
     else: assert False, f'Unknown dataset_id {dataset_id}'
     return collate_batch_fn
 
+def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
+
+    assert use_t5 or use_bart # TODO: support other seq2seq models eventually
+
+    if use_t5 or use_bart:
+        assert model_name is not None
+        if use_t5:
+            from transformers import T5TokenizerFast
+            tokenizer = T5TokenizerFast.from_pretrained(model_name)
+        elif use_bart:
+            from transformers import BartTokenizerFast
+            tokenizer = BartTokenizerFast.from_pretrained(model_name)
+
+    def collate_batch_fn(batch):
+
+        batch_dict = dict()
+        batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
+        if use_t5 or use_bart:
+            output_text = [x['output_text'] for x in batch]
+            assert type(output_text[0]) == str, type(output_text[0])
+            output_encoding = tokenizer(
+                output_text,
+                padding="longest",
+                return_tensors="pt",
+            )
+            labels = output_encoding.input_ids
+            labels[labels == tokenizer.pad_token_id] = -100
+            batch_dict['output_ids'] = labels
+            input_text = [x['input_text'] for x in batch]
+            input_encoding = tokenizer(
+                input_text,
+                padding="longest",
+                return_tensors="pt",
+            )
+            batch_dict['input_ids'] = input_encoding.input_ids
+            batch_dict['attention_mask'] = input_encoding.attention_mask
+        return batch_dict
+    
+    return collate_batch_fn
+
 def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visual_module_only=False,
         classify_gender=False, classify_chexpert=False, classify_chest_imagenome=False,
         predict_bboxes_chest_imagenome=False, predict_local_feature_coords=False, use_yolov8=False,

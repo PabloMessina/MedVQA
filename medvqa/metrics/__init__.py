@@ -8,7 +8,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
-from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareT5ReportLogger
+from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareSeq2SeqOutputLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
 from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
 from medvqa.metrics.medical import (
@@ -487,7 +487,7 @@ def attach_dataset_aware_loss(engine, loss_name, allowed_dataset_ids):
     )
     met.attach(engine, loss_name)
 
-def attach_condition_aware_loss(engine, loss_name, condition_function, metric_name=None):
+def attach_condition_aware_loss(engine, loss_name, condition_function=lambda _: True, metric_name=None):
     if metric_name is None:
         metric_name = loss_name
     met = ConditionAwareLoss(
@@ -505,10 +505,14 @@ def attach_loss(loss_name, engine, device):
 # ---------------------------------------------
 # Logging
 # ---------------------------------------------
-def attach_condition_aware_t5_report_logger(engine, t5_tokenizer=None, condition_function=lambda _: True):
-    met = ConditionAwareT5ReportLogger(
-        output_transform=operator.itemgetter('pred_reports'),
+def attach_condition_aware_seq2seq_output_logger(engine, tokenizer=None, condition_function=lambda _: True,
+                                         field_name='pred_reports', metric_name=None):
+    # Tested with T5 and BART
+    met = ConditionAwareSeq2SeqOutputLogger(
+        output_transform=operator.itemgetter(field_name),
         condition_function=condition_function,
-        t5_tokenizer=t5_tokenizer,
+        tokenizer=tokenizer,
     )
-    met.attach(engine, 't5_report')
+    if metric_name is None:
+        metric_name = field_name
+    met.attach(engine, metric_name)

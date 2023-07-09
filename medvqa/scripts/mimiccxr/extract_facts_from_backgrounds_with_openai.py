@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
+
+from medvqa.utils.logging import get_console_logger
 load_dotenv()
 
 import os
 import argparse
-import logging
 import tiktoken
 import re
 import sys
@@ -112,24 +113,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Set up logging
-    logger = logging.getLogger()
-    logging_level = logging.getLevelName(args.logging_level)
-    logger.setLevel(logging_level)
-    # configure a different color for each level
-    logging.addLevelName(logging.DEBUG, "\033[1;34m%s\033[1;0m" % logging.getLevelName(logging.DEBUG))
-    logging.addLevelName(logging.INFO, "\033[1;32m%s\033[1;0m" % logging.getLevelName(logging.INFO))
-    logging.addLevelName(logging.WARNING, "\033[1;33m%s\033[1;0m" % logging.getLevelName(logging.WARNING))
-    logging.addLevelName(logging.ERROR, "\033[1;31m%s\033[1;0m" % logging.getLevelName(logging.ERROR))
-    logging.addLevelName(logging.CRITICAL, "\033[1;41m%s\033[1;0m" % logging.getLevelName(logging.CRITICAL))
-    # create console handler and set level to debug
-    ch = logging.StreamHandler()
-    ch.setLevel(logging_level)
-    # create formatter
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    # add formatter to ch
-    ch.setFormatter(formatter)
-    # add ch to logger
-    logger.addHandler(ch)
+    logger = get_console_logger(args.logging_level)
 
     # Load preprocessed reports and ranked report indices
     preprocessed_reports_filepath = os.path.join(MIMICCXR_CACHE_DIR, args.preprocessed_reports_filename)
@@ -195,7 +179,7 @@ if __name__ == '__main__':
         max_tokens_per_minute=args.max_tokens_per_minute,
         token_encoding_name=tiktoken.encoding_for_model(args.openai_model_name).name,
         max_attempts=5,
-        logging_level=logging_level,
+        logging_level=args.logging_level,
         log_info_every_n_requests=20,
     )
 
