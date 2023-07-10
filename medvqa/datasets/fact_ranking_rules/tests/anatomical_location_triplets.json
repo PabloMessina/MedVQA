@@ -1,0 +1,34 @@
+[
+    {
+        "query": "L lung",
+        "fact1": "left lung",
+        "fact2": "right lung",
+        "label": 1
+    },
+    {
+        "query": "right upper mid hemi thorax",
+        "facts1": [
+            "right mid upper hemi thorax",
+            "right mid upper hemithorax"
+        ],
+        "fact2": "right lung",
+        "label": 1
+    },
+    {
+        "query": "region of the cardioesophageal junction",
+        "facts1": [
+            "cardioesophageal junction",
+            "bottom of the image at the region of the cardioesophageal junction",
+            "just above the cardioesophageal junction"
+        ],
+        "facts2": [
+            "posterior aspect of the costophrenic sinus",
+            "posterior aspect of the costophrenic sulcus",
+            "lateral inferior costophrenic angles",
+            "lower thoracic spine to the right",
+            "aortopulmonic level",
+            "abdominal fat pad"
+        ],
+        "label": 1
+    }
+]
