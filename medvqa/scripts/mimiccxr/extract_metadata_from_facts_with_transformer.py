@@ -59,7 +59,10 @@ if __name__ == '__main__':
             facts_to_skip = load_jsonl(filepath)
             logger.info(f"Loaded {len(facts_to_skip)} facts to skip")
             for row in facts_to_skip:
-                already_parsed_facts.add(row['metadata']['fact'])
+                if 'fact' in row:
+                    already_parsed_facts.add(row['fact'])
+                else:
+                    already_parsed_facts.add(row['metadata']['fact'])
             logger.info(f"Total number of facts to skip: {len(already_parsed_facts)}")
 
     # Collect unparsed facts from input files

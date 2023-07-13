@@ -4,6 +4,7 @@ import os
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
 from medvqa.datasets.mimiccxr.report_utils import integrate_reports_facts_and_metadata, _FACT_METADATA_FIELDS
 from medvqa.utils.files import save_jsonl
+from medvqa.utils.logging import print_red
 
 if __name__ == '__main__':
 
@@ -19,7 +20,7 @@ if __name__ == '__main__':
     assert len(args.extracted_metadata_filepaths) == len(args.metadata_extraction_methods)
 
     # Integrate reports, facts and metadata
-    sentence_facts_rows, fact_metadata_rows, report_facts_metadata_rows = integrate_reports_facts_and_metadata(
+    sentence_facts_rows, fact_metadata_rows, report_facts_metadata_rows, facts_without_metadata = integrate_reports_facts_and_metadata(
         preprocessed_reports_filepath=args.preprocessed_reports_filepath,
         extracted_facts_filepaths=args.extracted_facts_filepaths,
         fact_extraction_methods=args.fact_extraction_methods,
@@ -47,6 +48,12 @@ if __name__ == '__main__':
     print(f'Saving integrated fact metadata to {integrated_fact_metadata_filepath}')
     save_jsonl(fact_metadata_rows, integrated_fact_metadata_filepath)
 
+    if len(facts_without_metadata) > 0:
+        print_red(f'WARNING: {len(facts_without_metadata)} facts without metadata.')
+        facts_without_metadata_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, f'facts_without_metadata({len(facts_without_metadata)}).jsonl')
+        print(f'Saving facts without metadata to {facts_without_metadata_filepath}')
+        save_jsonl(facts_without_metadata, facts_without_metadata_filepath)
+    
     report_total_length = 0
     for row in report_facts_metadata_rows:
         report_total_length += len(row['fact_based_report'])

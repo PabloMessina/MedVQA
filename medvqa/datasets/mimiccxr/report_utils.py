@@ -6,7 +6,7 @@ from medvqa.utils.files import load_json, load_jsonl
 from nltk.tokenize import sent_tokenize
 from tqdm import tqdm
 
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging import print_orange, print_red
 
 _NEG_REGEX = re.compile(r'^\s*no(t|ne)?\s+', re.IGNORECASE)
 _FACT_METADATA_FIELDS = ('anatomical location', 'detailed observation', 'short observation', 'category', 'health status', 'prev_study_comparison?', 'comparison status')
@@ -24,30 +24,45 @@ def _is_s1_subsequence_of_s2(s1, s2):
         j += 1
     return i == len(s1)
 
-def _remove_consecutive_repeated_words_from_text(fact):
-    fact_ = fact.lower().split()
-    fact = fact.split()
-    dedup_fact = []
-    for i in range(len(fact_)):
-        # if current word is same as previous word -> skip
-        if i > 0 and fact_[i] == fact_[i-1]:
-            continue
-        dedup_fact.append(fact[i])
-    return ' '.join(dedup_fact)
+def _substrings_are_equal(text, i, j, k):
+    for x in range(k):
+        if text[i+x] != text[j+x]:
+            return False
+    return True
 
-def _remove_consecutive_repeated_pairs_of_words_from_text(fact):
-    fact_ = fact.lower().split()
-    fact = fact.split()
-    dedup_fact = []
-    for i in range(len(fact_)):
-        # if current word is part of a 2-word phrase that is repeated -> skip
-        if i-2 >= 0 and fact_[i] == fact_[i-2] and (
-            (i+1 < len(fact_) and fact_[i+1] == fact_[i-1]) or
-            (i-3 >= 0 and fact_[i-3] == fact_[i-1])
-        ):
-            continue
-        dedup_fact.append(fact[i])
-    return ' '.join(dedup_fact)
+def _remove_consecutive_repeated_words_from_text(text, ks=[1, 2, 3, 4, 5, 6, 7, 8]):
+    # Sanity checks
+    assert type(ks) == int or type(ks) == list
+    if type(ks) == int:
+        ks = [ks]
+    else:
+        assert len(ks) > 0
+        assert all(type(x) == int for x in ks)
+
+    tokens = text.split()
+    lower_tokens = text.lower().split()
+    dedup_tokens = []
+    dedup_lower_tokens = []
+
+    for k in ks:
+        for i in range(len(lower_tokens)):
+            # if current word is part of a k-word phrase that is repeated -> skip
+            skip = False
+            for j in range(k):
+                s = i - j # start index
+                e = s + k-1 # end index
+                if s - k >= 0 and e < len(lower_tokens) and _substrings_are_equal(lower_tokens, s, s-k, k):
+                    skip = True
+                    break
+            if skip:
+                continue
+            dedup_tokens.append(tokens[i])
+            dedup_lower_tokens.append(lower_tokens[i])
+        tokens = dedup_tokens
+        lower_tokens = dedup_lower_tokens
+        dedup_tokens = []
+        dedup_lower_tokens = []
+    return ' '.join(tokens)
 
 class ReportFactsDisplayer:
     def __init__(self, preprocessed_reports_filepath, extracted_facts_filepaths, skip_negated_facts=True):
@@ -193,8 +208,7 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
             if skip_negated_facts:
                 fs = [f for f in fs if not _NEG_REGEX.match(f)]
             if remove_consecutive_repeated_words:
-                fs = [_remove_consecutive_repeated_pairs_of_words_from_text(
-                        _remove_consecutive_repeated_words_from_text(f)) for f in fs]
+                fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
             sentence_facts_rows.append({
                 'sentence': s,
@@ -281,8 +295,7 @@ def integrate_reports_facts_and_metadata(
             if skip_negated_facts:
                 fs = [f for f in fs if not _NEG_REGEX.match(f)]
             if remove_consecutive_repeated_words:
-                fs = [_remove_consecutive_repeated_pairs_of_words_from_text(
-                        _remove_consecutive_repeated_words_from_text(f)) for f in fs]
+                fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
             sentence_facts_rows.append({
                 'sentence': s,
@@ -301,45 +314,47 @@ def integrate_reports_facts_and_metadata(
             try:
                 try:
                     f = x['metadata']['fact']
-                    ds = x['parsed_response']
+                    m = x['parsed_response']
                 except KeyError:
                     f = x['fact']
-                    ds = x['metadata']
+                    m = x['metadata']
             except KeyError:
                 print(f'KeyError: {x}')
                 raise
-            assert f not in fact2metadata
             if remove_consecutive_repeated_words:
+                f = _remove_consecutive_repeated_words_from_text(f)
                 for key in _FACT_METADATA_FIELDS:
-                    ds[key] = _remove_consecutive_repeated_pairs_of_words_from_text(
-                        _remove_consecutive_repeated_words_from_text(ds[key]))
-            fact2metadata[f] = ds
+                    m[key] = _remove_consecutive_repeated_words_from_text(m[key])
+            if f in fact2metadata and m != fact2metadata[f]:
+                print_red(f'Warning: fact "{f}" already found with different metadata. fact2metadata[f] = {fact2metadata[f]}, m = {m}')
+            fact2metadata[f] = m
             fact_metadata_rows.append({
                 'fact': f,
-                'metadata': ds,
+                'metadata': m,
                 'extraction_method': metadata_extraction_method
             })
 
     print('Integrating reports, facts, and metadata...')
     report_facts_metadata_rows = [None] * len(preprocessed_reports)
+    facts_without_metadata = []
     for rid, report in tqdm(enumerate(preprocessed_reports), total=len(preprocessed_reports), mininterval=2):
         dedup_facts = []
-        dedup_facts_with_metadata = []
         seen_facts = set()
         for x in [report['findings'], report['impression']]:
             for s in sent_tokenize(x):
                 for f in sentence2facts[s]:
-                    metadata = fact2metadata[f]
+                    try:
+                        metadata = fact2metadata[f]
+                    except KeyError:
+                        facts_without_metadata.append(f)
+                        print_orange(f'Warning: fact "{f}" has no metadata.')
+                        continue
                     if len(metadata['detailed observation']) > 0 and len(metadata['short observation']) == 0:
                         print_orange(f'Warning: fact "{f}" has detailed observation but no short observation. metadata: {metadata}')
                     if len(metadata['detailed observation']) == 0 and len(metadata['short observation']) == 0:
                         continue # skip facts for which we don't have observation
                     if f not in seen_facts:
                         dedup_facts.append(f)
-                        dedup_facts_with_metadata.append({
-                            'fact': f,
-                            'metadata': metadata,
-                        })
                         seen_facts.add(f)
 
         dedup_facts_ = [f.lower().split() for f in dedup_facts]
@@ -361,8 +376,8 @@ def integrate_reports_facts_and_metadata(
         report_facts_metadata_rows[rid] = ({
             'report_idx': rid,
             **report,
-            'facts': dedup_facts_with_metadata,
+            'facts': dedup_facts,
             'fact_based_report': fact_based_report,
         })
 
-    return sentence_facts_rows, fact_metadata_rows, report_facts_metadata_rows
+    return sentence_facts_rows, fact_metadata_rows, report_facts_metadata_rows, facts_without_metadata
