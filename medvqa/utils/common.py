@@ -8,8 +8,10 @@ import os
 SOURCE_DIR = os.environ['MEDVQA_SOURCE_DIR']
 WORKSPACE_DIR = os.environ['MEDVQA_WORKSPACE_DIR']
 FAST_WORKSPACE_DIR = os.environ['MEDVQA_FAST_WORKSPACE_DIR']
+LARGE_FAST_WORKSPACE_DIR = os.environ['MEDVQA_LARGE_FAST_WORKSPACE_DIR']
 CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
 FAST_CACHE_DIR = os.path.join(FAST_WORKSPACE_DIR, 'cache')
+LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_WORKSPACE_DIR, 'cache')
 TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
 FAST_TMP_DIR = os.path.join(FAST_WORKSPACE_DIR, 'tmp')
 RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')

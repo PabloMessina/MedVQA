@@ -4,7 +4,7 @@ from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_pickle
 load_dotenv()
 
-from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, FAST_TMP_DIR
+from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR, FAST_TMP_DIR
 
 import os
 import re
@@ -22,6 +22,7 @@ MIMICCXR_METADATA_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-met
 MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.csv')
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 MIMICCXR_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'mimiccxr')
+MIMICCXR_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'mimiccxr')
 MIMICCXR_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO', 'RAO', 

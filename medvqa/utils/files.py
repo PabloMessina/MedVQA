@@ -35,6 +35,9 @@ def load_json(path):
         return json.load(f)
 
 def load_jsonl(path):
+    assert os.path.exists(path)
+    assert os.path.isfile(path)
+    assert path.endswith('.jsonl')
     with open(path, 'r') as f:
         return [json.loads(line) for line in f]
 

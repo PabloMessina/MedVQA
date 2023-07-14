@@ -20,3 +20,19 @@ def rank_vectors_by_dot_product(vectors, query_vector):
     """
     similarities = np.dot(query_vector, vectors.T)
     return np.argsort(similarities)[::-1]
+
+def dot_product_triplets_accuracy(vectors, A, P, N):
+    """
+    Compute accuracy of dot product triplets
+    :param vectors: a 2D array of vectors
+    :param A: indices of anchor vectors
+    :param P: indices of positive vectors
+    :param N: indices of negative vectors
+    :return: accuracy of dot product triplets
+    """
+    A = vectors[A]
+    P = vectors[P]
+    N = vectors[N]
+    AP = np.sum(A * P, axis=1)
+    AN = np.sum(A * N, axis=1)
+    return np.mean(AP > AN)
