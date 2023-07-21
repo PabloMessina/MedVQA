@@ -19,7 +19,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import process_api_requests_from_file
+from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, process_api_requests_from_file
 from medvqa.utils.files import load_json, load_jsonl, save_jsonl
 from medvqa.utils.common import get_timestamp
 
@@ -98,7 +98,6 @@ def generate_request(sentence, model_name, max_tokens, temperature=0.0):
         raise ValueError(f"Unknown model name: {model_name}")
 
 _JSON_STRING_ARRAY_REGEX = re.compile(r"\[\s*(\".+?\",?\s*)*\]")
-_GPT_IS_PROTESTING_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please)\b")
 
 def parse_openai_model_output(text):
     """
@@ -106,7 +105,7 @@ def parse_openai_model_output(text):
     """
     match = _JSON_STRING_ARRAY_REGEX.search(text) # match a JSON list of strings
     if not match:
-        if _GPT_IS_PROTESTING_REGEX.search(text):
+        if GPT_IS_ACTING_WEIRD_REGEX.search(text):
             logger.warning(f"GPT is protesting: {text}, returning []")
             return []
     assert match, f"Could not parse output: {text}"

@@ -1,28 +1,17 @@
 from dotenv import load_dotenv
-
-from medvqa.utils.common import get_timestamp
-
 load_dotenv()
 
-import torch
 import os
+import re
 import argparse
 import sys
 import json
 import numpy as np
-from tqdm import tqdm
 
+from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.utils.logging import get_console_logger
-from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
-from medvqa.models.nlp.seq2seq import Seq2SeqModel
-from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
-
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl, save_jsonl
-
-from transformers import AutoTokenizer
-
-import re
+from medvqa.utils.files import load_jsonl
 
 _VALID_JSON_OBJECT_CONTENT_REGEX = re.compile(r"\s*\"anatomical location\"\s*:\s*\"[^\"]*\"\s*,\s*\"detailed observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"short observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"category\"\s*:\s*\"[^\"]*\"\s*,\s*\"health status\"\s*:\s*\"[^\"]*\"\s*,\s*\"prev_study_comparison\?\"\s*:\s*\"[^\"]*\"\s*,\s*\"comparison status\"\s*:\s*\"[^\"]*\"\s*")
 
@@ -87,101 +76,25 @@ if __name__ == '__main__':
     indices = np.random.choice(len(facts_to_parse), min(10, len(facts_to_parse)), replace=False)
     for i in indices:
         logger.info(f"{i}: {facts_to_parse[i]}")
-    
-    # Load model metadata
-    metadata = load_metadata(args.checkpoint_folder_path)
-    model_kwargs = metadata['model_kwargs']
-    
-    # Device
-    device = torch.device('cuda' if torch.cuda.is_available() and args.device == 'GPU' else 'CPU')
-    
-    # Create model
-    logger.info(f"Creating Seq2SeqModel")
-    model = Seq2SeqModel(**model_kwargs)
-    model = model.to(device)
 
-    # Load model weights
-    logger.info(f"Loading model weights from {args.checkpoint_folder_path}")
-    checkpoint_path = get_checkpoint_filepath(args.checkpoint_folder_path)
-    logger.info(f"Loading model weights from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint['model'])
-
-    # Create tokenizer
-    logger.info(f"Creating tokenizer")
-    tokenizer = AutoTokenizer.from_pretrained(model_kwargs['model_name'])
-
-    # Create dataset and dataloader
-    logger.info(f"Creating dataset and dataloader")
-    tokenizer_func = lambda x: tokenizer(x, padding="longest", return_tensors="pt")
-    dataset, dataloader = create_text_dataset_and_dataloader(
-        texts=facts_to_parse,
+    # Extract metadata from facts
+    save_dir = os.path.join(MIMICCXR_FAST_CACHE_DIR, "huggingface")
+    save_filename_prefix = "extracted_metadata"
+    def _postprocess_input_output_func(sentence, output_text):
+        return {
+            'fact': sentence,
+            'metadata': parse_metadata(output_text),
+        }
+    apply_seq2seq_model_to_sentences(
+        checkpoint_folder_path=args.checkpoint_folder_path,
+        sentences=facts_to_parse,
+        logger=logger,
+        device=args.device,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        tokenizer_func=tokenizer_func,
+        max_length=args.max_length,
+        num_beams=args.num_beams,
+        save_dir=save_dir,
+        save_filename_prefix=save_filename_prefix,
+        postprocess_input_output_func=_postprocess_input_output_func,
     )
-
-    # Run inference
-    logger.info(f"Running inference")
-    model.eval()
-    extracted_metadata = [None] * len(facts_to_parse)
-    i = 0
-    idx = 0
-    unparsed_facts = []
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            output_ids = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_len=args.max_length,
-                num_beams=args.num_beams,
-                mode='test',
-            )
-            output_texts = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-            for output_text in output_texts:
-                try:
-                    extracted_metadata[idx] = {
-                        'fact': facts_to_parse[i],
-                        'metadata': parse_metadata(output_text),
-                    }
-                    idx += 1
-                    if (idx-1) % 5000 == 0:
-                        logger.info(f"Processed {idx} facts")
-                        logger.info(f"Example extracted metadata:")
-                        logger.info(f"{extracted_metadata[idx-1]}")
-                except Exception as e:
-                    logger.warning(f"Failed to parse output text: {output_text}, for fact: {facts_to_parse[i]}, i: {i}, idx: {idx}")
-                    logger.warning(f"Exception: {e}")
-                    unparsed_facts.append(facts_to_parse[idx])
-                i += 1
-    
-    extracted_metadata = extracted_metadata[:idx]
-    assert all(x is not None for x in extracted_metadata)
-    
-    if len(unparsed_facts) > 0:
-        logger.warning(f"Failed to parse {len(unparsed_facts)} facts")
-    
-    logger.info(f"Successfully processed {len(extracted_metadata)} facts")
-    logger.info(f"Example extracted metadata:")
-    logger.info(f"{extracted_metadata[-1]}")
-
-    assert len(facts_to_parse) == len(extracted_metadata) + len(unparsed_facts)
-    
-    # Save extracted metadata
-    timestamp = get_timestamp()
-    filename = f"extracted_metadata_{model.get_name()}_{args.max_length}_{args.num_beams}_{timestamp}.jsonl"
-    save_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "huggingface", filename)
-    logger.info(f"Saving extracted metadata to {save_filepath}")
-    save_jsonl(extracted_metadata, save_filepath)
-
-    # Save unparsed facts
-    if len(unparsed_facts) > 0:
-        filename = f"unparsed_facts_{model.get_name()}_{args.max_length}_{args.num_beams}_{timestamp}.jsonl"
-        save_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "huggingface", filename)
-        logger.info(f"Saving unparsed facts to {save_filepath}")
-        save_jsonl(unparsed_facts, save_filepath)
-
-    logger.info(f"DONE")

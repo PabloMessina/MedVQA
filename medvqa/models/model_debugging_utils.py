@@ -5,6 +5,7 @@ from medvqa.models.common import load_model_state_dict
 from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.logging import print_bold
+from medvqa.utils.math import rank_vectors_by_dot_product
 
 def visualize_yolov8_predictions(
         model_name_or_path, checkpoint_folder_path, num_classes, class_names, image_path,
@@ -406,3 +407,98 @@ def load_and_run_seq2seq_model_in_inference_mode(
     if len(output_text) == 1:
         return output_text[0]
     return output_text
+
+def load_and_run_fact_encoder_in_inference_mode(
+        facts, model_folder_path=None, model_checkpoint_path=None, use_amp=False, device='GPU'):
+    
+    from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
+    from medvqa.models.nlp.fact_encoder import FactEncoder
+    from torch.cuda.amp.autocast_mode import autocast
+    from medvqa.datasets.fact_embedding.fact_embedding_dataset_management import (
+        _LABEL_TO_CATEGORY, _LABEL_TO_HEALTH_STATUS, _LABEL_TO_COMPARISON_STATUS,
+    )
+    import torch
+
+    if model_folder_path is None:
+        assert model_checkpoint_path is not None
+        model_folder_path = os.path.dirname(model_checkpoint_path)
+    
+    metadata = load_metadata(model_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    
+    # Create model
+    print_bold('Create model')
+    model = FactEncoder(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    if model_checkpoint_path is None:
+        assert model_folder_path is not None
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('model_checkpoint_path = ', model_checkpoint_path)
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Prepare input
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
+    assert type(facts) == list
+    assert len(facts) >= 2
+    assert all(type(x) == str for x in facts)
+    input_encoding = tokenizer(
+        facts,
+        padding="longest",
+        return_tensors="pt",
+    )
+    input_ids = input_encoding.input_ids.to(device)
+    attention_mask = input_encoding.attention_mask.to(device)
+    
+    # Run model in inference mode
+    print_bold('Run model in inference mode')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        with autocast(enabled=use_amp): # automatic mixed precision
+            model_output = model(input_ids=input_ids, attention_mask=attention_mask, run_auxiliary_tasks=True)
+    
+    embeddings = model_output['text_embeddings'].detach().cpu().numpy()
+    c_logits = model_output['category_logits'].detach().cpu()
+    hs_logits = model_output['health_status_logits'].detach().cpu()
+    cs_logits = model_output['comparison_status_logits'].detach().cpu()
+    print(f'embeddings.shape = {embeddings.shape}')
+    print(f'c_logits.shape = {c_logits.shape}')
+    print(f'hs_logits.shape = {hs_logits.shape}')
+    print(f'cs_logits.shape = {cs_logits.shape}')
+
+    ranked_indexes = rank_vectors_by_dot_product(embeddings[0], embeddings)
+    pred_c = c_logits.argmax(dim=1).numpy()
+    pred_hs = hs_logits.argmax(dim=1).numpy()
+    pred_cs = cs_logits.argmax(dim=1).numpy()
+    
+    print_bold(f'Query: {facts[0]}')
+    print(f'\tCategory: {_LABEL_TO_CATEGORY[pred_c[0]]}')
+    print(f'\tHealth status: {_LABEL_TO_HEALTH_STATUS[pred_hs[0]]}')
+    print(f'\tComparison status: {_LABEL_TO_COMPARISON_STATUS[pred_cs[0]]}')
+    print('----------------')
+    for i, idx in enumerate(ranked_indexes):
+        print_bold(f'Fact {i}: {facts[idx]}')
+        print(f'\tCategory: {_LABEL_TO_CATEGORY[pred_c[idx]]}')
+        print(f'\tHealth status: {_LABEL_TO_HEALTH_STATUS[pred_hs[idx]]}')
+        print(f'\tComparison status: {_LABEL_TO_COMPARISON_STATUS[pred_cs[idx]]}')
+    
+    # Release GPU memory
+    del model
+    del input_ids
+    del attention_mask
+    del embeddings
+    del c_logits
+    del hs_logits
+    del cs_logits
+    del model_output
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()

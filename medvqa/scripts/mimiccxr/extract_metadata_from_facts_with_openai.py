@@ -18,7 +18,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import process_api_requests_from_file
+from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, process_api_requests_from_file
 from medvqa.utils.files import load_jsonl, save_jsonl
 from medvqa.utils.common import get_timestamp
 
@@ -62,7 +62,7 @@ small to moderate size left pleural effusion
 "category": "anatomical finding",
 "health status": "abnormal",
 "prev_study_comparison?": "no",
- "comparison status": ""
+"comparison status": ""
 }
 
 new finding of mass in the abdomen
@@ -125,7 +125,6 @@ def generate_request(fact, model_name, max_tokens, temperature=0.0):
         raise ValueError(f"Unknown model name: {model_name}")
 
 _VALID_JSON_OBJECT_REGEX = re.compile(r"\{\s*\"anatomical location\"\s*:\s*\"[^\"]*\"\s*,\s*\"detailed observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"short observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"category\"\s*:\s*\"[^\"]*\"\s*,\s*\"health status\"\s*:\s*\"[^\"]*\"\s*,\s*\"prev_study_comparison\?\"\s*:\s*\"[^\"]*\"\s*,\s*\"comparison status\"\s*:\s*\"[^\"]*\"\s*\}")
-_GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
 
 def parse_openai_model_output(text):
     """
@@ -133,7 +132,7 @@ def parse_openai_model_output(text):
     """
     match = _VALID_JSON_OBJECT_REGEX.search(text) # match a JSON list of strings
     if not match:
-        if _GPT_IS_ACTING_WEIRD_REGEX.search(text):
+        if GPT_IS_ACTING_WEIRD_REGEX.search(text):
             raise ValueError(f"GPT is acting weird: {text}")
         else:
             raise ValueError(f"Could not parse output: {text}")

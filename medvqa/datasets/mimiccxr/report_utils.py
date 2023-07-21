@@ -1,6 +1,5 @@
 import os
 import random
-import re
 from pprint import pprint
 from medvqa.utils.files import load_json, load_jsonl
 from nltk.tokenize import sent_tokenize
@@ -8,7 +7,6 @@ from tqdm import tqdm
 
 from medvqa.utils.logging import print_orange, print_red
 
-_NEG_REGEX = re.compile(r'^\s*no(t|ne)?\s+', re.IGNORECASE)
 _FACT_METADATA_FIELDS = ('anatomical location', 'detailed observation', 'short observation', 'category', 'health status', 'prev_study_comparison?', 'comparison status')
 
 def _is_s1_subsequence_of_s2(s1, s2):
@@ -65,7 +63,7 @@ def _remove_consecutive_repeated_words_from_text(text, ks=[1, 2, 3, 4, 5, 6, 7, 
     return ' '.join(tokens)
 
 class ReportFactsDisplayer:
-    def __init__(self, preprocessed_reports_filepath, extracted_facts_filepaths, skip_negated_facts=True):
+    def __init__(self, preprocessed_reports_filepath, extracted_facts_filepaths):
         assert type(preprocessed_reports_filepath) == str
         assert type(extracted_facts_filepaths) == list
         assert len(extracted_facts_filepaths) > 0
@@ -94,8 +92,6 @@ class ReportFactsDisplayer:
                     print(f'KeyError: {x}')
                     raise
                 assert s not in self.sentence2facts
-                if skip_negated_facts:
-                    fs = [f for f in fs if not _NEG_REGEX.match(f)]
                 self.sentence2facts[s] = fs
                 self.sentence2filename[s] = filename
 
@@ -128,6 +124,9 @@ class ReportFactsDisplayer:
         print(f'RID: {rid}')
         print()
         pprint(report)
+        print()
+        with open(report['path']) as f:
+            print(f.read())
         print()
         print('Facts:')
         facts = []
@@ -175,7 +174,7 @@ class ReportFactsDisplayer:
         return facts
     
 def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_filepaths, extraction_methods,
-                                skip_negated_facts=True, remove_consecutive_repeated_words=True):
+                                remove_consecutive_repeated_words=True):
 
     assert type(preprocessed_reports_filepath) == str
     assert type(extracted_facts_filepaths) == list
@@ -205,8 +204,6 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
                 print(f'KeyError: {x}')
                 raise
             assert s not in sentence2facts
-            if skip_negated_facts:
-                fs = [f for f in fs if not _NEG_REGEX.match(f)]
             if remove_consecutive_repeated_words:
                 fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
@@ -257,7 +254,7 @@ def integrate_reports_facts_and_metadata(
         preprocessed_reports_filepath,
         extracted_facts_filepaths, fact_extraction_methods,
         extracted_metadata_filepaths, metadata_extraction_methods,
-        skip_negated_facts=True, remove_consecutive_repeated_words=True):
+        remove_consecutive_repeated_words=True):
 
     assert type(preprocessed_reports_filepath) == str
     assert type(extracted_facts_filepaths) == list
@@ -292,8 +289,6 @@ def integrate_reports_facts_and_metadata(
                 print(f'KeyError: {x}')
                 raise
             assert s not in sentence2facts
-            if skip_negated_facts:
-                fs = [f for f in fs if not _NEG_REGEX.match(f)]
             if remove_consecutive_repeated_words:
                 fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs

@@ -9,9 +9,18 @@ import os  # for reading API key
 import re  # for matching endpoint from request URL
 import tiktoken  # for counting tokens
 import time  # for sleeping after rate limit is hit
-from dataclasses import dataclass, field  # for storing API inputs, outputs, and metadata
+from dataclasses import dataclass, field
 
-__all__ = ["process_api_requests_from_file"]
+from medvqa.utils.common import get_timestamp
+from medvqa.utils.files import load_jsonl, save_jsonl  # for storing API inputs, outputs, and metadata
+
+__all__ = [
+    "process_api_requests_from_file",
+    "GPT_IS_ACTING_WEIRD_REGEX",
+    "run_common_boilerplate_for_api_requests",
+]
+
+GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
 
 def process_api_requests_from_file(
     requests_filepath: str,
@@ -42,6 +51,137 @@ def process_api_requests_from_file(
             log_info_every_n_requests=log_info_every_n_requests,
         )
     )
+
+_ALLOWED_GPT_CHAT_MODELS = (
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-0301",
+    "gpt-3.5-turbo-0613",
+    "gpt-3.5-turbo-16k-0613",
+    "gpt-4",
+    "gpt-4-0613",
+)
+
+def _generate_request(system_instructions, query, model_name, max_tokens,
+                     temperature=0, frequency_penalty=0, presence_penalty=0):
+    assert len(system_instructions) > 0
+    assert len(query) > 0
+    assert model_name in _ALLOWED_GPT_CHAT_MODELS, f"Unknown model name: {model_name}"
+    return {
+        "model": model_name,
+        "messages": [{
+            "role": "system",
+            "content": system_instructions,
+        }, {
+            "role": "user",
+            "content": query,
+        }],
+        "temperature": temperature, # 0.0 = (almost) deterministic, 2.0 = max entropy
+        "frequency_penalty": frequency_penalty, # 0.0 = no penalty, 2.0 = max penalty
+        "presence_penalty": presence_penalty, # 0.0 = no penalty, 2.0 = max penalty
+        "max_tokens": max_tokens,
+        "metadata": {
+            "query": query,
+        },
+    }
+
+def run_common_boilerplate_for_api_requests(
+        api_responses_filepath,
+        texts, system_instructions, api_key_name, openai_model_name, openai_request_url,
+        max_tokens_per_request, max_requests_per_minute, max_tokens_per_minute,
+        temperature, frequency_penalty, presence_penalty,
+        logger, logging_level, parse_openai_output, tmp_dir,save_filepath,
+        delete_api_requests_and_responses=False,
+        ):
+    """Runs common boilerplate for API requests."""
+
+    if api_responses_filepath is None:
+    
+        # Prepare API requests
+        jobs = []
+        for text in texts:
+            jobs.append(_generate_request(
+                system_instructions=system_instructions,
+                query=text,
+                model_name=openai_model_name,
+                max_tokens=max_tokens_per_request,
+                temperature=temperature,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+            ))
+            assert 'metadata' in jobs[-1]
+        
+        timestamp = get_timestamp()
+        api_requests_filepath = os.path.join(tmp_dir, "openai", f"api_requests_{timestamp}.jsonl")
+        api_responses_filepath = os.path.join(tmp_dir, "openai", f"api_responses_{timestamp}.jsonl")
+        logger.info(f"Saving API requests to {api_requests_filepath}")
+        logger.info(f"Saving API responses to {api_responses_filepath}")
+        save_jsonl(jobs, api_requests_filepath)
+
+        # Send API requests
+        process_api_requests_from_file(
+            requests_filepath=api_requests_filepath,
+            save_filepath=api_responses_filepath,
+            request_url=openai_request_url,
+            api_key=os.getenv(api_key_name),
+            max_requests_per_minute=max_requests_per_minute,
+            max_tokens_per_minute=max_tokens_per_minute,
+            token_encoding_name=tiktoken.encoding_for_model(openai_model_name).name,
+            max_attempts=5,
+            logging_level=logging_level,
+            log_info_every_n_requests=50,
+        )
+
+    else:
+        assert os.path.exists(api_responses_filepath), f"API responses file {api_responses_filepath} does not exist"
+        logger.info(f"API responses already exist at {api_responses_filepath}. Skipping API requests.")
+        dir_path = os.path.dirname(api_responses_filepath)
+        filename = os.path.basename(api_responses_filepath)
+        api_requests_filepath = os.path.join(dir_path, filename.replace("responses", "requests"))
+        assert os.path.exists(api_requests_filepath), f"API requests file {api_requests_filepath} does not exist"
+        jobs = None
+
+    # Load and postprocess API responses
+    logger.info(f"Loading API responses from {api_responses_filepath}")
+    api_responses = load_jsonl(api_responses_filepath)
+    if jobs is not None:
+        assert len(api_responses) == len(jobs)
+
+    postprocessed_responses = []
+    for i in range(len(api_responses)):
+        api_response = api_responses[i]
+        assert len(api_response) == 3 # request, response, and metadata
+        metadata = api_response[2]
+        try:
+            text = api_response[1]['choices'][0]['message']['content']
+            parsed_output = parse_openai_output(text)
+            postprocessed_responses.append({
+                "metadata": metadata,
+                "parsed_response": parsed_output,
+            })
+        except Exception as e:
+            api_response_string = json.dumps(api_response)
+            if len(api_response_string) > 300:
+                api_response_string = api_response_string[:150] + "..." + api_response_string[-150:]
+            logger.error(f"Error parsing response {api_response_string} for query \"{metadata['query']}\": {e}")
+            continue
+
+    # Delete API requests and responses
+    if delete_api_requests_and_responses:
+        logger.info(f"Deleting API requests and responses")
+        os.remove(api_requests_filepath)
+        os.remove(api_responses_filepath)
+
+    if len(postprocessed_responses) == 0:
+        logger.warning(f"None of the {len(api_responses)} API responses could be parsed. Exiting.")
+    else:
+        # Save processed texts by appending to existing file
+        n_processed = len(postprocessed_responses)
+        n_total = len(api_responses)
+        logger.info(f"""Succesfully processed {n_processed} of {n_total} API responses.
+                    {n_total - n_processed} of {n_total} API responses could not be processed.
+                    Saving processed texts to {save_filepath}""")
+        save_jsonl(postprocessed_responses, save_filepath, append=True)
+
 
 async def __process_api_requests_from_file(
     requests_filepath: str,

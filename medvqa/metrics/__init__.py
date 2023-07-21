@@ -7,6 +7,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMicroAvgF1,
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
+from medvqa.metrics.classification.singlelabel_accuracy import InstanceConditionedTripletAccuracy
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareSeq2SeqOutputLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
@@ -18,13 +19,14 @@ from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
 )
 from medvqa.metrics.classification import (
+    ConditionAwareSingleLabelAccuracy,
     MultiLabelF1score,
     MultiLabelMacroAvgF1,
     MultiLabelMicroAvgF1,
     MultiLabelAccuracy,
     MultiLabelPRF1,
     DatasetAwareMultilabelF1score,
-    DatasetAwareSinglelabelAccuracy,
+    DatasetAwareSingleLabelAccuracy,
     DatasetAwareOrientationAccuracy,
     roc_auc_fn,
 )
@@ -466,7 +468,7 @@ def attach_dataset_aware_padchest_localization_microavgf1(engine, allowed_datase
 
 # Gender
 def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_scores=False, ignore_index=-1):
-    met = DatasetAwareSinglelabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
+    met = DatasetAwareSingleLabelAccuracy(output_transform = _get_output_transform('pred_gender', 'gender'),
                                 allowed_dataset_ids=allowed_dataset_ids,
                                 record_scores=record_scores, ignore_index=ignore_index)
     met.attach(engine, MetricNames.GENDER_ACC)
@@ -475,6 +477,23 @@ def attach_dataset_aware_gender_accuracy(engine, allowed_dataset_ids, record_sco
 def attach_dataset_aware_orientation_accuracy(engine, allowed_dataset_ids, record_scores=False):
     met = DatasetAwareOrientationAccuracy(allowed_dataset_ids, record_scores=record_scores)
     met.attach(engine, MetricNames.ORIENACC)
+
+# Triplet accuracy
+def attach_condition_aware_triplet_accuracy(engine, accepted_id, metric_name, condition_function=lambda _: True):
+    met = InstanceConditionedTripletAccuracy(
+        output_transform=_get_output_transform('triplet_logits', 'rule_id'),
+        accepted_id=accepted_id,
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose accuracy
+def attach_condition_aware_accuracy(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
+    met = ConditionAwareSingleLabelAccuracy(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
 
 # ---------------------------------------------
 # Losses

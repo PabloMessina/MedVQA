@@ -36,3 +36,13 @@ def parsed_args_to_dict(args, verbose=True):
             print(f'   {k}: {v}')
     return args
 
+class DictWithDefault:
+    def __init__(self, default, initial_values={}):
+        self.values = initial_values
+        self.default = default
+    def __getitem__(self, key):
+        return self.values.get(key, self.default)
+    def __setitem__(self, key, value):
+        self.values[key] = value
+    def items(self):
+        return self.values.items()

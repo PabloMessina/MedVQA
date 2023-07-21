@@ -1,6 +1,4 @@
 from collections import OrderedDict
-from re import DEBUG
-from typing import Any
 import numpy as np
 import math
 import random
@@ -751,6 +749,48 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
             batch_dict['input_ids'] = input_encoding.input_ids
             batch_dict['attention_mask'] = input_encoding.attention_mask
         return batch_dict
+    
+    return collate_batch_fn
+
+def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_ranking=False, for_classification=False):
+
+    assert sum([for_triplet_ranking, for_classification]) == 1 # only one of these can be true
+    
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
+
+    if for_triplet_ranking:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='t') # t for triplet ranking
+            a_list = [x['a'] for x in batch]
+            p_list = [x['p'] for x in batch]
+            n_list = [x['n'] for x in batch]
+            a_encoding = tokenizer(a_list, padding="longest", return_tensors="pt")
+            p_encoding = tokenizer(p_list, padding="longest", return_tensors="pt")
+            n_encoding = tokenizer(n_list, padding="longest", return_tensors="pt")
+            batch_dict['a_input_ids'] = a_encoding.input_ids
+            batch_dict['a_attention_mask'] = a_encoding.attention_mask
+            batch_dict['p_input_ids'] = p_encoding.input_ids
+            batch_dict['p_attention_mask'] = p_encoding.attention_mask
+            batch_dict['n_input_ids'] = n_encoding.input_ids
+            batch_dict['n_attention_mask'] = n_encoding.attention_mask
+            if 'rule_id' in batch[0]:
+                batch_dict['rule_id'] = [x['rule_id'] for x in batch]
+            return batch_dict
+    elif for_classification:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='c') # c for classification
+            # facts
+            facts = [x['f'] for x in batch]
+            facts_encoding = tokenizer(facts, padding="longest", return_tensors="pt")
+            batch_dict['input_ids'] = facts_encoding.input_ids
+            batch_dict['attention_mask'] = facts_encoding.attention_mask
+            # labels
+            batch_dict['c'] = torch.tensor([x['c'] for x in batch]) # category
+            batch_dict['hs'] = torch.tensor([x['hs'] for x in batch]) # health status
+            batch_dict['cs'] = torch.tensor([x['cs'] for x in batch]) # comparison status
+            return batch_dict
+    else: assert False
     
     return collate_batch_fn
 

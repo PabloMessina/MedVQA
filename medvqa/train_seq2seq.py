@@ -85,6 +85,10 @@ def parse_args(args=None):
     parser.add_argument('--val_size', type=int, default=200, help='Number of samples to use for validation')
     parser.add_argument('--input_output_jsonl_filepaths', type=str, nargs='+', default=None,
                         help='List of paths to jsonl files with input-output pairs')
+    parser.add_argument('--integrated_facts_metadata_jsonl_filepath', type=str, default=None,
+                        help='Path to json file with integrated fact metadata')
+    parser.add_argument('--paraphrased_inputs_jsonl_filepaths', type=str, nargs='+', default=None,
+                        help='List of paths to jsonl files with paraphrased inputs')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
@@ -300,6 +304,8 @@ def train_from_scratch(
     warmup_decay_and_cyclic_decay_args,
     # Dataset args
     input_output_jsonl_filepaths,
+    integrated_facts_metadata_jsonl_filepath,
+    paraphrased_inputs_jsonl_filepaths,
     task_name,
     val_size,
     # Dataloading args
@@ -358,6 +364,8 @@ def train_from_scratch(
     
     seq2seq_trainer_kwargs = dict(
         input_output_jsonl_filepaths=input_output_jsonl_filepaths,
+        integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
+        paraphrased_inputs_jsonl_filepaths=paraphrased_inputs_jsonl_filepaths,
         task_name=task_name,
         val_size=val_size,
     )
