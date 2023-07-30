@@ -1,8 +1,9 @@
+import numpy as np
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from ignite.engine import Events
 from sklearn.metrics import f1_score
-
+from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 
 class MultiLabelF1score(Metric):
@@ -328,3 +329,79 @@ class MultiLabelPRF1(Metric):
             'r_macro_avg': r_macro_avg,
             'f1_macro_avg': f1_macro_avg,
         }
+    
+class ConditionAwareMultiLabelMultiClassMacroAvgF1(ConditionAwareMetric):
+
+    def __init__(self, output_transform, condition_function):
+        self._pred_labels_batches = []
+        self._gt_labels_batches = []
+        super().__init__(output_transform, condition_function)
+    
+    def reset(self):
+        self._pred_labels_batches.clear()
+        self._gt_labels_batches.clear()
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        self._pred_labels_batches.append(pred_labels.cpu().numpy())
+        self._gt_labels_batches.append(gt_labels.cpu().numpy())
+
+    def compute(self):
+        pred_labels = np.concatenate(self._pred_labels_batches, axis=0)
+        gt_labels = np.concatenate(self._gt_labels_batches, axis=0)
+        assert pred_labels.shape == gt_labels.shape
+        m = pred_labels.shape[1]
+        score = 0
+        for j in range(m):
+            y_true = gt_labels[:, j]
+            y_pred = pred_labels[:, j]
+            score += f1_score(y_true, y_pred, average='macro')
+        score /= m
+        return score
+
+
+class ConditionAwareMultiLabelMacroAvgF1(ConditionAwareMetric):
+
+    def __init__(self, output_transform, condition_function):
+        self._tp = []
+        self._tn = []
+        self._fp = []
+        self._fn = []
+        super().__init__(output_transform, condition_function)
+    
+    def reset(self):
+        self._tp.clear()
+        self._tn.clear()
+        self._fp.clear()
+        self._fn.clear()
+
+    def update(self, output):
+        pred_labels, gt_labels = output
+        
+        n, m = pred_labels.shape
+        if len(self._tp) == 0:
+            self._tp = [0] * m
+            self._tn = [0] * m
+            self._fp = [0] * m
+            self._fn = [0] * m
+        for i in range(n):
+            for j in range(m):
+                pred = pred_labels[i][j]
+                gt = gt_labels[i][j]
+                if pred:
+                    if gt: self._tp[j] += 1
+                    else: self._fp[j] += 1
+                else:
+                    if gt: self._fn[j] += 1
+                    else: self._tn[j] += 1
+
+    def compute(self):
+        m = len(self._tp)
+        mean_f1 = 0
+        for j in range(m):            
+            prec = self._tp[j] / max(self._tp[j] + self._fp[j], 1)
+            rec = self._tp[j] / max(self._tp[j] + self._fn[j], 1)            
+            f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
+            mean_f1 += f1
+        mean_f1 /= m
+        return mean_f1

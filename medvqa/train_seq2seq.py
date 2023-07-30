@@ -89,6 +89,8 @@ def parse_args(args=None):
                         help='Path to json file with integrated fact metadata')
     parser.add_argument('--paraphrased_inputs_jsonl_filepaths', type=str, nargs='+', default=None,
                         help='List of paths to jsonl files with paraphrased inputs')
+    parser.add_argument('--chest_imagenome_phrases2labels_filepath', type=str, default=None,
+                        help='Path to pickle file with chest imagenome phrases to labels mapping')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
@@ -162,6 +164,7 @@ def train_model(
     collate_batch_fn = get_seq2seq_collate_batch_fn(**collate_batch_fn_kwargs)
 
     # Create Seq2Seq trainer
+    count_print('Creating Seq2SeqTrainer ...')
     seq2seq_trainer = Seq2SeqTrainer(
         batch_size=batch_size,
         collate_batch_fn=collate_batch_fn,
@@ -306,6 +309,7 @@ def train_from_scratch(
     input_output_jsonl_filepaths,
     integrated_facts_metadata_jsonl_filepath,
     paraphrased_inputs_jsonl_filepaths,
+    chest_imagenome_phrases2labels_filepath,
     task_name,
     val_size,
     # Dataloading args
@@ -366,6 +370,7 @@ def train_from_scratch(
         input_output_jsonl_filepaths=input_output_jsonl_filepaths,
         integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
         paraphrased_inputs_jsonl_filepaths=paraphrased_inputs_jsonl_filepaths,
+        chest_imagenome_phrases2labels_filepath=chest_imagenome_phrases2labels_filepath,
         task_name=task_name,
         val_size=val_size,
     )

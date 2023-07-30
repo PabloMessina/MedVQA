@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 
 from medvqa.utils.logging import get_console_logger
+from medvqa.utils.nlp import sort_sentences
 load_dotenv()
 
 import os
@@ -11,8 +12,6 @@ import re
 import random
 import json
 import numpy as np
-from tqdm import tqdm
-from nltk.tokenize import word_tokenize
 
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
@@ -143,26 +142,6 @@ def parse_openai_model_output(text):
         assert isinstance(parsed_fact[x], str), f"Could not parse output: {text}"
     return parsed_fact
 
-def sort_facts(facts):
-    assert type(facts) == list, f"Expected list, got {type(facts)}"
-   
-    logger.info("Sorting facts by difficulty...")
-    tokenized_facts = [word_tokenize(x) for x in tqdm(facts, mininterval=2)]
-    logger.info("Counting word frequencies...")
-    vocab_freq = dict()        
-    for tokens in tqdm(tokenized_facts, mininterval=2):
-        for word in tokens:
-            vocab_freq[word] = vocab_freq.get(word, 0) + 1
-    def _difficulty(i):
-        return sum(1 / vocab_freq[word] for word in tokenized_facts[i])
-    ranked_indices = sorted(range(len(tokenized_facts)), key=_difficulty, reverse=True)
-    ranked_facts = [facts[i] for i in ranked_indices]
-    
-    logger.info("Done sorting facts.")
-    logger.info(f"First fact: {ranked_facts[0]}")
-    logger.info(f"Last fact: {ranked_facts[-1]}")
-    return ranked_facts
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -220,7 +199,7 @@ if __name__ == '__main__':
     
     # Sort facts
     unique_facts = list(unique_facts)
-    unique_facts = sort_facts(unique_facts)
+    unique_facts = sort_sentences(unique_facts, logger, by_difficulty=True)
 
     # Adjust number of facts to parse if necessary
     assert 0 <= args.offset < len(unique_facts)

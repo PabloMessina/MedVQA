@@ -3,13 +3,15 @@ import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
+from medvqa.losses import Focal_BCE_WBCE_Loss
 from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.wce import WeigthedByClassCrossEntropyLoss
 
 def get_step_fn(model, optimizer, training, validating, testing, device,
         iters_to_accumulate=1, # for gradient accumulation
         triplet_loss_criterion=None, # for triplet ranking
-        classifier_loss_criterion=None, # for classification
+        metadata_classifier_loss_criterion=None, # for metadata classification
+        chest_imagenome_classifier_loss_criterion=None, # for chest imagenome classification
         # automatic mixed precision
         use_amp=False,
         # batchwise learning rate updates
@@ -69,7 +71,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
-    def step_fn__classification(batch):
+    def step_fn__metadata_classification(batch):
 
         # Extract elements from batch
         input_ids = batch['input_ids'].to(device)
@@ -84,18 +86,18 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
-                output = model(input_ids=input_ids, attention_mask=attention_mask, run_auxiliary_tasks=True)
+                output = model(input_ids=input_ids, attention_mask=attention_mask, run_metadata_auxiliary_tasks=True)
                 c_logits = output['category_logits']
                 hs_logits = output['health_status_logits']
                 cs_logits = output['comparison_status_logits']
 
                 if training:
                     losses = []
-                    c_loss = classifier_loss_criterion(c_logits, c_labels)
+                    c_loss = metadata_classifier_loss_criterion(c_logits, c_labels)
                     losses.append(c_loss)
-                    hs_loss = classifier_loss_criterion(hs_logits, hs_labels)
+                    hs_loss = metadata_classifier_loss_criterion(hs_logits, hs_labels)
                     losses.append(hs_loss)
-                    cs_loss = classifier_loss_criterion(cs_logits, cs_labels)
+                    cs_loss = metadata_classifier_loss_criterion(cs_logits, cs_labels)
                     losses.append(cs_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
@@ -118,12 +120,49 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
+    def step_fn__chest_imagenome_classification(batch):
+
+        # Extract elements from batch
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['l'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+            
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                output = model(input_ids=input_ids, attention_mask=attention_mask, run_chest_imagenome_auxiliary_task=True)
+                logits = output['chest_imagenome_logits']
+
+                if training:
+                    losses = []
+                    chstimgn_loss = chest_imagenome_classifier_loss_criterion(logits, labels.float())
+                    losses.append(chstimgn_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss)
+
+        # Prepare output
+        output = {
+            'pred_labels': (logits.detach() > 0).cpu(),
+            'gt_labels': labels.detach(),
+        }
+        if training:
+            output['loss'] = batch_loss.detach()
+            output['chstimgn_loss'] = chstimgn_loss.detach()
+
+        return output
+    
     def step_fn_wrapper(unused_engine, batch):
         flag = batch['flag']
         if flag == 't': # triplet ranking
             output = step_fn__triplet_ranking(batch)
-        elif flag == 'c': # classification
-            output = step_fn__classification(batch)
+        elif flag == 'mc': # metadata classification
+            output = step_fn__metadata_classification(batch)
+        elif flag == 'cic': # chest imagenome classification
+            output = step_fn__chest_imagenome_classification(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -147,15 +186,19 @@ def get_engine(model, device,
     # Triplet loss criterion as binary cross entropy
     triplet_loss_criterion = nn.BCEWithLogitsLoss()
 
-    # Classification loss criterion as weighted cross entropy
-    classifier_loss_criterion = WeigthedByClassCrossEntropyLoss()
+    # Metadata classification loss criterion as weighted cross entropy
+    metadata_classifier_loss_criterion = WeigthedByClassCrossEntropyLoss()
+
+    # Chest imagenome classification loss criterion as weighted cross entropy
+    chest_imagenome_classifier_loss_criterion = Focal_BCE_WBCE_Loss()
     
     # Create engine
     step_fn = get_step_fn(model=model, optimizer=optimizer, device=device,
                           training=training, validating=validating, testing=testing,
                           iters_to_accumulate=iters_to_accumulate,
                           triplet_loss_criterion=triplet_loss_criterion,
-                          classifier_loss_criterion=classifier_loss_criterion,
+                          metadata_classifier_loss_criterion=metadata_classifier_loss_criterion,
+                          chest_imagenome_classifier_loss_criterion=chest_imagenome_classifier_loss_criterion,
                           use_amp=use_amp,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,

@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 
 from medvqa.utils.logging import get_console_logger
+from medvqa.utils.nlp import sort_sentences
 load_dotenv()
 
 import random
@@ -12,7 +13,7 @@ import sys
 import json
 import numpy as np
 from tqdm import tqdm
-from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tokenize import sent_tokenize
 
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
@@ -114,28 +115,6 @@ def parse_openai_model_output(text):
     assert all(isinstance(fact, str) for fact in list_of_facts), f"Could not parse output: {text}"
     return list_of_facts
 
-def sort_sentences(sentences, by_difficulty=False):
-    assert type(sentences) == list, f"Expected list, got {type(sentences)}"
-    if by_difficulty:
-        logger.info("Sorting sentences by difficulty...")
-        tokenized_sentences = [word_tokenize(x) for x in tqdm(sentences, mininterval=2)]
-        logger.info("Counting word frequencies...")
-        vocab_freq = dict()        
-        for tokens in tqdm(tokenized_sentences, mininterval=2):
-            for word in tokens:
-                vocab_freq[word] = vocab_freq.get(word, 0) + 1
-        def _difficulty(i):
-            return sum(1 / vocab_freq[word] for word in tokenized_sentences[i])
-        ranked_indices = sorted(range(len(tokenized_sentences)), key=_difficulty, reverse=True)
-        ranked_sentences = [sentences[i] for i in ranked_indices]
-    else:
-        logger.info("Sorting sentences by length...")
-        ranked_sentences = sorted(sentences, key=len, reverse=True)
-    logger.info("Done sorting sentences.")
-    logger.info(f"First sentence: {ranked_sentences[0]}")
-    logger.info(f"Last sentence: {ranked_sentences[-1]}")
-    return ranked_sentences
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -201,7 +180,7 @@ if __name__ == '__main__':
 
     # Sort sentences
     unique_sentences = list(unique_sentences)
-    unique_sentences = sort_sentences(unique_sentences, args.rank_sentences_by_difficulty)
+    unique_sentences = sort_sentences(unique_sentences, logger, args.rank_sentences_by_difficulty)
 
     # Adjust number of sentences to parse if necessary
     assert 0 <= args.offset < len(unique_sentences)

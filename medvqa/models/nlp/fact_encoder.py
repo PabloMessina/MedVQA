@@ -19,6 +19,8 @@ class FactEncoder(nn.Module):
                  n_health_statuses=None,
                  classify_comparison_status=False,
                  n_comparison_statuses=None,
+                 classify_chest_imagenome=False,
+                 n_chest_imagenome_labels=None,
                  **unused_kwargs):
         super().__init__()
         print('Fact encoder')
@@ -30,6 +32,8 @@ class FactEncoder(nn.Module):
         print(f'  n_health_statuses: {n_health_statuses}')
         print(f'  classify_comparison_status: {classify_comparison_status}')
         print(f'  n_comparison_statuses: {n_comparison_statuses}')
+        print(f'  classify_chest_imagenome: {classify_chest_imagenome}')
+        print(f'  n_chest_imagenome_labels: {n_chest_imagenome_labels}')
 
         self.huggingface_model_name = huggingface_model_name
 
@@ -53,17 +57,21 @@ class FactEncoder(nn.Module):
             self.health_status_classifier = nn.Linear(self.embedding_size, self.n_health_statuses)
         if self.classify_comparison_status:
             self.comparison_status_classifier = nn.Linear(self.embedding_size, self.n_comparison_statuses)
+        if classify_chest_imagenome:
+            self.chest_imagenome_classifier = nn.Linear(self.embedding_size, n_chest_imagenome_labels)
 
-    def forward(self, input_ids, attention_mask, run_auxiliary_tasks=False):
+    def forward(self, input_ids, attention_mask, run_metadata_auxiliary_tasks=False, run_chest_imagenome_auxiliary_task=False):
         text_embeddings = self.model.get_projected_text_embeddings(input_ids=input_ids, attention_mask=attention_mask)
         output = { 'text_embeddings': text_embeddings }
-        if run_auxiliary_tasks:
+        if run_metadata_auxiliary_tasks:
             if self.classify_category:
                 output['category_logits'] = self.category_classifier(text_embeddings)
             if self.classify_health_status:
                 output['health_status_logits'] = self.health_status_classifier(text_embeddings)
             if self.classify_comparison_status:
                 output['comparison_status_logits'] = self.comparison_status_classifier(text_embeddings)
+        if run_chest_imagenome_auxiliary_task:
+            output['chest_imagenome_logits'] = self.chest_imagenome_classifier(text_embeddings)
         return output
     
     def get_name(self):

@@ -274,7 +274,6 @@ def sample_anatomical_location_triplets__rule3(
                     # both CXR-BERT and Leveinshtein agree
                     used_triplets.add(triplet) # add triplet to used triplets
                     rule_triplets.append(triplet)
-                    
                     break # break out of for loop
     
     logger.info(f'Actual number of triplets sampled for Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus": {len(rule_triplets)}')
@@ -556,11 +555,98 @@ def sample_observation_triplets__rule5(
         'triplets': rule_triplets,
     })
 
+def sample_observation_triplets__rule6(
+    n_triplets_per_rule,
+    sentence2index,
+    index2sentence,
+    sentence_embeddings,
+    sentences,
+    labels,
+    used_triplets,
+    triplets_dict,
+    logger,
+):
+    # Rule 6: "Rank triplets according to Chest ImaGenome labels"
+    # dot(E(A), E(P)) > dot(E(A), E(N)) if F1(A, P) > F1(A, N), as long as CXR-BERT and Leveinshtein do not both disagree.
+    # Where:
+    # A = anchor = a sentence annotated with Chest ImaGenome labels
+    # P = positive = another sentence annotated with Chest ImaGenome labels, sharing at least one label with A
+    # N = negative = randomly sampled sentence annotated with Chest ImaGenome labels, not sharing any label with A
+    # F1(X, Y) = F1 score between the labels of X and Y
+    # In words: include the triplet (A, P, N) if A and P share at least one label and if the F1 score between the labels of A and P
+    #           is higher than the F1 score between the labels of A and N, as long as CXR-BERT and Leveinshtein do not both disagree.
+    
+    logger.info('Rule 6: "Rank triplets according to Chest ImaGenome labels"')
+    assert len(sentences) == len(labels), f'len(sentences)={len(sentences)} != len(labels)={len(labels)}'
+    n, m = labels.shape
+    rule_triplets = []
+    
+    # For each label, collect the indices of sentences that are annotated with that label
+    label2idxs = [[] for _ in range(m + 1)] # +1 for the "no label" label
+    idx2i = {}
+    for i in tqdm(range(n), mininterval=2):
+        s = sentences[i]
+        s_idx = sentence2index[s]
+        idx2i[s_idx] = i
+        no_label = True
+        for j in range(m):
+            if labels[i, j] == 1:
+                label2idxs[j].append(s_idx)
+                no_label = False
+        if no_label:
+            label2idxs[m].append(s_idx)
+
+    n_triplets_per_label = math.ceil(n_triplets_per_rule / m)
+    for i in tqdm(range(m), mininterval=2):
+        idxs = label2idxs[i]
+        if n_triplets_per_label < len(idxs):
+            idxs.sort(key=lambda x: len(index2sentence[x]))
+            idxs = [idxs[i] for i in np.linspace(0, len(idxs)-1, n_triplets_per_label, dtype=int)]
+            assert len(idxs) == n_triplets_per_label
+        n_triplets_per_idx = math.ceil(n_triplets_per_label / len(idxs))
+        for A in idxs:
+            A_labels = labels[idx2i[A]]
+            for _ in range(n_triplets_per_idx):
+                for _ in range(MAX_TRIES):
+                    P = random.choice(label2idxs[i])
+                    if A == P:
+                        continue
+                    L = random.randint(0, m) # randomly select a label (including "no label")
+                    if L < m and A_labels[L] == 1: # if A already has label L -> skip
+                        continue
+                    if len(label2idxs[L]) == 0: # if no sentence has label L -> skip
+                        continue
+                    N = random.choice(label2idxs[L])
+                    N_labels = labels[idx2i[N]]
+                    if np.any(A_labels & N_labels): # if A and N share at least one label -> skip
+                        continue
+                    assert A != N and P != N
+                    triplet = (A, P, N)
+                    if triplet in used_triplets: # if already used -> skip
+                        continue
+                    AP_sim = np.dot(sentence_embeddings[A], sentence_embeddings[P])
+                    AN_sim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
+                    AP_levd = levenshtein_distance(index2sentence[A], index2sentence[P])
+                    AN_levd = levenshtein_distance(index2sentence[A], index2sentence[N])
+                    if AN_sim > AP_sim and AN_levd < AP_levd: # if both CXR-BERT and Leveinshtein disagree -> skip
+                        continue
+                    # if we reach here, then we have found a valid triplet
+                    used_triplets.add(triplet)
+                    rule_triplets.append(triplet)
+                    break # break out of for loop
+        
+    logger.info(f'Actual number of triplets sampled for Rule 6: "Rank triplets according to Chest ImaGenome labels": {len(rule_triplets)}')
+    triplets_dict['train']['observations'].append({
+        'rule': 'Rank triplets according to Chest ImaGenome labels',
+        'triplets': rule_triplets,
+    })
+
 def main():
     parser = argparse.ArgumentParser(description='Sample triplets for fact embedding learning')
     parser.add_argument('--paraphrased_anatomical_locations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--paraphrased_observations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--integrated_fact_metadata_filepath', type=str, required=True)
+    parser.add_argument('--chest_imagenome_sentences_and_labels_filepath', type=str, required=True)
     parser.add_argument('--num_anatloc_clusters', type=int, required=True,
                         help='Number of clusters to be formed for anatomical locations. Used for sampling triplets.')
     parser.add_argument('--num_obs_clusters', type=int, required=True,
@@ -652,6 +738,11 @@ def main():
     observations_list = list(observations_set)
     observations_list.sort(key=lambda x: (len(x), x)) # Sort by length and then alphabetically
 
+    logger.info(f'Loading Chest ImaGenome sentences and labels from {args.chest_imagenome_sentences_and_labels_filepath}...')
+    chest_imagenome_data = load_pickle(args.chest_imagenome_sentences_and_labels_filepath)
+    for group in chest_imagenome_data['groups']:
+        sentences_set.update(group['sentences'])
+    
     logger.info(f'Found {len(sentences_set)} unique sentences.')
     sentences_list = list(sentences_set)
     sentences_list.sort(key=lambda x: (len(x), x)) # Sort by length and then alphabetically
@@ -701,6 +792,7 @@ def main():
                         embeddings[sentence2index[s]] = _precomputed_embeddings[i]
             else:
                 logger.info(f'Found {len(_sentences_to_skip)} precomputed sentence embeddings. Computing embeddings for {len(_sentences_to_process)} sentences...')
+                random.shuffle(_sentences_to_process) # shuffle to minimize the chance of having multiple long sentences in a batch
                 _embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(_sentences_to_process,
                                                                                     device=args.device,
                                                                                     logger=logger,
@@ -741,7 +833,8 @@ def main():
     # Precompute clusters for anatomical locations and observations
     clusters_save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR,
                                         f'clusters({args.num_anatloc_clusters},{args.num_obs_clusters}'
-                                        f'{len(anatomical_locations_list)},{len(observations_list)}).pkl')
+                                        f'{len(anatomical_locations_list)},{len(observations_list)},'
+                                        f'{len(sentences_list)},{sentlen_sum}).pkl')
     if os.path.exists(clusters_save_path):
         logger.info(f'Found precomputed clusters at {clusters_save_path}. Loading...')
         clusters = load_pickle(clusters_save_path)
@@ -750,7 +843,7 @@ def main():
         logger.info(f'Precomputing clusters for {len(anatomical_locations_list)} anatomical locations...')
         anatloc_embeddings = embeddings[anatloc_indices]
         logger.info(f'anatloc_embeddings.shape: {anatloc_embeddings.shape}')
-        anatloc_kmeans = KMeans(n_clusters=args.num_anatloc_clusters, init='k-means++', n_init='auto', verbose=2,
+        anatloc_kmeans = KMeans(n_clusters=args.num_anatloc_clusters, init='k-means++', n_init='auto', verbose=1,
                                 max_iter=args.num_kmeans_iterations).fit(anatloc_embeddings)
         anatloc_clusters = anatloc_kmeans.labels_
         logger.info(f'anatloc_clusters.shape: {anatloc_clusters.shape}')
@@ -759,7 +852,7 @@ def main():
         logger.info(f'Precomputing clusters for {len(observations_list)} observations...')
         obs_embeddings = embeddings[obs_indices]
         logger.info(f'obs_embeddings.shape: {obs_embeddings.shape}')
-        obs_kmeans = KMeans(n_clusters=args.num_obs_clusters, init='k-means++', n_init='auto', verbose=2,
+        obs_kmeans = KMeans(n_clusters=args.num_obs_clusters, init='k-means++', n_init='auto', verbose=1,
                             max_iter=args.num_kmeans_iterations).fit(obs_embeddings)
         obs_clusters = obs_kmeans.labels_
         logger.info(f'obs_clusters.shape: {obs_clusters.shape}')
@@ -1001,6 +1094,28 @@ def main():
         sentence_embeddings=embeddings,
         obs_idx2cluster=obs_idx2cluster,
         obs_cluster2indices=obs_cluster2indices,
+        used_triplets=used_triplets,
+        triplets_dict=triplets,
+        logger=logger,
+    )
+
+    # Rule 6
+    chest_imagenome_sentences = []
+    chest_imagenome_labels = []
+    for group in chest_imagenome_data['groups']:
+        chest_imagenome_sentences.extend(group['sentences'])
+        chest_imagenome_labels.append(group['labels'])
+        assert len(group['sentences']) == len(group['labels'])
+    chest_imagenome_labels = np.concatenate(chest_imagenome_labels, axis=0)
+    logger.info(f'len(chest_imagenome_sentences): {len(chest_imagenome_sentences)}')
+    logger.info(f'chest_imagenome_labels.shape: {chest_imagenome_labels.shape}')
+    sample_observation_triplets__rule6(
+        n_triplets_per_rule=args.num_train_triplets_per_rule,
+        sentence2index=sentence2index,
+        index2sentence=sentences_list,
+        sentence_embeddings=embeddings,
+        sentences=chest_imagenome_sentences,
+        labels=chest_imagenome_labels,
         used_triplets=used_triplets,
         triplets_dict=triplets,
         logger=logger,

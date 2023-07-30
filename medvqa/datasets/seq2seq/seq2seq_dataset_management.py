@@ -3,10 +3,12 @@ import math
 import random
 import os
 import json
+from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
-from medvqa.utils.files import load_jsonl
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.data_structures import UnionFind
+from medvqa.utils.files import load_jsonl, load_pickle
+from medvqa.utils.logging import print_bold, print_magenta, print_orange
 
 _ALLOWED_COMPARISONS = set([
     "no comparison",
@@ -32,6 +34,7 @@ class Seq2SeqTaskNames:
     BACKGROUND_TO_FACTS = 'background2facts'
     FACT_TO_METADATA = 'fact2metadata'
     FACT_TO_COMPARISON = 'fact2comparison'
+    SENTENCE_TO_CHEST_IMAGENOME_LABELS = 'sentence2chestimagenome_labels'
     @staticmethod
     def get_all():
         return [
@@ -40,6 +43,7 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.BACKGROUND_TO_FACTS,
             Seq2SeqTaskNames.FACT_TO_METADATA,
             Seq2SeqTaskNames.FACT_TO_COMPARISON,
+            Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS,
         ]
 
 class Seq2SeqDataset(Dataset):
@@ -68,6 +72,7 @@ class Seq2SeqDataset(Dataset):
 def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name, batch_size, collate_batch_fn, num_workers,
                                          integrated_facts_metadata_jsonl_filepath=None,
                                          paraphrased_inputs_jsonl_filepaths=None,
+                                         chest_imagenome_phrases2labels_filepath=None,
                                          val_size=200, verbose=True):
     assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
     # Load input and output texts
@@ -94,6 +99,34 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                     input_texts.append(row['fact'])
                     output_texts.append(comp)
         print(f'Loaded {len(input_texts)} input/output pairs from {integrated_facts_metadata_jsonl_filepath}')
+
+    if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS:
+        assert chest_imagenome_phrases2labels_filepath is not None, 'chest_imagenome_phrases2labels_filepath must be provided'
+        chest_imagenome_phrases2labels = load_pickle(chest_imagenome_phrases2labels_filepath)
+        phrases = chest_imagenome_phrases2labels['phrases']
+        labels = chest_imagenome_phrases2labels['labels']
+        label_names = chest_imagenome_phrases2labels['label_names']
+        # Remove nlp labels and prefixes
+        _idxs = [i for i, x in enumerate(label_names) if not x.startswith('nlp|')]
+        assert len(_idxs) + 2 == len(label_names) # 2 nlp labels
+        labels = labels[:, _idxs]
+        label_names = [label_names[i][label_names[i].index('|') + 1:] for i in _idxs]
+        n, m = labels.shape
+        assert len(phrases) == n
+        assert len(label_names) == m
+        for i in tqdm(range(n), total=n, mininterval=2):
+            input_texts.append(phrases[i])
+            output_text = json.dumps([label_names[j] for j in range(m) if labels[i, j] == 1])
+            output_texts.append(output_text)
+        if verbose:
+            print(f'Loaded {len(input_texts)} input/output pairs from {chest_imagenome_phrases2labels_filepath}')
+            print('Examples:')
+            for _ in range(3):
+                i = random.randint(0, n - 1)
+                print_bold(f'Input:')
+                print_magenta(input_texts[i], bold=True)
+                print_bold(f'Output:')
+                print_magenta(output_texts[i], bold=True)
 
     for input_output_jsonl_filepath in input_output_jsonl_filepaths:
         input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
@@ -134,6 +167,13 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 output_text = input_output['parsed_response']
                 input_texts.append(input_text)
                 output_texts.append(output_text)
+        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS:
+            for input_output in input_output_jsonl:
+                sentence = input_output['metadata']['query']
+                input_text = sentence
+                output_text = json.dumps(input_output['parsed_response'])
+                input_texts.append(input_text)
+                output_texts.append(output_text)
         else:
             raise ValueError(f'Unknown task name {task_name}')
         
@@ -162,7 +202,8 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 input2paraphrases[input_text].extend(paraphrases)
         if verbose:
             print('--------')
-            print(f'Loaded {len(input2paraphrases)} paraphrased inputs in total')
+            print_bold(f'Number of unique inputs: {len(input2paraphrases)}')
+            print_bold(f'Number of total paraphrases: {sum(len(x) for x in input2paraphrases.values())}')
         count = 0
         print_count = 0
         for i in range(len(input_texts)):
@@ -171,7 +212,7 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
             if input_text in input2paraphrases:
                 paraphrases = input2paraphrases[input_text]
                 paraphrases = set(paraphrases) # remove duplicates
-                paraphrases.discard(input_text) # remove original input (if present)
+                paraphrases.discard(input_text) # remove original input
                 for p in paraphrases:
                     input_texts.append(p)
                     output_texts.append(output_text) # keep same output
@@ -185,7 +226,7 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
         if verbose:
             print('--------')
             print(f'Added {count} paraphrased inputs')
-            print(f'Number of total examples: {len(input_texts)}')
+            print_bold(f'Number of total examples: {len(input_texts)}')
     
     if task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
 
@@ -238,6 +279,99 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
             print(f'Number of train examples: {train_size}')
             print(f'Number of val examples: {len(val_indices)}')
             print(f'Number of total examples: {train_size + len(val_indices)}')
+
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS:
+
+        label_name_2_idx = { label_name: i for i, label_name in enumerate(label_names) }
+        assert len(label_name_2_idx) == len(label_names)
+        label2idxs = [[] for _ in range(len(label_name_2_idx))]
+        idxs_without_labels = []
+        unknown_labels = set()
+        unknown_count = 0
+        for i, output_text in tqdm(enumerate(output_texts), total=len(output_texts), mininterval=2):
+            labels = json.loads(output_text)
+            label_found = False
+            for label in labels:
+                try:
+                    label2idxs[label_name_2_idx[label]].append(i)
+                    label_found = True
+                except KeyError:
+                    unknown_count += 1
+                    unknown_labels.add(label)
+            if not label_found:
+                idxs_without_labels.append(i)
+
+        if verbose:
+            print(f'Number of total examples: {len(output_texts)}')
+            print(f'Number of examples without labels: {len(idxs_without_labels)}')
+            if unknown_count > 0:
+                print_orange(f'WARNING: Number of unknown labels: {unknown_count}', bold=True)
+                unknown_labels = list(unknown_labels)
+                print_orange('Some unknown labels:', bold=True)
+                for x in random.sample(unknown_labels, min(10, len(unknown_labels))):
+                    print_orange(f'  {x}', bold=True)
+
+        # Split intro train & val
+        val_idxs_set = set()
+        val_sizes = [0] * (len(label2idxs) + 1) # +1 for idxs_without_labels
+        count = 0
+        while count < val_size:
+            for i, idxs in enumerate(label2idxs):
+                if (val_sizes[i] + 1) * 10 <= len(idxs):
+                    val_sizes[i] += 1
+                    count += 1
+                    if count >= val_size:
+                        break
+            if (val_sizes[-1] + 1) * 10 <= len(idxs_without_labels):
+                val_sizes[-1] += 1
+                count += 1
+                if count >= val_size:
+                    break
+        train_datasets = []
+        train_weights = []
+        print_messages = []
+        train_size = 0
+        for i, idxs in enumerate(label2idxs):
+            assert val_sizes[i] * 10 <= len(idxs), f'val_size {val_sizes[i]} is too large for label {label_names[i]} (len {len(idxs)})'
+            val_idxs = random.sample(idxs, val_sizes[i])
+            val_idxs_set.update(val_idxs)
+        val_idxs_set.update(random.sample(idxs_without_labels, val_sizes[-1]))
+        for i, idxs in enumerate(label2idxs):
+            train_idxs = [i for i in idxs if i not in val_idxs_set]
+            train_datasets.append(Seq2SeqDataset(train_idxs, input_texts, output_texts, shuffle=True, infinite=True))
+            train_weights.append(math.log2(len(train_idxs))**3) # weight by log^3 of number of examples
+            train_size += len(train_idxs)
+            print_messages.append((
+                len(train_idxs),
+                f'Label: {label_names[i]}, train size: {len(train_idxs)}, val size: {val_sizes[i]}, weight: {train_weights[-1]}'
+            ))
+        train_idxs = [i for i in idxs_without_labels if i not in val_idxs_set]
+        train_datasets.append(Seq2SeqDataset(train_idxs, input_texts, output_texts, shuffle=True, infinite=True))
+        train_weights.append(math.log2(len(train_idxs))**3) # weight by log^3 of number of examples
+        train_size += len(train_idxs)
+        print_messages.append((
+            len(train_idxs),
+            f'Label: None, train size: {len(train_idxs)}, val size: {val_sizes[-1]}, weight: {train_weights[-1]}'
+        ))
+        val_idxs = list(val_idxs_set)
+
+        if verbose:
+            # Print label stats
+            print('--------')
+            print_bold('Label stats:')
+            print_messages.sort(key=lambda x: x[0], reverse=True)
+            for _, msg in print_messages:
+                print(msg)
+            print('--------')
+            print(f'Number of train examples: {train_size}')
+            print(f'Number of val examples: {len(val_idxs)}')
+            print(f'Number of total examples: {train_size + len(val_idxs)}')
+            print(f'Number of train datasets: {len(train_datasets)}')
+
+        # Create datasets
+        train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+        val_dataset = Seq2SeqDataset(val_idxs, input_texts, output_texts, shuffle=False)
+        
     else:        
     
         # Split intro train & val
@@ -298,6 +432,7 @@ class Seq2SeqTrainer():
     def __init__(self, batch_size, collate_batch_fn, num_workers, input_output_jsonl_filepaths, task_name,
                  integrated_facts_metadata_jsonl_filepath=None,
                  paraphrased_inputs_jsonl_filepaths=None,
+                 chest_imagenome_phrases2labels_filepath=None,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -313,6 +448,7 @@ class Seq2SeqTrainer():
             input_output_jsonl_filepaths, task_name, batch_size, collate_batch_fn, num_workers,
             integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
             paraphrased_inputs_jsonl_filepaths=paraphrased_inputs_jsonl_filepaths,
+            chest_imagenome_phrases2labels_filepath=chest_imagenome_phrases2labels_filepath,
             val_size=val_size, verbose=verbose)
         self.train_dataset = tmp['train_dataset']
         self.val_dataset = tmp['val_dataset']

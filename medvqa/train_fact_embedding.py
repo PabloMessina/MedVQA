@@ -17,6 +17,7 @@ from medvqa.training.utils import append_metric_name, run_common_boilerplate_cod
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_loss,
+    attach_condition_aware_multilabel_f1score,
     attach_condition_aware_triplet_accuracy,
     attach_condition_aware_accuracy,
 )
@@ -70,6 +71,7 @@ def parse_args(args=None):
     # Model arguments
     parser.add_argument('--huggingface_model_name', type=str, default=None, choices=HuggingfaceModels.get_all())
     parser.add_argument('--embedding_size', type=int, default=128)
+    parser.add_argument('--n_chest_imagenome_labels', type=int, default=None)
     parser.add_argument('--pretrained_checkpoint_folder_path', type=str, default=None)
     
     # Optimization arguments
@@ -89,9 +91,13 @@ def parse_args(args=None):
     parser.add_argument('--triplet_rule_weights', type=str, action=_TripletRuleWeightsAction, help='Weights for triplet rules')
     parser.add_argument('--integrated_facts_metadata_jsonl_filepath', type=str, default=None, help='Path to integrated facts metadata file')
     parser.add_argument('--paraphrases_jsonl_filepaths', type=str, nargs='+', default=None, help='Path to paraphrases files')
+    parser.add_argument('--integrated_chest_imagenome_labels_filepath', type=str, default=None, help='Path to integrated chest imagenome labels file')
     parser.add_argument('--dataset_name', type=str, default=None, help='Name of dataset to use')
     parser.add_argument('--triplets_weight', type=float, default=1.0, help='Weight for triplet sampling during training')
-    parser.add_argument('--classification_weight', type=float, default=1.0, help='Weight for classification sampling during training')
+    parser.add_argument('--metadata_classification_weight', type=float, default=1.0,
+                        help='Weight for metadata classification sampling during training')
+    parser.add_argument('--chest_imagenome_classification_weight', type=float, default=1.0,
+                        help='Weight for chest imagenome classification sampling during training')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
@@ -103,7 +109,13 @@ def parse_args(args=None):
     
     return parser.parse_args(args=args)
 
-_METRIC_WEIGHTS = DictWithDefault(1.0) # Default weight is 1.0
+_METRIC_WEIGHTS = DictWithDefault(
+    initial_values={
+        'chestimg_macro_f1': 3.0, # Assign higher weight to chest imagenome classification
+        'tacc(al2)': 0.5, # Assign lower weight to accuracy of triplet rule #2 for anatomical locations
+        'tacc(ob2)': 0.5, # Assign lower weight to accuracy of triplet rule #2 for observations
+    },
+    default=1.0) # Default weight is 1.0
    
 def train_model(
         model_kwargs,
@@ -133,7 +145,7 @@ def train_model(
     count_print('device =', device)
 
     # Create model
-    count_print('Creating instance of Seq2SeqModel ...')
+    count_print('Creating instance of FactEncoder ...')
     model = FactEncoder(**model_kwargs)
     model = model.to(device)
 
@@ -154,13 +166,17 @@ def train_model(
     # Define collate batch functions
     count_print('Defining collate batch functions ...')
     triplet_collate_batch_fn = get_fact_embedding_collate_batch_fn(**collate_batch_fn_kwargs['triplets'])
-    classification_collate_batch_fn = get_fact_embedding_collate_batch_fn(**collate_batch_fn_kwargs['classification'])  
+    metadata_classification_collate_batch_fn = get_fact_embedding_collate_batch_fn(
+        **collate_batch_fn_kwargs['metadata_classification'])  
+    chest_imagenome_classification_collate_batch_fn = get_fact_embedding_collate_batch_fn(
+        **collate_batch_fn_kwargs['chest_imagenome_classification'])
     
     # Create dataloaders
     fact_embedding_trainer = FactEmbeddingTrainer(
         batch_size=batch_size,
         triplet_collate_batch_fn=triplet_collate_batch_fn,
-        classification_collate_batch_fn=classification_collate_batch_fn,
+        metadata_classification_collate_batch_fn=metadata_classification_collate_batch_fn,
+        chest_imagenome_classification_collate_batch_fn=chest_imagenome_classification_collate_batch_fn,
         num_workers=num_workers,
         **fact_embedding_trainer_kwargs,
     )
@@ -169,8 +185,10 @@ def train_model(
     _train_dataloaders = []
     _train_dataloaders.append(fact_embedding_trainer.train_triplet_dataloader)
     _train_weights.append(dataloading_kwargs['triplets_weight'])
-    _train_dataloaders.append(fact_embedding_trainer.train_classification_dataloader)
-    _train_weights.append(dataloading_kwargs['classification_weight'])
+    _train_dataloaders.append(fact_embedding_trainer.train_metadata_classification_dataloader)
+    _train_weights.append(dataloading_kwargs['metadata_classification_weight'])
+    _train_dataloaders.append(fact_embedding_trainer.train_chest_imagenome_classification_dataloader)
+    _train_weights.append(dataloading_kwargs['chest_imagenome_classification_weight'])
     train_dataloader = balanced_dataloaders_generator(_train_dataloaders, _train_weights)
     
     val_dataloader = fact_embedding_trainer.val_dataloader
@@ -197,7 +215,8 @@ def train_model(
         attach_condition_aware_triplet_accuracy(validator_engine, rule_id, metric_name)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, metric_name, train=False)
 
-    _cond_func = lambda x: x['flag'] == 'c' # only consider classification samples
+    # Attach metrics for metadata classification
+    _cond_func = lambda x: x['flag'] == 'mc' # only consider metadata classification samples
     
     attach_condition_aware_loss(trainer_engine, 'c_loss', condition_function=_cond_func)
     metrics_to_print.append('c_loss') # category classification loss
@@ -217,6 +236,14 @@ def train_model(
     attach_condition_aware_accuracy(trainer_engine, pred_field_name='pred_comparison_status', gt_field_name='gt_comparison_status',
                                     condition_function=_cond_func, metric_name='csacc')
     append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'csacc', val=False)
+
+    # Attach metrics for chest imagenome classification
+    _cond_func = lambda x: x['flag'] == 'cic' # only consider chest imagenome classification samples
+    attach_condition_aware_loss(trainer_engine, 'chstimgn_loss', condition_function=_cond_func)
+    metrics_to_print.append('chstimgn_loss') # chest imagenome classification loss
+    attach_condition_aware_multilabel_f1score(trainer_engine, pred_field_name='pred_labels', gt_field_name='gt_labels',
+                                              condition_function=_cond_func, metric_name='chestimg_macro_f1')
+    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chestimg_macro_f1', val=False)
 
     # Score function
     assert len(val_metrics_to_merge) > 0
@@ -269,6 +296,7 @@ def train_from_scratch(
     # Model args
     huggingface_model_name,
     embedding_size,
+    n_chest_imagenome_labels,
     pretrained_checkpoint_folder_path,
     # Optimizer args
     optimizer_name,
@@ -285,9 +313,11 @@ def train_from_scratch(
     triplet_rule_weights,
     integrated_facts_metadata_jsonl_filepath,
     paraphrases_jsonl_filepaths,
+    integrated_chest_imagenome_labels_filepath,
     dataset_name,
     triplets_weight,
-    classification_weight,
+    metadata_classification_weight,
+    chest_imagenome_classification_weight,
     # Dataloading args
     batch_size,
     num_workers,
@@ -314,6 +344,8 @@ def train_from_scratch(
         n_health_statuses=len(_LABEL_TO_HEALTH_STATUS),
         classify_comparison_status=True,
         n_comparison_statuses=len(_LABEL_TO_COMPARISON_STATUS),
+        classify_chest_imagenome=True,
+        n_chest_imagenome_labels=n_chest_imagenome_labels,
     )
 
     optimizer_kwargs = dict(
@@ -334,7 +366,8 @@ def train_from_scratch(
     dataloading_kwargs = dict(
         batch_size=batch_size,
         triplets_weight=triplets_weight,
-        classification_weight=classification_weight,
+        metadata_classification_weight=metadata_classification_weight,
+        chest_imagenome_classification_weight=chest_imagenome_classification_weight,
     )
     
     fact_embedding_trainer_kwargs = dict(
@@ -342,6 +375,7 @@ def train_from_scratch(
         triplet_rule_weights=triplet_rule_weights,
         integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
         paraphrases_jsonl_filepaths=paraphrases_jsonl_filepaths,
+        integrated_chest_imagenome_labels_filepath=integrated_chest_imagenome_labels_filepath,
         dataset_name=dataset_name,
     )
 
@@ -350,9 +384,13 @@ def train_from_scratch(
             huggingface_model_name=huggingface_model_name,
             for_triplet_ranking=True,
         ),
-        classification=dict(
+        metadata_classification=dict(
             huggingface_model_name=huggingface_model_name,
-            for_classification=True,
+            for_metadata_classification=True,
+        ),
+        chest_imagenome_classification=dict(
+            huggingface_model_name=huggingface_model_name,
+            for_chest_imagenome_classification=True,
         ),
     )
 

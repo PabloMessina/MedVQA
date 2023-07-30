@@ -20,6 +20,15 @@ __all__ = [
     "run_common_boilerplate_for_api_requests",
 ]
 
+_ALLOWED_GPT_CHAT_MODELS = (
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-0301",
+    "gpt-3.5-turbo-0613",
+    "gpt-3.5-turbo-16k-0613",
+    "gpt-4",
+    "gpt-4-0613",
+)
+
 GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
 
 def process_api_requests_from_file(
@@ -51,15 +60,6 @@ def process_api_requests_from_file(
             log_info_every_n_requests=log_info_every_n_requests,
         )
     )
-
-_ALLOWED_GPT_CHAT_MODELS = (
-    "gpt-3.5-turbo",
-    "gpt-3.5-turbo-0301",
-    "gpt-3.5-turbo-0613",
-    "gpt-3.5-turbo-16k-0613",
-    "gpt-4",
-    "gpt-4-0613",
-)
 
 def _generate_request(system_instructions, query, model_name, max_tokens,
                      temperature=0, frequency_penalty=0, presence_penalty=0):

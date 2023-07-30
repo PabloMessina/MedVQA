@@ -393,16 +393,14 @@ def get_chest_imagenome_average_bbox_coords(clamp_bbox_coords=True):
     return avg_bbox_coords
         
 # Extract labels from a scene graph
-def extract_labels_from_scene_graph(scene_graph):
+def extract_labels_from_scene_graph(scene_graph, categories_to_skip=('temporal', 'severity', 'laterality')):
     labels = []
     for node in scene_graph['attributes']:
         bbox_name = node['bbox_name']
         for x in node['attributes']:
             for y in x:
                 category, value, name = y.split('|')
-                if category == 'temporal' or\
-                   category == 'severity' or\
-                   category == 'laterality':
+                if categories_to_skip and category in categories_to_skip:
                     continue
                 assert category in CHEST_IMAGENOME_ATTRIBUTES_DICT, category
                 assert name in CHEST_IMAGENOME_ATTRIBUTES_DICT[category], name

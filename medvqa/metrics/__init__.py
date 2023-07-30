@@ -3,6 +3,8 @@ from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, Datase
 from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
+    ConditionAwareMultiLabelMacroAvgF1,
+    ConditionAwareMultiLabelMultiClassMacroAvgF1,
     DatasetAwareMultiLabelMacroAvgF1,
     DatasetAwareMultiLabelMicroAvgF1,
 )
@@ -350,7 +352,6 @@ def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids
                                     ), allowed_dataset_ids=allowed_dataset_ids, n_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXMEANF1)
 
-
 # ---------------------------------------------
 # Question labels related metrics
 # ---------------------------------------------
@@ -490,6 +491,22 @@ def attach_condition_aware_triplet_accuracy(engine, accepted_id, metric_name, co
 # General purpose accuracy
 def attach_condition_aware_accuracy(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareSingleLabelAccuracy(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose multi-label multi-class f1-score
+def attach_condition_aware_multilabel_multiclass_f1score(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
+    met = ConditionAwareMultiLabelMultiClassMacroAvgF1(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose multi-label f1-score
+def attach_condition_aware_multilabel_f1score(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
+    met = ConditionAwareMultiLabelMacroAvgF1(
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
     )

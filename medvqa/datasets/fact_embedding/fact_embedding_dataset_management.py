@@ -1,3 +1,4 @@
+import numpy as np
 import random
 import math
 from collections import Counter
@@ -90,8 +91,8 @@ class FactTripletDataset(Dataset):
             output['rule_id'] = self.rule_id
         return output
     
-class FactClassificationDataset(Dataset):
-    def __init__(self, facts, indices, categories, health_statuses, comparison_statuses, shuffle=False, infinite=False):
+class FactMetadataClassificationDataset(Dataset):
+    def __init__(self, indices, facts, categories, health_statuses, comparison_statuses, shuffle=False, infinite=False):
         self.facts = facts
         self.categories = categories
         self.health_statuses = health_statuses
@@ -119,6 +120,32 @@ class FactClassificationDataset(Dataset):
             'cs': self.comparison_statuses[idx],
         }
         return output
+    
+class ChestImaGenomeLabelsClassificationDataset(Dataset):
+    def __init__(self, indices, phrases, labels, shuffle=False, infinite=False):
+        self.phrases = phrases
+        self.labels = labels
+        self.indices = indices
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+        if shuffle:
+            random.shuffle(self.indices)
+
+    def __len__(self):
+        return self._len
+    
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
+        idx = self.indices[i]
+        output = {
+            'p': self.phrases[idx],
+            'l': self.labels[idx],
+        }
+        return output
 
 class FactEmbeddingTrainer():
 
@@ -127,10 +154,13 @@ class FactEmbeddingTrainer():
                  triplets_filepath,
                  triplet_rule_weights,
                  triplet_collate_batch_fn,
-                 # classification arguments
+                 # metadata classification arguments
                  integrated_facts_metadata_jsonl_filepath,
                  paraphrases_jsonl_filepaths,
-                 classification_collate_batch_fn,
+                 metadata_classification_collate_batch_fn,
+                 # chest imagenome labels classification arguments
+                 integrated_chest_imagenome_labels_filepath,
+                 chest_imagenome_classification_collate_batch_fn,
                  ):
         
         assert dataset_name, 'dataset_name must be provided'
@@ -140,8 +170,6 @@ class FactEmbeddingTrainer():
         assert paraphrases_jsonl_filepaths, 'paraphrases_jsonl_filepaths must be provided'
 
         self.batch_size = batch_size
-        self.triplet_collate_batch_fn = triplet_collate_batch_fn
-        self.classification_collate_batch_fn = classification_collate_batch_fn
         self.num_workers = num_workers
         self.triplets_filepath = triplets_filepath
         self.triplet_rule_weights = triplet_rule_weights
@@ -178,9 +206,9 @@ class FactEmbeddingTrainer():
             pin_memory=True,
         )
 
-        # Train classification dataset and dataloader
+        # Train metadata classification dataset and dataloader
         print('----')
-        print_bold('Building train classification dataset and dataloader...')
+        print_bold('Building train metadata classification dataset and dataloader...')
         sentence2paraphrases = {}
         for filepath in paraphrases_jsonl_filepaths:
             print(f'Loading paraphrases from {filepath}...')
@@ -268,19 +296,69 @@ class FactEmbeddingTrainer():
         for cs, indices in cs2indices.items():
             print(f'Comparison status: {_LABEL_TO_COMPARISON_STATUS[cs]}')
             print(f'\tNumber of samples: {len(indices)}')
-            _datasets.append(FactClassificationDataset(
-                sentences, indices, categories, health_statuses, comparison_statuses,
+            _datasets.append(FactMetadataClassificationDataset(
+                indices, sentences, categories, health_statuses, comparison_statuses,
                 shuffle=True, infinite=True,
             ))
             _weights.append(math.log2(len(indices))**3) # weight by log2(N)^3
             print(f'\tWeight: {_weights[-1]}')
-        self.train_classification_dataset = CompositeInfiniteDataset(_datasets, _weights)
-        self.train_classification_dataloader = DataLoader(
-            self.train_classification_dataset,
+        self.train_metadata_classification_dataset = CompositeInfiniteDataset(_datasets, _weights)
+        self.train_metadata_classification_dataloader = DataLoader(
+            self.train_metadata_classification_dataset,
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            collate_fn=classification_collate_batch_fn,
+            collate_fn=metadata_classification_collate_batch_fn,
+            pin_memory=True,
+        )
+
+        # Traing chest imagenome labels classification dataset and dataloader
+        print('----')
+        print_bold('Building train chest imagenome labels classification dataset and dataloader...')
+        print(f'Loading chest integrated chest imagenome labels from {integrated_chest_imagenome_labels_filepath}...')
+        integrated_chest_imagenome_labels = load_pickle(integrated_chest_imagenome_labels_filepath)
+        phrases = []
+        labels = []
+        label_names = integrated_chest_imagenome_labels['label_names']
+        for group in integrated_chest_imagenome_labels['groups']:
+            phrases.extend(group['sentences'])
+            labels.append(group['labels'])
+        labels = np.concatenate(labels, axis=0)
+        print(f'len(phrases): {len(phrases)}')
+        print(f'len(label_names): {len(label_names)}')
+        print(f'labels.shape: {labels.shape}')
+        assert len(phrases) == labels.shape[0]
+        assert len(label_names) == labels.shape[1]
+        # cast labels to long (int64) if needed
+        if labels.dtype != np.int64:
+            labels = labels.astype(np.int64)
+        _datasets = []
+        _weights = []
+        _lines = []
+        for i in range(labels.shape[1]):
+            idxs = np.where(labels.T[i] == 1)[0]
+            _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
+            _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
+            _lines.append((f'Label: {label_names[i]}\n'
+                          f'\tNumber of idxs: {len(idxs)}\n'
+                          f'\tWeight: {_weights[-1]:.2f}', _weights[-1]))
+        _lines.sort(key=lambda x: x[1], reverse=True)
+        for line, _ in _lines:
+            print(line)
+        # special dataset for rows with only "0" labels
+        idxs = np.where(np.all(labels == 0, axis=1))[0]
+        _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
+        _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
+        print(f'Label: "omitted"')
+        print(f'\tNumber of idxs: {len(idxs)}')
+        print(f'\tWeight: {_weights[-1]}')
+        self.train_chest_imagenome_classification_dataset = CompositeInfiniteDataset(_datasets, _weights)
+        self.train_chest_imagenome_classification_dataloader = DataLoader(
+            self.train_chest_imagenome_classification_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=chest_imagenome_classification_collate_batch_fn,
             pin_memory=True,
         )
 

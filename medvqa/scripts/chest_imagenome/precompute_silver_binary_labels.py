@@ -2,11 +2,11 @@ import argparse
 import os
 import numpy as np
 from tqdm import tqdm
-from medvqa.utils.files import load_pickle, save_to_pickle
+from medvqa.utils.files import load_pickle, save_pickle
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_CACHE_DIR
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     extract_labels_from_scene_graph,
-    load_scene_graphs_in_parallel,
+    load_scene_graphs_in_parallel,  
 )
 
 if __name__ == '__main__':
@@ -32,7 +32,7 @@ if __name__ == '__main__':
         for i, scene_graph in enumerate(tqdm(scene_graphs)):
             image_id = scene_graph['image_id']
             image_id_2_raw_labels[image_id] = extract_labels_from_scene_graph(scene_graph)
-        save_to_pickle(image_id_2_raw_labels, cache_path)
+        save_pickle(image_id_2_raw_labels, cache_path)
         print(f'Labels saved to cache ({cache_path})')
     
     # Count the number of times each label occurs
@@ -105,11 +105,11 @@ if __name__ == '__main__':
     imageId2mask_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, f'imageId2mask(min_freq={args.min_freq}).pkl')
     imageId2contradictions_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, f'imageId2contradictions(min_freq={args.min_freq}).pkl')
     print(f'Saving labels to {labels_path}')
-    save_to_pickle(unique_labels, labels_path)
+    save_pickle(unique_labels, labels_path)
     print(f'Saving imageId2labels to {imageId2labels_path}')
-    save_to_pickle(imageId2binaryLabels, imageId2labels_path)
+    save_pickle(imageId2binaryLabels, imageId2labels_path)
     print(f'Saving imageId2mask to {imageId2mask_path}')
-    save_to_pickle(imageId2mask, imageId2mask_path)
+    save_pickle(imageId2mask, imageId2mask_path)
     print(f'Saving imageId2contradictions to {imageId2contradictions_path}')
-    save_to_pickle(imageId2contradictions, imageId2contradictions_path)
+    save_pickle(imageId2contradictions, imageId2contradictions_path)
     print('Done')
