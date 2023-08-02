@@ -63,7 +63,6 @@ def _compute_anatomical_location_embeddings(facts_metadata, logger):
     else:
         embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(anat_locs,
                                                                                 device=args.device,
-                                                                                logger=logger,
                                                                                 batch_size=args.batch_size,
                                                                                 num_workers=args.num_workers,
                                                                                 )
@@ -104,8 +103,6 @@ if __name__ == '__main__':
     facts_metadata = load_jsonl(args.integrated_facts_metadata_filepath)
     _compute_anatomical_location_embeddings(facts_metadata, logger)
 
-    assert False
-
     # Load facts
     fact_freq = {}
     assert os.path.exists(args.integrated_sentence_facts_filepath), f"File not found: {args.integrated_sentence_facts_filepath}"
@@ -132,7 +129,6 @@ if __name__ == '__main__':
     else:
         embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(facts,
                                                                                 device=args.device,
-                                                                                logger=logger,
                                                                                 batch_size=args.batch_size,
                                                                                 num_workers=args.num_workers,
                                                                                 )

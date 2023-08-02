@@ -433,3 +433,28 @@ def plot_embeddings(X):
     
     # Show plot
     plt.show()
+
+def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10)):
+    assert type(metric_lists) == list
+    assert len(metric_lists) > 0
+    assert all(type(metric_list) == list for metric_list in metric_lists)
+    assert all(len(metric_list) > 0 for metric_list in metric_lists)
+    assert all(len(metric_list) == len(metric_lists[0]) for metric_list in metric_lists)
+    assert len(method_names) == len(metric_lists)
+
+    averages = [sum(metric_list) / len(metric_list) for metric_list in metric_lists]
+    method_idxs = list(range(len(method_names)))
+    method_idxs.sort(key=lambda i: averages[i], reverse=True)
+
+    plt.figure(figsize=figsize)
+    plt.title(title)
+    m = len(metric_lists)
+    n = len(metric_lists[0])
+    for i in range(m):
+        i = method_idxs[i]
+        plt.plot(range(1, n+1), metric_lists[i], label=method_names[i])
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel if ylabel is not None else metric_name)
+    plt.grid(axis='y')
+    plt.legend()
+    plt.show()

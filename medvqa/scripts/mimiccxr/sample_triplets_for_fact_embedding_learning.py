@@ -795,7 +795,6 @@ def main():
                 random.shuffle(_sentences_to_process) # shuffle to minimize the chance of having multiple long sentences in a batch
                 _embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(_sentences_to_process,
                                                                                     device=args.device,
-                                                                                    logger=logger,
                                                                                     batch_size=args.batch_size,
                                                                                     num_workers=args.num_workers,
                                                                                     )
@@ -811,7 +810,6 @@ def main():
         else:
             embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(sentences_list,
                                                                                     device=args.device,
-                                                                                    logger=logger,
                                                                                     batch_size=args.batch_size,
                                                                                     num_workers=args.num_workers,
                                                                                     )

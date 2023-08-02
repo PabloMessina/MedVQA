@@ -93,7 +93,6 @@ if __name__ == '__main__':
             logger.info(f"Computing embeddings for {len(unique_sentences)} unique sentences")
             embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(unique_sentences,
                                                                                      device=args.device,
-                                                                                     logger=logger,
                                                                                      batch_size=args.batch_size,
                                                                                      num_workers=args.num_workers,
                                                                                      )

@@ -1,8 +1,16 @@
-from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
 from tqdm import tqdm
 import numpy as np
+from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
+from medvqa.models.checkpoint import get_checkpoint_filepath
 
-def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, logger, batch_size=32, num_workers=0):
+def _adapt_checkpoint_keys(checkpoint):
+    for key in list(checkpoint.keys()):
+        if key.startswith('model.'):
+            checkpoint[key[6:]] = checkpoint.pop(key)
+    return checkpoint
+
+def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, batch_size=32, num_workers=0,
+                            model_checkpoint_folder_path=None):
     import torch
     from transformers import AutoTokenizer, AutoModel
     
@@ -12,6 +20,13 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, logger
     # Load model
     model = AutoModel.from_pretrained(model_url, trust_remote_code=True)
     model.to(device)
+
+    # Load pre-trained weights from checkpoint folder (if provided)
+    if model_checkpoint_folder_path is not None:
+        model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+        print(f'Loading model weights from {model_checkpoint_filepath}')
+        checkpoint = torch.load(model_checkpoint_filepath, map_location=device)
+        model.load_state_dict(_adapt_checkpoint_keys(checkpoint['model']), strict=False)
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_url, trust_remote_code=True)
@@ -26,7 +41,6 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, logger
     )
 
     # Run inference
-    logger.info(f"Running inference")
     model.eval()
     embeddings = np.zeros((len(texts), model.config.projection_size), dtype=np.float32)
     offset = 0
@@ -44,7 +58,8 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, logger
 
     return embeddings
 
-def compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(texts, device, logger, batch_size=32, num_workers=0):
+def compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(texts, device, batch_size=32, num_workers=0,
+                                                                model_checkpoint_folder_path=None):
 
     def _get_tokenizer_func(tokenizer):
         return lambda x: tokenizer.batch_encode_plus(batch_text_or_text_pairs=x,
@@ -57,7 +72,7 @@ def compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(texts, device, l
         get_tokenizer_func=_get_tokenizer_func,
         texts=texts,
         device=device,
-        logger=logger,
         batch_size=batch_size,
         num_workers=num_workers,
+        model_checkpoint_folder_path=model_checkpoint_folder_path,
     )
