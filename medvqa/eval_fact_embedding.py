@@ -7,7 +7,10 @@ from tqdm import tqdm
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 
-from medvqa.models.huggingface_utils import compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
+from medvqa.models.huggingface_utils import (
+    compute_text_embeddings_with_BiomedVLP_BioVilT,
+    compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized,
+)
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
 from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, load_json, load_pickle, save_pickle
 from medvqa.utils.math import rank_vectors_by_dot_product
@@ -23,12 +26,14 @@ class _EvaluationModes:
         ]
 
 class _Methods:
-    CXR_BERT = 'cxr_bert'
+    CXR_BERT_SPECIALIZED = 'cxr-bert-specialized'
+    BIOVIL_T = 'biovil-t'
     ORACLE = 'oracle'
     @staticmethod
     def get_all():
         return [
-            _Methods.CXR_BERT,
+            _Methods.CXR_BERT_SPECIALIZED,
+            _Methods.BIOVIL_T,
             _Methods.ORACLE,
         ]
 
@@ -133,11 +138,17 @@ def evaluate(
     n = len(sentences)
     mean_average_accuracy_up_to = [0] * top_k
     
-    if method == _Methods.CXR_BERT:
+    if method in [_Methods.CXR_BERT_SPECIALIZED, _Methods.BIOVIL_T]:
         # Obtain embeddings for each sentence
-        embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(
-            texts=sentences, device=device, batch_size=batch_size, num_workers=num_workers,
-            model_checkpoint_folder_path=model_checkpoint_folder_path)
+        if method == _Methods.CXR_BERT_SPECIALIZED:
+            embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(
+                texts=sentences, device=device, batch_size=batch_size, num_workers=num_workers,
+                model_checkpoint_folder_path=model_checkpoint_folder_path)
+        elif method == _Methods.BIOVIL_T:
+            embeddings = compute_text_embeddings_with_BiomedVLP_BioVilT(
+                texts=sentences, device=device, batch_size=batch_size, num_workers=num_workers,
+                model_checkpoint_folder_path=model_checkpoint_folder_path)
+        else: assert False
         print('Embeddings shape:', embeddings.shape)
         assert embeddings.shape[0] == n
         # Evaluate embeddings on ranking
@@ -151,7 +162,7 @@ def evaluate(
         if model_checkpoint_folder_path is not None:
             results_folder_path = get_results_folder_path(model_checkpoint_folder_path)
         else:
-            results_folder_path = get_results_folder_path(get_checkpoint_folder_path('fact_embedding', dataset_name, 'cxr_bert'))
+            results_folder_path = get_results_folder_path(get_checkpoint_folder_path('fact_embedding', dataset_name, method))
 
         if save_embeddings:
             embeddings_save_path = os.path.join(results_folder_path, f'embeddings({dataset_name}).pkl')

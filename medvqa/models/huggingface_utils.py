@@ -58,18 +58,29 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, batch_
 
     return embeddings
 
+def _get_microsoft_BERT_tokenizer_func(tokenizer):
+    return lambda x: tokenizer.batch_encode_plus(batch_text_or_text_pairs=x,
+                                                add_special_tokens=True,
+                                                padding='longest',
+                                                return_tensors='pt')
+
 def compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(texts, device, batch_size=32, num_workers=0,
                                                                 model_checkpoint_folder_path=None):
-
-    def _get_tokenizer_func(tokenizer):
-        return lambda x: tokenizer.batch_encode_plus(batch_text_or_text_pairs=x,
-                                                     add_special_tokens=True,
-                                                     padding='longest',
-                                                     return_tensors='pt')
-
     return compute_text_embeddings(
         model_url='microsoft/BiomedVLP-CXR-BERT-specialized',
-        get_tokenizer_func=_get_tokenizer_func,
+        get_tokenizer_func=_get_microsoft_BERT_tokenizer_func,
+        texts=texts,
+        device=device,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        model_checkpoint_folder_path=model_checkpoint_folder_path,
+    )
+
+def compute_text_embeddings_with_BiomedVLP_BioVilT(texts, device, batch_size=32, num_workers=0,
+                                                                model_checkpoint_folder_path=None):
+    return compute_text_embeddings(
+        model_url='microsoft/BiomedVLP-BioViL-T',
+        get_tokenizer_func=_get_microsoft_BERT_tokenizer_func,
         texts=texts,
         device=device,
         batch_size=batch_size,
