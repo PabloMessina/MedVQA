@@ -1,15 +1,11 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 from time import time
 import os
 import subprocess
 from medvqa.utils.common import CACHE_DIR, SOURCE_DIR, TMP_DIR, get_timestamp
 from medvqa.utils.files import get_cached_pickle_file, load_jsonl, save_pickle
 from medvqa.utils.hashing import hash_string
+from medvqa.datasets.radgraph import RADGRAPH_MODEL_CHECKPOINT_PATH, DYGIE_PACKAGE_PARENT_FOLDER
 
-RADGRAPH_MODEL_CHECKPOINT_PATH = os.environ['RADGRAPH_MODEL_CHECKPOINT_PATH']
-DYGIE_PACKAGE_PARENT_FOLDER =  os.environ['DYGIE_PACKAGE_PARENT_FOLDER']
 
 def compute_label_set(data, label2string):
     entities = data['entities']

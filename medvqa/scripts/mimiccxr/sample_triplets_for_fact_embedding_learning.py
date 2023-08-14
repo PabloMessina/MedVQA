@@ -11,6 +11,7 @@ from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
 from medvqa.utils.logging import get_console_logger
 from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
 from medvqa.models.huggingface_utils import compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
+from medvqa.utils.metrics import jaccard_score_between_sets
 
 MAX_TRIES = 20
 
@@ -641,18 +642,191 @@ def sample_observation_triplets__rule6(
         'triplets': rule_triplets,
     })
 
+def sample_observation_triplets__rule7(
+    n_triplets_per_rule,
+    sentence_labels_pairs,
+    sentence2index,
+    index2cluster,
+    used_triplets,
+    triplets_dict,
+    logger,
+    margin=0.5, # margin for Jaccard index
+    top_k=30, # top k sentences from the same cluster as A to consider for P
+):
+    # Rule 7: "RadGraph-based triplets (Human Annotations)"
+    # dot(E(A), E(P)) > dot(E(A), E(N)) if Jaccard(A, P) > Jaccard(A, N) + margin
+    # Where:
+    # A = anchor = a sentence with human annotations from RadGraph
+    # P = positive = another sentence with human annotations from RadGraph, from the same cluster as A
+    # N = negative = another sentence with human annotations from RadGraph
+    # Jaccard(X, Y) = Jaccard index between sets of RadGraph labels (entities and relations) of X and Y
+    # In words: include the triplet (A, P, N) if the Jaccard index between the sets of RadGraph labels of A and P
+    #           is higher than the Jaccard index between the sets of RadGraph labels of A and N.
+    
+    logger.info('Rule 7: "RadGraph-based triplets (Human Annotations)"')
+    rule_triplets = []
+
+    n_triplets_per_anchor = math.ceil(n_triplets_per_rule / len(sentence_labels_pairs))
+    logger.info(f'len(sentence_labels_pairs)={len(sentence_labels_pairs)}')
+    logger.info(f'n_triplets_per_anchor={n_triplets_per_anchor}')
+    for sentence, labels in tqdm(sentence_labels_pairs, mininterval=2):
+        sentence_idx = sentence2index[sentence]
+        sentence_cluster = index2cluster[sentence_idx]
+        A = sentence_idx
+        scores = [jaccard_score_between_sets(labels, x[1]) for x in sentence_labels_pairs]
+        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+        P_list = []
+        for j, i in enumerate(sorted_idxs):
+            if scores[i] == 0:
+                break # no more sentences with non-zero Jaccard index
+            s_idx = sentence2index[sentence_labels_pairs[i][0]]
+            if s_idx == A:
+                continue
+            if index2cluster[s_idx] != sentence_cluster:
+                continue
+            P_list.append((s_idx, j)) # (sentence index, rank)
+            if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
+                # We will consider at most the top 'top_k' sentences from the same cluster as A for P
+                break
+        assert len(P_list) <= n_triplets_per_anchor
+        if len(P_list) == 0:
+            continue
+        n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
+        for P, rank in P_list:
+            P_score = scores[sorted_idxs[rank]]
+            assert P_score > 0
+            N_start = -1
+            for i in range(rank+1, len(sorted_idxs)):
+                if scores[sorted_idxs[i]] + margin <= P_score or scores[sorted_idxs[i]] == 0:
+                    N_start = i
+                    break
+            if N_start == -1:
+                continue
+            if len(sorted_idxs) - N_start > n_triplets_per_positive:
+                N_end = N_start + n_triplets_per_positive
+            else:
+                N_end = len(sorted_idxs)
+            for i in range(N_start, N_end):
+                N = sentence2index[sentence_labels_pairs[sorted_idxs[i]][0]]
+                assert N != A and N != P
+                triplet = (A, P, N)
+                assert triplet not in used_triplets
+                rule_triplets.append(triplet)
+                used_triplets.add(triplet)
+    logger.info(f'Actual number of triplets sampled for Rule 7: "RadGraph-based triplets (Human Annotations)": {len(rule_triplets)}')
+    triplets_dict['train']['observations'].append({
+        'rule': 'RadGraph-based triplets (Human Annotations)',
+        'triplets': rule_triplets,
+    })
+
+def sample_observation_triplets__rule8(
+    n_triplets_per_rule,
+    sentence_labels_pairs,
+    sentence2index,
+    index2cluster,
+    used_triplets,
+    triplets_dict,
+    logger,
+    margin=0.5, # margin for Jaccard index
+    top_k=30, # top k sentences from the same cluster as A to consider for P
+    n_samples_per_cluster=300, # number of random samples per cluster to look for P's
+):
+    # Rule 8: "RadGraph-based triplets (Machine Annotations)"
+    # dot(E(A), E(P)) > dot(E(A), E(N)) if Jaccard(A, P) > Jaccard(A, N) + margin
+    # Where:
+    # A = anchor = a sentence with machine annotations from RadGraph
+    # P = positive = another sentence with machine annotations from RadGraph, from the same cluster as A
+    # N = negative = another sentence with machine annotations from RadGraph
+    # Jaccard(X, Y) = Jaccard index between sets of RadGraph labels (entities and relations) of X and Y
+    # In words: include the triplet (A, P, N) if the Jaccard index between the sets of RadGraph labels of A and P
+    #           is higher than the Jaccard index between the sets of RadGraph labels of A and N.
+    
+    logger.info('Rule 8: "RadGraph-based triplets (Machine Annotations)"')
+    rule_triplets = []
+
+    logger.info(f'len(sentence_labels_pairs)={len(sentence_labels_pairs)}')
+    logger.info('Computing cluster2idxs...')
+    cluster2idxs = dict()
+    idx2i = {}
+    for i, p in tqdm(enumerate(sentence_labels_pairs), mininterval=2):
+        s = p[0]
+        s_idx = sentence2index[s]
+        idx2i[s_idx] = i
+        c_idx = index2cluster[s_idx]
+        if c_idx not in cluster2idxs:
+            cluster2idxs[c_idx] = []
+        cluster2idxs[c_idx].append(s_idx)
+    cluster_list = list(cluster2idxs.keys())
+
+    n_triplets_per_anchor = math.ceil(n_triplets_per_rule / len(sentence_labels_pairs))
+    logger.info('Sampling triplets...')
+    logger.info(f'n_triplets_per_anchor={n_triplets_per_anchor}')
+    count = 0
+    for sentence, labels in tqdm(sentence_labels_pairs, mininterval=2):
+        count += 1
+        sentence_idx = sentence2index[sentence]
+        sentence_cluster = index2cluster[sentence_idx]
+        A = sentence_idx
+        assert n_samples_per_cluster < len(cluster2idxs[sentence_cluster])
+        random_idxs_for_P = random.sample(cluster2idxs[sentence_cluster], n_samples_per_cluster)
+        scores = [jaccard_score_between_sets(labels, sentence_labels_pairs[idx2i[idx]][1]) for idx in random_idxs_for_P]
+        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+        P_list = []
+        for j, i in enumerate(sorted_idxs):
+            if scores[i] == 0:
+                break # if we reach a score of 0, then all subsequent scores will also be 0
+            s_idx = random_idxs_for_P[i]
+            if s_idx == A:
+                continue
+            assert index2cluster[s_idx] == sentence_cluster
+            P_list.append((s_idx, j)) # (sentence index, rank)
+            if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
+                # We will consider at most the top 'top_k' sentences from the same cluster as A for P
+                break
+        assert len(P_list) <= n_triplets_per_anchor
+        if len(P_list) == 0:
+            continue
+        n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
+        for P, rank in P_list:
+            P_score = scores[sorted_idxs[rank]]
+            assert P_score > 0
+            for _ in range(n_triplets_per_positive):
+                for _ in range(MAX_TRIES):
+                    c = random.choice(cluster_list)
+                    if c == sentence_cluster:
+                        continue
+                    N = random.choice(cluster2idxs[c])
+                    assert N != A and N != P
+                    N_score = jaccard_score_between_sets(labels, sentence_labels_pairs[idx2i[N]][1])
+                    if N_score > 0 and N_score + margin > P_score:
+                        continue
+                    triplet = (A, P, N)
+                    if triplet in used_triplets: # if already used -> skip
+                        continue
+                    # if we reach here, then we have found a valid triplet
+                    used_triplets.add(triplet)
+                    rule_triplets.append(triplet)
+                    break # break out of for loop
+
+    logger.info(f'Actual number of triplets sampled for Rule 8: "RadGraph-based triplets (Machine Annotations)": {len(rule_triplets)}')
+    triplets_dict['train']['observations'].append({
+        'rule': 'RadGraph-based triplets (Machine Annotations)',
+        'triplets': rule_triplets,
+    })
+
 def main():
     parser = argparse.ArgumentParser(description='Sample triplets for fact embedding learning')
     parser.add_argument('--paraphrased_anatomical_locations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--paraphrased_observations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--integrated_fact_metadata_filepath', type=str, required=True)
     parser.add_argument('--chest_imagenome_sentences_and_labels_filepath', type=str, required=True)
-    parser.add_argument('--num_anatloc_clusters', type=int, required=True,
-                        help='Number of clusters to be formed for anatomical locations. Used for sampling triplets.')
-    parser.add_argument('--num_obs_clusters', type=int, required=True,
-                        help='Number of clusters to be formed for observations. Used for sampling triplets.')
+    parser.add_argument('--radgraph_sentences_and_labels_filepath', type=str, required=True)
+    parser.add_argument('--num_anatloc_clusters', type=int, required=True)
+    parser.add_argument('--num_obs_clusters', type=int, required=True)
+    parser.add_argument('--num_radgraph_clusters', type=int, required=True)
     parser.add_argument('--num_train_triplets_per_rule', type=int, required=True)
     parser.add_argument('--num_val_triplets_per_rule', type=int, required=True)
+    parser.add_argument('--num_test_triplets_per_rule', type=int, required=True)
 
     parser.add_argument('--precomputed_sentence_embeddings_filepath', type=str, default=None)
     
@@ -663,8 +837,9 @@ def main():
     parser.add_argument('--num_kmeans_iterations', type=int, default=300)
     args = parser.parse_args()
 
-    # Add validation triplets to training triplets (since the validation triplets will be subtracted from the training triplets later)
+    # Add validation and test triplets to training triplets (since they will be subtracted from the training triplets later)
     args.num_train_triplets_per_rule += args.num_val_triplets_per_rule
+    args.num_train_triplets_per_rule += args.num_test_triplets_per_rule
 
     # Set up logging
     logger = get_console_logger(args.logging_level)
@@ -675,6 +850,7 @@ def main():
     sentences_set = set()
     anatomical_locations_set = set()
     observations_set = set()
+    radgraph_sentences_set = set()
     
     logger.info(f'Loading integrated fact metadata from {args.integrated_fact_metadata_filepath}...')
     integrated_fact_metadata = load_jsonl(args.integrated_fact_metadata_filepath)
@@ -742,6 +918,14 @@ def main():
     chest_imagenome_data = load_pickle(args.chest_imagenome_sentences_and_labels_filepath)
     for group in chest_imagenome_data['groups']:
         sentences_set.update(group['sentences'])
+
+    logger.info(f'Loading RadGraph sentences and labels from {args.radgraph_sentences_and_labels_filepath}...')
+    radgraph_data = load_pickle(args.radgraph_sentences_and_labels_filepath)
+    for key in ('train', 'dev', 'test', 'chexpert', 'mimiccxr'):
+        logger.info(f'len(radgraph_data[{key}])={len(radgraph_data[key])}')
+        for s in radgraph_data[key]:
+            radgraph_sentences_set.add(s)
+            sentences_set.add(s)
     
     logger.info(f'Found {len(sentences_set)} unique sentences.')
     sentences_list = list(sentences_set)
@@ -885,6 +1069,31 @@ def main():
         anatloc_idx2cluster[i] = c
     n_anatloc_clusters = len(anatloc_cluster2indices)
 
+    # Precompute clusters for radgraph sentences
+    radgraph_clusters_save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR,
+                                        f'radgraph_clusters({len(radgraph_sentences_set)},{sentlen_sum}).pkl')
+    if os.path.exists(radgraph_clusters_save_path):
+        logger.info(f'Found precomputed radgraph clusters at {radgraph_clusters_save_path}. Loading...')
+        radgraph_clusters = load_pickle(radgraph_clusters_save_path)
+    else:
+        logger.info(f'Precomputing RadGraph clusters for {len(radgraph_sentences_set)} sentences...')
+        _idxs = [sentence2index[s] for s in radgraph_sentences_set]
+        _idxs.sort()
+        _embeddings = embeddings[_idxs]
+        logger.info(f'_embeddings.shape: {_embeddings.shape}')
+        radgraph_kmeans = KMeans(n_clusters=args.num_radgraph_clusters, init='k-means++', n_init='auto', verbose=1,
+                                max_iter=args.num_kmeans_iterations).fit(_embeddings)
+        logger.info(f'radgraph_kmeans.labels_.shape: {radgraph_kmeans.labels_.shape}')
+
+        # Save RadGraph clusters
+        logger.info(f'Saving RadGraph clusters to {radgraph_clusters_save_path}...')
+        radgraph_clusters = {
+            'indices': _idxs,
+            'clusters': radgraph_kmeans.labels_,
+        }
+        save_pickle(radgraph_clusters, radgraph_clusters_save_path)
+
+
     # =================
     # Triplet sampling
     # =================
@@ -908,11 +1117,15 @@ def main():
             'anatomical_locations': [],
             'observations': [],
         },
+        'test': {
+            'anatomical_locations': [],
+            'observations': [],
+        },
     }
 
     triplets_save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR,
                                       f'triplets({len(sentences_list)},{len(anatomical_locations_list)},{len(observations_list)},'
-                                      f'{args.num_train_triplets_per_rule},{args.num_val_triplets_per_rule}).pkl')
+                                      f'{args.num_train_triplets_per_rule},{args.num_val_triplets_per_rule},{args.num_test_triplets_per_rule}).pkl')
 
     # --------------------------------------------
     # 1) Sample triplets for anatomical locations
@@ -1119,23 +1332,66 @@ def main():
         logger=logger,
     )
 
+    # Rule 7
+    radgraph_index2cluster = { i:c for i, c in zip(radgraph_clusters['indices'], radgraph_clusters['clusters']) }
+    s2l = dict()
+    for key in ('train', 'dev', 'test'): # these were annotated by radiologists
+        for s, l in radgraph_data[key].items():
+            if s in s2l:
+                s2l[s] |= l # union of sets
+            else:
+                s2l[s] = l
+    radgraph_sentence_labels_pairs__human_annotations = [(s, l) for s, l in s2l.items()]
+    sample_observation_triplets__rule7(
+        n_triplets_per_rule=args.num_train_triplets_per_rule,
+        sentence_labels_pairs=radgraph_sentence_labels_pairs__human_annotations,
+        sentence2index=sentence2index,
+        index2cluster=radgraph_index2cluster,
+        used_triplets=used_triplets,
+        triplets_dict=triplets,
+        logger=logger,
+    ) 
+
+    # Rule 8
+    for key in ('chexpert', 'mimiccxr'): # these were annotated by an NLP model (Dygie++)
+        for s, l in radgraph_data[key].items():
+            if s in s2l:
+                s2l[s] |= l
+            else:
+                s2l[s] = l
+    radgraph_sentence_labels_pairs__machine_annotations = [(s, l) for s, l in s2l.items()]
+    sample_observation_triplets__rule8(
+        n_triplets_per_rule=args.num_train_triplets_per_rule,
+        sentence_labels_pairs=radgraph_sentence_labels_pairs__machine_annotations,
+        sentence2index=sentence2index,
+        index2cluster=radgraph_index2cluster,
+        used_triplets=used_triplets,
+        triplets_dict=triplets,
+        logger=logger,
+    )
+
     # ==================================================================================================
-    # Extract triplets for validation set
-    logger.info('Extracting triplets for validation set...')
+    # Extract triplets for validation and test sets
+    logger.info('Extracting triplets for validation and test sets...')
     for key in ['anatomical_locations', 'observations']:
         if len(triplets['train'][key]) == 0:
             continue
         for x in triplets['train'][key]:
-            indices = random.sample(range(len(x['triplets'])), args.num_val_triplets_per_rule)
+            indices = random.sample(range(len(x['triplets'])), args.num_val_triplets_per_rule + args.num_test_triplets_per_rule)
             indices_set = set(indices)
-            val_triplets = [x['triplets'][i] for i in indices]
-            val_triplets = np.array(val_triplets)
+            sampled_triplets = [x['triplets'][i] for i in indices]
+            val_triplets = np.array(sampled_triplets[:args.num_val_triplets_per_rule])
+            test_triplets = np.array(sampled_triplets[args.num_val_triplets_per_rule:])
             train_triplets = [x['triplets'][i] for i in range(len(x['triplets'])) if i not in indices_set]
             train_triplets = np.array(train_triplets)
             x['triplets'] = train_triplets
             triplets['val'][key].append({
                 'rule': x['rule'],
                 'triplets': val_triplets,
+            })
+            triplets['test'][key].append({
+                'rule': x['rule'],
+                'triplets': test_triplets,
             })
 
     # Save triplets
