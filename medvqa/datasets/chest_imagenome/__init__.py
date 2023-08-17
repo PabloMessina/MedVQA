@@ -183,6 +183,47 @@ assert len(set(ANAXNET_BBOX_NAMES)) == len(ANAXNET_BBOX_NAMES) # no duplicates
 assert all(name in CHEST_IMAGENOME_BBOX_NAMES for name in ANAXNET_BBOX_NAMES) # all names are in the original list
 assert len(ANAXNET_BBOX_NAMES) == CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES # same number of classes
 
+CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING = [
+    'abdomen',
+    'aortic arch',
+    'cardiac silhouette',
+    'carina',
+    'cavoatrial junction',
+    'left apical zone',
+    'left arm',
+    'left breast',
+    'left chest wall',
+    'left clavicle',
+    'left costophrenic angle',
+    'left hemidiaphragm',
+    'left hilar structures',
+    'left lower lung zone',
+    'left lung',
+    'left mid lung zone',
+    'left shoulder',
+    'left upper lung zone',
+    'mediastinum',
+    'neck',
+    'right apical zone',
+    'right arm',
+    'right atrium',
+    'right breast',
+    'right chest wall',
+    'right clavicle',
+    'right costophrenic angle',
+    'right hemidiaphragm',
+    'right hilar structures',
+    'right lower lung zone',
+    'right lung',
+    'right mid lung zone',
+    'right shoulder',
+    'right upper lung zone',
+    'spine',
+    'svc',
+    'trachea',
+    'upper mediastinum',
+]
+
 def get_anaxnet_bbox_sorted_indices():
     indices = [i for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES) if name in ANAXNET_BBOX_NAMES]
     return indices
