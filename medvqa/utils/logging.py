@@ -3,29 +3,29 @@ from termcolor import colored
 from medvqa.utils.files import make_dirs_in_filepath
 from medvqa.utils.constants import CHEXPERT_LABELS
 
-def _print_with_color(color, *args, bold=False):
+def _print_with_color(color, *args, bold=False, end='\n'):
     if bold:
-        print(*[colored(x, color, attrs=['bold']) for x in args])
+        print(*[colored(x, color, attrs=['bold']) for x in args], end=end)
     else:
-        print(*[colored(x, color) for x in args])
+        print(*[colored(x, color) for x in args], end=end)
 
-def print_blue(*args, bold=False):
-    _print_with_color('blue', *args, bold=bold)
+def print_blue(*args, bold=False, end='\n'):
+    _print_with_color('blue', *args, bold=bold, end=end)
 
-def print_red(*args, bold=False):
-    _print_with_color('red', *args, bold=bold)
+def print_red(*args, bold=False, end='\n'):
+    _print_with_color('red', *args, bold=bold, end=end)
 
-def print_magenta(*args, bold=False):
-    _print_with_color('magenta', *args, bold=bold)
+def print_magenta(*args, bold=False, end='\n'):
+    _print_with_color('magenta', *args, bold=bold, end=end)
 
-def print_orange(*args, bold=False):
+def print_orange(*args, bold=False, end='\n'):
     if bold:
-        print(*[f'\033[93m\033[1m{x}\033[0m' for x in args])
+        print(*[f'\033[93m\033[1m{x}\033[0m' for x in args], end=end)
     else:
-        print(*[f'\033[93m{x}\033[0m' for x in args])
+        print(*[f'\033[93m{x}\033[0m' for x in args], end=end)
 
-def print_bold(*args):
-    print(*[colored(x, attrs=['bold']) for x in args])
+def print_bold(*args, end='\n'):
+    print(*[colored(x, attrs=['bold']) for x in args], end=end)
 
 def print_normal_and_bold(normal, bold):
     print(normal, end='')

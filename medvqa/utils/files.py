@@ -12,6 +12,7 @@ from medvqa.utils.hashing import hash_string
 MAX_FILENAME_LENGTH = os.statvfs('/').f_namemax
 
 _json_cache = dict()
+_jsonl_cache = dict()
 _pickle_cache = dict()
 
 def get_cached_json_file(path):
@@ -19,6 +20,13 @@ def get_cached_json_file(path):
         file = _json_cache[path]
     except KeyError:
         file = _json_cache[path] = load_json(path)
+    return file
+
+def get_cached_jsonl_file(path):
+    try:
+        file = _jsonl_cache[path]
+    except KeyError:
+        file = _jsonl_cache[path] = load_jsonl(path)
     return file
 
 def get_cached_pickle_file(path):
@@ -68,10 +76,12 @@ def read_txt(path):
 def make_dirs_in_filepath(filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-def save_pickle(obj, path):
+def save_pickle(obj, path, add_to_cache=False):
     make_dirs_in_filepath(path)
     with open(path, 'wb') as f:
         pickle.dump(obj, f)
+    if add_to_cache:
+        _pickle_cache[path] = obj
 
 def save_json(obj, path):
     make_dirs_in_filepath(path)
@@ -110,10 +120,14 @@ def get_results_folder_path(checkpoint_folder_path):
                                                          f'{os.path.sep}results{os.path.sep}')
     return results_folder_path
 
-def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings, ext='pkl'):
+def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings, ext='pkl', force_hashing=False):
     assert len(strings) > 0
+    assert os.path.sep not in prefix # prevent path-related bugs
+    for i in range(len(strings)):
+        if os.path.sep in strings[i]:
+            strings[i] = strings[i].replace(os.path.sep, '_') # prevent path-related bugs
     file_path = os.path.join(folder_path, f'{prefix}({";".join(strings)}).{ext}')
-    if len(file_path) > MAX_FILENAME_LENGTH:
+    if len(file_path) > MAX_FILENAME_LENGTH or force_hashing:
         h = hash_string(file_path)
         file_path = os.path.join(folder_path, f'{prefix}(hash={h[0]},{h[1]}).{ext}')
     return file_path

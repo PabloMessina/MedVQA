@@ -1,17 +1,26 @@
+import torch
 import torch.nn as nn
 from transformers import AutoModel
+from medvqa.models.common import freeze_parameters
+
+from medvqa.utils.logging import print_orange
 
 class HuggingfaceModels:
     MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED = 'microsoft/BiomedVLP-CXR-BERT-specialized'
+    MICROSOFT_BIOMEDVLP_BIOVIL_T = 'microsoft/BiomedVLP-BioViL-T'
     @staticmethod
     def get_all():
-        return [HuggingfaceModels.MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED]
+        return [
+            HuggingfaceModels.MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED,
+            HuggingfaceModels.MICROSOFT_BIOMEDVLP_BIOVIL_T,
+        ]
 
 class FactEncoder(nn.Module):
 
     def __init__(self,
                  huggingface_model_name,
                  embedding_size,
+                 freeze_huggingface_model=False,
                  # Auxiliary tasks
                  classify_category=False,
                  n_categories=None,
@@ -19,8 +28,12 @@ class FactEncoder(nn.Module):
                  n_health_statuses=None,
                  classify_comparison_status=False,
                  n_comparison_statuses=None,
-                 classify_chest_imagenome=False,
-                 n_chest_imagenome_labels=None,
+                 classify_chest_imagenome_obs=False,
+                 n_chest_imagenome_observations=None,
+                 classify_chest_imagenome_anatloc=False,
+                 n_chest_imagenome_anatomical_locations=None,
+                 use_aux_task_hidden_layer=False,
+                 aux_task_hidden_layer_size=None,
                  **unused_kwargs):
         super().__init__()
         print('Fact encoder')
@@ -32,15 +45,29 @@ class FactEncoder(nn.Module):
         print(f'  n_health_statuses: {n_health_statuses}')
         print(f'  classify_comparison_status: {classify_comparison_status}')
         print(f'  n_comparison_statuses: {n_comparison_statuses}')
-        print(f'  classify_chest_imagenome: {classify_chest_imagenome}')
-        print(f'  n_chest_imagenome_labels: {n_chest_imagenome_labels}')
+        print(f'  classify_chest_imagenome_obs: {classify_chest_imagenome_obs}')
+        print(f'  n_chest_imagenome_observations: {n_chest_imagenome_observations}')
+        print(f'  classify_chest_imagenome_anatloc: {classify_chest_imagenome_anatloc}')
+        print(f'  n_chest_imagenome_anatomical_locations: {n_chest_imagenome_anatomical_locations}')
+        print(f'  use_aux_task_hidden_layer: {use_aux_task_hidden_layer}')
+        print(f'  aux_task_hidden_layer_size: {aux_task_hidden_layer_size}')
+
+        if len(unused_kwargs) > 0:
+            print_orange(f'WARNING: unused_kwargs: {unused_kwargs}', bold=True)
 
         self.huggingface_model_name = huggingface_model_name
 
-        if huggingface_model_name == HuggingfaceModels.MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED:
+        if huggingface_model_name in [
+            HuggingfaceModels.MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED,
+            HuggingfaceModels.MICROSOFT_BIOMEDVLP_BIOVIL_T,
+        ]:
             self.model = AutoModel.from_pretrained(huggingface_model_name, trust_remote_code=True)
         else:
             raise ValueError(f'Unsupported huggingface_model_name: {huggingface_model_name}')
+        
+        if freeze_huggingface_model:
+            print('Freezing huggingface model')
+            freeze_parameters(self.model)
         
         self.embedding_size = embedding_size
         self.classify_category = classify_category
@@ -49,29 +76,52 @@ class FactEncoder(nn.Module):
         self.n_health_statuses = n_health_statuses
         self.classify_comparison_status = classify_comparison_status
         self.n_comparison_statuses = n_comparison_statuses
+        self.classify_chest_imagenome_obs = classify_chest_imagenome_obs
+        self.n_chest_imagenome_observations = n_chest_imagenome_observations
+        self.classify_chest_imagenome_anatloc = classify_chest_imagenome_anatloc
+        self.n_chest_imagenome_anatomical_locations = n_chest_imagenome_anatomical_locations
+        self.use_aux_task_hidden_layer = use_aux_task_hidden_layer
         
         # Auxiliary tasks
+        if use_aux_task_hidden_layer:
+            assert aux_task_hidden_layer_size is not None
+            self.aux_task_hidden_layer = nn.Linear(self.embedding_size, aux_task_hidden_layer_size)
+            aux_task_input_size = aux_task_hidden_layer_size
+        else:
+            aux_task_input_size = self.embedding_size
         if self.classify_category:
-            self.category_classifier = nn.Linear(self.embedding_size, self.n_categories)
+            self.category_classifier = nn.Linear(aux_task_input_size, self.n_categories)
         if self.classify_health_status:
-            self.health_status_classifier = nn.Linear(self.embedding_size, self.n_health_statuses)
+            self.health_status_classifier = nn.Linear(aux_task_input_size, self.n_health_statuses)
         if self.classify_comparison_status:
-            self.comparison_status_classifier = nn.Linear(self.embedding_size, self.n_comparison_statuses)
-        if classify_chest_imagenome:
-            self.chest_imagenome_classifier = nn.Linear(self.embedding_size, n_chest_imagenome_labels)
+            self.comparison_status_classifier = nn.Linear(aux_task_input_size, self.n_comparison_statuses)
+        if classify_chest_imagenome_obs:
+            self.chest_imagenome_obs_classifier = nn.Linear(aux_task_input_size, self.n_chest_imagenome_observations)
+        if classify_chest_imagenome_anatloc:
+            self.chest_imagenome_anatloc_classifier = nn.Linear(aux_task_input_size, self.n_chest_imagenome_anatomical_locations)
 
-    def forward(self, input_ids, attention_mask, run_metadata_auxiliary_tasks=False, run_chest_imagenome_auxiliary_task=False):
+    def forward(self, input_ids, attention_mask, run_metadata_auxiliary_tasks=False, run_chest_imagenome_obs_task=False,
+                run_chest_imagenome_anatloc_task=False):
         text_embeddings = self.model.get_projected_text_embeddings(input_ids=input_ids, attention_mask=attention_mask)
         output = { 'text_embeddings': text_embeddings }
-        if run_metadata_auxiliary_tasks:
-            if self.classify_category:
-                output['category_logits'] = self.category_classifier(text_embeddings)
-            if self.classify_health_status:
-                output['health_status_logits'] = self.health_status_classifier(text_embeddings)
-            if self.classify_comparison_status:
-                output['comparison_status_logits'] = self.comparison_status_classifier(text_embeddings)
-        if run_chest_imagenome_auxiliary_task:
-            output['chest_imagenome_logits'] = self.chest_imagenome_classifier(text_embeddings)
+        if run_metadata_auxiliary_tasks or run_chest_imagenome_obs_task or run_chest_imagenome_anatloc_task:
+            # Run auxiliary tasks
+            if self.use_aux_task_hidden_layer:
+                aux_task_input = self.aux_task_hidden_layer(text_embeddings)
+                aux_task_input = torch.relu(aux_task_input)
+            else:
+                aux_task_input = text_embeddings
+            if run_metadata_auxiliary_tasks:
+                if self.classify_category:
+                    output['category_logits'] = self.category_classifier(aux_task_input)
+                if self.classify_health_status:
+                    output['health_status_logits'] = self.health_status_classifier(aux_task_input)
+                if self.classify_comparison_status:
+                    output['comparison_status_logits'] = self.comparison_status_classifier(aux_task_input)
+            if run_chest_imagenome_obs_task:
+                output['chest_imagenome_obs_logits'] = self.chest_imagenome_obs_classifier(aux_task_input)
+            if run_chest_imagenome_anatloc_task:
+                output['chest_imagenome_anatloc_logits'] = self.chest_imagenome_anatloc_classifier(aux_task_input)
         return output
     
     def get_name(self):

@@ -752,12 +752,16 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
     
     return collate_batch_fn
 
-def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_ranking=False, for_metadata_classification=False,
-                                        for_chest_imagenome_classification=False):
+def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_ranking=False,
+                                        for_metadata_classification=False,
+                                        for_chest_imagenome_observation_classification=False,
+                                        for_chest_imagenome_anatomical_location_classification=False,
+                                        ):
 
     assert sum([for_triplet_ranking,
                 for_metadata_classification,
-                for_chest_imagenome_classification]) == 1 # only one of these can be true
+                for_chest_imagenome_observation_classification,
+                for_chest_imagenome_anatomical_location_classification]) == 1 # only one of these should be true
     
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
@@ -793,9 +797,20 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict['hs'] = torch.tensor([x['hs'] for x in batch]) # health status
             batch_dict['cs'] = torch.tensor([x['cs'] for x in batch]) # comparison status
             return batch_dict
-    elif for_chest_imagenome_classification:
+    elif for_chest_imagenome_observation_classification:
         def collate_batch_fn(batch):
-            batch_dict = dict(flag='cic') # cic for chest imagenome classification
+            batch_dict = dict(flag='cioc') # cioc for chest imagenome observation classification
+            # phrases
+            phrases = [x['p'] for x in batch]
+            phrases_encoding = tokenizer(phrases, padding="longest", return_tensors="pt")
+            batch_dict['input_ids'] = phrases_encoding.input_ids
+            batch_dict['attention_mask'] = phrases_encoding.attention_mask
+            # labels
+            batch_dict['l'] = torch.tensor([x['l'] for x in batch])
+            return batch_dict
+    elif for_chest_imagenome_anatomical_location_classification:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='cialc') # cialc for chest imagenome anatomical location classification
             # phrases
             phrases = [x['p'] for x in batch]
             phrases_encoding = tokenizer(phrases, padding="longest", return_tensors="pt")

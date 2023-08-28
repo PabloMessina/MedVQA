@@ -10,10 +10,23 @@ from sklearn.cluster import KMeans
 from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
 from medvqa.utils.logging import get_console_logger
 from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
-from medvqa.models.huggingface_utils import compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
+from medvqa.models.huggingface_utils import (
+    compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized,
+    compute_text_embeddings_with_BiomedVLP_BioVilT,
+)
 from medvqa.utils.metrics import jaccard_score_between_sets
 
-MAX_TRIES = 20
+class _BERT_MODEL_NAMES:
+    BiomedVLP_CXR_BERT_specialized = 'BiomedVLP_CXR_BERT_specialized'
+    BiomedVLP_BioVilT = 'BiomedVLP_BioVilT'
+    @staticmethod
+    def get_all():
+        return [
+            _BERT_MODEL_NAMES.BiomedVLP_CXR_BERT_specialized,
+            _BERT_MODEL_NAMES.BiomedVLP_BioVilT,
+        ]
+
+MAX_TRIES = 10
 
 def _levenshtein_similarity(a, b):
     return 1 - levenshtein_distance(a, b) / max(len(a), len(b))
@@ -241,6 +254,8 @@ def sample_anatomical_location_triplets__rule3(
     used_triplets,
     triplets_dict,
     logger,
+    top_k=20, # top k sentences from the same cluster as A to consider for P
+    n_samples_per_cluster=300, # number of random samples per cluster to look for P's
 ):
     # Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus"
     # dot(E(A), E(P)) > dot(E(A), E(N)) if cos(A, P) > cos(A, N) AND leveinshtein(A, P) < leveinshtein(A, N)
@@ -257,25 +272,49 @@ def sample_anatomical_location_triplets__rule3(
 
     for A in tqdm(anatloc_indices, mininterval=2):
         cid_A = anatloc_idx2cluster[A]
-        for _ in range(n_triplets_per_anchor):
-            for _ in range(MAX_TRIES):
-                P = random.choice(anatloc_cluster2indices[cid_A])
-                if P == A:
-                    continue
-                cid = random.randint(0, n_anatloc_clusters-1) # randomly select a cluster
-                N = random.choice(anatloc_cluster2indices[cid]) # randomly select an index from the cluster
-                triplet = (A, P, N)
-                if triplet in used_triplets: # already used
-                    continue
-                AP_sim = np.dot(sentence_embeddings[A], sentence_embeddings[P])
-                AN_sim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
-                AP_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[P])
-                AN_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[N])
-                if _is_at_least_x_percent_better(AP_sim, AN_sim, 0.5) and _is_at_least_x_percent_better(AP_levsim, AN_levsim, 0.5):
-                    # both CXR-BERT and Leveinshtein agree
-                    used_triplets.add(triplet) # add triplet to used triplets
-                    rule_triplets.append(triplet)
-                    break # break out of for loop
+        random_idxs_for_P = anatloc_cluster2indices[cid_A]
+        if n_samples_per_cluster < len(random_idxs_for_P):
+            random_idxs_for_P = random.sample(random_idxs_for_P, n_samples_per_cluster)
+        scores = [_levenshtein_similarity(sentence_list[A], sentence_list[idx]) +\
+                  np.dot(sentence_embeddings[A], sentence_embeddings[idx])\
+                    for idx in random_idxs_for_P]
+        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+        P_list = []
+        for j, i in enumerate(sorted_idxs):
+            s_idx = random_idxs_for_P[i]
+            if scores[i] == 0:
+                break
+            if s_idx == A:
+                continue
+            P_list.append((s_idx, j)) # (sentence index, rank)
+            if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
+                # We will consider at most the top 'top_k' sentences from the same cluster as A for P
+                break
+        assert len(P_list) <= n_triplets_per_anchor
+        if len(P_list) == 0:
+            continue
+        n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
+        for P, rank in P_list:
+            AP_score = scores[sorted_idxs[rank]]
+            assert AP_score > 0
+            for _ in range(n_triplets_per_positive):
+                for _ in range(MAX_TRIES):
+                    c = random.randint(0, n_anatloc_clusters-1) # randomly select a cluster
+                    if c == cid_A:
+                        continue # skip if same cluster as A
+                    N = random.choice(anatloc_cluster2indices[c]) # randomly select an index from the cluster
+                    assert N != A and N != P
+                    triplet = (A, P, N)
+                    if triplet in used_triplets: # if already used -> skip
+                        continue
+                    AN_embsim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
+                    AN_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[N])
+                    AN_score = AN_embsim + AN_levsim
+                    if _is_at_least_x_percent_better(AP_score, AN_score, 0.5):
+                        # both CXR-BERT and Leveinshtein agree
+                        used_triplets.add(triplet) # add triplet to used triplets
+                        rule_triplets.append(triplet)
+                        break # break out of for loop
     
     logger.info(f'Actual number of triplets sampled for Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus": {len(rule_triplets)}')
     triplets_dict['train']['anatomical_locations'].append({
@@ -348,6 +387,8 @@ def sample_observation_triplets__rule3(
     used_triplets,
     triplets_dict,
     logger,
+    top_k=10, # top k sentences from the same cluster as A to consider for P
+    n_samples_per_cluster=100, # number of random samples per cluster to look for P's
 ):
     # Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus, while anchor and positive share the same health status"
     # dot(E(A), E(P)) > dot(E(A), E(N)) if HS(A) = HS(P) AND cos(A, P) > cos(A, N) AND leveinshtein(A, P) < leveinshtein(A, N)
@@ -361,28 +402,53 @@ def sample_observation_triplets__rule3(
     n_triplets_per_anchor = math.ceil(n_triplets_per_rule / len(obs_idx_2_hsid_cid))
     rule_triplets = []
     logger.info('Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus, while anchor and positive share the same health status"')
+    
     for A, hsid_cid_A in tqdm(obs_idx_2_hsid_cid.items(), mininterval=2):
-        pos_idxs = hsid_cid_2_obs_idxs[hsid_cid_A]
-        for _ in range(n_triplets_per_anchor):
-            for _ in range(MAX_TRIES):
-                P = random.choice(pos_idxs)
-                if P == A:
-                    continue
-                cid = random.randint(0, n_obs_clusters-1) # randomly select a cluster
-                N = random.choice(obs_cluster2indices[cid]) # randomly select an index from the cluster
-                triplet = (A, P, N)
-                if triplet in used_triplets: # already used
-                    continue
-                AP_sim = np.dot(sentence_embeddings[A], sentence_embeddings[P])
-                AN_sim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
-                AP_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[P])
-                AN_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[N])
-                if _is_at_least_x_percent_better(AP_sim, AN_sim, 0.5) and _is_at_least_x_percent_better(AP_levsim, AN_levsim, 0.5):
-                    # both CXR-BERT and Leveinshtein agree
-                    used_triplets.add(triplet) # add triplet to used triplets
-                    rule_triplets.append(triplet)
-                    break # break out of for loop
-    logger.info(f'Actual number of triplets sampled for Rule 2: "Rank some triplets according to CXR-BERT and Leveinshtein consensus,'
+        random_idxs_for_P = hsid_cid_2_obs_idxs[hsid_cid_A]
+        if n_samples_per_cluster < len(random_idxs_for_P):
+            random_idxs_for_P = random.sample(random_idxs_for_P, n_samples_per_cluster)
+        scores = [_levenshtein_similarity(sentence_list[A], sentence_list[idx]) +\
+                  np.dot(sentence_embeddings[A], sentence_embeddings[idx])\
+                    for idx in random_idxs_for_P]
+        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+        P_list = []
+        for j, i in enumerate(sorted_idxs):
+            if scores[i] == 0:
+                break
+            s_idx = random_idxs_for_P[i]
+            if s_idx == A:
+                continue
+            P_list.append((s_idx, j)) # (sentence index, rank)
+            if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
+                # We will consider at most the top 'top_k' sentences from the same cluster as A for P
+                break
+        assert len(P_list) <= n_triplets_per_anchor
+        if len(P_list) == 0:
+            continue # no sentences with non-zero Levenshtein similarity
+        n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
+        A_cluster = hsid_cid_A[1]
+        for P, rank in P_list:
+            AP_score = scores[sorted_idxs[rank]]
+            assert AP_score > 0
+            for _ in range(n_triplets_per_positive):
+                for _ in range(MAX_TRIES):
+                    c = random.randint(0, n_obs_clusters-1) # randomly select a cluster
+                    if c == A_cluster:
+                        continue # skip if cluster is the same as A's cluster
+                    N = random.choice(obs_cluster2indices[c]) # randomly select an index from the cluster
+                    assert N != A and N != P
+                    triplet = (A, P, N)
+                    if triplet in used_triplets: # if already used -> skip
+                        continue
+                    AN_embsim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
+                    AN_levsim = _levenshtein_similarity(sentence_list[A], sentence_list[N])
+                    AN_score = AN_embsim + AN_levsim
+                    if _is_at_least_x_percent_better(AP_score, AN_score, 0.5):
+                        # both CXR-BERT and Leveinshtein agree
+                        used_triplets.add(triplet) # add triplet to used triplets
+                        rule_triplets.append(triplet)
+                        break # break out of for loop
+    logger.info(f'Actual number of triplets sampled for Rule 3: "Rank some triplets according to CXR-BERT and Leveinshtein consensus,'
                 f' while anchor and positive share the same health status": {len(rule_triplets)}')
     triplets_dict['train']['observations'].append({
         'rule': 'Rank some triplets according to CXR-BERT and Leveinshtein consensus, while anchor and positive share the same health status',
@@ -652,86 +718,9 @@ def sample_observation_triplets__rule7(
     logger,
     margin=0.5, # margin for Jaccard index
     top_k=30, # top k sentences from the same cluster as A to consider for P
-):
-    # Rule 7: "RadGraph-based triplets (Human Annotations)"
-    # dot(E(A), E(P)) > dot(E(A), E(N)) if Jaccard(A, P) > Jaccard(A, N) + margin
-    # Where:
-    # A = anchor = a sentence with human annotations from RadGraph
-    # P = positive = another sentence with human annotations from RadGraph, from the same cluster as A
-    # N = negative = another sentence with human annotations from RadGraph
-    # Jaccard(X, Y) = Jaccard index between sets of RadGraph labels (entities and relations) of X and Y
-    # In words: include the triplet (A, P, N) if the Jaccard index between the sets of RadGraph labels of A and P
-    #           is higher than the Jaccard index between the sets of RadGraph labels of A and N.
-    
-    logger.info('Rule 7: "RadGraph-based triplets (Human Annotations)"')
-    rule_triplets = []
-
-    n_triplets_per_anchor = math.ceil(n_triplets_per_rule / len(sentence_labels_pairs))
-    logger.info(f'len(sentence_labels_pairs)={len(sentence_labels_pairs)}')
-    logger.info(f'n_triplets_per_anchor={n_triplets_per_anchor}')
-    for sentence, labels in tqdm(sentence_labels_pairs, mininterval=2):
-        sentence_idx = sentence2index[sentence]
-        sentence_cluster = index2cluster[sentence_idx]
-        A = sentence_idx
-        scores = [jaccard_score_between_sets(labels, x[1]) for x in sentence_labels_pairs]
-        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
-        P_list = []
-        for j, i in enumerate(sorted_idxs):
-            if scores[i] == 0:
-                break # no more sentences with non-zero Jaccard index
-            s_idx = sentence2index[sentence_labels_pairs[i][0]]
-            if s_idx == A:
-                continue
-            if index2cluster[s_idx] != sentence_cluster:
-                continue
-            P_list.append((s_idx, j)) # (sentence index, rank)
-            if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
-                # We will consider at most the top 'top_k' sentences from the same cluster as A for P
-                break
-        assert len(P_list) <= n_triplets_per_anchor
-        if len(P_list) == 0:
-            continue
-        n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
-        for P, rank in P_list:
-            P_score = scores[sorted_idxs[rank]]
-            assert P_score > 0
-            N_start = -1
-            for i in range(rank+1, len(sorted_idxs)):
-                if scores[sorted_idxs[i]] + margin <= P_score or scores[sorted_idxs[i]] == 0:
-                    N_start = i
-                    break
-            if N_start == -1:
-                continue
-            if len(sorted_idxs) - N_start > n_triplets_per_positive:
-                N_end = N_start + n_triplets_per_positive
-            else:
-                N_end = len(sorted_idxs)
-            for i in range(N_start, N_end):
-                N = sentence2index[sentence_labels_pairs[sorted_idxs[i]][0]]
-                assert N != A and N != P
-                triplet = (A, P, N)
-                assert triplet not in used_triplets
-                rule_triplets.append(triplet)
-                used_triplets.add(triplet)
-    logger.info(f'Actual number of triplets sampled for Rule 7: "RadGraph-based triplets (Human Annotations)": {len(rule_triplets)}')
-    triplets_dict['train']['observations'].append({
-        'rule': 'RadGraph-based triplets (Human Annotations)',
-        'triplets': rule_triplets,
-    })
-
-def sample_observation_triplets__rule8(
-    n_triplets_per_rule,
-    sentence_labels_pairs,
-    sentence2index,
-    index2cluster,
-    used_triplets,
-    triplets_dict,
-    logger,
-    margin=0.5, # margin for Jaccard index
-    top_k=30, # top k sentences from the same cluster as A to consider for P
     n_samples_per_cluster=300, # number of random samples per cluster to look for P's
 ):
-    # Rule 8: "RadGraph-based triplets (Machine Annotations)"
+    # Rule 7: "RadGraph-based triplets (Machine Annotations)"
     # dot(E(A), E(P)) > dot(E(A), E(N)) if Jaccard(A, P) > Jaccard(A, N) + margin
     # Where:
     # A = anchor = a sentence with machine annotations from RadGraph
@@ -741,7 +730,7 @@ def sample_observation_triplets__rule8(
     # In words: include the triplet (A, P, N) if the Jaccard index between the sets of RadGraph labels of A and P
     #           is higher than the Jaccard index between the sets of RadGraph labels of A and N.
     
-    logger.info('Rule 8: "RadGraph-based triplets (Machine Annotations)"')
+    logger.info('Rule 7: "RadGraph-based triplets"')
     rule_triplets = []
 
     logger.info(f'len(sentence_labels_pairs)={len(sentence_labels_pairs)}')
@@ -761,9 +750,7 @@ def sample_observation_triplets__rule8(
     n_triplets_per_anchor = math.ceil(n_triplets_per_rule / len(sentence_labels_pairs))
     logger.info('Sampling triplets...')
     logger.info(f'n_triplets_per_anchor={n_triplets_per_anchor}')
-    count = 0
     for sentence, labels in tqdm(sentence_labels_pairs, mininterval=2):
-        count += 1
         sentence_idx = sentence2index[sentence]
         sentence_cluster = index2cluster[sentence_idx]
         A = sentence_idx
@@ -808,9 +795,9 @@ def sample_observation_triplets__rule8(
                     rule_triplets.append(triplet)
                     break # break out of for loop
 
-    logger.info(f'Actual number of triplets sampled for Rule 8: "RadGraph-based triplets (Machine Annotations)": {len(rule_triplets)}')
+    logger.info(f'Actual number of triplets sampled for Rule 7: "RadGraph-based triplets": {len(rule_triplets)}')
     triplets_dict['train']['observations'].append({
-        'rule': 'RadGraph-based triplets (Machine Annotations)',
+        'rule': 'RadGraph-based triplets',
         'triplets': rule_triplets,
     })
 
@@ -829,6 +816,7 @@ def main():
     parser.add_argument('--num_test_triplets_per_rule', type=int, required=True)
 
     parser.add_argument('--precomputed_sentence_embeddings_filepath', type=str, default=None)
+    parser.add_argument('--bert_model_name', type=str, default='BiomedVLP_CXR_BERT_specialized', choices=_BERT_MODEL_NAMES.get_all())
     
     parser.add_argument('--logging_level', type=str, default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
     parser.add_argument("--device", type=str, default="GPU", choices=["GPU", "CPU"])
@@ -918,6 +906,7 @@ def main():
     chest_imagenome_data = load_pickle(args.chest_imagenome_sentences_and_labels_filepath)
     for group in chest_imagenome_data['groups']:
         sentences_set.update(group['sentences'])
+        logger.info(f'len(group["sentences"])={len(group["sentences"])}')
 
     logger.info(f'Loading RadGraph sentences and labels from {args.radgraph_sentences_and_labels_filepath}...')
     radgraph_data = load_pickle(args.radgraph_sentences_and_labels_filepath)
@@ -945,10 +934,16 @@ def main():
     for i in np.linspace(0, len(observations_list)-1, 10, dtype=int):
         logger.info(f'{i}: {observations_list[i]}')
 
-    # Precompute CXR-BERT embeddings for all sentences
+    # Precompute BERT-based embeddings for all sentences
+    if args.bert_model_name == _BERT_MODEL_NAMES.BiomedVLP_CXR_BERT_specialized:
+        embedding_extraction_function = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
+    elif args.bert_model_name == _BERT_MODEL_NAMES.BiomedVLP_BioVilT:
+        embedding_extraction_function = compute_text_embeddings_with_BiomedVLP_BioVilT
+    else: assert False
+
     sentlen_sum = sum(len(x) for x in sentences_list)
     sentence_embeddings_save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR,
-                                                 f'cxr_bert_sentence_embeddings({len(sentences_list)},{sentlen_sum}).pkl')
+                                                 f'sentence_embeddings({args.bert_model_name},{len(sentences_list)},{sentlen_sum}).pkl')
     if os.path.exists(sentence_embeddings_save_path):
         logger.info(f'Found precomputed sentence embeddings at {sentence_embeddings_save_path}. Loading...')
         sentences_and_embeddings = load_pickle(sentence_embeddings_save_path)
@@ -977,11 +972,11 @@ def main():
             else:
                 logger.info(f'Found {len(_sentences_to_skip)} precomputed sentence embeddings. Computing embeddings for {len(_sentences_to_process)} sentences...')
                 random.shuffle(_sentences_to_process) # shuffle to minimize the chance of having multiple long sentences in a batch
-                _embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(_sentences_to_process,
-                                                                                    device=args.device,
-                                                                                    batch_size=args.batch_size,
-                                                                                    num_workers=args.num_workers,
-                                                                                    )
+                _embeddings = embedding_extraction_function(_sentences_to_process,
+                                                            device=args.device,
+                                                            batch_size=args.batch_size,
+                                                            num_workers=args.num_workers,
+                                                            )
                 logger.info(f'_precomputed_embeddings.shape: {_precomputed_embeddings.shape}')
                 logger.info(f'_embeddings.shape: {_embeddings.shape}')
                 logger.info('Merge precomputed embeddings with newly computed embeddings...')
@@ -992,11 +987,11 @@ def main():
                 for i, s in tqdm(enumerate(_sentences_to_process), mininterval=2):
                     embeddings[sentence2index[s]] = _embeddings[i]
         else:
-            embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(sentences_list,
-                                                                                    device=args.device,
-                                                                                    batch_size=args.batch_size,
-                                                                                    num_workers=args.num_workers,
-                                                                                    )
+            embeddings = embedding_extraction_function(sentences_list,
+                                                        device=args.device,
+                                                        batch_size=args.batch_size,
+                                                        num_workers=args.num_workers,
+                                                        )
         # Sanity checks
         assert embeddings.shape[0] == len(sentences_list)
         for i in tqdm(range(len(sentences_list)), mininterval=2):
@@ -1335,34 +1330,16 @@ def main():
     # Rule 7
     radgraph_index2cluster = { i:c for i, c in zip(radgraph_clusters['indices'], radgraph_clusters['clusters']) }
     s2l = dict()
-    for key in ('train', 'dev', 'test'): # these were annotated by radiologists
+    for key in ('train', 'dev', 'test', 'chexpert', 'mimiccxr'):
         for s, l in radgraph_data[key].items():
             if s in s2l:
                 s2l[s] |= l # union of sets
             else:
                 s2l[s] = l
-    radgraph_sentence_labels_pairs__human_annotations = [(s, l) for s, l in s2l.items()]
+    radgraph_sentence_labels_pairs = [(s, l) for s, l in s2l.items()]
     sample_observation_triplets__rule7(
         n_triplets_per_rule=args.num_train_triplets_per_rule,
-        sentence_labels_pairs=radgraph_sentence_labels_pairs__human_annotations,
-        sentence2index=sentence2index,
-        index2cluster=radgraph_index2cluster,
-        used_triplets=used_triplets,
-        triplets_dict=triplets,
-        logger=logger,
-    ) 
-
-    # Rule 8
-    for key in ('chexpert', 'mimiccxr'): # these were annotated by an NLP model (Dygie++)
-        for s, l in radgraph_data[key].items():
-            if s in s2l:
-                s2l[s] |= l
-            else:
-                s2l[s] = l
-    radgraph_sentence_labels_pairs__machine_annotations = [(s, l) for s, l in s2l.items()]
-    sample_observation_triplets__rule8(
-        n_triplets_per_rule=args.num_train_triplets_per_rule,
-        sentence_labels_pairs=radgraph_sentence_labels_pairs__machine_annotations,
+        sentence_labels_pairs=radgraph_sentence_labels_pairs,
         sentence2index=sentence2index,
         index2cluster=radgraph_index2cluster,
         used_triplets=used_triplets,

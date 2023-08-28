@@ -17,6 +17,13 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
+        # loss weights
+        triplet_loss_weight=1.0,
+        category_classif_loss_weight=1.0,
+        health_status_classif_loss_weight=1.0,
+        comparison_status_classif_loss_weight=1.0,
+        chest_imagenome_obs_classif_loss_weight=1.0,
+        chest_imagenome_anatloc_classif_loss_weight=1.0,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -54,6 +61,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 if training:
                     losses = []
                     triplet_loss = triplet_loss_criterion(diff, torch.ones_like(diff))
+                    triplet_loss = triplet_loss * triplet_loss_weight
                     losses.append(triplet_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
@@ -94,10 +102,13 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 if training:
                     losses = []
                     c_loss = metadata_classifier_loss_criterion(c_logits, c_labels)
+                    c_loss = c_loss * category_classif_loss_weight
                     losses.append(c_loss)
                     hs_loss = metadata_classifier_loss_criterion(hs_logits, hs_labels)
+                    hs_loss = hs_loss * health_status_classif_loss_weight
                     losses.append(hs_loss)
                     cs_loss = metadata_classifier_loss_criterion(cs_logits, cs_labels)
+                    cs_loss = cs_loss * comparison_status_classif_loss_weight
                     losses.append(cs_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
@@ -120,7 +131,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
-    def step_fn__chest_imagenome_classification(batch):
+    def step_fn__chest_imagenome_observation_classification(batch):
 
         # Extract elements from batch
         input_ids = batch['input_ids'].to(device)
@@ -133,12 +144,49 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
-                output = model(input_ids=input_ids, attention_mask=attention_mask, run_chest_imagenome_auxiliary_task=True)
-                logits = output['chest_imagenome_logits']
+                output = model(input_ids=input_ids, attention_mask=attention_mask, run_chest_imagenome_obs_task=True)
+                logits = output['chest_imagenome_obs_logits']
 
                 if training:
                     losses = []
                     chstimgn_loss = chest_imagenome_classifier_loss_criterion(logits, labels.float())
+                    chstimgn_loss = chstimgn_loss * chest_imagenome_obs_classif_loss_weight
+                    losses.append(chstimgn_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss)
+
+        # Prepare output
+        output = {
+            'pred_labels': (logits.detach() > 0).cpu(),
+            'gt_labels': labels.detach(),
+        }
+        if training:
+            output['loss'] = batch_loss.detach()
+            output['chstimgn_loss'] = chstimgn_loss.detach()
+
+        return output
+    
+    def step_fn__chest_imagenome_anatomical_location_classification(batch):
+
+        # Extract elements from batch
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['l'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+            
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                output = model(input_ids=input_ids, attention_mask=attention_mask, run_chest_imagenome_anatloc_task=True)
+                logits = output['chest_imagenome_anatloc_logits']
+
+                if training:
+                    losses = []
+                    chstimgn_loss = chest_imagenome_classifier_loss_criterion(logits, labels.float())
+                    chstimgn_loss = chstimgn_loss * chest_imagenome_anatloc_classif_loss_weight
                     losses.append(chstimgn_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
@@ -161,8 +209,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output = step_fn__triplet_ranking(batch)
         elif flag == 'mc': # metadata classification
             output = step_fn__metadata_classification(batch)
-        elif flag == 'cic': # chest imagenome classification
-            output = step_fn__chest_imagenome_classification(batch)
+        elif flag == 'cioc': # chest imagenome observation classification
+            output = step_fn__chest_imagenome_observation_classification(batch)
+        elif flag == 'cialc': # chest imagenome anatomical location classification
+            output = step_fn__chest_imagenome_anatomical_location_classification(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -181,6 +231,12 @@ def get_engine(model, device,
                testing=False,
                optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None,
+               triplet_loss_weight=1.0,
+               category_classif_loss_weight=1.0,
+               health_status_classif_loss_weight=1.0,
+               comparison_status_classif_loss_weight=1.0,
+               chest_imagenome_obs_classif_loss_weight=1.0,
+               chest_imagenome_anatloc_classif_loss_weight=1.0,
             ):
     
     # Triplet loss criterion as binary cross entropy
@@ -203,6 +259,13 @@ def get_engine(model, device,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,
                           lr_scheduler=lr_scheduler,
+                          # loss weights
+                          triplet_loss_weight=triplet_loss_weight,
+                          category_classif_loss_weight=category_classif_loss_weight,
+                          health_status_classif_loss_weight=health_status_classif_loss_weight,
+                          comparison_status_classif_loss_weight=comparison_status_classif_loss_weight,
+                          chest_imagenome_obs_classif_loss_weight=chest_imagenome_obs_classif_loss_weight,
+                          chest_imagenome_anatloc_classif_loss_weight=chest_imagenome_anatloc_classif_loss_weight,
                           )
     engine = Engine(step_fn)
     return engine

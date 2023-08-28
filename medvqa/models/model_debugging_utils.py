@@ -409,7 +409,8 @@ def load_and_run_seq2seq_model_in_inference_mode(
     return output_text
 
 def load_and_run_fact_encoder_in_inference_mode(
-        facts, chest_imagenome_label_names, model_folder_path=None, model_checkpoint_path=None, use_amp=False,
+        facts, chest_imagenome_observations, chest_imagenome_anatomical_locations,
+        model_folder_path=None, model_checkpoint_path=None, use_amp=False,
         device='GPU'):
     
     from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
@@ -465,44 +466,58 @@ def load_and_run_fact_encoder_in_inference_mode(
         model.train(False)
         with autocast(enabled=use_amp): # automatic mixed precision
             model_output = model(input_ids=input_ids, attention_mask=attention_mask,
-                                 run_metadata_auxiliary_tasks=True, run_chest_imagenome_auxiliary_task=True)
+                                 run_metadata_auxiliary_tasks=True,
+                                 run_chest_imagenome_obs_task=True,
+                                 run_chest_imagenome_anatloc_task=True)
     
     embeddings = model_output['text_embeddings'].detach().cpu().numpy()
     c_logits = model_output['category_logits'].detach().cpu()
     hs_logits = model_output['health_status_logits'].detach().cpu()
     cs_logits = model_output['comparison_status_logits'].detach().cpu()
-    ci_logits = model_output['chest_imagenome_logits'].detach().cpu()
+    cio_logits = model_output['chest_imagenome_obs_logits'].detach().cpu()
+    cia_logits = model_output['chest_imagenome_anatloc_logits'].detach().cpu()
     print(f'embeddings.shape = {embeddings.shape}')
     print(f'c_logits.shape = {c_logits.shape}')
     print(f'hs_logits.shape = {hs_logits.shape}')
     print(f'cs_logits.shape = {cs_logits.shape}')
-    print(f'ci_logits.shape = {ci_logits.shape}')
+    print(f'cio_logits.shape = {cio_logits.shape}')
+    print(f'cia_logits.shape = {cia_logits.shape}')
 
     ranked_indexes = rank_vectors_by_dot_product(embeddings[0], embeddings)
     pred_c = c_logits.argmax(dim=1).numpy()
     pred_hs = hs_logits.argmax(dim=1).numpy()
     pred_cs = cs_logits.argmax(dim=1).numpy()
-    pred_ci = (ci_logits > 0).numpy().astype(int)
-    assert pred_ci.shape == (len(facts), len(chest_imagenome_label_names))
+    pred_cio = (cio_logits > 0).numpy().astype(int)
+    pred_cia = (cia_logits > 0).numpy().astype(int)
+    assert pred_cio.shape == (len(facts), len(chest_imagenome_observations))
+    assert pred_cia.shape == (len(facts), len(chest_imagenome_anatomical_locations))
     
     print_bold(f'Query: {facts[0]}')
     print(f'\tCategory: {_LABEL_TO_CATEGORY[pred_c[0]]}')
     print(f'\tHealth status: {_LABEL_TO_HEALTH_STATUS[pred_hs[0]]}')
     print(f'\tComparison status: {_LABEL_TO_COMPARISON_STATUS[pred_cs[0]]}')
-    print('\tChest Imagenome labels:')
-    for j in range(len(chest_imagenome_label_names)):
-        if pred_ci[0, j] == 1:
-            print(f'\t\t{chest_imagenome_label_names[j]}')
+    print('\tChest Imagenome observations:')
+    for j in range(len(chest_imagenome_observations)):
+        if pred_cio[0, j] == 1:
+            print(f'\t\t{chest_imagenome_observations[j]}')
+    print('\tChest Imagenome anatomical locations:')
+    for j in range(len(chest_imagenome_anatomical_locations)):
+        if pred_cia[0, j] == 1:
+            print(f'\t\t{chest_imagenome_anatomical_locations[j]}')
     print('----------------')
     for i, idx in enumerate(ranked_indexes):
         print_bold(f'Fact {i}: {facts[idx]}')
         print(f'\tCategory: {_LABEL_TO_CATEGORY[pred_c[idx]]}')
         print(f'\tHealth status: {_LABEL_TO_HEALTH_STATUS[pred_hs[idx]]}')
         print(f'\tComparison status: {_LABEL_TO_COMPARISON_STATUS[pred_cs[idx]]}')
-        print('\tChest Imagenome labels:')
-        for j in range(len(chest_imagenome_label_names)):
-            if pred_ci[idx, j] == 1:
-                print(f'\t\t{chest_imagenome_label_names[j]}')
+        print('\tChest Imagenome observations:')
+        for j in range(len(chest_imagenome_observations)):
+            if pred_cio[idx, j] == 1:
+                print(f'\t\t{chest_imagenome_observations[j]}')
+        print('\tChest Imagenome anatomical locations:')
+        for j in range(len(chest_imagenome_anatomical_locations)):
+            if pred_cia[idx, j] == 1:
+                print(f'\t\t{chest_imagenome_anatomical_locations[j]}')
     
     # Release GPU memory
     del model

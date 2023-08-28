@@ -159,8 +159,10 @@ class FactEmbeddingTrainer():
                  paraphrases_jsonl_filepaths,
                  metadata_classification_collate_batch_fn,
                  # chest imagenome labels classification arguments
-                 integrated_chest_imagenome_labels_filepath,
-                 chest_imagenome_classification_collate_batch_fn,
+                 integrated_chest_imagenome_observations_filepath,
+                 integrated_chest_imagenome_anatomical_locations_filepath,
+                 chest_imagenome_observation_collate_batch_fn,
+                 chest_imagenome_anatomical_location_collate_batch_fn,
                  ):
         
         assert dataset_name, 'dataset_name must be provided'
@@ -313,54 +315,61 @@ class FactEmbeddingTrainer():
         )
 
         # Traing chest imagenome labels classification dataset and dataloader
-        print('----')
-        print_bold('Building train chest imagenome labels classification dataset and dataloader...')
-        print(f'Loading chest integrated chest imagenome labels from {integrated_chest_imagenome_labels_filepath}...')
-        integrated_chest_imagenome_labels = load_pickle(integrated_chest_imagenome_labels_filepath)
-        phrases = []
-        labels = []
-        label_names = integrated_chest_imagenome_labels['label_names']
-        for group in integrated_chest_imagenome_labels['groups']:
-            phrases.extend(group['sentences'])
-            labels.append(group['labels'])
-        labels = np.concatenate(labels, axis=0)
-        print(f'len(phrases): {len(phrases)}')
-        print(f'len(label_names): {len(label_names)}')
-        print(f'labels.shape: {labels.shape}')
-        assert len(phrases) == labels.shape[0]
-        assert len(label_names) == labels.shape[1]
-        # cast labels to long (int64) if needed
-        if labels.dtype != np.int64:
-            labels = labels.astype(np.int64)
-        _datasets = []
-        _weights = []
-        _lines = []
-        for i in range(labels.shape[1]):
-            idxs = np.where(labels.T[i] == 1)[0]
+        for key, labels_filepath, collate_batch_fn in zip(
+                ('observations', 'anatomical_locations'),
+                (integrated_chest_imagenome_observations_filepath,
+                 integrated_chest_imagenome_anatomical_locations_filepath),
+                (chest_imagenome_observation_collate_batch_fn,
+                 chest_imagenome_anatomical_location_collate_batch_fn)
+        ):
+            print('----')
+            print_bold(f'Building train chest imagenome {key} classification dataset and dataloader...')
+            print(f'Loading chest integrated chest imagenome observations from {labels_filepath}...')
+            labels_data = load_pickle(labels_filepath)
+            phrases = []
+            labels = []
+            label_names = labels_data['label_names']
+            for group in labels_data['groups']:
+                phrases.extend(group['sentences'])
+                labels.append(group['labels'])
+            labels = np.concatenate(labels, axis=0)
+            print(f'len(phrases): {len(phrases)}')
+            print(f'len(label_names): {len(label_names)}')
+            print(f'labels.shape: {labels.shape}')
+            assert len(phrases) == labels.shape[0]
+            assert len(label_names) == labels.shape[1]
+            # cast labels to long (int64) if needed
+            if labels.dtype != np.int64:
+                labels = labels.astype(np.int64)
+            _datasets = []
+            _weights = []
+            _lines = []
+            for i in range(labels.shape[1]):
+                idxs = np.where(labels.T[i] == 1)[0]
+                _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
+                _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
+                _lines.append((f'Label: {label_names[i]}\n'
+                            f'\tNumber of idxs: {len(idxs)}\n'
+                            f'\tWeight: {_weights[-1]:.2f}', _weights[-1]))
+            _lines.sort(key=lambda x: x[1], reverse=True)
+            for line, _ in _lines:
+                print(line)
+            # special dataset for rows with only "0" labels
+            idxs = np.where(np.all(labels == 0, axis=1))[0]
             _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
             _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
-            _lines.append((f'Label: {label_names[i]}\n'
-                          f'\tNumber of idxs: {len(idxs)}\n'
-                          f'\tWeight: {_weights[-1]:.2f}', _weights[-1]))
-        _lines.sort(key=lambda x: x[1], reverse=True)
-        for line, _ in _lines:
-            print(line)
-        # special dataset for rows with only "0" labels
-        idxs = np.where(np.all(labels == 0, axis=1))[0]
-        _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
-        _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
-        print(f'Label: "omitted"')
-        print(f'\tNumber of idxs: {len(idxs)}')
-        print(f'\tWeight: {_weights[-1]}')
-        self.train_chest_imagenome_classification_dataset = CompositeInfiniteDataset(_datasets, _weights)
-        self.train_chest_imagenome_classification_dataloader = DataLoader(
-            self.train_chest_imagenome_classification_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            collate_fn=chest_imagenome_classification_collate_batch_fn,
-            pin_memory=True,
-        )
+            print(f'Label: "omitted"')
+            print(f'\tNumber of idxs: {len(idxs)}')
+            print(f'\tWeight: {_weights[-1]}')
+            setattr(self, f'train_chest_imagenome_{key}_dataset', CompositeInfiniteDataset(_datasets, _weights))
+            setattr(self, f'train_chest_imagenome_{key}_dataloader', DataLoader(
+                getattr(self, f'train_chest_imagenome_{key}_dataset'),
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=collate_batch_fn,
+                pin_memory=True,
+            ))
 
         # Val dataset and dataloader
         print('----')
