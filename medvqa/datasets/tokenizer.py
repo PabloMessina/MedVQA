@@ -4,8 +4,8 @@ from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor
 from medvqa.utils.files import (
     get_cached_json_file,
     load_pickle,
-    save_to_pickle,
-    load_json_file,
+    save_pickle,
+    load_json,
     get_file_path_with_hashing_if_too_long,
 )
 from medvqa.datasets.preprocessing import get_sentences
@@ -89,7 +89,7 @@ class Tokenizer:
 
             if mode == 'report':
                 # include questions' vocab
-                questions = load_json_file(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
+                questions = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
                 for item in questions:
                     for token in item['question'][:-1].split():
                         filtered_vocab.add(token)
@@ -110,7 +110,7 @@ class Tokenizer:
 
             self.id2token = [self.PAD_TOKEN, self.START_TOKEN, self.END_TOKEN]
             self.id2token.extend(filtered_vocab)
-            save_to_pickle(self.id2token, vocab_filepath)
+            save_pickle(self.id2token, vocab_filepath)
             print (f'Vocabulary saved to {vocab_filepath}')
         
         self.token2id = {t:i for i,t in enumerate(self.id2token)}

@@ -2,9 +2,22 @@ import os
 import numpy as np
 from tqdm import tqdm
 from f1chexbert import F1CheXbert
+from nltk.tokenize import sent_tokenize
 from medvqa.utils.common import CACHE_DIR
+from medvqa.utils.constants import CHEXBERT_LABELS
 from medvqa.utils.files import get_cached_pickle_file, save_pickle
 from medvqa.utils.hashing import hash_string
+
+def merge_labels(labels_list):        
+    merged = np.zeros((len(CHEXBERT_LABELS),), np.int8)
+    merged[-1] = 1 # default to no findings
+    for labels in labels_list:
+        if labels[-1] == 0: # there is a finding
+            merged[-1] = 0
+        for i in range(0, len(labels)-1): # iterate over all labels except the last one
+            if labels[i] == 1:
+                merged[i] = 1
+    return merged
 
 class CheXbertLabeler(F1CheXbert):
 
@@ -23,39 +36,35 @@ class CheXbertLabeler(F1CheXbert):
         if self.verbose:
             print(f'(*) Chexbert: labeling {len(texts)} texts ...')
 
-        labels_list = [None] * len(texts)
-        unlabeled_pairs = []
-        unlabeled_hashes_set = set()
-        unlabeled_hashes = []
-        unlabeled_texts = []
+        output_labels = [None] * len(texts)
+        dirty_count = 0
+        
+        for i, text in tqdm(enumerate(texts), mininterval=2):
+            text_hash = hash_string(text)
+            if text_hash in self.cache:
+                output_labels[i] = self.cache[text_hash]
+                continue
+            sentences = sent_tokenize(text)
+            sentence_labels = []
+            for sentence in sentences:
+                hash = hash_string(sentence)
+                labels = self.cache.get(hash, None)
+                if labels is None:
+                    labels = self.get_label(sentence)
+                    self.cache[hash] = labels
+                    dirty_count += 1
+                sentence_labels.append(labels)
+            output_labels[i] = merge_labels(sentence_labels)
+            self.cache[text_hash] = output_labels[i]            
 
-        for i, text in enumerate(texts):
-            hash = hash_string(text)
-            labels_list[i] = self.cache.get(hash, None)
-            if labels_list[i] is None:
-                unlabeled_pairs.append((i, hash))
-                if hash not in unlabeled_hashes_set:
-                    unlabeled_hashes_set.add(hash)
-                    unlabeled_hashes.append(hash)
-                    unlabeled_texts.append(text)
-
-        if len(unlabeled_texts) > 0:
+        if dirty_count > 0:
             if self.verbose:
-                print(f'Chexbert: {len(unlabeled_texts)} texts not found in cache, invoking chexbert labeler ...')
-                labels = [self.get_label(text) for text in tqdm(unlabeled_texts, mininterval=2)]
-            else:
-                labels = [self.get_label(text) for text in unlabeled_texts]
-            for hash, label in zip(unlabeled_hashes, labels):
-                self.cache[hash] = label
-            
+                print(f'Done labeling: {dirty_count} new labels found and cached')
             if update_cache_on_disk:
                 save_pickle(self.cache, self.cache_path)
                 if self.verbose:
                     print(f'Cache successfully updated and saved to {self.cache_path}')
-            
-            for i, hash in unlabeled_pairs:
-                labels_list[i] = self.cache[hash]
         elif self.verbose:
             print('All labels found in cache, no need to invoke chexbert labeler')
         
-        return np.array(labels_list)
+        return np.array(output_labels)

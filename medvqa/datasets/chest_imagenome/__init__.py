@@ -380,6 +380,21 @@ CHEST_IMAGENOME_ATTRIBUTES_DICT = {
         'calcified',
         'lucency',
     ],
+    'temporal': [
+        'acute',
+        'chronic',
+    ],
+    'severity': [
+        'hedge',
+        'mild',
+        'moderate',
+        'severe',
+    ],
+    'laterality': [
+        'left',
+        'right',
+        'bilateral',
+    ],
 }
 
 assert len(CHEST_IMAGENOME_BBOX_NAMES) == CHEST_IMAGENOME_NUM_BBOX_CLASSES

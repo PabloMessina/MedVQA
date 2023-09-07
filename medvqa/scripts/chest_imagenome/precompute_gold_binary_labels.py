@@ -9,7 +9,7 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH,
     CHEST_IMAGENOME_OTHER_REGIONS,
 )
-from medvqa.utils.files import save_to_pickle
+from medvqa.utils.files import save_pickle
 
 if __name__ == '__main__':
     print(f'Reading {CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH}')
@@ -87,11 +87,11 @@ if __name__ == '__main__':
     imageId2mask_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'gold_imageId2mask.pkl')
     imageId2contradictions_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'gold_imageId2contradictions.pkl')
     print(f'Saving labels to {labels_path}')
-    save_to_pickle(all_labels, labels_path)
+    save_pickle(all_labels, labels_path)
     print(f'Saving imageId2labels to {imageId2labels_path}')
-    save_to_pickle(imageId2binaryLabels, imageId2labels_path)
+    save_pickle(imageId2binaryLabels, imageId2labels_path)
     print(f'Saving imageId2mask to {imageId2mask_path}')
-    save_to_pickle(imageId2mask, imageId2mask_path)
+    save_pickle(imageId2mask, imageId2mask_path)
     print(f'Saving imageId2contradictions to {imageId2contradictions_path}')
-    save_to_pickle(imageId2contradictions, imageId2contradictions_path)
+    save_pickle(imageId2contradictions, imageId2contradictions_path)
     print('Done')

@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-from nltk.tokenize import wordpunct_tokenize
+from nltk.tokenize import word_tokenize
 from PIL import Image
 import random
 from sklearn.metrics import (
@@ -12,6 +12,9 @@ from sklearn.metrics import (
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_label_names
 from medvqa.datasets.mimiccxr import get_mimiccxr_image_paths
+from medvqa.metrics.medical.chexbert import CheXbertLabeler
+from medvqa.metrics.medical.fact_embedding import FactEmbeddingScorer
+from medvqa.metrics.medical.radgraph import RadGraphLabeler
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
@@ -22,22 +25,27 @@ from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.models.report_generation.templates.models import SimpleTemplateRGModel
 from medvqa.utils.constants import (
     CHEST_IMAGENOME_GENDERS,
+    CHEXBERT_LABELS,
+    CHEXBERT_LABELS_5_INDICES,
     CHEXPERT_LABEL2SHORT,
     CHEXPERT_LABELS,
+    CHEXPERT_LABELS_5_INDICES,
     METRIC2SHORT,
     VINBIG_LABELS,
     ReportEvalMode,
 )
-from medvqa.utils.files import load_pickle, save_to_pickle
+from medvqa.utils.files import load_pickle, save_pickle
 from medvqa.utils.logging import (
     chest_imagenome_label_array_to_string,
     chexpert_label_array_to_string,
     print_blue, print_bold, print_magenta,
 )
 from medvqa.utils.common import CACHE_DIR, get_timestamp
+from medvqa.utils.metrics import f1_between_dicts, jaccard_between_dicts, precision_between_dicts, recall_between_dicts
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
-_REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels']
+_REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels',
+                                'chexbert_labels', 'radgraph_labels', 'fact_embedding_score']
 
 def _concatenate_report(qa_adapted_dataset, rid):
     report = qa_adapted_dataset['reports'][rid]
@@ -107,16 +115,22 @@ def recover_reports(metrics_dict, dataset, tokenizer, report_eval_mode,
 
 class TemplateBasedModes:
     CHEXPERT_LABELS = 'chexpert_labels'
+    CHEXPERT_LABELS__ORACLE = 'chexpert_labels__oracle'
+    CHEXBERT_LABELS__ORACLE = 'chexbert_labels__oracle'
     CHEST_IMAGENOME_LABELS = 'chest_imagenome_labels'
     CHEST_IMAGENOME_LABELS__ORACLE = 'chest_imagenome_labels__oracle'
     CHEXPERT_AND_CHEST_IMAGENOME_LABELS = 'chexpert_and_chest_imagenome_labels'
+    FACT_EMBEDDING_LABELS__ORACLE = 'fact_embedding_labels__oracle'
     @staticmethod
     def get_choices():
         return [
             TemplateBasedModes.CHEXPERT_LABELS,
+            TemplateBasedModes.CHEXPERT_LABELS__ORACLE,
+            TemplateBasedModes.CHEXBERT_LABELS__ORACLE,
             TemplateBasedModes.CHEST_IMAGENOME_LABELS,
             TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE,
             TemplateBasedModes.CHEXPERT_AND_CHEST_IMAGENOME_LABELS,
+            TemplateBasedModes.FACT_EMBEDDING_LABELS__ORACLE,
         ]
 
 def recover_reports__template_based(
@@ -158,9 +172,7 @@ def recover_reports__template_based(
         'gen_reports': gen_reports,
     }
 
-def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
-                                metric_names=_REPORT_LEVEL_METRIC_NAMES,
-                                max_processes=10,):
+def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_LEVEL_METRIC_NAMES, max_processes=10):
 
     n = len(gt_reports)
     gt_texts = []
@@ -174,14 +186,14 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
             gt_text = gt_reports[i]
         else:
             gt_text = gt_reports[i]['text']
-        gt_texts_tokenized.append(tokenizer.clean_sentence(tokenizer.string2ids(gt_text)))
+        gt_texts_tokenized.append(word_tokenize(gt_text))
         gt_texts.append(gt_text)
         # gen text
         if type(gen_reports[i]) == str:
             gen_text = gen_reports[i]
         else:            
-            gen_text = ' . '.join(x for x in gen_reports[i]['a'] if len(x) > 0)
-        gen_texts_tokenized.append(tokenizer.clean_sentence(tokenizer.string2ids(gen_text)))
+            gen_text = '. '.join(x for x in gen_reports[i]['a'] if len(x) > 0)
+        gen_texts_tokenized.append(word_tokenize(gen_text))
         gen_texts.append(gen_text)
 
     print_blue('Computing report-level metrics...', bold=True)
@@ -195,8 +207,8 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
     
     metric_name = 'bleu'
     if metric_name in metric_names:
-        metric = Bleu(device='cpu', record_scores=True)
-        metric.update((gen_texts_tokenized, gt_texts_tokenized))
+        metric = Bleu(device='cpu', record_scores=True, using_ids=False)
+        metric.update((gen_texts, gt_texts))
         scores = metric.compute()    
         for k in range(0, 4):
             blue_k = f'bleu-{k+1}'
@@ -204,48 +216,61 @@ def compute_report_level_metrics(gt_reports, gen_reports, tokenizer,
     
     metric_name = 'rougeL'
     if metric_name in metric_names:
-        metric = RougeL(device='cpu', record_scores=True)
-        metric.update((gen_texts_tokenized, gt_texts_tokenized))
+        metric = RougeL(device='cpu', record_scores=True, using_ids=False)
+        metric.update((gen_texts, gt_texts))
         metrics[metric_name] = metric.compute()
 
     metric_name = 'meteor'
     if metric_name in metric_names:
         metric = Meteor(device='cpu', record_scores=True)
-        gen_texts_ = [wordpunct_tokenize(x) for x in gen_texts]
-        gt_texts_ = [wordpunct_tokenize(x) for x in gt_texts]
-        metric.update((gen_texts_, gt_texts_))
+        metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
     
     metric_name = 'ciderD'
     if metric_name in metric_names:
-        metric = CiderD(device='cpu', record_scores=True)
-        metric.update((gen_texts_tokenized, gt_texts_tokenized))
+        metric = CiderD(device='cpu', record_scores=True, using_ids=False)
+        metric.update((gen_texts, gt_texts))
         metrics[metric_name] = metric.compute()
 
-    metric_name = 'medcomp'
-    if metric_name in metric_names:
-        metric = MedicalCompleteness(tokenizer, device='cpu', record_scores=True)
-        metric.update((gen_texts_tokenized, gt_texts_tokenized))
-        metrics[metric_name] = metric.compute()
+    # metric_name = 'medcomp'
+    # if metric_name in metric_names:
+    #     metric = MedicalCompleteness(tokenizer, device='cpu', record_scores=True)
+    #     metric.update((gen_texts_tokenized, gt_texts_tokenized))
+    #     metrics[metric_name] = metric.compute()
     
-    metric_name = 'wmedcomp'
-    if metric_name in metric_names:
-        metric = WeightedMedicalCompleteness(tokenizer, device='cpu', record_scores=True)
-        metric.update((gen_texts_tokenized, gt_texts_tokenized))
-        metrics[metric_name] = metric.compute()
+    # metric_name = 'wmedcomp'
+    # if metric_name in metric_names:
+    #     metric = WeightedMedicalCompleteness(tokenizer, device='cpu', record_scores=True)
+    #     metric.update((gen_texts_tokenized, gt_texts_tokenized))
+    #     metrics[metric_name] = metric.compute()
 
     metric_name = 'chexpert_labels'
     if metric_name in metric_names:
-        gt_texts_ = [tokenizer.ids2string(x) for x in gt_texts_tokenized]
-        gen_texts_ = [tokenizer.ids2string(x) for x in gen_texts_tokenized]
-        labeler = ChexpertLabeler()
+        labeler = ChexpertLabeler(verbose=True)
         tmp_anticolission_code = f'_{get_timestamp()}_{random.random()}'
-        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts_, tmp_suffix=tmp_anticolission_code,
+        metrics['chexpert_labels_gt'] = labeler.get_labels(gt_texts, tmp_suffix=tmp_anticolission_code,
                                             update_cache_on_disk=True, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
-        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts_, tmp_suffix=tmp_anticolission_code,
-                                            update_cache_on_disk=False, remove_tmp_files=True,
+        metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix=tmp_anticolission_code,
+                                            update_cache_on_disk=True, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
+        
+    metric_name = 'chexbert_labels'
+    if metric_name in metric_names:
+        labeler = CheXbertLabeler(verbose=True)
+        metrics['chexbert_labels_gt'] = labeler.get_labels(gt_texts, update_cache_on_disk=True)
+        metrics['chexbert_labels_gen'] = labeler.get_labels(gen_texts, update_cache_on_disk=True)
+
+    metric_name = 'radgraph_labels'
+    if metric_name in metric_names:
+        labeler = RadGraphLabeler(verbose=True)
+        metrics['radgraph_labels_gt'] = labeler.get_labels(gt_texts, update_cache_on_disk=True)
+        metrics['radgraph_labels_gen'] = labeler.get_labels(gen_texts, update_cache_on_disk=True)
+
+    metric_name = 'fact_embedding_score'
+    if metric_name in metric_names:
+        scorer = FactEmbeddingScorer(verbose=True)
+        metrics[metric_name] = scorer(gen_texts, gt_texts, update_cache_on_disk=True)
     
     print('Done computing report-level metrics.')
     return metrics
@@ -264,10 +289,11 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
         needs_update = True
 
     # Build dataframe
-    columns = ['metrics_path']
-    data = [[] for _ in range(len(metrics_paths))]
+    columns_set = set()
+    columns_set.add('metrics_path')
+    data_dicts = [dict() for _ in range(len(metrics_paths))]
     for row_i, metrics_path in enumerate(metrics_paths):
-        data[row_i].append(metrics_path)
+        data_dicts[row_i]['metrics_path'] = metrics_path
 
         # Retrieve cached results (if any)
         cache_key = (metrics_path, os.path.getmtime(metrics_path))
@@ -283,8 +309,16 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
         for mn in metric_names:
             try:
                 cached_metric = cached_results[mn]
-                data[row_i].extend(cached_metric['values'])
-                if row_i == 0: columns.extend(cached_metric['names'])
+                if mn == 'chexpert_labels':
+                    prefix = 'chxp_'
+                elif mn == 'chexbert_labels':
+                    prefix = 'chxb_'
+                else:
+                    prefix = ''
+                for name, value in zip(cached_metric['names'], cached_metric['values']):
+                    name = f'{prefix}{name}'
+                    data_dicts[row_i][name] = value
+                    columns_set.add(name)
                 continue
             except KeyError:
                 cached_metric = cached_results[mn] = {'values':[], 'names':[]}
@@ -292,90 +326,236 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
                     metrics_dict = load_pickle(metrics_path)
                 needs_update = True
 
-            if mn == 'chexpert_labels':
-                gt_labels = metrics_dict['chexpert_labels_gt']
-                gen_labels = metrics_dict['chexpert_labels_gen']
-                
-                chxlabf1 = ChexpertLabelsF1score(device='cpu')
-                chxlabf1.update((gen_labels, gt_labels))
-                cached_metric['values'].append(chxlabf1.compute())
-                cached_metric['names'].append('chxlabf1(hard)')
+            try:
+                if mn == 'chexpert_labels':
+                    gt_labels = metrics_dict['chexpert_labels_gt']
+                    gen_labels = metrics_dict['chexpert_labels_gen']
 
-                # chxlabacc = MultiLabelAccuracy(device='cpu')
-                # chxlabacc.update((gen_labels, gt_labels))
-                # data[row_i].append(chxlabacc.compute())
-                # if row_i == 0: columns.append(METRIC2SHORT['chxlabelacc'])
+                    ps, rs, f1s, accs = [], [], [], []
+                    for i in range(len(CHEXPERT_LABELS)):
+                        ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
+                        rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
+                        f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
+                        accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
+                    macro_avg_p = sum(ps) / len(CHEXPERT_LABELS)
+                    macro_avg_r = sum(rs) / len(CHEXPERT_LABELS)
+                    macro_avg_f1 = sum(f1s) / len(CHEXPERT_LABELS)
+                    gt_flat = gt_labels.reshape(-1)
+                    gen_flat = gen_labels.reshape(-1)
+                    micro_avg_p = precision_score(gt_flat, gen_flat)
+                    micro_avg_r = recall_score(gt_flat, gen_flat)
+                    micro_avg_f1 = f1_score(gt_flat, gen_flat)
+                    accuracy = accuracy_score(gt_flat, gen_flat)
+                    n = len(gt_labels)
+                    sample_avg_p = sum(precision_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    sample_avg_r = sum(recall_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    sample_avg_f1 = sum(f1_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    gt_5 = gt_labels.T[CHEXPERT_LABELS_5_INDICES]
+                    gen_5 = gen_labels.T[CHEXPERT_LABELS_5_INDICES]
+                    gt_5_flat = gt_5.reshape(-1)
+                    gen_5_flat = gen_5.reshape(-1)
+                    micro_avg_p_5= precision_score(gt_5_flat, gen_5_flat)
+                    micro_avg_r_5 = recall_score(gt_5_flat, gen_5_flat)
+                    micro_avg_f1_5 = f1_score(gt_5_flat, gen_5_flat)
+                    macro_avg_p_5 = sum(ps[i] for i in CHEXPERT_LABELS_5_INDICES) / len(CHEXPERT_LABELS_5_INDICES)
+                    macro_avg_r_5 = sum(rs[i] for i in CHEXPERT_LABELS_5_INDICES) / len(CHEXPERT_LABELS_5_INDICES)
+                    macro_avg_f1_5 = sum(f1s[i] for i in CHEXPERT_LABELS_5_INDICES) / len(CHEXPERT_LABELS_5_INDICES)
 
-                ps, rs, f1s, accs = [], [], [], []
-                for i in range(len(CHEXPERT_LABELS)):
-                    ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
-                    rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
-                    f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
-                    accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
-                macro_avg_p = sum(ps) / len(CHEXPERT_LABELS)
-                macro_avg_r = sum(rs) / len(CHEXPERT_LABELS)
-                macro_avg_f1 = sum(f1s) / len(CHEXPERT_LABELS)
-                gt_flat = gt_labels.reshape(-1)
-                gen_flat = gen_labels.reshape(-1)
-                micro_avg_p = precision_score(gt_flat, gen_flat)
-                micro_avg_r = recall_score(gt_flat, gen_flat)
-                micro_avg_f1 = f1_score(gt_flat, gen_flat)
-                accuracy = accuracy_score(gt_flat, gen_flat)
+                    cached_metric['values'].append(micro_avg_p)
+                    cached_metric['names'].append('p(micro)')                
+                    cached_metric['values'].append(micro_avg_r)
+                    cached_metric['names'].append('r(micro)')
+                    cached_metric['values'].append(micro_avg_f1)
+                    cached_metric['names'].append('f1(micro)')
 
-                cached_metric['values'].append(micro_avg_p)
-                cached_metric['names'].append('p(micro)')                
-                cached_metric['values'].append(micro_avg_r)
-                cached_metric['names'].append('r(micro)')
-                cached_metric['values'].append(micro_avg_f1)
-                cached_metric['names'].append('f1(micro)')
+                    cached_metric['values'].append(macro_avg_p)
+                    cached_metric['names'].append('p(macro)')
+                    cached_metric['values'].append(macro_avg_r)
+                    cached_metric['names'].append('r(macro)')
+                    cached_metric['values'].append(macro_avg_f1)
+                    cached_metric['names'].append('f1(macro)')
 
-                cached_metric['values'].append(macro_avg_p)
-                cached_metric['names'].append('p(macro)')
-                cached_metric['values'].append(macro_avg_r)
-                cached_metric['names'].append('r(macro)')
-                cached_metric['values'].append(macro_avg_f1)
-                cached_metric['names'].append('f1(macro)')
+                    cached_metric['values'].append(sample_avg_p)
+                    cached_metric['names'].append('p(sample)')
+                    cached_metric['values'].append(sample_avg_r)
+                    cached_metric['names'].append('r(sample)')
+                    cached_metric['values'].append(sample_avg_f1)
+                    cached_metric['names'].append('f1(sample)')
 
-                cached_metric['values'].append(accuracy)
-                cached_metric['names'].append('acc')
+                    cached_metric['values'].append(micro_avg_p_5)
+                    cached_metric['names'].append('p(micro-5)')
+                    cached_metric['values'].append(micro_avg_r_5)
+                    cached_metric['names'].append('r(micro-5)')
+                    cached_metric['values'].append(micro_avg_f1_5)
+                    cached_metric['names'].append('f1(micro-5)')
 
-                for i, label in enumerate(CHEXPERT_LABELS):
-                    cached_metric['values'].append(ps[i])
-                    cached_metric['names'].append(f'p({CHEXPERT_LABEL2SHORT[label]})')
-                for i, label in enumerate(CHEXPERT_LABELS):
-                    cached_metric['values'].append(rs[i])
-                    cached_metric['names'].append(f'r({CHEXPERT_LABEL2SHORT[label]})')
-                for i, label in enumerate(CHEXPERT_LABELS):
-                    cached_metric['values'].append(f1s[i])
-                    cached_metric['names'].append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
-                
-            elif mn == 'bleu':            
-                for k in range(4):
-                    bleu_k = f'bleu-{k+1}'
-                    bleu_score = metrics_dict[bleu_k]                
-                    cached_metric['values'].append(bleu_score[0])
-                    cached_metric['names'].append(METRIC2SHORT.get(bleu_k, bleu_k))
-            elif mn == 'ciderD':
-                scores = metrics_dict[mn]
-                cached_metric['values'].append(scores[0])
-                cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
-            else:
-                try:
-                    scores = metrics_dict[mn]
-                    score = sum(scores) / len(scores)
+                    cached_metric['values'].append(macro_avg_p_5)
+                    cached_metric['names'].append('p(macro-5)')
+                    cached_metric['values'].append(macro_avg_r_5)
+                    cached_metric['names'].append('r(macro-5)')
+                    cached_metric['values'].append(macro_avg_f1_5)
+                    cached_metric['names'].append('f1(macro-5)')
+
+                    cached_metric['values'].append(accuracy)
+                    cached_metric['names'].append('acc')
+
+                    for i, label in enumerate(CHEXPERT_LABELS):
+                        cached_metric['values'].append(ps[i])
+                        cached_metric['names'].append(f'p({CHEXPERT_LABEL2SHORT[label]})')
+                    for i, label in enumerate(CHEXPERT_LABELS):
+                        cached_metric['values'].append(rs[i])
+                        cached_metric['names'].append(f'r({CHEXPERT_LABEL2SHORT[label]})')
+                    for i, label in enumerate(CHEXPERT_LABELS):
+                        cached_metric['values'].append(f1s[i])
+                        cached_metric['names'].append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
+
+                elif mn == 'chexbert_labels':
+                    gt_labels = metrics_dict['chexbert_labels_gt']
+                    gen_labels = metrics_dict['chexbert_labels_gen']
+
+                    ps, rs, f1s, accs = [], [], [], []
+                    for i in range(len(CHEXBERT_LABELS)):
+                        ps.append(precision_score(gt_labels.T[i], gen_labels.T[i]))
+                        rs.append(recall_score(gt_labels.T[i], gen_labels.T[i]))
+                        f1s.append(f1_score(gt_labels.T[i], gen_labels.T[i]))
+                        accs.append(accuracy_score(gt_labels.T[i], gen_labels.T[i]))
+                    macro_avg_p = sum(ps) / len(CHEXBERT_LABELS)
+                    macro_avg_r = sum(rs) / len(CHEXBERT_LABELS)
+                    macro_avg_f1 = sum(f1s) / len(CHEXBERT_LABELS)
+                    gt_flat = gt_labels.reshape(-1)
+                    gen_flat = gen_labels.reshape(-1)
+                    micro_avg_p = precision_score(gt_flat, gen_flat)
+                    micro_avg_r = recall_score(gt_flat, gen_flat)
+                    micro_avg_f1 = f1_score(gt_flat, gen_flat)
+                    accuracy = accuracy_score(gt_flat, gen_flat)
+                    n = len(gt_labels)
+                    sample_avg_p = sum(precision_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    sample_avg_r = sum(recall_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    sample_avg_f1 = sum(f1_score(gt_labels[i], gen_labels[i], zero_division=1) for i in range(n)) / n
+                    gt_5 = gt_labels.T[CHEXBERT_LABELS_5_INDICES]
+                    gen_5 = gen_labels.T[CHEXBERT_LABELS_5_INDICES]
+                    gt_5_flat = gt_5.reshape(-1)
+                    gen_5_flat = gen_5.reshape(-1)
+                    micro_avg_p_5= precision_score(gt_5_flat, gen_5_flat)
+                    micro_avg_r_5 = recall_score(gt_5_flat, gen_5_flat)
+                    micro_avg_f1_5 = f1_score(gt_5_flat, gen_5_flat)
+                    macro_avg_p_5 = sum(ps[i] for i in CHEXBERT_LABELS_5_INDICES) / len(CHEXBERT_LABELS_5_INDICES)
+                    macro_avg_r_5 = sum(rs[i] for i in CHEXBERT_LABELS_5_INDICES) / len(CHEXBERT_LABELS_5_INDICES)
+                    macro_avg_f1_5 = sum(f1s[i] for i in CHEXBERT_LABELS_5_INDICES) / len(CHEXBERT_LABELS_5_INDICES)
+
+                    cached_metric['values'].append(micro_avg_p)
+                    cached_metric['names'].append('p(micro)')                
+                    cached_metric['values'].append(micro_avg_r)
+                    cached_metric['names'].append('r(micro)')
+                    cached_metric['values'].append(micro_avg_f1)
+                    cached_metric['names'].append('f1(micro)')
+
+                    cached_metric['values'].append(macro_avg_p)
+                    cached_metric['names'].append('p(macro)')
+                    cached_metric['values'].append(macro_avg_r)
+                    cached_metric['names'].append('r(macro)')
+                    cached_metric['values'].append(macro_avg_f1)
+                    cached_metric['names'].append('f1(macro)')
+
+                    cached_metric['values'].append(sample_avg_p)
+                    cached_metric['names'].append('p(sample)')
+                    cached_metric['values'].append(sample_avg_r)
+                    cached_metric['names'].append('r(sample)')
+                    cached_metric['values'].append(sample_avg_f1)
+                    cached_metric['names'].append('f1(sample)')
+
+                    cached_metric['values'].append(micro_avg_p_5)
+                    cached_metric['names'].append('p(micro-5)')
+                    cached_metric['values'].append(micro_avg_r_5)
+                    cached_metric['names'].append('r(micro-5)')
+                    cached_metric['values'].append(micro_avg_f1_5)
+                    cached_metric['names'].append('f1(micro-5)')
+
+                    cached_metric['values'].append(macro_avg_p_5)
+                    cached_metric['names'].append('p(macro-5)')
+                    cached_metric['values'].append(macro_avg_r_5)
+                    cached_metric['names'].append('r(macro-5)')
+                    cached_metric['values'].append(macro_avg_f1_5)
+                    cached_metric['names'].append('f1(macro-5)')
+
+                    cached_metric['values'].append(accuracy)
+                    cached_metric['names'].append('acc')
+
+                    for i, label in enumerate(CHEXBERT_LABELS):
+                        cached_metric['values'].append(ps[i])
+                        cached_metric['names'].append(f'p({CHEXPERT_LABEL2SHORT[label]})')
+                    for i, label in enumerate(CHEXBERT_LABELS):
+                        cached_metric['values'].append(rs[i])
+                        cached_metric['names'].append(f'r({CHEXPERT_LABEL2SHORT[label]})')
+                    for i, label in enumerate(CHEXBERT_LABELS):
+                        cached_metric['values'].append(f1s[i])
+                        cached_metric['names'].append(f'f1({CHEXPERT_LABEL2SHORT[label]})')
+
+                elif mn == 'radgraph_labels':
+                    gt_labels = metrics_dict['radgraph_labels_gt']
+                    gen_labels = metrics_dict['radgraph_labels_gen']
+                    n = len(gt_labels)
+                    sample_avg_p = sum(precision_between_dicts(gt_labels[i], gen_labels[i]) for i in range(n)) / n
+                    sample_avg_r = sum(recall_between_dicts(gt_labels[i], gen_labels[i]) for i in range(n)) / n
+                    sample_avg_f1 = sum(f1_between_dicts(gt_labels[i], gen_labels[i]) for i in range(n)) / n
+                    sample_avg_jaccard = sum(jaccard_between_dicts(gt_labels[i], gen_labels[i]) for i in range(n)) / n
+                    cached_metric['values'].append(sample_avg_p)
+                    cached_metric['names'].append('radgraph_p(sample)')
+                    cached_metric['values'].append(sample_avg_r)
+                    cached_metric['names'].append('radgraph_r(sample)')
+                    cached_metric['values'].append(sample_avg_f1)
+                    cached_metric['names'].append('radgraph_f1(sample)')
+                    cached_metric['values'].append(sample_avg_jaccard)
+                    cached_metric['names'].append('radgraph_jaccard(sample)')
+
+                elif mn == 'fact_embedding_score':
+                    score = metrics_dict['fact_embedding_score']
                     cached_metric['values'].append(score)
-                except KeyError:
-                    cached_metric['values'].append(None)
-                cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
+                    cached_metric['names'].append('fact_embedding_score')
+                    
+                elif mn == 'bleu':
+                    for k in range(4):
+                        bleu_k = f'bleu-{k+1}'
+                        bleu_score = metrics_dict[bleu_k]                
+                        cached_metric['values'].append(bleu_score[0])
+                        cached_metric['names'].append(METRIC2SHORT.get(bleu_k, bleu_k))
+                elif mn == 'ciderD':
+                    scores = metrics_dict[mn]
+                    cached_metric['values'].append(scores[0])
+                    cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
+                else:
+                    try:
+                        scores = metrics_dict[mn]
+                        score = sum(scores) / len(scores)
+                        cached_metric['values'].append(score)
+                    except KeyError:
+                        cached_metric['values'].append(None)
+                    cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
 
-            data[row_i].extend(cached_metric['values'])
-            if row_i == 0: columns.extend(cached_metric['names'])
+                if mn == 'chexpert_labels':
+                    prefix = 'chxp_'
+                elif mn == 'chexbert_labels':
+                    prefix = 'chxb_'
+                else:
+                    prefix = ''
+                for name, value in zip(cached_metric['names'], cached_metric['values']):
+                    name = f'{prefix}{name}'
+                    data_dicts[row_i][name] = value
+                    columns_set.add(name)
+            except KeyError:
+                pass
     
     # Save updated cache to disk if required
     if needs_update:
-        save_to_pickle(metrics_cache, _REPORT_LEVEL_METRICS_CACHE_PATH)
+        save_pickle(metrics_cache, _REPORT_LEVEL_METRICS_CACHE_PATH)
         print(f'Report level metrics updated and saved to {_REPORT_LEVEL_METRICS_CACHE_PATH}')
 
+    # Build dataframe
+    columns = sorted(list(columns_set))
+    data = [[] for _ in range(len(metrics_paths))]
+    for row_i in range(len(metrics_paths)):
+        for col in columns:
+            data[row_i].append(data_dicts[row_i].get(col, None))
     return pd.DataFrame(data=data, columns=columns)
 
 def get_chexpert_based_outputs_dataframe(metrics_paths):

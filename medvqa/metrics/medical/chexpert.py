@@ -186,7 +186,7 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
     return out_labels
 
 class ChexpertLabeler:
-    def __init__(self, verbose=True):        
+    def __init__(self, verbose=False):
         self.cache_path = os.path.join(CACHE_DIR, 'chexpert_labeler_cache.pkl')
         self.cache = get_cached_pickle_file(self.cache_path)
         self.verbose = verbose

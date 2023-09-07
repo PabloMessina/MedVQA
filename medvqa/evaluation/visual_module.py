@@ -47,7 +47,7 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
 from medvqa.utils.handlers import (
     attach_accumulator,
     get_log_iteration_handler,
@@ -879,7 +879,7 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
         if cache_thresholds:
             print('Saving thresholds ...')
             save_path = _get_thresholds_filepath(results_folder_path, labeler_name, score_name)
-            save_to_pickle(thresholds, save_path)
+            save_pickle(thresholds, save_path)
             print('Thresholds saved to ', end=''); print_bold(save_path)
             if return_filepaths_instead:
                 thresholds_dict[labeler_name] = save_path
@@ -897,7 +897,7 @@ def calibrate_thresholds_on_mimiccxr_validation_set(
             for i, idx in enumerate(mimiccxr_vision_evaluator.val_indices):
                 dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
                 dicom_id_to_pred_probs[dicom_id] = pred_probs[i]
-            save_to_pickle(dicom_id_to_pred_probs, save_path)
+            save_pickle(dicom_id_to_pred_probs, save_path)
             print('Probabilities saved to: ', end=''); print_bold(save_path)
     
     assert len(thresholds_dict) > 0

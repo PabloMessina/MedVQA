@@ -1,5 +1,5 @@
 import os
-from medvqa.utils.files import get_cached_json_file, load_pickle, save_to_pickle
+from medvqa.utils.files import get_cached_json_file, load_pickle, save_pickle
 from medvqa.utils.hashing import update_hash
 
 def get_sentences(qa_adapted_datasets, mode='report', include_unmatched=True):
@@ -43,7 +43,7 @@ def get_average_question_positions(cache_dir, qa_adapted_dataset_filename, repor
     for i in range(n_questions):
         question_scores[i] /= max(1, question_counts[i])
 
-    save_to_pickle(question_scores, file_path)
+    save_pickle(question_scores, file_path)
     print('question_scores saved to', file_path)
     return question_scores
 
@@ -68,7 +68,7 @@ def get_question_frequencies(cache_dir, qa_adapted_dataset_filename, report_ids)
         for qid in report['question_ids']:
             question_frequencies[qid] += 1
 
-    save_to_pickle(question_frequencies, file_path)
+    save_pickle(question_frequencies, file_path)
     print('question_frequencies saved to', file_path)
     return question_frequencies
 

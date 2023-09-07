@@ -2,9 +2,9 @@
 # This is intended to be run as a script from the command line or as a subprocess, e.g.:
 
 # subprocess.run("conda run -n dygiepp python3 {path_to_this_inference_script} \
-# --model_path {path_to_mode_checkpoint_folder/model.tar.gz} \
+# --model_path {path_to_model_checkpoint_folder/model.tar.gz} \
 # --data_path {path_to_folder_with_txt_files} \
-# --out_path {path_to_jsonl_file_to_save_the_output} \
+# --out_path {path_to_json_file_to_save_the_output} \
 # --temp_folder {path_to_folder_where_temporary_files_will_be_saved}", shell=True)
 
 # The original instructions from RadGraph are copied below:

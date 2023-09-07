@@ -1,4 +1,5 @@
 from torch.utils.data import Dataset, DataLoader
+from nltk.tokenize import sent_tokenize
 
 class TextDataset(Dataset):
     def __init__(self, texts):
@@ -44,3 +45,21 @@ def create_text_dataset_and_dataloader(texts, batch_size, num_workers, tokenizer
         pin_memory=True,
     )
     return dataset, dataloader
+
+def split_text_into_chunks(text, max_length):
+    sentences = sent_tokenize(text)
+    chunks = []
+    chunk = ''
+    for sentence in sentences:
+        if len(chunk) + len(sentence) > max_length and chunk != '':
+            chunks.append(chunk)
+            chunk = ''
+        if chunk != '':
+            if chunk[-1] != '.':
+                chunk += '. '
+            else:
+                chunk += ' '
+        chunk += sentence
+    if chunk != '':
+        chunks.append(chunk)
+    return chunks

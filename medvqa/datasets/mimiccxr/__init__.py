@@ -388,15 +388,22 @@ def save_report_image_and_other_images_as_pdf(dicom_id, pdf_path):
     # we add the following option: '--enable-local-file-access ""'
     pdfkit.from_string(html, pdf_path, options={'enable-local-file-access': ''})
 
-def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, exclude_invalid_sentences=False):
+def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, exclude_invalid_sentences=False,
+                                            background_findings_and_impression_per_report_filepath=None):
+    
+    assert qa_adapted_reports_filename is None or background_findings_and_impression_per_report_filepath is None
 
-    if qa_adapted_reports_filename is None:
+    if qa_adapted_reports_filename is None and background_findings_and_impression_per_report_filepath is None:
         filename = 'detailed_metadata.pkl'
-    else:
+    elif qa_adapted_reports_filename is not None:
         if exclude_invalid_sentences:
             filename = f'{qa_adapted_reports_filename}(invalid_excluded)__detailed_metadata.pkl'
         else:
             filename = f'{qa_adapted_reports_filename}__detailed_metadata.pkl'
+    elif background_findings_and_impression_per_report_filepath is not None:
+        bfaipr_filename = os.path.basename(background_findings_and_impression_per_report_filepath)
+        filename = f'{bfaipr_filename}__detailed_metadata.pkl'
+    else: assert False
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, filename)
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
@@ -433,7 +440,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
         reports = [None] * n_reports
         report_metadata['backgrounds'] = backgrounds
         report_metadata['reports'] = reports
-        for i, report in tqdm(enumerate(qa_adapted_reports['reports'])):
+        for i, report in tqdm(enumerate(qa_adapted_reports['reports']), mininterval=2):
             filepath = report['filepath']
             part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])            
             backgrounds[i] = report['background']
@@ -451,8 +458,31 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
             for j in range(1, len(dicom_id_view_pos_pairs[i])):
                 assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
             filepaths[i] = filepath
+    elif background_findings_and_impression_per_report_filepath is not None:
+        backgrounds = [None] * n_reports
+        findings = [None] * n_reports
+        impressions = [None] * n_reports
+        report_metadata['backgrounds'] = backgrounds
+        report_metadata['findings'] = findings
+        report_metadata['impressions'] = impressions
+        bfaipr_data = get_cached_json_file(background_findings_and_impression_per_report_filepath)
+        assert len(bfaipr_data) == n_reports
+        for i, row in tqdm(enumerate(bfaipr_data), mininterval=2):
+            filepath = row['path']
+            backgrounds[i] = row['background']
+            findings[i] = row['findings']
+            impressions[i] = row['impression']
+            part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(filepath)[0])
+            part_ids[i] = part_id
+            subject_ids[i] = subject_id
+            study_ids[i] = study_id
+            dicom_id_view_pos_pairs[i] = image_views_dict[(subject_id, study_id)]
+            splits[i] = split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][0][0])]
+            for j in range(1, len(dicom_id_view_pos_pairs[i])):
+                assert split_dict[(subject_id, study_id, dicom_id_view_pos_pairs[i][j][0])] == splits[i]
+            filepaths[i] = filepath
     else:
-        for i, report_path in tqdm(enumerate(report_paths)):
+        for i, report_path in tqdm(enumerate(report_paths), mininterval=2):
             report_path = str(report_path)
             part_id, subject_id, study_id = map(int, MIMICCXR_STUDY_REGEX.findall(report_path)[0])
             part_ids[i] = part_id

@@ -21,7 +21,7 @@ from medvqa.models.vision.visual_modules import (
     CLIP_VERSION_2_IMAGE_MEAN_STD,
 )
 from medvqa.utils.common import CACHE_DIR
-from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_to_pickle
+from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import (
     ImageAugmentationTransforms,
@@ -598,7 +598,7 @@ def get_nearest_neighbors(target_images, reference_images, transform, pretrained
     del batch_feat
     torch.cuda.empty_cache()
 
-    save_to_pickle(nearest_neighbors, file_path)
+    save_pickle(nearest_neighbors, file_path)
     print('nearest_neighbors saved to', file_path)
     return nearest_neighbors
 
@@ -645,7 +645,7 @@ class _ImageSizeCache():
 
     def update_cache_on_disk(self):
         if self._dirty:
-            save_to_pickle(self._image_size_dict, self._image_size_cache_path)
+            save_pickle(self._image_size_dict, self._image_size_cache_path)
             print('image size cache saved to', self._image_size_cache_path)
             self._dirty = False
 

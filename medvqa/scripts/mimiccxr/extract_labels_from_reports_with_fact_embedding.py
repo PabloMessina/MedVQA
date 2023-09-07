@@ -15,7 +15,6 @@ from medvqa.utils.files import (
     get_cached_jsonl_file,
     get_cached_json_file,
     get_file_path_with_hashing_if_too_long,
-    load_json,
     load_jsonl,
     save_pickle,
     get_cached_pickle_file,
@@ -498,7 +497,7 @@ def _assign_cluster_based_labels_to_each_report(
                             obs_al = (labels['fact_ccid'], labels['anatloc_ccid'])
                             if obs_al in top_labels_set:
                                 row_labels.append(obs_al)
-            # remove duplicates preserving order
+            # remove duplicates while preserving order
             seen = set()
             row_labels = [x for x in row_labels if not (x in seen or seen.add(x))]
             labeled_reports.append({

@@ -14,7 +14,7 @@ from medvqa.models.huggingface_utils import (
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
 from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, load_json, load_pickle, save_pickle
 from medvqa.utils.math import rank_vectors_by_dot_product
-from medvqa.utils.metrics import jaccard_score_between_sets
+from medvqa.utils.metrics import jaccard_score_between_dicts
 
 class _EvaluationModes:
     MIMICCXR_RADIOLOGIST_ANNOTATIONS = 'mimiccxr_radiologist_annotations'
@@ -248,7 +248,7 @@ def evaluate(
                 accsum = 0
                 li = labels[i]
                 for k in range(top_k):
-                    accsum += jaccard_score_between_sets(li, labels[sorted_idxs[k]])
+                    accsum += jaccard_score_between_dicts(li, labels[sorted_idxs[k]])
                     mean_average_jaccard_up_to[k] += accsum / (k + 1)
             for k in range(top_k):
                 mean_average_jaccard_up_to[k] /= n
@@ -290,10 +290,10 @@ def evaluate(
             mean_average_jaccard_up_to = [0] * top_k
             for i in tqdm(range(n), mininterval=2):
                 # Sort labels by f1 score
-                sorted_idxs = np.argsort([jaccard_score_between_sets(labels[i], labels[j]) for j in range(n)])[::-1]
+                sorted_idxs = np.argsort([jaccard_score_between_dicts(labels[i], labels[j]) for j in range(n)])[::-1]
                 accsum = 0
                 for k in range(top_k):
-                    accsum += jaccard_score_between_sets(labels[i], labels[sorted_idxs[k]])
+                    accsum += jaccard_score_between_dicts(labels[i], labels[sorted_idxs[k]])
                     mean_average_jaccard_up_to[k] += accsum / (k + 1)
             for k in range(top_k):
                 mean_average_jaccard_up_to[k] /= n

@@ -4,7 +4,7 @@ import random
 import itertools
 from tqdm import tqdm
 
-from medvqa.utils.files import load_json_file, load_pickle
+from medvqa.utils.files import load_json, load_pickle
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.utils.logging import print_blue
 
@@ -220,7 +220,7 @@ class QuestionClassificationEnsembleSearcher(MultilabelOptimalEnsembleSearcher):
         
         report_ids = list(probs_list[0].keys())
 
-        qa_reports = load_json_file(qa_adapted_reports_path)
+        qa_reports = load_json(qa_adapted_reports_path)
         nq = len(qa_reports['questions'])
         gt = np.zeros((len(report_ids), nq))
         for i, ri in enumerate(report_ids):

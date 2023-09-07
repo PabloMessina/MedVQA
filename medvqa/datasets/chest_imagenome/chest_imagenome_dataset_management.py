@@ -403,7 +403,7 @@ def extract_labels_from_scene_graph(scene_graph, categories_to_skip=('temporal',
                 if categories_to_skip and category in categories_to_skip:
                     continue
                 assert category in CHEST_IMAGENOME_ATTRIBUTES_DICT, category
-                assert name in CHEST_IMAGENOME_ATTRIBUTES_DICT[category], name
+                assert name in CHEST_IMAGENOME_ATTRIBUTES_DICT[category], (category, name)
                 assert value == 'yes' or value == 'no', value
                 value = int(value == 'yes') # convert to 0/1
                 labels.append((bbox_name, category, name, value))    
@@ -458,19 +458,39 @@ def load_chest_imagenome_label_names_and_templates(chest_imagenome_label_names_f
     chest_imagenome_templates = {}
     for label_name in chest_imagenome_label_names:
         if len(label_name) == 3:
-            anomaly = label_name[2]
-            anomaly = anomaly.replace('/', ' or ')
-            anatomy = label_name[0]
-            positive_answer = f'{anomaly} in {anatomy}' # anomaly observed in anatomy
+            anatomy, category, observation = label_name
+            observation = observation.replace('/', ' or ')
+            if category in ('tubesandlines', 'technicalassessment', 'disease', 'device', 'anatomicalfinding'):
+                positive_answer = f'{observation} in {anatomy}'
+                negative_answer = f'no {observation} in {anatomy}'
+            elif category in ('texture', 'severity', 'nlp'):
+                positive_answer = f'{observation} {anatomy}'
+                negative_answer = f'no {observation} {anatomy}'
+            elif category in ('laterality', 'temporal'):
+                positive_answer = '' 
+                negative_answer = ''
+            else:
+                raise ValueError(f'Unexpected category: {category}')
         elif len(label_name) == 2:
-            anomaly = label_name[1]
-            anomaly = anomaly.replace('/', ' or ')
-            positive_answer = anomaly # anomaly observed
+            category, observation = label_name
+            observation = observation.replace('/', ' or ')
+            if category in ('tubesandlines', 'technicalassessment', 'disease', 'device', 'anatomicalfinding'):
+                positive_answer = f'{observation}'
+                negative_answer = f'no {observation}'
+            elif category in ('texture', 'severity', 'nlp'):
+                positive_answer = ''
+                negative_answer = ''
+            elif category in ('laterality', 'temporal'):
+                positive_answer = '' 
+                negative_answer = ''
+            else:
+                raise ValueError(f'Unexpected category: {category}')
         else:
             raise ValueError(f'Unexpected label_name: {label_name}')
         chest_imagenome_templates[label_name] = {
-            0: '', # no anomaly
-            1: positive_answer # anomaly observed
+            -1: '', # report is silent about the observation
+            0: negative_answer, # negation of an observation
+            1: positive_answer # affirmation of an observation
         }        
     return chest_imagenome_label_names, chest_imagenome_templates
 

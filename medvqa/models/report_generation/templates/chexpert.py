@@ -69,7 +69,8 @@ TEMPLATES_CHEXPERT_v1 = {
 }
 
 # Same as v1, but all negatives are empty
-TEMPLATES_CHEXPERT_v2 = TEMPLATES_CHEXPERT_v1.copy()
+import copy
+TEMPLATES_CHEXPERT_v2 = copy.deepcopy(TEMPLATES_CHEXPERT_v1)
 for key in TEMPLATES_CHEXPERT_v2.keys():
     TEMPLATES_CHEXPERT_v2[key][0] = ''
 

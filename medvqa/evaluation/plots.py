@@ -1,3 +1,5 @@
+import math
+import random
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -11,6 +13,7 @@ from medvqa.datasets.chest_imagenome import (
 
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.metrics import average_ignoring_nones_and_nans
+from medvqa.utils.logging import print_blue
 
 # List of 30 different colors
 _COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
@@ -404,7 +407,6 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
     
     plt.show()
 
-
 def plot_embeddings_and_clusters(X_dataset, X_clusters):
     # Apply PCA to reduce dimensionality to 2
     import sklearn.decomposition
@@ -417,8 +419,7 @@ def plot_embeddings_and_clusters(X_dataset, X_clusters):
     plt.title('Dataset and clusters')
     plt.scatter(X_dataset_2d[:, 0], X_dataset_2d[:, 1], s=1, c='black', alpha=0.5)
     plt.scatter(X_clusters_2d[:, 0], X_clusters_2d[:, 1], s=10, c='red')
-    plt.show()   
-
+    plt.show()
 
 def plot_embeddings(X):
     # Apply PCA to reduce dimensionality to 2
@@ -458,3 +459,139 @@ def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Ep
     plt.grid(axis='y')
     plt.legend()
     plt.show()
+
+class SentenceClusteringVisualizer:
+    def __init__(self,
+                 sentence_embeddings_filepath,
+                 closest_cluster_centers_filepath,
+                 kmedoids_refinement_filepath,
+                 sample_size=None,
+                 ):
+        self.sentence_embeddings_filepath = sentence_embeddings_filepath
+        self.closest_cluster_centers_filepath = closest_cluster_centers_filepath
+        self.kmedoids_refinement_filepath = kmedoids_refinement_filepath
+        self.sentence_embeddings = get_cached_pickle_file(sentence_embeddings_filepath)
+        self.ccc = get_cached_pickle_file(closest_cluster_centers_filepath)
+        self.kmedoids_refinement = get_cached_pickle_file(kmedoids_refinement_filepath)
+        
+        if sample_size is not None:
+            print(f'Randomly selecting {sample_size} samples from dataset')
+            cluster2indices = dict()
+            for i, c in zip(self.ccc['sentence_idxs'], self.ccc['closest_cluster_centers']):
+                if c not in cluster2indices:
+                    cluster2indices[c] = []
+                cluster2indices[c].append(i)
+            idxs = []
+            for c in cluster2indices:
+                cluster_sample_size = math.ceil(sample_size * len(cluster2indices[c]) / len(self.ccc['sentence_idxs']))
+                try:
+                    idxs.extend(random.sample(cluster2indices[c], cluster_sample_size))
+                except ValueError:
+                    print(f'Error: cluster {c} has only {len(cluster2indices[c])} samples, but {cluster_sample_size} were requested')
+                    raise
+            idxs = set(idxs)
+            idxs.update(self.kmedoids_refinement['refined_cluster_center_sentence_idxs'])
+            idxs = list(idxs)
+            idxs.sort()
+            self.sample_idxs = idxs
+        else:
+            self.sample_idxs = None
+
+        # Fit PCA to reduce dimensionality to 50
+        print('Fitting PCA to reduce dimensionality to 50')
+        from sklearn.decomposition import PCA
+        self.pca = PCA(n_components=50)
+        self.pca_embeddings = self.pca.fit_transform(self.sentence_embeddings['embeddings'])
+        print('self.pca_embeddings.shape =', self.pca_embeddings.shape)
+
+        # Fit UMAP to reduce dimensionality to 2
+        print('Fitting UMAP to reduce dimensionality to 2') 
+        if sample_size is None:
+            embeddings = self.pca_embeddings[self.ccc['sentence_idxs']]
+        else:
+            embeddings = self.pca_embeddings[self.sample_idxs]
+        print('embeddings.shape =', embeddings.shape)
+        import umap
+        self.umap = umap.UMAP(n_components=2, metric='cosine', n_neighbors=15, verbose=1)
+        self.umap_embeddings = self.umap.fit_transform(embeddings)
+        print('self.umap_embeddings.shape =', self.umap_embeddings.shape)
+
+        # Apply PCA and UMAP to the cluster centers
+        cluster_centers = self.kmedoids_refinement['refined_cluster_centers']
+        print('cluster_centers.shape =', cluster_centers.shape)
+        self.pca_cluster_centers = self.pca.transform(cluster_centers)
+        print('self.pca_cluster_centers.shape =', self.pca_cluster_centers.shape)
+        self.umap_cluster_centers = self.umap.transform(self.pca_cluster_centers)
+        print('self.umap_cluster_centers.shape =', self.umap_cluster_centers.shape)
+
+    def plot_embeddings(self, figsize=(10, 10)):
+        plt.figure(figsize=figsize)
+        plt.title('UMAP Sentence embeddings')
+        plt.scatter(self.umap_embeddings[:, 0], self.umap_embeddings[:, 1], s=1, c='black', alpha=0.5)
+        plt.show()
+
+    def plot_embeddings_and_clusters(self, figsize=(10, 10)):
+        plt.figure(figsize=figsize)
+        plt.title('UMAP Sentence embeddings and clusters')
+        plt.scatter(self.umap_embeddings[:, 0], self.umap_embeddings[:, 1], s=1, c='black', alpha=0.5)
+        plt.scatter(self.umap_cluster_centers[:, 0], self.umap_cluster_centers[:, 1], s=2, c='red')
+        plt.show()
+
+    def plot_embeddings_and_clusters_within_rectangle(self, x1, y1, w, h, figsize=(10, 10), plot_sentences=True,
+                                                      other_sentences=None, other_umap_embeddings=None):
+        assert (other_sentences is None) == (other_umap_embeddings is None)
+        x2 = x1 + w
+        y2 = y1 + h
+        plt.figure(figsize=figsize)
+        plt.title(f'UMAP Sentence embeddings within rectangle ({x1:.2f}, {y1:.2f}) - ({x2:.2f}, {y2:.2f})')
+        plt.scatter(self.umap_embeddings[:, 0], self.umap_embeddings[:, 1], s=1, c='black', alpha=0.5)
+        plt.scatter(self.umap_cluster_centers[:, 0], self.umap_cluster_centers[:, 1], s=2, c='red')
+        if other_sentences is not None:
+            assert len(other_sentences) == len(other_umap_embeddings)
+            plt.scatter(other_umap_embeddings[:, 0], other_umap_embeddings[:, 1], s=1, c='blue')
+        plt.xlim(x1, x2)
+        plt.ylim(y1, y2)
+        if plot_sentences:
+            # Find sentences within rectangle
+            sentences_in_rectangle = []
+            for i in range(len(self.umap_embeddings)):
+                if x1 <= self.umap_embeddings[i, 0] <= x2 and y1 <= self.umap_embeddings[i, 1] <= y2:
+                    if self.sample_idxs is None:
+                        s_idx = self.ccc['sentence_idxs'][i]
+                    else:
+                        s_idx = self.sample_idxs[i]
+                    sentences_in_rectangle.append((s_idx, self.umap_embeddings[i, 0], self.umap_embeddings[i, 1]))
+            # Choose a random subset of sentences to show
+            sample = random.sample(sentences_in_rectangle, min(20, len(sentences_in_rectangle)))
+            # Plot sentences
+            for i, x, y in sample:
+                plt.text(x, y, self.sentence_embeddings['sentences'][i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+            if other_sentences is not None:
+                for i in range(len(other_sentences)):
+                    plt.text(other_umap_embeddings[i, 0], other_umap_embeddings[i, 1], other_sentences[i], fontsize=10, fontweight='bold', color='blue',
+                              bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+
+        plt.show()
+
+        if plot_sentences:
+            # Print sentences
+            if other_sentences is not None:
+                for i in range(len(other_sentences)):
+                    print_blue(other_sentences[i], bold=True)
+            sentences = [self.sentence_embeddings['sentences'][i] for i, _, _ in sample]
+            sentences.sort(key=lambda s: (len(s), s))
+            for s in sentences:
+                print(s)
+
+    def plot_rectangle_around_sentence(self, sentence, w, h, figsize=(10, 10)):
+        # Find sentence index
+        sentence_idx = self.sentence_embeddings['sentences'].index(sentence)        
+        # Obtain embedding
+        sentence_embedding = self.sentence_embeddings['embeddings'][sentence_idx]
+        pca_sentence_embedding = self.pca.transform([sentence_embedding])[0]
+        umap_sentence_embedding = self.umap.transform([pca_sentence_embedding])[0]
+        x = umap_sentence_embedding[0]
+        y = umap_sentence_embedding[1]
+        # Plot rectangle
+        self.plot_embeddings_and_clusters_within_rectangle(x - w/2, y - h/2, w, h, figsize=figsize, plot_sentences=True,
+                                                              other_sentences=[sentence], other_umap_embeddings=umap_sentence_embedding.reshape((1, 2)))

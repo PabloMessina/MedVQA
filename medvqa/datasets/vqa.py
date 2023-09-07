@@ -9,7 +9,7 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
     load_pickle,
     get_cached_json_file,
-    save_to_pickle,
+    save_pickle,
 )
 from medvqa.datasets.dataloading_utils import (
     CompositeDataset,
@@ -546,7 +546,7 @@ class VQA_Base(LabelBasedVQAClass):
             data['orientations'] = self.orientations
         if hasattr(self, 'dicom_ids'):
             data['dicom_ids'] = self.dicom_ids
-        save_to_pickle(data, preprocessing_save_path)
+        save_pickle(data, preprocessing_save_path)
         print('\tdone!')
         return True
 

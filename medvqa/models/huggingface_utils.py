@@ -56,6 +56,14 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, batch_
             offset += batch_size
     assert offset == len(texts)
 
+    # Cleanup
+    del model
+    del tokenizer
+    del dataloader
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
     return embeddings
 
 def _get_microsoft_BERT_tokenizer_func(tokenizer):

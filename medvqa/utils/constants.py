@@ -1,3 +1,5 @@
+import numpy as np
+
 CHEXPERT_LABELS = [ # Note: I'm annotating roughly equivalent labels in the Chest ImaGenome dataset
     'No Finding', # NOT abnormal
     'Enlarged Cardiomediastinum', # mediastinal widening
@@ -33,6 +35,18 @@ CHEXPERT_LABEL2SHORT = {
     'Lung Lesion': 'LL',
     'Fracture': 'F',
 }
+
+CHEXBERT_LABELS = [
+    "Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Opacity", "Lung Lesion", "Edema",
+    "Consolidation", "Pneumonia", "Atelectasis", "Pneumothorax", "Pleural Effusion", "Pleural Other",
+    "Fracture", "Support Devices", "No Finding",
+]
+
+CHEXBERT_LABELS_5 = ["Cardiomegaly", "Edema", "Consolidation", "Atelectasis", "Pleural Effusion"]
+CHEXPERT_LABELS_5 = ["Cardiomegaly", "Edema", "Consolidation", "Atelectasis", "Pleural Effusion"]
+
+CHEXBERT_LABELS_5_INDICES = np.where(np.isin(CHEXBERT_LABELS, CHEXBERT_LABELS_5))[0]
+CHEXPERT_LABELS_5_INDICES = np.where(np.isin(CHEXPERT_LABELS, CHEXPERT_LABELS_5))[0]
 
 CXR14_LABELS = [
     'No Finding',

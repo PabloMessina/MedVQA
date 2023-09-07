@@ -1,22 +1,24 @@
 from time import time
 import os
 import subprocess
+from nltk.tokenize import sent_tokenize
+from medvqa.datasets.text_data_utils import split_text_into_chunks
 from medvqa.utils.common import CACHE_DIR, SOURCE_DIR, TMP_DIR, get_timestamp
-from medvqa.utils.files import get_cached_pickle_file, load_jsonl, save_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_json, save_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.radgraph import RADGRAPH_MODEL_CHECKPOINT_PATH, DYGIE_PACKAGE_PARENT_FOLDER
 
 
-def compute_label_set(data, label2string):
+def compute_label_dict(data, label2string):
     entities = data['entities']
     n = len(entities)
     e_strings = [None] * n
-    hashes = set()
+    hash2count = dict()
     for k, e in entities.items():
         i = int(k)-1
         e_strings[i] = f"{e['tokens']}|{e['label']}" # tokens|label
         h = hash_string(e_strings[i])
-        hashes.add(h)
+        hash2count[h] = hash2count.get(h, 0) + 1
         if h in label2string:
             assert label2string[h] == e_strings[i]
         else:
@@ -29,8 +31,8 @@ def compute_label_set(data, label2string):
             rel_s2 = f"{e_strings[i]}|{e_strings[j]}" # e1|e2
             h1 = hash_string(rel_s1)
             h2 = hash_string(rel_s2)
-            hashes.add(h1)
-            hashes.add(h2)
+            hash2count[h1] = hash2count.get(h1, 0) + 1
+            hash2count[h2] = hash2count.get(h2, 0) + 1
             if h1 in label2string:
                 assert label2string[h1] == rel_s1
             else:
@@ -39,12 +41,12 @@ def compute_label_set(data, label2string):
                 assert label2string[h2] == rel_s2
             else:
                 label2string[h2] = rel_s2
-    return hashes
+    return hash2count
 
 class RadGraphLabeler:
 
     def __init__(self, verbose=False):
-        self.cache_path = os.path.join(CACHE_DIR, 'radgraph_labeler_cache.pkl')
+        self.cache_path = os.path.join(CACHE_DIR, 'radgraph_labeler_cache_.pkl')
         self.cache = get_cached_pickle_file(self.cache_path)
         self.verbose = verbose
         if self.cache is None:
@@ -67,8 +69,13 @@ class RadGraphLabeler:
         unlabeled_hashes_set = set()
         unlabeled_hashes = []
         unlabeled_texts = []
+        unlabeled_ranges = []
 
+        offset = 0
         for i, text in enumerate(texts):
+            if len(text) == 0: # empty text
+                labels_list[i] = dict()
+                continue
             hash = hash_string(text)
             labels_list[i] = self.hash2labels.get(hash, None)
             if labels_list[i] is None:
@@ -76,7 +83,15 @@ class RadGraphLabeler:
                 if hash not in unlabeled_hashes_set:
                     unlabeled_hashes_set.add(hash)
                     unlabeled_hashes.append(hash)
-                    unlabeled_texts.append(text)
+                    if len(text) > 1000:
+                        chunks = split_text_into_chunks(text, max_length=1000)
+                        unlabeled_texts.extend(chunks)
+                        unlabeled_ranges.append((offset, offset+len(chunks)))
+                        offset += len(chunks)
+                    else:
+                        unlabeled_texts.append(text)
+                        unlabeled_ranges.append((offset, offset+1))
+                        offset += 1
 
         if len(unlabeled_texts) > 0:
             if self.verbose:
@@ -104,6 +119,8 @@ class RadGraphLabeler:
                 f'--out_path {out_path} '
                 f'--temp_folder {temp_folder}'
             )
+            if self.verbose:
+                print(f'RadGraph: invoking command {command} ...')
             time_before = time()
             ret = subprocess.call(command, shell=True)
             time_after = time()
@@ -114,9 +131,7 @@ class RadGraphLabeler:
             assert os.path.exists(out_path), f'RadGraph labeler failed to generate output file {out_path}'
 
             # Read output file
-            output = load_jsonl(out_path)
-            assert len(output) == 1
-            output = output[0]
+            output = load_json(out_path)
             assert len(output) == len(unlabeled_texts)
 
             # Parse output file
@@ -124,12 +139,21 @@ class RadGraphLabeler:
             for input_path, data in output.items():
                 filename = os.path.basename(input_path)
                 idx = int(filename.split('.')[0])
-                labels[idx] = compute_label_set(data, self.label2string)
+                labels[idx] = compute_label_dict(data, self.label2string)
             assert None not in labels
 
             # Update cache
-            for hash, label in zip(unlabeled_hashes, labels):
+            for hash, (s, e) in zip(unlabeled_hashes, unlabeled_ranges):
+                assert s < e
+                if s+1 == e:
+                    label = labels[s]
+                else:
+                    label = dict()
+                    for i in range(s, e):
+                        for k, v in labels[i].items():
+                            label[k] = label.get(k, 0) + v # sum counts
                 self.hash2labels[hash] = label
+            
             if update_cache_on_disk:
                 save_pickle(self.cache, self.cache_path)
                 if self.verbose:
