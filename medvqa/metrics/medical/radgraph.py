@@ -1,7 +1,6 @@
 from time import time
 import os
 import subprocess
-from nltk.tokenize import sent_tokenize
 from medvqa.datasets.text_data_utils import split_text_into_chunks
 from medvqa.utils.common import CACHE_DIR, SOURCE_DIR, TMP_DIR, get_timestamp
 from medvqa.utils.files import get_cached_pickle_file, load_json, save_pickle
@@ -59,7 +58,7 @@ class RadGraphLabeler:
         self.hash2labels = self.cache['hash2labels']
         self.label2string = self.cache['label2string']
 
-    def get_labels(self, texts, update_cache_on_disk=False):
+    def get_labels(self, texts, update_cache_on_disk=False, cuda_device=-1):
 
         if self.verbose:
             print(f'(*) RadGraph: labeling {len(texts)} texts ...')
@@ -117,7 +116,8 @@ class RadGraphLabeler:
                 f'--dygie_package_parent_folder {DYGIE_PACKAGE_PARENT_FOLDER} '
                 f'--data_path {temp_dir} '
                 f'--out_path {out_path} '
-                f'--temp_folder {temp_folder}'
+                f'--temp_folder {temp_folder} '
+                f'--cuda_device {cuda_device}'
             )
             if self.verbose:
                 print(f'RadGraph: invoking command {command} ...')

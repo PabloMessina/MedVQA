@@ -1,14 +1,17 @@
 import os
+import multiprocessing as mp
 from nltk import word_tokenize
 from tqdm import tqdm
 
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
 from medvqa.utils.files import load_pickle, save_pickle
 
+_shared_sentences = None
+
 def indexes_to_string(indexes):
     return ' '.join(str(i) for i in indexes)
 
-def sort_sentences(sentences, logger, by_difficulty=False, cache_ranking=False):
+def sort_sentences(sentences, logger, by_difficulty=False, cache_ranking=False, num_workers=mp.cpu_count()):
     if cache_ranking:
         len_sum = sum(len(x) for x in sentences)
         save_path = os.path.join(LARGE_FAST_CACHE_DIR, f"sorted_sentences({len(sentences)},{len_sum}).pkl")
@@ -24,7 +27,10 @@ def sort_sentences(sentences, logger, by_difficulty=False, cache_ranking=False):
     assert type(sentences) == list, f"Expected list, got {type(sentences)}"
     if by_difficulty:
         logger.info("Sorting sentences by difficulty...")
-        tokenized_sentences = [word_tokenize(x) for x in tqdm(sentences, mininterval=2)]
+        global _shared_sentences
+        _shared_sentences = sentences
+        with mp.Pool(num_workers) as pool:
+            tokenized_sentences = pool.map(word_tokenize, _shared_sentences)
         logger.info("Counting word frequencies...")
         vocab_freq = dict()        
         for tokens in tqdm(tokenized_sentences, mininterval=2):

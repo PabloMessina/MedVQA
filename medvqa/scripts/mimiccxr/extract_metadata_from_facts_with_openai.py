@@ -129,6 +129,7 @@ def parse_openai_model_output(text):
     """
     Parse the output of the OpenAI API call.
     """
+    text = text.replace("\\\"", "") # remove escaped quotes
     match = _VALID_JSON_OBJECT_REGEX.search(text) # match a JSON list of strings
     if not match:
         if GPT_IS_ACTING_WEIRD_REGEX.search(text):

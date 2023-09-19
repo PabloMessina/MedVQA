@@ -75,8 +75,15 @@ if __name__ == '__main__':
         rows = load_jsonl(filepath)
         logger.info(f"Loaded {len(rows)} paraphrases from {filepath}")
         for row in rows:
-            p = row['parsed_response']
             s = next(iter(row['metadata'].values()))
+            parsed_response = row['parsed_response']
+            if type(parsed_response) == list:
+                p = parsed_response
+            elif type(parsed_response) == dict:
+                assert 'positives' in parsed_response and 'negatives' in parsed_response
+                p = parsed_response['positives'] # only use positives
+            else:
+                raise ValueError(f'Unknown type {type(parsed_response)}')
             p.append(s)
             for x in p:
                 if len(x) > 0 and any(c.isalpha() for c in x) and x not in sentences_to_skip:

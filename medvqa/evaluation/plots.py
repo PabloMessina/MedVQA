@@ -537,18 +537,17 @@ class SentenceClusteringVisualizer:
         plt.scatter(self.umap_cluster_centers[:, 0], self.umap_cluster_centers[:, 1], s=2, c='red')
         plt.show()
 
-    def plot_embeddings_and_clusters_within_rectangle(self, x1, y1, w, h, figsize=(10, 10), plot_sentences=True,
+    def plot_embeddings_and_clusters_around_point(self, x, y, r, figsize=(10, 10), plot_sentences=True,
                                                       other_sentences=None, other_umap_embeddings=None):
         assert (other_sentences is None) == (other_umap_embeddings is None)
-        x2 = x1 + w
-        y2 = y1 + h
         plt.figure(figsize=figsize)
-        plt.title(f'UMAP Sentence embeddings within rectangle ({x1:.2f}, {y1:.2f}) - ({x2:.2f}, {y2:.2f})')
+        plt.title(f'UMAP Sentence embeddings around point (x={x:.3f}, y={y:.3f}, r={r:.3f})')
         plt.scatter(self.umap_embeddings[:, 0], self.umap_embeddings[:, 1], s=1, c='black', alpha=0.5)
         plt.scatter(self.umap_cluster_centers[:, 0], self.umap_cluster_centers[:, 1], s=2, c='red')
         if other_sentences is not None:
             assert len(other_sentences) == len(other_umap_embeddings)
             plt.scatter(other_umap_embeddings[:, 0], other_umap_embeddings[:, 1], s=1, c='blue')
+        x1, x2, y1, y2 = x - r, x + r, y - r, y + r
         plt.xlim(x1, x2)
         plt.ylim(y1, y2)
         if plot_sentences:
@@ -583,7 +582,7 @@ class SentenceClusteringVisualizer:
             for s in sentences:
                 print(s)
 
-    def plot_rectangle_around_sentence(self, sentence, w, h, figsize=(10, 10)):
+    def plot_rectangle_around_sentence(self, sentence, r, figsize=(10, 10)):
         # Find sentence index
         sentence_idx = self.sentence_embeddings['sentences'].index(sentence)        
         # Obtain embedding
@@ -593,5 +592,5 @@ class SentenceClusteringVisualizer:
         x = umap_sentence_embedding[0]
         y = umap_sentence_embedding[1]
         # Plot rectangle
-        self.plot_embeddings_and_clusters_within_rectangle(x - w/2, y - h/2, w, h, figsize=figsize, plot_sentences=True,
-                                                              other_sentences=[sentence], other_umap_embeddings=umap_sentence_embedding.reshape((1, 2)))
+        self.plot_embeddings_and_clusters_around_point(x, y, r, figsize=figsize, plot_sentences=True,
+                                                       other_sentences=[sentence], other_umap_embeddings=umap_sentence_embedding.reshape((1, 2)))

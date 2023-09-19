@@ -12,7 +12,6 @@ if __name__ == '__main__':
     parser.add_argument('--preprocessed_reports_filepath', type=str, required=True)
     parser.add_argument('--extracted_facts_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--extraction_methods', type=str, nargs='+', required=True)
-    parser.add_argument('--skip_negated_facts', action='store_true', default=False)
     args = parser.parse_args()
     assert len(args.extracted_facts_filepaths) == len(args.extraction_methods)
 
@@ -21,7 +20,6 @@ if __name__ == '__main__':
         preprocessed_reports_filepath=args.preprocessed_reports_filepath,
         extracted_facts_filepaths=args.extracted_facts_filepaths,
         extraction_methods=args.extraction_methods,
-        skip_negated_facts=args.skip_negated_facts,
         remove_consecutive_repeated_words=True)
 
     # Save integrated reports and facts
@@ -31,16 +29,15 @@ if __name__ == '__main__':
         sentence_total_length += len(row['sentence'])
         for fact in row['facts']:
             facts_total_length += len(fact)
-    skip_neg_str = '_skip_neg' if args.skip_negated_facts else ''
     integrated_sentence_facts_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR,
-                                                      f'integrated_sentence_facts({sentence_total_length},{facts_total_length}){skip_neg_str}.jsonl')
+                                                      f'integrated_sentence_facts({sentence_total_length},{facts_total_length}).jsonl')
     print(f'Saving integrated sentence facts to {integrated_sentence_facts_filepath}')
     save_jsonl(sentence_facts_rows, integrated_sentence_facts_filepath)
 
     report_total_length = 0
     for row in report_facts_rows:
         report_total_length += len(row['fact_based_report'])
-    integrated_report_facts_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, f'integrated_report_facts({report_total_length}){skip_neg_str}.jsonl')
+    integrated_report_facts_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, f'integrated_report_facts({report_total_length}).jsonl')
     print(f'Saving integrated report facts to {integrated_report_facts_filepath}')
     save_jsonl(report_facts_rows, integrated_report_facts_filepath)
 

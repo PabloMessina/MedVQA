@@ -34,7 +34,7 @@ class Seq2SeqTaskNames:
     BACKGROUND_TO_FACTS = 'background2facts'
     FACT_TO_METADATA = 'fact2metadata'
     FACT_TO_COMPARISON = 'fact2comparison'
-    SENTENCE_TO_CHEST_IMAGENOME_LABELS = 'sentence2chestimagenome_labels'
+    SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS = 'sentence2chestimagenome_observations'
     SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS = 'sentence2chestimagenome_anatomical_locations'
     @staticmethod
     def get_all():
@@ -44,7 +44,7 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.BACKGROUND_TO_FACTS,
             Seq2SeqTaskNames.FACT_TO_METADATA,
             Seq2SeqTaskNames.FACT_TO_COMPARISON,
-            Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS,
+            Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS,
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS,
         ]
 
@@ -102,13 +102,13 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                     output_texts.append(comp)
         print(f'Loaded {len(input_texts)} input/output pairs from {integrated_facts_metadata_jsonl_filepath}')
 
-    if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS or \
+    if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
          task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
         assert chest_imagenome_phrases2labels_filepath is not None, 'chest_imagenome_phrases2labels_filepath must be provided'
         chest_imagenome_phrases2labels = load_pickle(chest_imagenome_phrases2labels_filepath)
         phrases = chest_imagenome_phrases2labels['phrases']
-
-        if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS:
+        
+        if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
             labels = chest_imagenome_phrases2labels['observation_labels']
             label_names = chest_imagenome_phrases2labels['observation_names']
             # Remove nlp labels and prefixes
@@ -128,7 +128,6 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 (f'Expected {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)} but got {set(label_names)}\n'
                  f'Difference (->): {set(label_names) - set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)}\n'
                     f'Difference (<-): {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING) - set(label_names)}')
-                 
         else: assert False
 
         n, m = labels.shape
@@ -161,7 +160,10 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 output_texts.append(output_text)
         elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
             for input_output in input_output_jsonl:
-                sentence = input_output['metadata']['sentence']
+                try:
+                    sentence = input_output['metadata']['query']
+                except KeyError:
+                    sentence = input_output['metadata']['sentence'] # backward compatibility                    
                 input_text = sentence
                 output_text = json.dumps(input_output['parsed_response'])
                 input_texts.append(input_text)
@@ -187,35 +189,14 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 output_text = input_output['parsed_response']
                 input_texts.append(input_text)
                 output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS:
+        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
+                task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
             for input_output in input_output_jsonl:
                 sentence = input_output['metadata']['query']
                 input_text = sentence
                 output_text = json.dumps(input_output['parsed_response'])
                 input_texts.append(input_text)
                 output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
-            allowed_label_names = set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)
-            skip_count = 0
-            partial_count = 0
-            for input_output in input_output_jsonl:
-                sentence = input_output['metadata']['query']
-                input_text = sentence
-                output_labels = input_output['parsed_response']
-                clean_labels = [x for x in output_labels if x in allowed_label_names]
-                if len(clean_labels) < len(output_labels):
-                    if len(clean_labels) == 0:
-                        skip_count += 1
-                        continue
-                    else:
-                        partial_count += 1
-                output_text = json.dumps(clean_labels)
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-            if verbose and skip_count > 0:
-                print_orange(f'WARNING: Skipped {skip_count}/{len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath} because of invalid labels')
-            if verbose and partial_count > 0:
-                print_orange(f'WARNING: Partially dropped labels from {partial_count}/{len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath} because of invalid labels')
         else:
             raise ValueError(f'Unknown task name {task_name}')
         
@@ -259,7 +240,14 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 print_count = 0
             for row in paraphrased_inputs:
                 input_text = next(iter(row['metadata'].values()))
-                paraphrases = row['parsed_response']
+                parsed_response = row['parsed_response']
+                if type(parsed_response) == list:
+                    paraphrases = parsed_response
+                elif type(parsed_response) == dict:
+                    assert 'positives' in parsed_response and 'negatives' in parsed_response
+                    paraphrases = parsed_response['positives'] # only use positives
+                else:
+                    raise ValueError(f'Unknown type {type(parsed_response)}')
                 if verbose and print_count < 1:
                     print_count += 1
                     print_bold(f'Input:')
@@ -350,7 +338,7 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
             print(f'Number of val examples: {len(val_indices)}')
             print(f'Number of total examples: {train_size + len(val_indices)}')
 
-    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_LABELS or \
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
             task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
 
         label_name_2_idx = { label_name: i for i, label_name in enumerate(label_names) }
@@ -359,24 +347,21 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
         idxs_without_labels = []
         unknown_labels = set()
         unknown_count = 0
+        
         for i, output_text in tqdm(enumerate(output_texts), total=len(output_texts), mininterval=2):
             labels = json.loads(output_text)
-            label_found = False
+            clean_labels = []
             for label in labels:
                 try:
                     label2idxs[label_name_2_idx[label]].append(i)
-                    label_found = True
+                    clean_labels.append(label)
                 except KeyError:
                     unknown_count += 1
                     unknown_labels.add(label)
-                    # print(f'Unknown label: {label}')
-                    # print(f'Output text: {output_text}')
-                    # print(f'Input text: {input_texts[i]}')
-                    # print(f'label_name_2_idx: {label_name_2_idx}')
-                    # raise
-
-            if not label_found:
+            if len(clean_labels) == 0:
                 idxs_without_labels.append(i)
+            if len(clean_labels) < len(labels):
+                output_texts[i] = json.dumps(clean_labels) # remove unknown labels
 
         if verbose:
             print(f'Number of total examples: {len(output_texts)}')

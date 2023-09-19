@@ -123,13 +123,7 @@ def parse_args(args=None):
     
     return parser.parse_args(args=args)
 
-_METRIC_WEIGHTS = DictWithDefault(
-    initial_values={
-        'chestimg_macro_f1': 3.0, # Assign higher weight to chest imagenome classification
-        'tacc(al2)': 0.5, # Assign lower weight to accuracy of triplet rule #2 for anatomical locations
-        'tacc(ob2)': 0.5, # Assign lower weight to accuracy of triplet rule #2 for observations
-    },
-    default=1.0) # Default weight is 1.0
+_METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
    
 def train_model(
         model_kwargs,
@@ -291,6 +285,15 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chestimg_anatloc_macf1', val=False)
 
     # Score function
+    triplet_rule_weights = fact_embedding_trainer.triplet_rule_weights
+    for i, w in enumerate(triplet_rule_weights['anatomical_locations']):
+        rule_id = f'al{i}'
+        assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
+        _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
+    for i, w in enumerate(triplet_rule_weights['observations']):
+        rule_id = f'ob{i}'
+        assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
+        _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9)

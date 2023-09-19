@@ -76,7 +76,6 @@ def apply_seq2seq_model_to_sentences(
             for output_text in output_texts_batch:
                 try:
                     outputs[idx] = postprocess_input_output_func(sentences[idx], output_text)
-                    idx += 1
                     if (idx-1) % 5000 == 0 and print_counts < 4:
                         logger.info(f"Processed {idx} sentences")
                         logger.info(f"Example output:")
@@ -86,9 +85,10 @@ def apply_seq2seq_model_to_sentences(
                     logger.warning(f"Failed to process output text: {output_text}, for sentence: {sentences[idx]}, idx: {idx}")
                     logger.warning(f"Exception: {e}")
                     unprocessed_sentences.append(sentences[idx])
+                idx += 1
+    assert idx == len(sentences)
     
-    outputs = outputs[:idx]
-    assert all(x is not None for x in outputs)
+    outputs = [x for x in outputs if x is not None]
     
     if len(unprocessed_sentences) > 0:
         logger.warning(f"Failed to process {len(unprocessed_sentences)} sentences")

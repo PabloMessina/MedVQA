@@ -742,6 +742,7 @@ class ClusteringBasedLabelVisualizer:
         print(f'Loading {integrated_sentence_facts_filepath}...')
         self.integrated_sentence_facts = get_cached_jsonl_file(integrated_sentence_facts_filepath)
         self.sentence2facts = { row['sentence']: row['facts'] for row in self.integrated_sentence_facts }
+        self.sentence2extraction_method = { row['sentence']: row['extraction_method'] for row in self.integrated_sentence_facts }
         print(f'Loading {integrated_fact_metadata_filepath}...')
         self.integrated_fact_metadata = get_cached_jsonl_file(integrated_fact_metadata_filepath)
         self.fact2metadata = { row['fact']: row['metadata'] for row in self.integrated_fact_metadata }
@@ -820,12 +821,14 @@ class ClusteringBasedLabelVisualizer:
         facts = []
         for s in sent_tokenize(row['findings']):
             print_blue(s, bold=True)
+            print(f'\t(*) extraction method: {self.sentence2extraction_method[s]}')
             for f in self.sentence2facts[s]:
                 print(f'\t- {f}')
                 facts.append(f)
             print()
         for s in sent_tokenize(row['impression']):
             print_blue(s, bold=True)
+            print(f'\t(*) extraction method: {self.sentence2extraction_method[s]}')
             for f in self.sentence2facts[s]:
                 print(f'\t- {f}')
                 facts.append(f)

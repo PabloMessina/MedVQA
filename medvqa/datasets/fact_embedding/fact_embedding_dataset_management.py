@@ -218,7 +218,14 @@ class FactEmbeddingTrainer():
             print_count = 0
             for row in rows:
                 s = next(iter(row['metadata'].values()))
-                p = row['parsed_response']
+                parsed_response = row['parsed_response']
+                if type(parsed_response) == list:
+                    p = parsed_response
+                elif type(parsed_response) == dict:
+                    assert 'positives' in parsed_response and 'negatives' in parsed_response
+                    p = parsed_response['positives'] # only use positives
+                else:
+                    raise ValueError(f'Unknown type {type(parsed_response)}')
                 if print_count < 1:
                     print_count += 1
                     print_bold(f'Input:')
@@ -324,7 +331,7 @@ class FactEmbeddingTrainer():
         ):
             print('----')
             print_bold(f'Building train chest imagenome {key} classification dataset and dataloader...')
-            print(f'Loading chest integrated chest imagenome observations from {labels_filepath}...')
+            print(f'Loading integrated chest imagenome {key} from {labels_filepath}...')
             labels_data = load_pickle(labels_filepath)
             phrases = []
             labels = []

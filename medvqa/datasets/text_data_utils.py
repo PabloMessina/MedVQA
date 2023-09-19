@@ -24,8 +24,7 @@ def get_text_collate_batch_fn(tokenizer_func):
         # )
         encoding = tokenizer_func(batch)
         batch_dict = {}
-        batch_dict['input_ids'] = encoding.input_ids
-        batch_dict['attention_mask'] = encoding.attention_mask
+        batch_dict['encoding'] = encoding
         return batch_dict
     
     return collate_batch_fn

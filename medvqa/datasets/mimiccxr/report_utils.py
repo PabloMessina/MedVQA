@@ -83,7 +83,10 @@ class ReportFactsDisplayer:
             for x in extracted_facts:
                 try:
                     if 'metadata' in x:
-                        s = x['metadata']['sentence']
+                        try:
+                            s = x['metadata']['query']
+                        except KeyError:
+                            s = x['metadata']['sentence'] # backward compatibility
                         fs = x['parsed_response']
                     else:
                         s = x['sentence']
@@ -195,7 +198,10 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
         for x in tqdm(extracted_facts, total=len(extracted_facts), mininterval=2):
             try:
                 if 'metadata' in x:
-                    s = x['metadata']['sentence']
+                    try:
+                        s = x['metadata']['query']
+                    except KeyError:
+                        s = x['metadata']['sentence'] # backward compatibility
                     fs = x['parsed_response']
                 else:
                     s = x['sentence']
@@ -280,7 +286,11 @@ def integrate_reports_facts_and_metadata(
         for x in tqdm(extracted_facts, total=len(extracted_facts), mininterval=2):
             try:
                 try:
-                    s = x['metadata']['sentence']
+                    metadata = x['metadata']
+                    try:
+                        s = x['metadata']['query']
+                    except KeyError:
+                        s = x['metadata']['sentence'] # backward compatibility
                     fs = x['parsed_response']
                 except KeyError:
                     s = x['sentence']
@@ -304,6 +314,7 @@ def integrate_reports_facts_and_metadata(
     for extracted_metadata_filepath, metadata_extraction_method in zip(extracted_metadata_filepaths, metadata_extraction_methods):
         assert os.path.exists(extracted_metadata_filepath)
         print(f'Loading extracted metadata from {extracted_metadata_filepath}...')
+
         extracted_metadata = load_jsonl(extracted_metadata_filepath)
         for x in tqdm(extracted_metadata, total=len(extracted_metadata), mininterval=2):
             try:

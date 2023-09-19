@@ -26,7 +26,6 @@ if __name__ == '__main__':
         fact_extraction_methods=args.fact_extraction_methods,
         extracted_metadata_filepaths=args.extracted_metadata_filepaths,
         metadata_extraction_methods=args.metadata_extraction_methods,
-        skip_negated_facts=False,
         remove_consecutive_repeated_words=True)
 
     # Save integrated reports, facts and metadata

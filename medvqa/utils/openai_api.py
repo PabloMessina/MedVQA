@@ -90,7 +90,7 @@ def run_common_boilerplate_for_api_requests(
         max_tokens_per_request, max_requests_per_minute, max_tokens_per_minute,
         temperature, frequency_penalty, presence_penalty,
         logger, logging_level, parse_openai_output, tmp_dir,save_filepath,
-        delete_api_requests_and_responses=False,
+        delete_api_requests_and_responses=True,
         ):
     """Runs common boilerplate for API requests."""
 

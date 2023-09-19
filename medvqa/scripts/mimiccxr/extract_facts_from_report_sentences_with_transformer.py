@@ -62,7 +62,10 @@ if __name__ == '__main__':
             sentences_to_skip = load_jsonl(preprocessed_sentences_to_skip_filepath)
             logger.info(f"Loaded {len(sentences_to_skip)} sentences to skip")
             for row in sentences_to_skip:
-                already_parsed_sentences.add(row['metadata']['sentence'])
+                try:
+                    already_parsed_sentences.add(row['metadata']['query'])
+                except KeyError:
+                    already_parsed_sentences.add(row['metadata']['sentence']) # backward compatibility
             logger.info(f"Total number of sentences to skip: {len(already_parsed_sentences)}")
 
     # Collect unparsed sentences from input files
