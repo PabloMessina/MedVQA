@@ -6,7 +6,7 @@ from nltk import sent_tokenize
 from tqdm import tqdm
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
 from medvqa.utils.logging import print_orange
-from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
+from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
 from medvqa.utils.files import (
     get_checkpoint_folder_path,
@@ -35,28 +35,10 @@ class _EvaluationModes:
             _EvaluationModes.IUXRAY_RADGRAPH_LABELER,
         ]
 
-class _Methods:
-    CXR_BERT_SPECIALIZED = 'BiomedVLP-CXR-BERT-specialized'
-    BIOVIL_T = 'BiomedVLP-BioViL-T'
-    BIOLINKBERT_LARGE = 'BioLinkBERT-large'
-    PUBMEDBERT_LARGE = 'BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext'
-    BIO_CLINICAL_BERT = 'Bio_ClinicalBERT'
-    ORACLE = 'oracle'
-    @staticmethod
-    def get_all():
-        return [
-            _Methods.CXR_BERT_SPECIALIZED,
-            _Methods.BIOVIL_T,
-            _Methods.BIOLINKBERT_LARGE,
-            _Methods.PUBMEDBERT_LARGE,
-            _Methods.BIO_CLINICAL_BERT,
-            _Methods.ORACLE,
-        ]
-
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--evaluation_mode', type=str, required=True, choices=_EvaluationModes.get_all())
-    parser.add_argument('--method', type=str, required=True, choices=_Methods.get_all())
+    parser.add_argument('--method', type=str, required=True, choices=['oracle'] + SupportedHuggingfaceMedicalBERTModels.get_all())
     parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU'])
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
@@ -64,6 +46,7 @@ def parse_args(args=None):
     parser.add_argument('--top_k', type=int, default=10)
     parser.add_argument('--save_embeddings', action='store_true', default=False)
     parser.add_argument('--distance_metric', type=str, default='cosine', choices=['cosine', 'euclidean', 'dot_product'])
+    parser.add_argument('--average_token_embeddings', action='store_true', default=False)
     return parser.parse_args(args=args)
 
 def _load_mimiccxr_radiologist_annotations():
@@ -187,6 +170,7 @@ def evaluate(
     top_k,
     save_embeddings,
     distance_metric,
+    average_token_embeddings,
 ):
     use_accuracy = False
     use_jaccard = False
@@ -221,8 +205,7 @@ def evaluate(
         print_orange(f'WARNING: top_k ({top_k}) is greater than the number of sentences ({n}). Setting top_k to {n}.', bold=True)
         top_k = n
     
-    if method in [_Methods.CXR_BERT_SPECIALIZED, _Methods.BIOVIL_T, _Methods.BIOLINKBERT_LARGE,
-                  _Methods.PUBMEDBERT_LARGE, _Methods.BIO_CLINICAL_BERT]:
+    if method in SupportedHuggingfaceMedicalBERTModels.get_all():
         # Obtain embeddings for each sentence
         embedding_extractor = CachedTextEmbeddingExtractor(
             model_name=method,
@@ -230,10 +213,13 @@ def evaluate(
             model_checkpoint_folder_path=model_checkpoint_folder_path,
             batch_size=batch_size,
             num_workers=num_workers,
+            average_token_embeddings=average_token_embeddings,
         )
         embeddings = embedding_extractor.compute_text_embeddings(sentences)
         print('Embeddings shape:', embeddings.shape)
         assert embeddings.shape[0] == n
+
+        average_token_embeddings_str = ',avgtok' if average_token_embeddings else ''
         
         # Define results folder path
         if model_checkpoint_folder_path is not None:
@@ -264,7 +250,7 @@ def evaluate(
                 mean_average_accuracy_up_to[k] /= n
             metrics_to_save = mean_average_accuracy_up_to
             metrics_save_path = os.path.join(results_folder_path,
-                                             f'mean_average_accuracy_up_to_{top_k}({dataset_name},{distance_metric}).pkl')
+                                             f'mean_average_accuracy_up_to_{top_k}({dataset_name},{distance_metric}{average_token_embeddings_str}).pkl')
         elif use_jaccard:
             mean_average_jaccard_up_to = [0] * top_k
             for i in tqdm(range(n), mininterval=2):
@@ -278,11 +264,11 @@ def evaluate(
                 mean_average_jaccard_up_to[k] /= n
             metrics_to_save = mean_average_jaccard_up_to
             metrics_save_path = os.path.join(results_folder_path,
-                                             f'mean_average_jaccard_up_to_{top_k}({dataset_name},{distance_metric}).pkl')
+                                             f'mean_average_jaccard_up_to_{top_k}({dataset_name},{distance_metric}{average_token_embeddings_str}).pkl')
         else: assert False
 
         if save_embeddings:
-            embeddings_save_path = os.path.join(results_folder_path, f'embeddings({dataset_name}).pkl')
+            embeddings_save_path = os.path.join(results_folder_path, f'embeddings({dataset_name}{average_token_embeddings_str}).pkl')
             if os.path.exists(embeddings_save_path):
                 print_orange(f'WARNING: embeddings save path {embeddings_save_path} already exists. Skipping.', bold=True)
             else:
@@ -292,7 +278,7 @@ def evaluate(
                     'embeddings': embeddings,
                 }, embeddings_save_path)
 
-    elif method == _Methods.ORACLE:
+    elif method == 'oracle':
 
         # Define results folder path
         results_folder_path = get_results_folder_path(get_checkpoint_folder_path('fact_embedding', dataset_name, 'oracle'))

@@ -32,7 +32,7 @@ def _get_balancedly_distributed_class_indices(class_weights):
     ws = [w / w_sum for w in class_weights]
     w_min = min(ws)
     assert w_min > 0
-    freqs = [max(int(w/w_min),1) for w in ws]
+    freqs = [max(int(10*w/w_min),1) for w in ws]
     count = sum(freqs)
     indices = [None] * count
     class_ids = list(range(len(class_weights)))
@@ -756,12 +756,13 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
                                         for_metadata_classification=False,
                                         for_chest_imagenome_observation_classification=False,
                                         for_chest_imagenome_anatomical_location_classification=False,
-                                        ):
+                                        for_nli=False, for_entcon=False):
 
     assert sum([for_triplet_ranking,
                 for_metadata_classification,
                 for_chest_imagenome_observation_classification,
-                for_chest_imagenome_anatomical_location_classification]) == 1 # only one of these should be true
+                for_chest_imagenome_anatomical_location_classification,
+                for_nli, for_entcon]) == 1 # only one of these should be true
     
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
@@ -819,7 +820,48 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             # labels
             batch_dict['l'] = torch.tensor([x['l'] for x in batch])
             return batch_dict
+    elif for_nli:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='nli')
+            premises = [x['p'] for x in batch]
+            hypotheses = [x['h'] for x in batch]
+            batch_dict['tokenized_premises'] = tokenizer(premises, padding="longest", return_tensors="pt")
+            batch_dict['tokenized_hypotheses'] = tokenizer(hypotheses, padding="longest", return_tensors="pt")
+            batch_dict['labels'] = torch.tensor([x['l'] for x in batch])
+            return batch_dict
+    elif for_entcon:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='entcon')
+            batch_dict['tokenized_ent_p'] = tokenizer([x['ent_p'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['tokenized_ent_h'] = tokenizer([x['ent_h'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['tokenized_con_p'] = tokenizer([x['con_p'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['tokenized_con_h'] = tokenizer([x['con_h'] for x in batch], padding="longest", return_tensors="pt")
+            return batch_dict
     else: assert False
+    
+    return collate_batch_fn
+
+def get_nli_collate_batch_fn(huggingface_model_name, merged_input=False):
+    
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
+
+    if merged_input:
+        def collate_batch_fn(batch):
+            batch_dict = dict()
+            texts = [x['t'] for x in batch]
+            batch_dict['tokenized_texts'] = tokenizer(texts, padding="longest", return_tensors="pt")
+            batch_dict['labels'] = torch.tensor([x['l'] for x in batch])
+            return batch_dict
+    else:
+        def collate_batch_fn(batch):
+            batch_dict = dict()
+            premises = [x['p'] for x in batch]
+            hypotheses = [x['h'] for x in batch]
+            batch_dict['tokenized_premises'] = tokenizer(premises, padding="longest", return_tensors="pt")
+            batch_dict['tokenized_hypotheses'] = tokenizer(hypotheses, padding="longest", return_tensors="pt")
+            batch_dict['labels'] = torch.tensor([x['l'] for x in batch])
+            return batch_dict
     
     return collate_batch_fn
 

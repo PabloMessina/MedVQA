@@ -4,31 +4,54 @@ from tqdm import tqdm
 from sklearn.cluster import KMeans
 from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
 from medvqa.models.checkpoint import get_checkpoint_filepath
+from medvqa.models.common import load_model_state_dict
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
 from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
 from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string_list, update_hash
 
-_ALLOWED_MODEL_NAMES = [
-    'BiomedVLP-CXR-BERT-specialized',
-    'BiomedVLP-BioViL-T',
-    'BioLinkBERT-large',
-    'BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext',
-    'Bio_ClinicalBERT',
-]
-_MODEL_NAME_TO_EMBEDDING_SIZE = {
-    'BiomedVLP-CXR-BERT-specialized': 128,
-    'BiomedVLP-BioViL-T': 128,
-    'BioLinkBERT-large': 1024,
-    'BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext': 768,
-    'Bio_ClinicalBERT': 768,
-}
-_MODEL_NAME_TO_URL = {
-    'BiomedVLP-CXR-BERT-specialized': 'microsoft/BiomedVLP-CXR-BERT-specialized',
-    'BiomedVLP-BioViL-T': 'microsoft/BiomedVLP-BioViL-T',
-    'BioLinkBERT-large': 'michiyasunaga/BioLinkBERT-large',
-    'BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext': 'microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext',
-    'Bio_ClinicalBERT': 'emilyalsentzer/Bio_ClinicalBERT',
-}
+class SupportedHuggingfaceMedicalBERTModels:
+    BiomedVLP_CXR_BERT_specialized = 'microsoft/BiomedVLP-CXR-BERT-specialized'
+    BiomedVLP_BioViL_T = 'microsoft/BiomedVLP-BioViL-T'
+    BioLinkBERT_large = 'michiyasunaga/BioLinkBERT-large'
+    BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext = 'microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext'
+    Bio_ClinicalBERT = 'emilyalsentzer/Bio_ClinicalBERT'
+
+    _model_name_to_embedding_size = {
+        BiomedVLP_CXR_BERT_specialized: 128,
+        BiomedVLP_BioViL_T: 128,
+        BioLinkBERT_large: 1024,
+        BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext: 768,
+        Bio_ClinicalBERT: 768,
+    }
+    
+    @classmethod
+    def get_all(cls):
+        return [
+            cls.BiomedVLP_CXR_BERT_specialized,
+            cls.BiomedVLP_BioViL_T,
+            cls.BioLinkBERT_large,
+            cls.BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext,
+            cls.Bio_ClinicalBERT,
+        ]
+    
+    @classmethod
+    def get_all_cxr_bert_variants(cls):
+        return [
+            cls.BiomedVLP_CXR_BERT_specialized,
+            cls.BiomedVLP_BioViL_T,
+        ]
+    
+    @classmethod
+    def get_models_with_pooler_output(cls):
+        return [
+            cls.BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext,
+            cls.Bio_ClinicalBERT,
+            cls.BioLinkBERT_large
+        ]
+    
+    @classmethod
+    def get_embedding_size(cls, model_name):
+        return cls._model_name_to_embedding_size[model_name]
 
 def _adapt_checkpoint_keys(checkpoint):
     for key in list(checkpoint.keys()):
@@ -36,27 +59,33 @@ def _adapt_checkpoint_keys(checkpoint):
             checkpoint[key[6:]] = checkpoint.pop(key)
     return checkpoint
 
-def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, batch_size=32, num_workers=0,
-                            model_checkpoint_folder_path=None, is_cxr_bert_variant=False):
+def compute_text_embeddings(model_name, get_tokenizer_func, texts, device, batch_size=32, num_workers=0,
+                            model_checkpoint_folder_path=None, model_checkpoint_filepath=None,
+                            is_cxr_bert_variant=False, average_token_embeddings=False):
     import torch
     from transformers import AutoTokenizer, AutoModel
+
+    if average_token_embeddings:
+        assert not is_cxr_bert_variant, 'average_token_embeddings is not supported for CXR-BERT variants'
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'CPU')
 
     # Load model
-    model = AutoModel.from_pretrained(model_url, trust_remote_code=True)
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
     model.to(device)
 
     # Load pre-trained weights from checkpoint folder (if provided)
-    if model_checkpoint_folder_path is not None:
-        model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+    if model_checkpoint_filepath is None:
+        if model_checkpoint_folder_path is not None:
+            model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+    if model_checkpoint_filepath is not None:
         print(f'Loading model weights from {model_checkpoint_filepath}')
         checkpoint = torch.load(model_checkpoint_filepath, map_location=device)
-        model.load_state_dict(_adapt_checkpoint_keys(checkpoint['model']), strict=False)
+        load_model_state_dict(model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
 
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_url, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer_func = get_tokenizer_func(tokenizer)
 
     # Create dataset and dataloader
@@ -72,9 +101,13 @@ def compute_text_embeddings(model_url, get_tokenizer_func, texts, device, batch_
     embeddings = None
     offset = 0
     if is_cxr_bert_variant:
-        forward_func = lambda x: model.get_projected_text_embeddings(**x) # CXR-BERT variants
+        forward_func = lambda x: model.get_projected_text_embeddings(
+            input_ids=x['input_ids'], attention_mask=x['attention_mask']) # CXR-BERT variants
     else:
-        forward_func = lambda x: model(**x).pooler_output # BERT-like models
+        if average_token_embeddings:
+            forward_func = lambda x: model(**x).last_hidden_state.mean(dim=1)
+        else:
+            forward_func = lambda x: model(**x).pooler_output # BERT-like models
     with torch.no_grad():
         for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
             encoding = batch['encoding']
@@ -109,60 +142,78 @@ def _get_default_BERT_tokenizer_func(tokenizer):
     return lambda x: tokenizer(x, padding='longest', return_tensors='pt')
 
 def compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(texts, device, batch_size=32, num_workers=0,
-                                                                model_checkpoint_folder_path=None):
+                                                                model_checkpoint_folder_path=None,
+                                                                model_checkpoint_filepath=None):
     return compute_text_embeddings(
-        model_url=_MODEL_NAME_TO_URL['BiomedVLP-CXR-BERT-specialized'],
+        model_name=SupportedHuggingfaceMedicalBERTModels.BiomedVLP_CXR_BERT_specialized,
         get_tokenizer_func=_get_microsoft_BERT_tokenizer_func,
         texts=texts,
         device=device,
         batch_size=batch_size,
         num_workers=num_workers,
         model_checkpoint_folder_path=model_checkpoint_folder_path,
+        model_checkpoint_filepath=model_checkpoint_filepath,
         is_cxr_bert_variant=True,
     )
 
 def compute_text_embeddings_with_BiomedVLP_BioVilT(texts, device, batch_size=32, num_workers=0,
-                                                                model_checkpoint_folder_path=None):
+                                                                model_checkpoint_folder_path=None,
+                                                                model_checkpoint_filepath=None):
     return compute_text_embeddings(
-        model_url=_MODEL_NAME_TO_URL['BiomedVLP-BioViL-T'],
+        model_name=SupportedHuggingfaceMedicalBERTModels.BiomedVLP_BioViL_T,
         get_tokenizer_func=_get_microsoft_BERT_tokenizer_func,
         texts=texts,
         device=device,
         batch_size=batch_size,
         num_workers=num_workers,
         model_checkpoint_folder_path=model_checkpoint_folder_path,
+        model_checkpoint_filepath=model_checkpoint_filepath,
         is_cxr_bert_variant=True,
     )
 
-def compute_text_embeddings_with_BERT_variant(model_url, texts, device, batch_size=32, num_workers=0,
-                                                model_checkpoint_folder_path=None):
+def compute_text_embeddings_with_BERT_variant(model_name, texts, device, batch_size=32, num_workers=0,
+                                                model_checkpoint_folder_path=None,
+                                                model_checkpoint_filepath=None, average_token_embeddings=False):
     return compute_text_embeddings(
-        model_url=model_url,
+        model_name=model_name,
         get_tokenizer_func=_get_default_BERT_tokenizer_func,
         texts=texts,
         device=device,
         batch_size=batch_size,
         num_workers=num_workers,
         model_checkpoint_folder_path=model_checkpoint_folder_path,
+        model_checkpoint_filepath=model_checkpoint_filepath,
         is_cxr_bert_variant=False,
+        average_token_embeddings=average_token_embeddings,
     )
 
 class CachedTextEmbeddingExtractor:
-    def __init__(self, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0):
-        assert model_name in _ALLOWED_MODEL_NAMES
-        self.embedding_size = _MODEL_NAME_TO_EMBEDDING_SIZE[model_name]
+    def __init__(self, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
+                 average_token_embeddings=False):
+        assert model_name in SupportedHuggingfaceMedicalBERTModels.get_all()
+        if average_token_embeddings:
+            assert model_name not in SupportedHuggingfaceMedicalBERTModels.get_all_cxr_bert_variants()
+        self.embedding_size = SupportedHuggingfaceMedicalBERTModels.get_embedding_size(model_name)
         self.model_name = model_name
         self.model_checkpoint_folder_path = model_checkpoint_folder_path
+        if model_checkpoint_folder_path is not None:
+            self.model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+        else:
+            self.model_checkpoint_filepath = None
         self.device = device
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.average_token_embeddings = average_token_embeddings
+        strings = [
+            model_name,
+            self.model_checkpoint_filepath or self.model_checkpoint_folder_path or '',
+        ]
+        if average_token_embeddings:
+            strings.append('average_token_embeddings')
         self.cache_path = get_file_path_with_hashing_if_too_long(
             folder_path=LARGE_FAST_CACHE_DIR,
             prefix=f'text_embeddings_cache',
-            strings=[
-                model_name,
-                model_checkpoint_folder_path or '',
-            ],
+            strings=strings,
             force_hashing=True,
         )
         self._cache = None
@@ -193,7 +244,7 @@ class CachedTextEmbeddingExtractor:
             self._hash2index = {}
 
     def _compute_embeddings(self, texts):
-        if self.model_name == 'BiomedVLP-CXR-BERT-specialized':
+        if self.model_name == SupportedHuggingfaceMedicalBERTModels.BiomedVLP_CXR_BERT_specialized:
             embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(
                 texts=texts,
                 device=self.device,
@@ -201,7 +252,7 @@ class CachedTextEmbeddingExtractor:
                 num_workers=self.num_workers,
                 model_checkpoint_folder_path=self.model_checkpoint_folder_path,
             )
-        elif self.model_name == 'BiomedVLP-BioViL-T':
+        elif self.model_name == SupportedHuggingfaceMedicalBERTModels.BiomedVLP_BioViL_T:
             embeddings = compute_text_embeddings_with_BiomedVLP_BioVilT(
                 texts=texts,
                 device=self.device,
@@ -209,14 +260,15 @@ class CachedTextEmbeddingExtractor:
                 num_workers=self.num_workers,
                 model_checkpoint_folder_path=self.model_checkpoint_folder_path,
             )
-        elif self.model_name in ['BioLinkBERT-large', 'BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext', 'Bio_ClinicalBERT']:
+        elif self.model_name in SupportedHuggingfaceMedicalBERTModels.get_models_with_pooler_output():
             embeddings = compute_text_embeddings_with_BERT_variant(
-                model_url=_MODEL_NAME_TO_URL[self.model_name],
+                model_name=self.model_name,
                 texts=texts,
                 device=self.device,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 model_checkpoint_folder_path=self.model_checkpoint_folder_path,
+                average_token_embeddings=self.average_token_embeddings,
             )
         else:
             raise NotImplementedError(f'Unsupported model name: {self.model_name}')

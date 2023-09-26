@@ -59,6 +59,28 @@ class ConditionAwareSingleLabelAccuracy(ConditionAwareMetric):
             raise NotComputableError('ConditionAwareSingleLabelAccuracy must have at least one example before it can be computed.')
         return self._acc_score / self._count
     
+class ConditionAwareLogitsAboveThresholdAccuracy(ConditionAwareMetric):
+
+    def __init__(self, output_transform, threshold=0, condition_function=lambda _: True):
+        super().__init__(output_transform, condition_function)
+        self._threshold = threshold
+
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+
+    def update(self, output):
+        assert len(output) == 1
+        logits = output[0]
+        n = logits.size(0)
+        self._count += n
+        self._acc_score += (logits > self._threshold).sum().item()
+
+    def compute(self):
+        if self._count == 0:
+            raise NotComputableError('LogitsAboveThresholdAccuracy must have at least one example before it can be computed.')
+        return self._acc_score / self._count
+    
 class InstanceConditionedTripletAccuracy(ConditionAwareMetric):
 
     def __init__(self, output_transform, accepted_id, condition_function=lambda _: True):

@@ -9,7 +9,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMicroAvgF1,
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
-from medvqa.metrics.classification.singlelabel_accuracy import InstanceConditionedTripletAccuracy
+from medvqa.metrics.classification.singlelabel_accuracy import ConditionAwareLogitsAboveThresholdAccuracy, InstanceConditionedTripletAccuracy
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareSeq2SeqOutputLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
@@ -492,6 +492,16 @@ def attach_condition_aware_triplet_accuracy(engine, accepted_id, metric_name, co
 def attach_condition_aware_accuracy(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareSingleLabelAccuracy(
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose logits accuracy
+def attach_condition_aware_logits_above_threshold_accuracy(engine, logits_field_name, metric_name,
+                                                          threshold=0, condition_function=lambda _: True):
+    met = ConditionAwareLogitsAboveThresholdAccuracy(
+        output_transform=_get_output_transform(logits_field_name),
+        threshold=threshold,
         condition_function=condition_function,
     )
     met.attach(engine, metric_name)

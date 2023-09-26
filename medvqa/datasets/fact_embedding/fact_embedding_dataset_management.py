@@ -2,8 +2,11 @@ import numpy as np
 import random
 import math
 from collections import Counter
+import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset
+from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_TEST_JSONL_PATH
+from medvqa.datasets.nli.nli_dataset_management import EntailmentContradictionDataset, NLIDataset
 from medvqa.utils.common import DictWithDefault
 from medvqa.utils.files import load_jsonl, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta
@@ -163,6 +166,11 @@ class FactEmbeddingTrainer():
                  integrated_chest_imagenome_anatomical_locations_filepath,
                  chest_imagenome_observation_collate_batch_fn,
                  chest_imagenome_anatomical_location_collate_batch_fn,
+                 # natural language inference arguments
+                 integrated_nli_jsonl_filepath,
+                 nli_collate_batch_fn,
+                 entcon_collate_batch_fn,
+                 gpt4_radnli_labels_jsonl_filepath=None,
                  ):
         
         assert dataset_name, 'dataset_name must be provided'
@@ -378,9 +386,121 @@ class FactEmbeddingTrainer():
                 pin_memory=True,
             ))
 
-        # Val dataset and dataloader
+        # Train NLI dataset and dataloader
         print('----')
-        print_bold('Building val dataset and dataloader...')
+        print_bold('Building train NLI dataset and dataloader...')
+        print(f'Loading integrated NLI from {integrated_nli_jsonl_filepath}...')
+        rows = load_jsonl(integrated_nli_jsonl_filepath)
+        print(f'Number of samples: {len(rows)}')
+        premises = [x['premise'] for x in rows]
+        hypotheses = [x['hypothesis'] for x in rows]
+        label2id = { 'entailment': 0, 'neutral': 1, 'contradiction': 2 }
+        labels = [label2id[x['label']] for x in rows]
+        ent_indices = [i for i, x in enumerate(labels) if x == 0]
+        neu_indices = [i for i, x in enumerate(labels) if x == 1]
+        con_indices = [i for i, x in enumerate(labels) if x == 2]
+        ent_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=ent_indices)
+        neu_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=neu_indices)
+        con_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=con_indices)
+        print(f'Number of entailment samples: {len(ent_indices)}')
+        print(f'Number of neutral samples: {len(neu_indices)}')
+        print(f'Number of contradiction samples: {len(con_indices)}')
+        self.train_nli_dataset = CompositeInfiniteDataset([ent_dataset, neu_dataset, con_dataset], [1, 1, 1])
+        self.train_nli_dataloader = DataLoader(
+            self.train_nli_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=nli_collate_batch_fn,
+            pin_memory=True,
+        )
+
+        # Train entailment/contradiction dataset and dataloader
+        print('----')
+        print_bold('Building train entailment/contradiction dataset and dataloader...')
+        self.train_entcon_dataset = EntailmentContradictionDataset(premises, hypotheses, labels, shuffle=True, infinite=True)
+        self.train_entcon_dataloader = DataLoader(
+            self.train_entcon_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=entcon_collate_batch_fn,
+            pin_memory=True,
+        )
+        print('Example entailment/contradiction samples:')
+        for i in range(4):
+            print(self.train_entcon_dataset[i])
+
+        # Val NLI dataset and dataloader
+        print('----')
+        print_bold('Building val NLI dataset and dataloader...')
+        # RadNLI
+        rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
+        print(f'Number of RadNLI samples: {len(rows)}')
+        premises = []
+        hypotheses = []
+        labels = []
+        if gpt4_radnli_labels_jsonl_filepath is not None: # use GPT-4 labels
+            gpt4_radnli_labels = load_jsonl(gpt4_radnli_labels_jsonl_filepath)
+            print(f'Number of GPT-4 RadNLI labels: {len(gpt4_radnli_labels)}')
+            gpt4_query_to_label = {x['metadata']['query'] : x['parsed_response'] for x in gpt4_radnli_labels}
+            for x in rows:
+                premises.append(x['sentence1'])
+                hypotheses.append(x['sentence2'])
+                labels.append(label2id[x['gold_label']])
+                query = f'Premise: {x["sentence1"]} | Hypothesis: {x["sentence2"]}'
+                if gpt4_query_to_label[query] != x['gold_label']: # only add if GPT-4 disagrees
+                    premises.append(x['sentence1'])
+                    hypotheses.append(x['sentence2'])
+                    labels.append(label2id[gpt4_query_to_label[query]])
+        else:
+            for x in rows:
+                premises.append(x['sentence1'])
+                hypotheses.append(x['sentence2'])
+                labels.append(label2id[x['gold_label']])
+        # MS_CXR_T
+        df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
+        for premise, hypothesis, label in zip(df.sentence_1, df.sentence_2, df.category):
+            premises.append(premise)
+            hypotheses.append(hypothesis)
+            if label == 'paraphrase':
+                labels.append(label2id['entailment'])                
+            elif label == 'contradiction':
+                labels.append(label2id['contradiction'])
+            else:
+                raise ValueError(f'Unknown label {label}')
+        print(f'Number of MS_CXR_T samples: {len(df)}')
+        print(f'Number of total samples: {len(premises)}')
+        assert len(premises) == len(hypotheses) == len(labels)
+        self.val_nli_dataset = NLIDataset(premises, hypotheses, labels, shuffle=False, infinite=False)
+        self.val_nli_dataloader = DataLoader(
+            self.val_nli_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=nli_collate_batch_fn,
+            pin_memory=True,
+        )
+
+        # Val entailment/contradiction dataset and dataloader
+        print('----')
+        print_bold('Building val entailment/contradiction dataset and dataloader...')
+        self.val_entcon_dataset = EntailmentContradictionDataset(premises, hypotheses, labels, shuffle=False, infinite=False)
+        self.val_entcon_dataloader = DataLoader(
+            self.val_entcon_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=entcon_collate_batch_fn,
+            pin_memory=True,
+        )
+        print('Example entailment/contradiction samples:')
+        for i in range(4):
+            print(self.val_entcon_dataset[i])
+
+        # Val triplets dataset and dataloader
+        print('----')
+        print_bold('Building val triplets dataset and dataloader...')
         val_rule_datasets = []
         self.rule_ids = []
         for group_name, rules in triplets_data['val'].items():
@@ -393,9 +513,9 @@ class FactEmbeddingTrainer():
                 print(f'\tRule ID: {rule_id}')
                 self.rule_ids.append(rule_id)
                 val_rule_datasets.append(FactTripletDataset(self.facts, rule_triplets, rule_id=rule_id))
-        self.val_dataset = CompositeDataset(val_rule_datasets)
-        self.val_dataloader = DataLoader(
-            self.val_dataset,
+        self.val_triplets_dataset = CompositeDataset(val_rule_datasets)
+        self.val_triplets_dataloader = DataLoader(
+            self.val_triplets_dataset,
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,

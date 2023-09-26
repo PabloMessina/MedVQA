@@ -12,6 +12,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         triplet_loss_criterion=None, # for triplet ranking
         metadata_classifier_loss_criterion=None, # for metadata classification
         chest_imagenome_classifier_loss_criterion=None, # for chest imagenome classification
+        nli_loss_criterion=None, # for NLI
+        entcon_loss_criterion=None, # for entailment contradiction
         # automatic mixed precision
         use_amp=False,
         # batchwise learning rate updates
@@ -24,6 +26,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         comparison_status_classif_loss_weight=1.0,
         chest_imagenome_obs_classif_loss_weight=1.0,
         chest_imagenome_anatloc_classif_loss_weight=1.0,
+        nli_loss_weight=1.0,
+        entcon_loss_weight=1.0,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -203,6 +207,95 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
+    def step_fn__nli(batch):
+
+        # Extract elements from batch
+        tokenized_premises = batch['tokenized_premises']
+        p_input_ids = tokenized_premises['input_ids'].to(device)
+        p_attention_mask = tokenized_premises['attention_mask'].to(device)
+        tokenized_hypotheses = batch['tokenized_hypotheses']
+        h_input_ids = tokenized_hypotheses['input_ids'].to(device)
+        h_attention_mask = tokenized_hypotheses['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+            
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                logits = model.nli_forward(p_input_ids, p_attention_mask, h_input_ids, h_attention_mask)
+                
+                if training:
+                    losses = []
+                    nli_loss = nli_loss_criterion(logits, labels)
+                    nli_loss = nli_loss * nli_loss_weight
+                    losses.append(nli_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss)
+
+        # Prepare output
+        output = {
+            'pred_labels': torch.argmax(logits.detach(), dim=1),
+            'gt_labels': labels.detach(),
+        }
+        if training:
+            output['loss'] = batch_loss.detach()
+            output['nli_loss'] = nli_loss.detach()
+
+        return output
+    
+    def step_fn__entcon(batch):
+
+        # Extract elements from batch
+        tokenized_ent_p = batch['tokenized_ent_p']
+        tokenized_ent_h = batch['tokenized_ent_h']
+        tokenized_con_p = batch['tokenized_con_p']
+        tokenized_con_h = batch['tokenized_con_h']
+        ent_p_input_ids = tokenized_ent_p['input_ids'].to(device)
+        ent_p_attention_mask = tokenized_ent_p['attention_mask'].to(device)
+        ent_h_input_ids = tokenized_ent_h['input_ids'].to(device)
+        ent_h_attention_mask = tokenized_ent_h['attention_mask'].to(device)
+        con_p_input_ids = tokenized_con_p['input_ids'].to(device)
+        con_p_attention_mask = tokenized_con_p['attention_mask'].to(device)
+        con_h_input_ids = tokenized_con_h['input_ids'].to(device)
+        con_h_attention_mask = tokenized_con_h['attention_mask'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+            
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                ent_p_embeddings = model(input_ids=ent_p_input_ids, attention_mask=ent_p_attention_mask)['text_embeddings']
+                ent_h_embeddings = model(input_ids=ent_h_input_ids, attention_mask=ent_h_attention_mask)['text_embeddings']
+                con_p_embeddings = model(input_ids=con_p_input_ids, attention_mask=con_p_attention_mask)['text_embeddings']
+                con_h_embeddings = model(input_ids=con_h_input_ids, attention_mask=con_h_attention_mask)['text_embeddings']
+                # dot(ent_p, ent_h) - dot(con_p, con_h) > 0
+                ent_sim = torch.sum(ent_p_embeddings * ent_h_embeddings, dim=1)
+                con_sim = torch.sum(con_p_embeddings * con_h_embeddings, dim=1)
+                diff = ent_sim - con_sim
+
+                if training:
+                    losses = []
+                    entcon_loss = entcon_loss_criterion(diff, torch.ones_like(diff))
+                    entcon_loss = entcon_loss * entcon_loss_weight
+                    losses.append(entcon_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss)
+
+        # Prepare output
+        output = {
+            'logits': diff.detach(),
+        }
+        if training:
+            output['loss'] = batch_loss.detach()
+            output['entcon_loss'] = entcon_loss.detach()
+
+        return output
+    
     def step_fn_wrapper(unused_engine, batch):
         flag = batch['flag']
         if flag == 't': # triplet ranking
@@ -213,6 +306,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output = step_fn__chest_imagenome_observation_classification(batch)
         elif flag == 'cialc': # chest imagenome anatomical location classification
             output = step_fn__chest_imagenome_anatomical_location_classification(batch)
+        elif flag == 'nli': # NLI
+            output = step_fn__nli(batch)
+        elif flag == 'entcon': # entailment contradiction
+            output = step_fn__entcon(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -237,6 +334,8 @@ def get_engine(model, device,
                comparison_status_classif_loss_weight=1.0,
                chest_imagenome_obs_classif_loss_weight=1.0,
                chest_imagenome_anatloc_classif_loss_weight=1.0,
+               nli_loss_weight=1.0,
+               entcon_loss_weight=1.0,
             ):
     
     # Triplet loss criterion as binary cross entropy
@@ -247,6 +346,12 @@ def get_engine(model, device,
 
     # Chest imagenome classification loss criterion as weighted cross entropy
     chest_imagenome_classifier_loss_criterion = Focal_BCE_WBCE_Loss()
+
+    # NLI loss
+    nli_loss_criterion = nn.CrossEntropyLoss()
+
+    # Entailment contradiction loss
+    entcon_loss_criterion = nn.BCEWithLogitsLoss() # dot(ent_p, ent_h) - dot(con_p, con_h) > 0
     
     # Create engine
     step_fn = get_step_fn(model=model, optimizer=optimizer, device=device,
@@ -255,6 +360,8 @@ def get_engine(model, device,
                           triplet_loss_criterion=triplet_loss_criterion,
                           metadata_classifier_loss_criterion=metadata_classifier_loss_criterion,
                           chest_imagenome_classifier_loss_criterion=chest_imagenome_classifier_loss_criterion,
+                          nli_loss_criterion=nli_loss_criterion,
+                          entcon_loss_criterion=entcon_loss_criterion,
                           use_amp=use_amp,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,
@@ -266,6 +373,8 @@ def get_engine(model, device,
                           comparison_status_classif_loss_weight=comparison_status_classif_loss_weight,
                           chest_imagenome_obs_classif_loss_weight=chest_imagenome_obs_classif_loss_weight,
                           chest_imagenome_anatloc_classif_loss_weight=chest_imagenome_anatloc_classif_loss_weight,
+                          nli_loss_weight=nli_loss_weight,
+                          entcon_loss_weight=entcon_loss_weight,
                           )
     engine = Engine(step_fn)
     return engine

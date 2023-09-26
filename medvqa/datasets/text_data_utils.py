@@ -62,3 +62,14 @@ def split_text_into_chunks(text, max_length):
     if chunk != '':
         chunks.append(chunk)
     return chunks
+
+def sentence_tokenize_texts_in_parallel(texts, num_workers=None):
+    import multiprocessing as mp
+    if num_workers is None:
+        num_workers = mp.cpu_count()
+    else:
+        num_workers = min(num_workers, mp.cpu_count())
+    with mp.Pool(num_workers) as pool:
+        sentences = pool.map(sent_tokenize, texts)
+    return sentences
+

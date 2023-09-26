@@ -531,3 +531,82 @@ def load_and_run_fact_encoder_in_inference_mode(
     import gc
     gc.collect()
     torch.cuda.empty_cache()
+
+def run_fact_encoder_nli(
+        premises, hypotheses, model_folder_path=None, model_checkpoint_path=None, use_amp=False,
+        device='GPU'):
+    assert len(premises) == len(hypotheses)
+    
+    from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
+    from medvqa.models.nlp.fact_encoder import FactEncoder
+    from torch.cuda.amp.autocast_mode import autocast
+    from medvqa.datasets.nli.nli_dataset_management import _INDEX_TO_LABEL
+    import torch
+
+    if model_folder_path is None:
+        assert model_checkpoint_path is not None
+        model_folder_path = os.path.dirname(model_checkpoint_path)
+    
+    metadata = load_metadata(model_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    
+    # Create model
+    print_bold('Create model')
+    model = FactEncoder(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    if model_checkpoint_path is None:
+        assert model_folder_path is not None
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('model_checkpoint_path = ', model_checkpoint_path)
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Prepare input
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
+    p_encoding = tokenizer(premises, padding="longest", return_tensors="pt")
+    h_encoding = tokenizer(hypotheses, padding="longest", return_tensors="pt")
+    p_input_ids = p_encoding.input_ids.to(device)
+    p_attention_mask = p_encoding.attention_mask.to(device)
+    h_input_ids = h_encoding.input_ids.to(device)
+    h_attention_mask = h_encoding.attention_mask.to(device)
+    
+    # Run model in inference mode
+    print_bold('Run model in inference mode')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        with autocast(enabled=use_amp): # automatic mixed precision
+            logits = model.nli_forward(p_input_ids=p_input_ids, p_attention_mask=p_attention_mask,
+                                       h_input_ids=h_input_ids, h_attention_mask=h_attention_mask)
+    
+    # Convert logits to labels
+    print_bold('Convert logits to labels')
+    labels = logits.argmax(dim=1).detach().cpu().numpy()
+    assert labels.shape == (len(premises),)
+    labels = [_INDEX_TO_LABEL[x] for x in labels]
+    
+    # Print results
+    print_bold('Results')
+    for i in range(len(premises)):
+        print(f'Premise: {premises[i]}')
+        print(f'Hypothesis: {hypotheses[i]}')
+        print(f'Label: {labels[i]}')
+        print('----------------')
+    
+    # Release GPU memory
+    del model
+    del p_input_ids
+    del p_attention_mask
+    del h_input_ids
+    del h_attention_mask
+    del logits
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
