@@ -1,4 +1,5 @@
 from torch.optim import Adam, AdamW, SGD
+from torch.nn.utils import clip_grad_norm_
 
 def create_optimizer(name, params, lr):
     print(f'create_optimizer(): name = {name}')
@@ -13,17 +14,20 @@ def create_optimizer(name, params, lr):
     return optimizer
 
 class GradientAccumulator:
-    def __init__(self, optimizer, scaler, num_accumulation_steps):
-        print(f'GradientAccumulator.__init__(): num_accumulation_steps = {num_accumulation_steps}')
+    def __init__(self, optimizer, scaler, num_accumulation_steps, max_grad_norm=None):
+        print(f'GradientAccumulator.__init__(): num_accumulation_steps = {num_accumulation_steps}, max_grad_norm = {max_grad_norm}')
         self.optimizer = optimizer
         self.scaler = scaler
         self.num_accumulation_steps = num_accumulation_steps
         self.step_count = 0
+        self._max_grad_norm = max_grad_norm
 
-    def step(self, batch_loss):
+    def step(self, batch_loss, model):
         assert batch_loss is not None
         batch_loss = batch_loss / self.num_accumulation_steps
         self.scaler.scale(batch_loss).backward()
+        if self._max_grad_norm is not None:
+            clip_grad_norm_(model.parameters(), self._max_grad_norm)
         self.step_count += 1
         if self.step_count % self.num_accumulation_steps == 0:
             self.scaler.step(self.optimizer)

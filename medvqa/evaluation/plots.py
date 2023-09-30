@@ -435,13 +435,16 @@ def plot_embeddings(X):
     # Show plot
     plt.show()
 
-def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10)):
+def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10), first_k=None):
     assert type(metric_lists) == list
     assert len(metric_lists) > 0
     assert all(type(metric_list) == list for metric_list in metric_lists)
     assert all(len(metric_list) > 0 for metric_list in metric_lists)
     assert all(len(metric_list) == len(metric_lists[0]) for metric_list in metric_lists)
     assert len(method_names) == len(metric_lists)
+
+    if first_k is not None:
+        metric_lists = [metric_list[:first_k] for metric_list in metric_lists]
 
     averages = [sum(metric_list) / len(metric_list) for metric_list in metric_lists]
     method_idxs = list(range(len(method_names)))
@@ -453,7 +456,8 @@ def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Ep
     n = len(metric_lists[0])
     for i in range(m):
         i = method_idxs[i]
-        plt.plot(range(1, n+1), metric_lists[i], label=method_names[i])
+        label = f'{method_names[i]} ({averages[i]:.3f})'
+        plt.plot(range(1, n+1), metric_lists[i], label=label, color=_COLORS[i % len(_COLORS)])
     plt.xlabel(xlabel)
     plt.ylabel(ylabel if ylabel is not None else metric_name)
     plt.grid(axis='y')

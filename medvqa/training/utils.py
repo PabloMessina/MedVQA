@@ -1,7 +1,15 @@
+import torch
+
 def append_metric_name(train_list, val_list, log_list, metric_name, train=True, val=True, log=True):
     if train: train_list.append(metric_name)
     if val: val_list.append(metric_name)
     if log: log_list.append(metric_name)
+
+def batch_to_device(batch, device):
+    for key in batch:
+        if isinstance(batch[key], torch.Tensor):
+            batch[key] = batch[key].to(device)
+    return batch
 
 def run_common_boilerplate_code_and_start_training(
     update_lr_batchwise,

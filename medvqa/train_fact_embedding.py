@@ -9,6 +9,7 @@ from medvqa.datasets.fact_embedding.fact_embedding_dataset_management import (
     _LABEL_TO_HEALTH_STATUS,
     FactEmbeddingTrainer,
 )
+from medvqa.datasets.radgraph import RADGRAPH_CONLLFORMAT_ENTITY_TYPE_COUNT, RADGRAPH_CONLLFORMAT_RELATION_TYPE_COUNT, RADGRAPH_CONLLFORMAT_TYPES_JSON_PATH
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 from medvqa.models.nlp.fact_encoder import FactEncoder, HuggingfaceModels
@@ -67,6 +68,7 @@ def parse_args(args=None):
 
     # --- Other arguments
 
+    parser.add_argument('--radgraph_spert_batch_size', type=int, default=None, help='Batch size for RadGraph NER/RE')
     parser.add_argument('--checkpoint_folder', type=str, default=None,
                         help='Relative path to folder with checkpoint to resume training from')
 
@@ -80,6 +82,9 @@ def parse_args(args=None):
     parser.add_argument('--nli_hidden_layer_size', type=int, default=None)
     parser.add_argument('--pretrained_checkpoint_folder_path', type=str, default=None)
     parser.add_argument('--freeze_huggingface_model', action='store_true', default=False)
+    parser.add_argument('--spert_size_embedding', type=int, default=25)
+    parser.add_argument('--spert_max_pairs', type=int, default=1000)
+    parser.add_argument('--spert_prop_drop', type=float, default=0.1)
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -92,6 +97,7 @@ def parse_args(args=None):
     parser.add_argument('--warmup_decay_and_cyclic_decay_args', type=str, default=None)
     parser.add_argument('--iters_to_accumulate', type=int, default=1, help='For gradient accumulation')
     parser.add_argument('--override_lr', action='store_true', default=False)
+    parser.add_argument('--max_grad_norm', type=float, default=None, help='Max gradient norm')
     # Loss weights
     parser.add_argument('--triplet_loss_weight', type=float, default=1.0)
     parser.add_argument('--category_classif_loss_weight', type=float, default=1.0)
@@ -121,6 +127,7 @@ def parse_args(args=None):
                         help='Weight for chest imagenome anatomical locations classification sampling during training')
     parser.add_argument('--nli_weight', type=float, default=1.0, help='Weight for NLI sampling during training')
     parser.add_argument('--entcon_weight', type=float, default=1.0, help='Weight for entailment/contradiction sampling during training')
+    parser.add_argument('--radgraph_ner_re_weight', type=float, default=1.0, help='Weight for RadGraph NER/RE sampling during training')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
@@ -135,6 +142,11 @@ def parse_args(args=None):
 _METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
 _METRIC_WEIGHTS['nli_acc'] = 2.0 # NLI accuracy is more important than other metrics
 _METRIC_WEIGHTS['entcon_acc'] = 2.0 # Entailment/contradiction accuracy is more important than other metrics
+
+def _metric_getter(metrics_dict, key):
+    if '_loss' in key:
+        return 1 / (1 + metrics_dict[key]) # convert loss to score
+    return metrics_dict[key]
    
 def train_model(
         model_kwargs,
@@ -158,11 +170,18 @@ def train_model(
     
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
+    radgraph_spert_batch_size = dataloading_kwargs['radgraph_spert_batch_size']
+    if radgraph_spert_batch_size is None:
+        radgraph_spert_batch_size = batch_size
     use_triplets = dataloading_kwargs['triplets_weight'] > 0
     use_metadata = dataloading_kwargs['metadata_classification_weight'] > 0
     use_chest_imagenome_observations = dataloading_kwargs['chest_imagenome_observations_classification_weight'] > 0
     use_chest_imagenome_anatlocs = dataloading_kwargs['chest_imagenome_anatomical_locations_classification_weight'] > 0
     use_nli = dataloading_kwargs['nli_weight'] > 0
+    use_entcon = dataloading_kwargs['entcon_weight'] > 0
+    use_radgraph_ner_re = dataloading_kwargs['radgraph_ner_re_weight'] > 0
+    assert sum([use_triplets, use_metadata, use_chest_imagenome_observations,
+                use_chest_imagenome_anatlocs, use_nli, use_entcon, use_radgraph_ner_re]) > 0
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -202,8 +221,14 @@ def train_model(
         **collate_batch_fn_kwargs['entcon'])
     
     # Create dataloaders
+    if use_radgraph_ner_re:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
+    else:
+        tokenizer = None
     fact_embedding_trainer = FactEmbeddingTrainer(
         batch_size=batch_size,
+        radgraph_spert_batch_size=radgraph_spert_batch_size,
         triplet_collate_batch_fn=triplet_collate_batch_fn,
         metadata_classification_collate_batch_fn=metadata_classification_collate_batch_fn,
         chest_imagenome_observation_collate_batch_fn=chest_imagenome_observation_collate_batch_fn,
@@ -211,6 +236,7 @@ def train_model(
         nli_collate_batch_fn=nli_collate_batch_fn,
         entcon_collate_batch_fn=entcon_collate_batch_fn,
         num_workers=num_workers,
+        tokenizer=tokenizer,
         **fact_embedding_trainer_kwargs,
     )
     
@@ -238,6 +264,9 @@ def train_model(
         _train_dataloaders.append(fact_embedding_trainer.train_entcon_dataloader)
         _train_weights.append(dataloading_kwargs['entcon_weight'])
         _val_dataloaders.append(fact_embedding_trainer.val_entcon_dataloader)
+    if dataloading_kwargs['radgraph_ner_re_weight'] > 0:
+        _train_dataloaders.append(fact_embedding_trainer.radgraph_spert_train_dataloader)
+        _train_weights.append(dataloading_kwargs['radgraph_ner_re_weight'])
     
     assert len(_train_dataloaders) > 0
     assert len(_train_weights) == len(_train_dataloaders)
@@ -318,7 +347,6 @@ def train_model(
 
     # Attach metrics for NLI
     if use_nli:
-        # traditional NLI metrics
         _cond_func = lambda x: x['flag'] == 'nli' # only consider NLI samples
         attach_condition_aware_loss(trainer_engine, 'nli_loss', condition_function=_cond_func)
         metrics_to_print.append('nli_loss') # NLI loss
@@ -327,7 +355,9 @@ def train_model(
         attach_condition_aware_accuracy(validator_engine, pred_field_name='pred_labels', gt_field_name='gt_labels',
                                         condition_function=_cond_func, metric_name='nli_acc')
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'nli_acc')
-        # entailment/contradiction metrics
+        
+    # Attach metrics for entailment/contradiction
+    if use_entcon:
         _cond_func = lambda x: x['flag'] == 'entcon' # only consider entailment/contradiction samples
         attach_condition_aware_loss(trainer_engine, 'entcon_loss', condition_function=_cond_func)
         metrics_to_print.append('entcon_loss') # entailment/contradiction loss
@@ -337,22 +367,29 @@ def train_model(
                                                                condition_function=_cond_func, metric_name='entcon_acc')
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'entcon_acc')
 
+    # Attach metrics for RadGraph NER/RE
+    if use_radgraph_ner_re:
+        _cond_func = lambda x: x['flag'] == 'spert'
+        attach_condition_aware_loss(trainer_engine, 'spert_loss', condition_function=_cond_func)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'spert_loss', val=False)
+
     # Score function
-    triplet_rule_weights = fact_embedding_trainer.triplet_rule_weights
-    for i, w in enumerate(triplet_rule_weights['anatomical_locations']):
-        rule_id = f'al{i}'
-        assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
-        _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
-    for i, w in enumerate(triplet_rule_weights['observations']):
-        rule_id = f'ob{i}'
-        assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
-        _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
+    if use_triplets:
+        triplet_rule_weights = fact_embedding_trainer.triplet_rule_weights
+        for i, w in enumerate(triplet_rule_weights['anatomical_locations']):
+            rule_id = f'al{i}'
+            assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
+            _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
+        for i, w in enumerate(triplet_rule_weights['observations']):
+            rule_id = f'ob{i}'
+            assert rule_id in fact_embedding_trainer.rule_ids, f'{rule_id} not in {fact_embedding_trainer.rule_ids}'
+            _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
-        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9)
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(trainer_engine.state.metrics, validator_engine.state.metrics)
     else:
-        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1)
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(validator_engine.state.metrics)
 
     # Run common boilerplate code and start training
@@ -404,9 +441,13 @@ def train_from_scratch(
     use_aux_task_hidden_layer,
     aux_task_hidden_layer_size,
     nli_hidden_layer_size,
+    spert_size_embedding,
+    spert_max_pairs,
+    spert_prop_drop,
     # Optimizer args
     optimizer_name,
     lr,
+    max_grad_norm,
     # lr_scheduler args
     scheduler,
     lr_decay,
@@ -430,8 +471,10 @@ def train_from_scratch(
     chest_imagenome_anatomical_locations_classification_weight,
     nli_weight,
     entcon_weight,
+    radgraph_ner_re_weight,
     # Dataloading args
     batch_size,
+    radgraph_spert_batch_size,
     num_workers,
     # Fixed traning args
     use_amp,
@@ -454,27 +497,48 @@ def train_from_scratch(
     save,
 ):
     print_blue('----- Training model from scratch ------', bold=True)
+
+    # Define boolean flags
+    use_triplets = triplets_weight > 0
+    use_metadata_classification = metadata_classification_weight > 0
+    use_chest_imagenome_observations_classification = chest_imagenome_observations_classification_weight > 0
+    use_chest_imagenome_anatomical_locations_classification = chest_imagenome_anatomical_locations_classification_weight > 0
+    use_nli = nli_weight > 0
+    use_entcon = entcon_weight > 0
+    use_radgraph_ner_re = radgraph_ner_re_weight > 0
     
     model_kwargs = dict(
         huggingface_model_name=huggingface_model_name,
         embedding_size=embedding_size,
         pretrained_checkpoint_folder_path=pretrained_checkpoint_folder_path,
         freeze_huggingface_model=freeze_huggingface_model,
-        classify_category=True,
+        classify_category=use_metadata_classification,
         n_categories=len(_LABEL_TO_CATEGORY),
-        classify_health_status=True,
+        classify_health_status=use_metadata_classification,
         n_health_statuses=len(_LABEL_TO_HEALTH_STATUS),
-        classify_comparison_status=True,
+        classify_comparison_status=use_metadata_classification,
         n_comparison_statuses=len(_LABEL_TO_COMPARISON_STATUS),
-        classify_chest_imagenome_obs=True,
+        classify_chest_imagenome_obs=use_chest_imagenome_observations_classification,
         n_chest_imagenome_observations=n_chest_imagenome_observations,
-        classify_chest_imagenome_anatloc=True,
+        classify_chest_imagenome_anatloc=use_chest_imagenome_anatomical_locations_classification,
         use_aux_task_hidden_layer=use_aux_task_hidden_layer,
         aux_task_hidden_layer_size=aux_task_hidden_layer_size,
         n_chest_imagenome_anatomical_locations=n_chest_imagenome_anatomical_locations,
-        do_nli=True,
+        do_nli=use_nli,
         nli_hidden_layer_size=nli_hidden_layer_size,
     )
+    if use_radgraph_ner_re:
+        from transformers import AutoTokenizer
+        _tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
+        _spert_cls_token = _tokenizer.convert_tokens_to_ids('[CLS]')        
+        print(f'_spert_cls_token = {_spert_cls_token}')
+        model_kwargs['use_spert'] = True
+        model_kwargs['spert_size_embedding'] = spert_size_embedding
+        model_kwargs['spert_relation_types'] = RADGRAPH_CONLLFORMAT_RELATION_TYPE_COUNT
+        model_kwargs['spert_entity_types'] = RADGRAPH_CONLLFORMAT_ENTITY_TYPE_COUNT
+        model_kwargs['spert_max_pairs'] = spert_max_pairs
+        model_kwargs['spert_prop_drop'] = spert_prop_drop
+        model_kwargs['spert_cls_token'] = _spert_cls_token
 
     optimizer_kwargs = dict(
         name=optimizer_name,
@@ -493,12 +557,14 @@ def train_from_scratch(
     
     dataloading_kwargs = dict(
         batch_size=batch_size,
+        radgraph_spert_batch_size=radgraph_spert_batch_size,
         triplets_weight=triplets_weight,
         metadata_classification_weight=metadata_classification_weight,
         chest_imagenome_observations_classification_weight=chest_imagenome_observations_classification_weight,
         chest_imagenome_anatomical_locations_classification_weight=chest_imagenome_anatomical_locations_classification_weight,
         nli_weight=nli_weight,
         entcon_weight=entcon_weight,
+        radgraph_ner_re_weight=radgraph_ner_re_weight,
     )
     
     fact_embedding_trainer_kwargs = dict(
@@ -511,6 +577,14 @@ def train_from_scratch(
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
         gpt4_radnli_labels_jsonl_filepath=gpt4_radnli_labels_jsonl_filepath,
         dataset_name=dataset_name,
+        use_triplets=use_triplets,
+        use_triplets_val=use_triplets or (not use_nli and not use_entcon),
+        use_metadata_classification=use_metadata_classification,
+        use_chest_imagenome_observations_classification=use_chest_imagenome_observations_classification,
+        use_chest_imagenome_anatomical_locations_classification=use_chest_imagenome_anatomical_locations_classification,
+        use_nli=use_nli,
+        use_entcon=use_entcon,
+        use_radgraph_ner_re=use_radgraph_ner_re,
     )
 
     collate_batch_fn_kwargs = dict(
@@ -553,6 +627,7 @@ def train_from_scratch(
         chest_imagenome_anatloc_classif_loss_weight=chest_imagenome_anatloc_classif_loss_weight,
         nli_loss_weight=nli_loss_weight,
         entcon_loss_weight=entcon_loss_weight,
+        max_grad_norm=max_grad_norm,
     )
 
     validator_engine_kwargs = dict(

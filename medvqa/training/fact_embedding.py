@@ -5,7 +5,9 @@ from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
 from medvqa.losses import Focal_BCE_WBCE_Loss
 from medvqa.losses.optimizers import GradientAccumulator
+from medvqa.losses.spert_loss import SpERTLoss
 from medvqa.losses.wce import WeigthedByClassCrossEntropyLoss
+from medvqa.training.utils import batch_to_device
 
 def get_step_fn(model, optimizer, training, validating, testing, device,
         iters_to_accumulate=1, # for gradient accumulation
@@ -14,6 +16,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         chest_imagenome_classifier_loss_criterion=None, # for chest imagenome classification
         nli_loss_criterion=None, # for NLI
         entcon_loss_criterion=None, # for entailment contradiction
+        spert_loss_criterion=None, # for SpERT
+        max_grad_norm=None,
         # automatic mixed precision
         use_amp=False,
         # batchwise learning rate updates
@@ -35,7 +39,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     assert (training + validating + testing) == 1, 'Only one of training, validating, testing must be True'
 
     if training:
-        gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
+        gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate, max_grad_norm)
     
     def step_fn__triplet_ranking(batch):
 
@@ -69,7 +73,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(triplet_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -116,7 +120,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(cs_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -158,7 +162,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(chstimgn_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -194,7 +198,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(chstimgn_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -233,7 +237,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(nli_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -284,7 +288,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(entcon_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {
@@ -293,6 +297,44 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         if training:
             output['loss'] = batch_loss.detach()
             output['entcon_loss'] = entcon_loss.detach()
+
+        return output
+    
+    def step_fn__spert(batch):
+
+        assert training, 'Only training is supported for SpERT'
+        
+        batch = batch_to_device(batch, device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+            
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+
+                entity_logits, rel_logits = model.spert_forward_train(
+                    encodings=batch['encodings'], context_masks=batch['context_masks'],
+                    entity_masks=batch['entity_masks'], entity_sizes=batch['entity_sizes'],
+                    relations=batch['rels'], rel_masks=batch['rel_masks'],
+                )
+
+                if training:
+                    losses = []
+                    spert_loss = spert_loss_criterion.compute(
+                        entity_logits=entity_logits, rel_logits=rel_logits,
+                        entity_types=batch['entity_types'], rel_types=batch['rel_types'],
+                        entity_sample_masks=batch['entity_sample_masks'], rel_sample_masks=batch['rel_sample_masks'])
+                    losses.append(spert_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+
+        # Prepare output
+        output = {}
+        if training:
+            output['loss'] = batch_loss.detach()
+            output['spert_loss'] = spert_loss.detach()
 
         return output
     
@@ -310,6 +352,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output = step_fn__nli(batch)
         elif flag == 'entcon': # entailment contradiction
             output = step_fn__entcon(batch)
+        elif flag == 'spert': # SpERT
+            output = step_fn__spert(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -328,6 +372,7 @@ def get_engine(model, device,
                testing=False,
                optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None,
+               max_grad_norm=None,
                triplet_loss_weight=1.0,
                category_classif_loss_weight=1.0,
                health_status_classif_loss_weight=1.0,
@@ -352,6 +397,11 @@ def get_engine(model, device,
 
     # Entailment contradiction loss
     entcon_loss_criterion = nn.BCEWithLogitsLoss() # dot(ent_p, ent_h) - dot(con_p, con_h) > 0
+
+    # SpERT loss
+    rel_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
+    entity_criterion = torch.nn.CrossEntropyLoss(reduction='none')
+    spert_loss_criterion = SpERTLoss(rel_criterion, entity_criterion)
     
     # Create engine
     step_fn = get_step_fn(model=model, optimizer=optimizer, device=device,
@@ -362,6 +412,8 @@ def get_engine(model, device,
                           chest_imagenome_classifier_loss_criterion=chest_imagenome_classifier_loss_criterion,
                           nli_loss_criterion=nli_loss_criterion,
                           entcon_loss_criterion=entcon_loss_criterion,
+                          spert_loss_criterion=spert_loss_criterion,
+                          max_grad_norm=max_grad_norm,
                           use_amp=use_amp,
                           # batchwise learning rate updates
                           update_lr_batchwise=update_lr_batchwise,

@@ -1,6 +1,7 @@
 import json
 import pickle
 import os
+import datetime
 from tqdm import tqdm
 
 from medvqa.utils.common import (
@@ -185,3 +186,21 @@ def zip_files_and_folders_in_dir(dir_path, file_or_folder_names, output_path):
                         file_path = os.path.join(root, f)
                         arcname = os.path.join(name, file_path.replace(path, ''))
                         zipf.write(file_path, arcname=arcname)
+
+def list_filepaths_with_prefix_and_timestamps(path_prefix, must_contain=None):
+    if type(must_contain) == str:
+        must_contain = [must_contain]
+    matching_files = []
+    directory = os.path.dirname(path_prefix)
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            full_path = os.path.join(root, filename)
+            if full_path.startswith(path_prefix):
+                if must_contain is not None:
+                    if not all(s in full_path for s in must_contain):
+                        continue
+                creation_timestamp = os.path.getctime(full_path)
+                timestamp_human_readable = datetime.datetime.fromtimestamp(creation_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                matching_files.append((full_path, timestamp_human_readable))
+    matching_files.sort(key=lambda x:x[1], reverse=True)
+    return matching_files

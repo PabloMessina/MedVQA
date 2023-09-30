@@ -16,7 +16,6 @@ from medvqa.utils.files import (
 )
 from medvqa.utils.math import (
     rank_vectors_by_dot_product,
-    rank_vectors_by_cosine_similarity,
     rank_vectors_by_euclidean_distance,
 )
 from medvqa.utils.metrics import jaccard_between_dicts
@@ -229,7 +228,9 @@ def evaluate(
 
         rank_vectors_func = None
         if distance_metric == 'cosine':
-            rank_vectors_func = rank_vectors_by_cosine_similarity
+            print('Normalizing embeddings (for cosine similarity)')
+            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
+            rank_vectors_func = rank_vectors_by_dot_product # Cosine similarity is equivalent to dot product when embeddings are normalized
         elif distance_metric == 'euclidean':
             rank_vectors_func = rank_vectors_by_euclidean_distance
         elif distance_metric == 'dot_product':

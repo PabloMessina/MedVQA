@@ -6,8 +6,9 @@ from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
 from medvqa.models.checkpoint import get_checkpoint_filepath
 from medvqa.models.common import load_model_state_dict
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
+from medvqa.utils.files import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
 from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string_list, update_hash
+from medvqa.utils.logging import print_bold
 
 class SupportedHuggingfaceMedicalBERTModels:
     BiomedVLP_CXR_BERT_specialized = 'microsoft/BiomedVLP-CXR-BERT-specialized'
@@ -19,6 +20,14 @@ class SupportedHuggingfaceMedicalBERTModels:
     _model_name_to_embedding_size = {
         BiomedVLP_CXR_BERT_specialized: 128,
         BiomedVLP_BioViL_T: 128,
+        BioLinkBERT_large: 1024,
+        BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext: 768,
+        Bio_ClinicalBERT: 768,
+    }
+
+    _model_name_to_hidden_size = {
+        BiomedVLP_CXR_BERT_specialized: 768,
+        BiomedVLP_BioViL_T: 768,
         BioLinkBERT_large: 1024,
         BiomedNLP_PubMedBERT_base_uncased_abstract_fulltext: 768,
         Bio_ClinicalBERT: 768,
@@ -52,6 +61,10 @@ class SupportedHuggingfaceMedicalBERTModels:
     @classmethod
     def get_embedding_size(cls, model_name):
         return cls._model_name_to_embedding_size[model_name]
+    
+    @classmethod
+    def get_hidden_size(cls, model_name):
+        return cls._model_name_to_hidden_size[model_name]
 
 def _adapt_checkpoint_keys(checkpoint):
     for key in list(checkpoint.keys()):
@@ -346,15 +359,17 @@ class CachedTextEmbeddingExtractor:
         return labels
     
 class TripletRankingEvaluator:
-    def __init__(self, triplets_filepath, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0):
+    def __init__(self, triplets_filepath, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
+                 average_token_embeddings=False):
         print(f'Loading triplets from {triplets_filepath}')
-        self.triplets_data = load_pickle(triplets_filepath)
+        self.triplets_data = get_cached_pickle_file(triplets_filepath)
         self.embedding_extractor = CachedTextEmbeddingExtractor(
             model_name=model_name,
             device=device,
             model_checkpoint_folder_path=model_checkpoint_folder_path,
             batch_size=batch_size,
             num_workers=num_workers,
+            average_token_embeddings=average_token_embeddings,
         )
 
     def evaluate_triplet_ranking(self, split, category, rule_index):
@@ -385,3 +400,38 @@ class TripletRankingEvaluator:
             'positives': positives,
             'negatives': negatives,
         }
+    
+    def evaluate_split(self, split):
+        assert split in ['train', 'val', 'test']
+        sentences = self.triplets_data['sentences']
+        split_idxs = set()
+        for category in ['observations', 'anatomical_locations']:
+            for rule_index in range(len(self.triplets_data[split][category])):
+                triplets = self.triplets_data[split][category][rule_index]['triplets']
+                split_idxs.update(triplets.flatten())
+        split_idxs = sorted(list(split_idxs))
+        split_sentences = [sentences[i] for i in split_idxs]
+        split_embeddings = self.embedding_extractor.compute_text_embeddings(split_sentences)
+        split_embeddings /= np.linalg.norm(split_embeddings, axis=1, keepdims=True) # Normalize embeddings
+        idx2i = { idx:i for i,idx in enumerate(split_idxs) }
+        assert len(idx2i) == len(split_idxs)
+        
+        for category in ['observations', 'anatomical_locations']:
+            for rule_index in range(len(self.triplets_data[split][category])):
+                triplets = self.triplets_data[split][category][rule_index]['triplets']
+                rule = self.triplets_data[split][category][rule_index]['rule']
+                print(f'Category: {category}, Rule: {rule}')
+                print(f'triplets.shape = {triplets.shape}')
+                anchors = [idx2i[i] for i in triplets.T[0]]
+                positives = [idx2i[i] for i in triplets.T[1]]
+                negatives = [idx2i[i] for i in triplets.T[2]]
+                A = split_embeddings[anchors]
+                P = split_embeddings[positives]
+                N = split_embeddings[negatives]
+                AP = np.sum(A * P, axis=1)
+                AN = np.sum(A * N, axis=1)
+                correct = AP > AN
+                accuracy = np.mean(correct)
+                print_bold(f'accuracy = {accuracy}')
+                print('-'*80)
+

@@ -11,8 +11,10 @@ from medvqa.utils.logging import get_console_logger
 from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
 from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
+    SupportedHuggingfaceMedicalBERTModels,
 )
 from medvqa.utils.metrics import jaccard_between_sets
+from medvqa.utils.hashing import hash_string
 
 MAX_TRIES = 10
 
@@ -272,18 +274,26 @@ def sample_anatomical_location_triplets__rule3(
         random_idxs_for_P = anatloc_cluster2indices[cid_A]
         if n_samples_per_cluster < len(random_idxs_for_P):
             random_idxs_for_P = random.sample(random_idxs_for_P, n_samples_per_cluster)
-        scores = [_levenshtein_similarity(sentence_list[A], sentence_list[idx]) +\
-                  np.dot(sentence_embeddings[A], sentence_embeddings[idx])\
-                    for idx in random_idxs_for_P]
-        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+
+        filtered_scores = []
+        filtered_idxs = []
+        for idx in random_idxs_for_P:
+            levsim = _levenshtein_similarity(sentence_list[A], sentence_list[idx])
+            dotsim = np.dot(sentence_embeddings[A], sentence_embeddings[idx])
+            if levsim > 0 and dotsim > 0:
+                filtered_scores.append(levsim + dotsim)
+                filtered_idxs.append(idx)
+
+        if len(filtered_idxs) == 0:
+            continue
+
+        filtered_scores_argsort = np.argsort(filtered_scores)[::-1] # sort in descending order
         P_list = []
-        for j, i in enumerate(sorted_idxs):
-            s_idx = random_idxs_for_P[i]
-            if scores[i] == 0:
-                break
+        for rank, pos in enumerate(filtered_scores_argsort):
+            s_idx = filtered_idxs[pos]
             if s_idx == A:
                 continue
-            P_list.append((s_idx, j)) # (sentence index, rank)
+            P_list.append((s_idx, rank)) # (sentence index, rank)
             if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
                 # We will consider at most the top 'top_k' sentences from the same cluster as A for P
                 break
@@ -292,7 +302,7 @@ def sample_anatomical_location_triplets__rule3(
             continue
         n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
         for P, rank in P_list:
-            AP_score = scores[sorted_idxs[rank]]
+            AP_score = filtered_scores[filtered_scores_argsort[rank]]
             assert AP_score > 0
             for _ in range(n_triplets_per_positive):
                 for _ in range(MAX_TRIES):
@@ -404,18 +414,26 @@ def sample_observation_triplets__rule3(
         random_idxs_for_P = hsid_cid_2_obs_idxs[hsid_cid_A]
         if n_samples_per_cluster < len(random_idxs_for_P):
             random_idxs_for_P = random.sample(random_idxs_for_P, n_samples_per_cluster)
-        scores = [_levenshtein_similarity(sentence_list[A], sentence_list[idx]) +\
-                  np.dot(sentence_embeddings[A], sentence_embeddings[idx])\
-                    for idx in random_idxs_for_P]
-        sorted_idxs = np.argsort(scores)[::-1] # sort in descending order
+
+        filtered_scores = []
+        filtered_idxs = []
+        for idx in random_idxs_for_P:
+            levsim = _levenshtein_similarity(sentence_list[A], sentence_list[idx])
+            dotsim = np.dot(sentence_embeddings[A], sentence_embeddings[idx])
+            if levsim > 0 and dotsim > 0:
+                filtered_scores.append(levsim + dotsim)
+                filtered_idxs.append(idx)
+
+        if len(filtered_idxs) == 0:
+            continue
+
+        filtered_scores_argsort = np.argsort(filtered_scores)[::-1] # sort in descending order
         P_list = []
-        for j, i in enumerate(sorted_idxs):
-            if scores[i] == 0:
-                break
-            s_idx = random_idxs_for_P[i]
+        for rank, pos in enumerate(filtered_scores_argsort):
+            s_idx = filtered_idxs[pos]
             if s_idx == A:
                 continue
-            P_list.append((s_idx, j)) # (sentence index, rank)
+            P_list.append((s_idx, rank)) # (sentence index, rank)
             if len(P_list) == top_k or len(P_list) == n_triplets_per_anchor:
                 # We will consider at most the top 'top_k' sentences from the same cluster as A for P
                 break
@@ -425,7 +443,7 @@ def sample_observation_triplets__rule3(
         n_triplets_per_positive = math.ceil(n_triplets_per_anchor / len(P_list))
         A_cluster = hsid_cid_A[1]
         for P, rank in P_list:
-            AP_score = scores[sorted_idxs[rank]]
+            AP_score = filtered_scores[filtered_scores_argsort[rank]]
             assert AP_score > 0
             for _ in range(n_triplets_per_positive):
                 for _ in range(MAX_TRIES):
@@ -705,9 +723,7 @@ def sample_observation_triplets__rule6(
                     AN_dotsim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
                     AP_levsim = _levenshtein_similarity(index2sentence[A], index2sentence[P])
                     AN_levsim = _levenshtein_similarity(index2sentence[A], index2sentence[N])
-                    if not((AP_dotsim > AN_dotsim and AP_levsim > AN_levsim) or\
-                           _is_at_least_x_percent_better(AP_dotsim, AN_dotsim, 0.5) or\
-                            _is_at_least_x_percent_better(AP_levsim, AN_levsim, 0.5)): # if both CXR-BERT and Leveinshtein disagree -> skip
+                    if not(AP_dotsim > AN_dotsim and AP_levsim > AN_levsim): # if not both CXR-BERT and Leveinshtein agree -> skip
                         continue
                     # if we reach here, then we have found a valid triplet
                     used_triplets.add(triplet)
@@ -921,7 +937,8 @@ def main():
     parser.add_argument('--num_val_triplets_per_rule', type=int, required=True)
     parser.add_argument('--num_test_triplets_per_rule', type=int, required=True)
 
-    parser.add_argument('--bert_model_name', type=str, default='BiomedVLP-CXR-BERT-specialized')
+    parser.add_argument('--bert_model_name', type=str, default=SupportedHuggingfaceMedicalBERTModels.BiomedVLP_CXR_BERT_specialized,
+                        choices=SupportedHuggingfaceMedicalBERTModels.get_all())
     parser.add_argument('--bert_checkpoint_folder_path', type=str, default=None)
     
     parser.add_argument('--logging_level', type=str, default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
@@ -1142,9 +1159,22 @@ def main():
         },
     }
 
+    config_string = ';'.join([
+        f'num_anatloc_clusters={args.num_anatloc_clusters}',
+        f'num_obs_clusters={args.num_obs_clusters}',
+        f'num_radgraph_clusters={args.num_radgraph_clusters}',
+        f'num_train_triplets_per_rule={args.num_train_triplets_per_rule}',
+        f'num_val_triplets_per_rule={args.num_val_triplets_per_rule}',
+        f'num_test_triplets_per_rule={args.num_test_triplets_per_rule}',
+        f'num_kmeans_iterations={args.num_kmeans_iterations}',
+        f'bert_model_name={args.bert_model_name}',
+        f'bert_checkpoint_folder_path={args.bert_checkpoint_folder_path}',
+    ])
+    config_hash = hash_string(config_string)
     triplets_save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR,
                                       f'triplets({len(sentences_list)},{len(anatomical_locations_list)},{len(observations_list)},'
-                                      f'{args.num_train_triplets_per_rule},{args.num_val_triplets_per_rule},{args.num_test_triplets_per_rule}).pkl')
+                                      f'{args.num_train_triplets_per_rule},{args.num_val_triplets_per_rule},{args.num_test_triplets_per_rule},'
+                                      f'{config_hash[0]},{config_hash[1]}).pkl')
 
     # --------------------------------------------
     # 1) Sample triplets for anatomical locations
