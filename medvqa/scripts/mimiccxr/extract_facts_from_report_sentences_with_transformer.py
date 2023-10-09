@@ -2,10 +2,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import re
 import argparse
 import sys
-import json
 import numpy as np
 from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
@@ -16,21 +14,8 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
+from medvqa.datasets.text_data_utils import parse_facts
 from medvqa.utils.files import load_json, load_jsonl
-
-_COMMA_SEPARATED_LIST_REGEX = re.compile(r'\[\s*(\".+?\"(\s*,\s*\".+?\")*)?\s*\]?')
-
-def parse_facts(txt):
-    facts_str = _COMMA_SEPARATED_LIST_REGEX.search(txt).group()
-    if facts_str[-1] != ']': facts_str += ']'
-    facts = json.loads(facts_str)
-    seen = set()
-    clean_facts = []
-    for fact in facts:
-        if fact not in seen:
-            clean_facts.append(fact)
-            seen.add(fact)
-    return clean_facts
 
 if __name__ == '__main__':
 

@@ -35,6 +35,8 @@ def evaluate(
     compare_with_gpt4_predictions=False,    
     gpt4_predictions_path=None,
     use_bert_based_nli=False,
+    sns_font_scale=1.8,
+    font_size=25,
 ):
     print_blue('----- Evaluating model ------', bold=True)
 
@@ -122,6 +124,10 @@ def evaluate(
     accuracy = np.mean(labels == pred_labels)
     print(f'Accuracy = {accuracy:.4f}')
 
+    if plot_confusion_matrix:
+        import seaborn as sns
+        sns.set(font_scale=sns_font_scale)
+
     # Plot a confusion matrix
     if plot_confusion_matrix:
         from sklearn.metrics import confusion_matrix
@@ -130,10 +136,10 @@ def evaluate(
         cm = confusion_matrix(labels, pred_labels)
         # Use label names instead of indices
         label_names = [_INDEX_TO_LABEL[label] for label in range(3)]
-        plt.figure(figsize=(9, 7))
+        plt.figure(figsize=(8, 6))
         sns.heatmap(cm, annot=True, fmt='d', xticklabels=label_names, yticklabels=label_names)
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
+        plt.xlabel('Predicted', fontsize=font_size)
+        plt.ylabel('True', fontsize=font_size)
         plt.show()
     
     output = {
@@ -166,10 +172,10 @@ def evaluate(
             cm = confusion_matrix(gpt4_labels, pred_labels)
             # Use label names instead of indices
             label_names = [_INDEX_TO_LABEL[label] for label in range(3)]
-            plt.figure(figsize=(9, 7))
+            plt.figure(figsize=(8, 6))
             sns.heatmap(cm, annot=True, fmt='d', xticklabels=label_names, yticklabels=label_names)
-            plt.xlabel('Predicted')
-            plt.ylabel('GPT4')
+            plt.xlabel('Predicted', fontsize=font_size)
+            plt.ylabel('GPT4', fontsize=font_size)
             plt.show()
     return output 
 

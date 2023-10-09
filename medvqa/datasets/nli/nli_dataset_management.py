@@ -1,4 +1,5 @@
 import random
+import math
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
 from medvqa.datasets.nli import RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
@@ -52,19 +53,10 @@ class NLIDataset(Dataset):
         return output
 
 class EntailmentContradictionDataset(Dataset):
-    def __init__(self, premises, hypotheses, labels, shuffle=False, infinite=False):
+    def __init__(self, ent_premises, ent_hypotheses, con_premises, con_hypotheses, shuffle=False, infinite=False):
         print('EntailmentContradictionDataset: __init__')
-        ent_premises = []
-        ent_hypotheses = []
-        con_premises = []
-        con_hypotheses = []
-        for i, l in enumerate(labels):
-            if l == 0:
-                ent_premises.append(premises[i])
-                ent_hypotheses.append(hypotheses[i])
-            elif l == 2:
-                con_premises.append(premises[i])
-                con_hypotheses.append(hypotheses[i])
+        assert len(ent_premises) == len(ent_hypotheses)
+        assert len(con_premises) == len(con_hypotheses)
         self.ent_premises = ent_premises
         self.ent_hypotheses = ent_hypotheses
         self.con_premises = con_premises
@@ -100,7 +92,8 @@ class EntailmentContradictionDataset(Dataset):
 
 class NLI_Trainer:
 
-    def __init__(self, batch_size, num_workers, collate_batch_fn, integrated_nli_jsonl_filepath=None, merged=False,
+    def __init__(self, batch_size, num_workers, collate_batch_fn, integrated_nli_jsonl_filepath=None,
+                 integrated_sentence_facts_jsonl_filepath=None, merged=False,
                  train_mode=True, test_mode=False, dev_mode=False):
 
         self.batch_size = batch_size
@@ -114,12 +107,38 @@ class NLI_Trainer:
             train_premises = [x['premise'] for x in nli_train_rows]
             train_hypotheses = [x['hypothesis'] for x in nli_train_rows]
             train_labels = [_LABEL_TO_INDEX[x['label']] for x in nli_train_rows]
+            source2id = {}
+            for row in nli_train_rows:
+                source = row['source']
+                if source not in source2id:
+                    source2id[source] = len(source2id)
+            id2source = { v: k for k, v in source2id.items() }
+            train_sources = [source2id[x['source']] for x in nli_train_rows]
             print(f'Number of train samples: {len(train_premises)}')
             print_bold('Example train text:')
             _i = random.randint(0, len(train_premises)-1)
             print(f'Premise: {train_premises[_i]}')
             print(f'Hypothesis: {train_hypotheses[_i]}')
             print(f'Label: {_INDEX_TO_LABEL[train_labels[_i]]}')
+            print(f'Source: {train_sources[_i]}')
+
+            if integrated_sentence_facts_jsonl_filepath is not None:
+                print(f'Loading integrated sentence facts from {integrated_sentence_facts_jsonl_filepath}...')
+                integrated_sentence_facts = load_jsonl(integrated_sentence_facts_jsonl_filepath)
+                print(f'Number of integrated sentence facts: {len(integrated_sentence_facts)}')
+                entailment_id = _LABEL_TO_INDEX['entailment']
+                source_id = len(source2id) # add new source
+                id2source[source_id] = 'integrated_sentence_facts'
+                len_bef = len(train_premises)
+                for row in integrated_sentence_facts:
+                    s = row['sentence']
+                    for f in row['facts']:
+                        if s != f:
+                            train_premises.append(s)
+                            train_hypotheses.append(f)
+                            train_sources.append(source_id)
+                            train_labels.append(entailment_id)
+                print(f'Number of train entailment samples added: {len(train_premises) - len_bef}')
         
         if train_mode or test_mode:
             radnli_test_rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
@@ -149,20 +168,45 @@ class NLI_Trainer:
         print('----')
         if train_mode:
             print_bold('Building train NLI dataset and dataloader...') 
-            train_ent_idxs = [i for i, l in enumerate(train_labels) if l == 0]
-            train_neu_idxs = [i for i, l in enumerate(train_labels) if l == 1]
-            train_con_idxs = [i for i, l in enumerate(train_labels) if l == 2]
-            print(f'Number of train entailment samples: {len(train_ent_idxs)}')
-            print(f'Number of train neutral samples: {len(train_neu_idxs)}')
-            print(f'Number of train contradiction samples: {len(train_con_idxs)}')
-            assert len(train_ent_idxs) + len(train_neu_idxs) + len(train_con_idxs) == len(train_labels)
-            train_ent_dataset = NLIDataset(train_premises, train_hypotheses, train_labels, merged=merged,
-                                           infinite=True, shuffle=True, indices=train_ent_idxs)
-            train_neu_dataset = NLIDataset(train_premises, train_hypotheses, train_labels, merged=merged,
-                                           infinite=True, shuffle=True, indices=train_neu_idxs)
-            train_con_dataset = NLIDataset(train_premises, train_hypotheses, train_labels, merged=merged,
-                                           infinite=True, shuffle=True, indices=train_con_idxs)
-            self.train_dataset = CompositeInfiniteDataset([train_ent_dataset, train_neu_dataset, train_con_dataset], [1, 1, 1])
+
+            # Create a dataset for each label and source combination and weight them by log2(N)^3
+            source_label_2_indices = {}
+            unique_sources = set()
+            unique_labels = set()
+            for i, (source, label) in enumerate(zip(train_sources, train_labels)):
+                unique_sources.add(source)
+                unique_labels.add(label)
+                key = (source, label)
+                if key not in source_label_2_indices:
+                    source_label_2_indices[key] = []
+                source_label_2_indices[key].append(i)
+            unique_sources = sorted(list(unique_sources))
+            unique_labels = sorted(list(unique_labels))
+
+            label_datasets = []
+            label_weights = []
+            label2weight = {
+                'entailment': 1,
+                'contradiction': 1,
+                'neutral': 2, # 2 neutral samples will be sampled twice as much as the other labels
+            }
+            for label in unique_labels:
+                _datasets = []
+                _weights = []
+                for source in unique_sources:
+                    key = (source, label)
+                    if key in source_label_2_indices:
+                        indices = source_label_2_indices[key]
+                        _datasets.append(NLIDataset(train_premises, train_hypotheses, train_labels, shuffle=True, infinite=True, indices=indices))
+                        _weights.append(math.log2(len(indices))**3) # weight by log2(N)^3
+                        # print(f'Source: {source} | Label: {label} -> {len(indices)} ({_weights[-1]:.2f})')
+                        print(f'Label: {_INDEX_TO_LABEL[label]} | Source: {id2source[source]} -> {len(indices)} ({_weights[-1]:.2f})')
+                label_datasets.append(CompositeInfiniteDataset(_datasets, _weights))
+                label_weights.append(label2weight[_INDEX_TO_LABEL[label]])
+            print(f'Number of label datasets: {len(label_datasets)}')
+            print(f'Label weights: {label_weights}')
+            
+            self.train_dataset = CompositeInfiniteDataset(label_datasets, label_weights)
             self.train_dataloader = DataLoader(
                 self.train_dataset,
                 batch_size=batch_size,

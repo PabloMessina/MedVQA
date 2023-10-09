@@ -8,8 +8,8 @@ from sklearn.cluster import KMeans
 from sklearn_extra.cluster import KMedoids
 from nltk.tokenize import sent_tokenize, word_tokenize
 from medvqa.models.huggingface_utils import (
-    compute_text_embeddings_with_BiomedVLP_BioVilT,
-    compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized,
+    CachedTextEmbeddingExtractor,
+    SupportedHuggingfaceMedicalBERTModels,
 )
 from medvqa.utils.files import (
     get_cached_jsonl_file,
@@ -70,7 +70,7 @@ def _compute_kmeans_and_kmedoids_clustering(alias, sentence_embeddings_filepath,
                                             num_kmedoids_clusters, num_kmedoids_iterations, kmedoids_method,
                                             sentence_rareness_scorer, k_nearest_sentences):
     
-    assert num_kmedoids_clusters > num_kmeans_clusters
+    assert num_kmedoids_clusters >= num_kmeans_clusters
 
     # Step 1: compute kmeans clustering
     kmeans_clustering_save_path = get_file_path_with_hashing_if_too_long(
@@ -490,13 +490,16 @@ def _assign_cluster_based_labels_to_each_report(
                     for fact in facts:
                         labels = fact2labels[fact]
                         assert 'fact_ccid' in labels
-                        label = labels['fact_ccid']
-                        if label in top_labels_set:
-                            row_labels.append(label)
+                        label_found = False
                         if 'anatloc_ccid' in labels:
                             obs_al = (labels['fact_ccid'], labels['anatloc_ccid'])
                             if obs_al in top_labels_set:
                                 row_labels.append(obs_al)
+                                label_found = True
+                        if not label_found:
+                            label = labels['fact_ccid']
+                            if label in top_labels_set:
+                                row_labels.append(label)
             # remove duplicates while preserving order
             seen = set()
             row_labels = [x for x in row_labels if not (x in seen or seen.add(x))]
@@ -521,7 +524,7 @@ def main():
     parser.add_argument('--integrated_fact_metadata_filepath', type=str, required=True)
     parser.add_argument('--integrated_sentence_facts_filepath', type=str, required=True)
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str, required=True)
-    parser.add_argument('--model_name', type=str, required=True, choices=['cxr-bert-specialized', 'biovil-t'])
+    parser.add_argument('--model_name', type=str, required=True, choices=SupportedHuggingfaceMedicalBERTModels.get_all())
     parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU'])
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
@@ -550,7 +553,14 @@ def main():
         print('len(paraphrases):', len(paraphrases))
         for row in paraphrases:
             s = next(iter(row['metadata'].values()))
-            p = row['parsed_response']
+            parsed_response = row['parsed_response']
+            if type(parsed_response) == list:
+                p = parsed_response
+            elif type(parsed_response) == dict:
+                assert 'positives' in parsed_response and 'negatives' in parsed_response
+                p = parsed_response['positives'] # only use positives
+            else:
+                raise ValueError(f'Unknown type {type(parsed_response)}')
             if s not in sentence2paraphrases:
                 sentence2paraphrases[s] = []
             sentence2paraphrases[s].extend(p)
@@ -611,15 +621,11 @@ def main():
         print_bold('Sentence embeddings found at:', sentence_embeddings_save_path)
     else:
         print_bold('Computing embeddings for each sentence...')
-        if args.model_name == 'cxr-bert-specialized':
-            embeddings = compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized(
-                texts=sentences, device=args.device, batch_size=args.batch_size, num_workers=args.num_workers,
-                model_checkpoint_folder_path=args.model_checkpoint_folder_path)
-        elif args.model_name == 'biovil-t':
-            embeddings = compute_text_embeddings_with_BiomedVLP_BioVilT(
-                texts=sentences, device=args.device, batch_size=args.batch_size, num_workers=args.num_workers,
-                model_checkpoint_folder_path=args.model_checkpoint_folder_path)
-        else: assert False
+        embedding_extractor = CachedTextEmbeddingExtractor(
+            model_name=args.model_name, device=args.device, batch_size=args.batch_size, num_workers=args.num_workers,
+            model_checkpoint_folder_path=args.model_checkpoint_folder_path,
+        )
+        embeddings = embedding_extractor.compute_text_embeddings(sentences)
         print('Embeddings shape:', embeddings.shape)
         print('Saving sentence embeddings to:', sentence_embeddings_save_path)
         save_pickle({

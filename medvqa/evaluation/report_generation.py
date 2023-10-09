@@ -18,8 +18,8 @@ from medvqa.metrics.medical.radgraph import RadGraphLabeler
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
-    MedicalCompleteness,
-    WeightedMedicalCompleteness,
+    # MedicalCompleteness,
+    # WeightedMedicalCompleteness,
 )
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.models.report_generation.templates.models import SimpleTemplateRGModel
@@ -45,7 +45,7 @@ from medvqa.utils.metrics import f1_between_dicts, jaccard_between_dicts, precis
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels',
-                                'chexbert_labels', 'radgraph_labels', 'fact_embedding_score']
+                                'chexbert_labels', 'radgraph_labels', 'fact_embedding_score', 'bert_score']
 
 def _concatenate_report(qa_adapted_dataset, rid):
     report = qa_adapted_dataset['reports'][rid]
@@ -121,16 +121,18 @@ class TemplateBasedModes:
     CHEST_IMAGENOME_LABELS__ORACLE = 'chest_imagenome_labels__oracle'
     CHEXPERT_AND_CHEST_IMAGENOME_LABELS = 'chexpert_and_chest_imagenome_labels'
     FACT_EMBEDDING_LABELS__ORACLE = 'fact_embedding_labels__oracle'
-    @staticmethod
-    def get_choices():
+    FACTS_EXTRACTED_FROM_REPORTS__ORACLE = 'facts_extracted_from_reports__oracle'
+    @classmethod
+    def get_choices(cls):
         return [
-            TemplateBasedModes.CHEXPERT_LABELS,
-            TemplateBasedModes.CHEXPERT_LABELS__ORACLE,
-            TemplateBasedModes.CHEXBERT_LABELS__ORACLE,
-            TemplateBasedModes.CHEST_IMAGENOME_LABELS,
-            TemplateBasedModes.CHEST_IMAGENOME_LABELS__ORACLE,
-            TemplateBasedModes.CHEXPERT_AND_CHEST_IMAGENOME_LABELS,
-            TemplateBasedModes.FACT_EMBEDDING_LABELS__ORACLE,
+            cls.CHEXPERT_LABELS,
+            cls.CHEXPERT_LABELS__ORACLE,
+            cls.CHEXBERT_LABELS__ORACLE,
+            cls.CHEST_IMAGENOME_LABELS,
+            cls.CHEST_IMAGENOME_LABELS__ORACLE,
+            cls.CHEXPERT_AND_CHEST_IMAGENOME_LABELS,
+            cls.FACT_EMBEDDING_LABELS__ORACLE,
+            cls.FACTS_EXTRACTED_FROM_REPORTS__ORACLE,
         ]
 
 def recover_reports__template_based(
@@ -270,7 +272,19 @@ def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_L
     metric_name = 'fact_embedding_score'
     if metric_name in metric_names:
         scorer = FactEmbeddingScorer(verbose=True)
-        metrics[metric_name] = scorer(gen_texts, gt_texts, update_cache_on_disk=True)
+        soft_score, P, R, F1 = scorer(gen_texts, gt_texts, update_cache_on_disk=True)
+        metrics['fact_embedding_soft'] = soft_score
+        metrics['fact_embedding_p'] = P
+        metrics['fact_embedding_r'] = R
+        metrics['fact_embedding_f1'] = F1
+
+    metric_name = 'bert_score'
+    if metric_name in metric_names:
+        from bert_score import score as bert_score
+        P, R, F1 = bert_score(gen_texts, gt_texts, lang='en', verbose=True, use_fast_tokenizer=True)
+        metrics['bert_score_p'] = P.mean().item()
+        metrics['bert_score_r'] = R.mean().item()
+        metrics['bert_score_f1'] = F1.mean().item()
     
     print('Done computing report-level metrics.')
     return metrics
@@ -362,7 +376,7 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
                     macro_avg_f1_5 = sum(f1s[i] for i in CHEXPERT_LABELS_5_INDICES) / len(CHEXPERT_LABELS_5_INDICES)
 
                     cached_metric['values'].append(micro_avg_p)
-                    cached_metric['names'].append('p(micro)')                
+                    cached_metric['names'].append('p(micro)')
                     cached_metric['values'].append(micro_avg_r)
                     cached_metric['names'].append('r(micro)')
                     cached_metric['values'].append(micro_avg_f1)
@@ -509,20 +523,31 @@ def get_report_level_metrics_dataframe(metrics_paths, metric_names=_REPORT_LEVEL
                     cached_metric['names'].append('radgraph_jaccard(sample)')
 
                 elif mn == 'fact_embedding_score':
-                    score = metrics_dict['fact_embedding_score']
-                    cached_metric['values'].append(score)
-                    cached_metric['names'].append('fact_embedding_score')
-                    
+                    # print('DEBUG: fact_embedding_score')
+                    for key in ('soft', 'p', 'r', 'f1'):
+                        cached_metric['values'].append(metrics_dict[f'fact_embedding_{key}'])
+                        cached_metric['names'].append(f'fact_embedding_{key}')
+                    # print('cached_metric:', cached_metric)
+
+                elif mn == 'bert_score':
+                    # print('DEBUG: bert_score')
+                    for key in ('p', 'r', 'f1'):
+                        cached_metric['values'].append(metrics_dict[f'bert_score_{key}'])
+                        cached_metric['names'].append(f'bert_score_{key}')
+                    # print('cached_metric:', cached_metric)
+
                 elif mn == 'bleu':
                     for k in range(4):
                         bleu_k = f'bleu-{k+1}'
                         bleu_score = metrics_dict[bleu_k]                
                         cached_metric['values'].append(bleu_score[0])
                         cached_metric['names'].append(METRIC2SHORT.get(bleu_k, bleu_k))
+
                 elif mn == 'ciderD':
                     scores = metrics_dict[mn]
                     cached_metric['values'].append(scores[0])
                     cached_metric['names'].append(METRIC2SHORT.get(mn, mn))
+
                 else:
                     try:
                         scores = metrics_dict[mn]

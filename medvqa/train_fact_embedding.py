@@ -68,6 +68,7 @@ def parse_args(args=None):
 
     # --- Other arguments
 
+    parser.add_argument('--val_batch_size', type=int, default=None, help='Batch size for validation')
     parser.add_argument('--radgraph_spert_batch_size', type=int, default=None, help='Batch size for RadGraph NER/RE')
     parser.add_argument('--checkpoint_folder', type=str, default=None,
                         help='Relative path to folder with checkpoint to resume training from')
@@ -116,6 +117,7 @@ def parse_args(args=None):
     parser.add_argument('--integrated_chest_imagenome_observations_filepath', type=str, default=None)
     parser.add_argument('--integrated_chest_imagenome_anatomical_locations_filepath', type=str, default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--integrated_sentence_facts_jsonl_filepath', type=str, default=None)
     parser.add_argument('--gpt4_radnli_labels_jsonl_filepath', type=str, default=None)
     parser.add_argument('--dataset_name', type=str, default=None, help='Name of dataset to use')
     parser.add_argument('--triplets_weight', type=float, default=1.0, help='Weight for triplet sampling during training')
@@ -170,6 +172,9 @@ def train_model(
     
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
+    val_batch_size = dataloading_kwargs['val_batch_size']
+    if val_batch_size is None:
+        val_batch_size = batch_size
     radgraph_spert_batch_size = dataloading_kwargs['radgraph_spert_batch_size']
     if radgraph_spert_batch_size is None:
         radgraph_spert_batch_size = batch_size
@@ -228,6 +233,7 @@ def train_model(
         tokenizer = None
     fact_embedding_trainer = FactEmbeddingTrainer(
         batch_size=batch_size,
+        val_batch_size=val_batch_size,
         radgraph_spert_batch_size=radgraph_spert_batch_size,
         triplet_collate_batch_fn=triplet_collate_batch_fn,
         metadata_classification_collate_batch_fn=metadata_classification_collate_batch_fn,
@@ -463,6 +469,7 @@ def train_from_scratch(
     integrated_chest_imagenome_observations_filepath,
     integrated_chest_imagenome_anatomical_locations_filepath,
     integrated_nli_jsonl_filepath,
+    integrated_sentence_facts_jsonl_filepath,
     gpt4_radnli_labels_jsonl_filepath,
     dataset_name,
     triplets_weight,
@@ -474,6 +481,7 @@ def train_from_scratch(
     radgraph_ner_re_weight,
     # Dataloading args
     batch_size,
+    val_batch_size,
     radgraph_spert_batch_size,
     num_workers,
     # Fixed traning args
@@ -557,6 +565,7 @@ def train_from_scratch(
     
     dataloading_kwargs = dict(
         batch_size=batch_size,
+        val_batch_size=val_batch_size,
         radgraph_spert_batch_size=radgraph_spert_batch_size,
         triplets_weight=triplets_weight,
         metadata_classification_weight=metadata_classification_weight,
@@ -575,6 +584,7 @@ def train_from_scratch(
         integrated_chest_imagenome_observations_filepath=integrated_chest_imagenome_observations_filepath,
         integrated_chest_imagenome_anatomical_locations_filepath=integrated_chest_imagenome_anatomical_locations_filepath,
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
+        integrated_sentence_facts_jsonl_filepath=integrated_sentence_facts_jsonl_filepath,
         gpt4_radnli_labels_jsonl_filepath=gpt4_radnli_labels_jsonl_filepath,
         dataset_name=dataset_name,
         use_triplets=use_triplets,

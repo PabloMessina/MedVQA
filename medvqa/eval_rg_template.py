@@ -58,6 +58,7 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
     get_checkpoint_folder_path,
     get_results_folder_path,
+    load_jsonl,
     save_pickle,
 )
 from medvqa.training.vision import get_engine
@@ -90,6 +91,7 @@ def parse_args():
     parser.add_argument('--label_score_threshold', type=float, default=None, help='if not None, keep only labels with score >= threshold')
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str, default=None)
     parser.add_argument('--fact_embedding_cluster_labels_per_report_filepath', type=str, default=None)
+    parser.add_argument('--integrated_report_facts_filepath', type=str, default=None)
     parser.add_argument('--use_amp', action='store_true', default=False)
     parser.add_argument('--cache_computations', action='store_true', default=False)
     
@@ -376,6 +378,46 @@ def _evaluate_fact_embedding_template_based_oracle(
             if gen_report:
                 gen_report += ' ' if gen_report[-1] == '.' else '. '
             gen_report += label_name
+        gen_reports.append(gen_report)
+
+    results_folder_path = get_results_folder_path(get_checkpoint_folder_path('report_gen', 'mimiccxr', 'oracle'))
+    _compute_and_save_report_level_metrics(
+        gt_reports, gen_reports, 'mimiccxr', results_folder_path,
+        max_processes_for_chexpert_labeler, template_based_mode)
+    _save_gen_reports(gen_reports, test_idxs, 'mimiccxr', results_folder_path, template_based_mode)
+
+def _evaluate_facts_extracted_from_reports_template_based_oracle(
+        background_findings_and_impression_per_report_filepath,
+        integrated_report_facts_filepath,
+        max_processes_for_chexpert_labeler,
+        template_based_mode,
+):
+    print('Evaluating facts extracted from reports template-based oracle ...')
+    assert background_findings_and_impression_per_report_filepath is not None
+    assert integrated_report_facts_filepath is not None
+    
+    mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(background_findings_and_impression_per_report_filepath=
+                                                                         background_findings_and_impression_per_report_filepath)
+    test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']
+    integrated_report_facts = load_jsonl(integrated_report_facts_filepath)
+    
+    gt_reports = []
+    gen_reports = []
+    for i in test_idxs:
+        assert mimiccxr_detailed_metadata['filepaths'][i] == integrated_report_facts[i]['path']
+        # gt report
+        findings = mimiccxr_detailed_metadata['findings'][i]
+        impression = mimiccxr_detailed_metadata['impressions'][i]
+        assert findings == integrated_report_facts[i]['findings']
+        assert impression == integrated_report_facts[i]['impression']
+        gt_report = ""
+        for text in (findings, impression):
+            if gt_report:
+                gt_report += ' ' if gt_report[-1] == '.' else '. '
+            gt_report += text
+        gt_reports.append(gt_report)
+        # gen report
+        gen_report = integrated_report_facts[i]['fact_based_report']
         gen_reports.append(gen_report)
 
     results_folder_path = get_results_folder_path(get_checkpoint_folder_path('report_gen', 'mimiccxr', 'oracle'))
@@ -679,6 +721,7 @@ def _evaluate_model(
     chest_imagenome_labels_filename=None,
     background_findings_and_impression_per_report_filepath=None,
     fact_embedding_cluster_labels_per_report_filepath=None,
+    integrated_report_facts_filepath=None,
     cache_computations=False,
 ):
     if eval_mimiccxr:
@@ -711,6 +754,15 @@ def _evaluate_model(
             _evaluate_fact_embedding_template_based_oracle(
                 background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
                 fact_embedding_cluster_labels_per_report_filepath=fact_embedding_cluster_labels_per_report_filepath,
+                max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+                template_based_mode=template_based_mode,
+            )
+        elif template_based_mode == TemplateBasedModes.FACTS_EXTRACTED_FROM_REPORTS__ORACLE:
+            assert background_findings_and_impression_per_report_filepath is not None
+            assert integrated_report_facts_filepath is not None
+            _evaluate_facts_extracted_from_reports_template_based_oracle(
+                background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
+                integrated_report_facts_filepath=integrated_report_facts_filepath,
                 max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
                 template_based_mode=template_based_mode,
             )
@@ -929,6 +981,7 @@ def evaluate_model(
     label_score_threshold=None,
     background_findings_and_impression_per_report_filepath=None,
     fact_embedding_cluster_labels_per_report_filepath=None,
+    integrated_report_facts_filepath=None,
     cache_computations=False,
 ):
     print()
@@ -968,6 +1021,7 @@ def evaluate_model(
         chest_imagenome_labels_filename=chest_imagenome_labels_filename,
         background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
         fact_embedding_cluster_labels_per_report_filepath=fact_embedding_cluster_labels_per_report_filepath,
+        integrated_report_facts_filepath=integrated_report_facts_filepath,
         cache_computations=cache_computations,
     )
 

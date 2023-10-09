@@ -1,6 +1,10 @@
 import os
 import random
 from pprint import pprint
+from medvqa.datasets.text_data_utils import (
+    is_s1_subsequence_of_s2,
+    remove_consecutive_repeated_words_from_text,
+)
 from medvqa.utils.files import load_json, load_jsonl
 from nltk.tokenize import sent_tokenize
 from tqdm import tqdm
@@ -8,59 +12,6 @@ from tqdm import tqdm
 from medvqa.utils.logging import print_orange, print_red
 
 _FACT_METADATA_FIELDS = ('anatomical location', 'detailed observation', 'short observation', 'category', 'health status', 'prev_study_comparison?', 'comparison status')
-
-def _is_s1_subsequence_of_s2(s1, s2):
-    assert type(s1) == list
-    assert type(s2) == list
-    if len(s1) > len(s2):
-        return False
-    i = 0
-    j = 0
-    while i < len(s1) and j < len(s2):
-        if s1[i] == s2[j]:
-            i += 1
-        j += 1
-    return i == len(s1)
-
-def _substrings_are_equal(text, i, j, k):
-    for x in range(k):
-        if text[i+x] != text[j+x]:
-            return False
-    return True
-
-def _remove_consecutive_repeated_words_from_text(text, ks=[1, 2, 3, 4, 5, 6, 7, 8]):
-    # Sanity checks
-    assert type(ks) == int or type(ks) == list
-    if type(ks) == int:
-        ks = [ks]
-    else:
-        assert len(ks) > 0
-        assert all(type(x) == int for x in ks)
-
-    tokens = text.split()
-    lower_tokens = text.lower().split()
-    dedup_tokens = []
-    dedup_lower_tokens = []
-
-    for k in ks:
-        for i in range(len(lower_tokens)):
-            # if current word is part of a k-word phrase that is repeated -> skip
-            skip = False
-            for j in range(k):
-                s = i - j # start index
-                e = s + k-1 # end index
-                if s - k >= 0 and e < len(lower_tokens) and _substrings_are_equal(lower_tokens, s, s-k, k):
-                    skip = True
-                    break
-            if skip:
-                continue
-            dedup_tokens.append(tokens[i])
-            dedup_lower_tokens.append(lower_tokens[i])
-        tokens = dedup_tokens
-        lower_tokens = dedup_lower_tokens
-        dedup_tokens = []
-        dedup_lower_tokens = []
-    return ' '.join(tokens)
 
 class ReportFactsDisplayer:
     def __init__(self, preprocessed_reports_filepath, extracted_facts_filepaths):
@@ -151,7 +102,7 @@ class ReportFactsDisplayer:
             for j in range(len(facts)):
                 if i == j:
                     continue
-                if _is_s1_subsequence_of_s2(facts_[i], facts_[j]):
+                if is_s1_subsequence_of_s2(facts_[i], facts_[j]):
                     if facts[i] == facts[j] and i > j:
                         continue
                     duplicate = True
@@ -211,7 +162,7 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
                 raise
             assert s not in sentence2facts
             if remove_consecutive_repeated_words:
-                fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
+                fs = [remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
             sentence_facts_rows.append({
                 'sentence': s,
@@ -238,7 +189,7 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
             for j in range(len(dedup_facts)):
                 if i == j:
                     continue
-                if _is_s1_subsequence_of_s2(dedup_facts_[i], dedup_facts_[j]):
+                if is_s1_subsequence_of_s2(dedup_facts_[i], dedup_facts_[j]):
                     if dedup_facts_[i] == dedup_facts_[j] and i > j:
                         continue
                     redundant = True
@@ -300,7 +251,7 @@ def integrate_reports_facts_and_metadata(
                 raise
             assert s not in sentence2facts
             if remove_consecutive_repeated_words:
-                fs = [_remove_consecutive_repeated_words_from_text(f) for f in fs]
+                fs = [remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
             sentence_facts_rows.append({
                 'sentence': s,
@@ -328,9 +279,9 @@ def integrate_reports_facts_and_metadata(
                 print(f'KeyError: {x}')
                 raise
             if remove_consecutive_repeated_words:
-                f = _remove_consecutive_repeated_words_from_text(f)
+                f = remove_consecutive_repeated_words_from_text(f)
                 for key in _FACT_METADATA_FIELDS:
-                    m[key] = _remove_consecutive_repeated_words_from_text(m[key])
+                    m[key] = remove_consecutive_repeated_words_from_text(m[key])
             if f in fact2metadata and m != fact2metadata[f]:
                 print_red(f'Warning: fact "{f}" already found with different metadata. fact2metadata[f] = {fact2metadata[f]}, m = {m}')
             fact2metadata[f] = m
@@ -370,7 +321,7 @@ def integrate_reports_facts_and_metadata(
             for j in range(len(dedup_facts)):
                 if i == j:
                     continue
-                if _is_s1_subsequence_of_s2(dedup_facts_[i], dedup_facts_[j]):
+                if is_s1_subsequence_of_s2(dedup_facts_[i], dedup_facts_[j]):
                     if dedup_facts_[i] == dedup_facts_[j] and i > j:
                         continue
                     redundant = True

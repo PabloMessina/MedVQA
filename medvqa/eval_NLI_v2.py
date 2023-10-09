@@ -4,14 +4,16 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from medvqa.datasets.nli import RADNLI_TEST_JSONL_PATH, MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH
+from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
+from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.files import load_jsonl
 from medvqa.utils.logging import print_blue, print_bold, print_magenta
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--huggingface_model_name', type=str, required=True)
+    parser.add_argument('--huggingface_model_name', type=str, default=None, choices=SupportedHuggingfaceMedicalBERTModels.get_all())
+    parser.add_argument('--model_name', type=str, default=None, choices=['CheXbert'])
     parser.add_argument('--model_checkpoint_folder_path', type=str, default=None)
     parser.add_argument('--device', type=str, required=True)
     parser.add_argument('--batch_size', type=int, required=True)
@@ -63,6 +65,7 @@ def calibrate_threshold(train_entailment_pairs, train_contradiction_pairs, embed
     return best_threshold
 
 def evaluate(
+    model_name,
     huggingface_model_name,
     device,
     model_checkpoint_folder_path,
@@ -73,14 +76,23 @@ def evaluate(
     average_token_embeddings,
     calibrate_on_test_set=False,
 ):    
-    embedding_extractor = CachedTextEmbeddingExtractor(
-        model_name=huggingface_model_name,
-        device=device,
-        model_checkpoint_folder_path=model_checkpoint_folder_path,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        average_token_embeddings=average_token_embeddings,
-    )
+    assert (model_name != None) != (huggingface_model_name != None), 'Exactly one of model_name or huggingface_model_name must be provided'
+    if huggingface_model_name is not None:
+        embedding_extractor = CachedTextEmbeddingExtractor(
+            model_name=huggingface_model_name,
+            device=device,
+            model_checkpoint_folder_path=model_checkpoint_folder_path,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            average_token_embeddings=average_token_embeddings,
+        )
+        get_embeddings_func = embedding_extractor.compute_text_embeddings
+    elif model_name is not None:
+        if model_name == 'CheXbert':
+            chexbert_labeler = CheXbertLabeler(device=device)
+            get_embeddings_func = chexbert_labeler.get_embeddings
+        else:
+            raise ValueError(f"Unknown model_name: {model_name}")
     
     sentences = set()
 
@@ -167,7 +179,8 @@ def evaluate(
     sentences = list(sentences)
     s2i = {s: i for i, s in enumerate(sentences)}
     print(f"Total sentences: {len(sentences)}")
-    embeddings = embedding_extractor.compute_text_embeddings(sentences)
+    # embeddings = embedding_extractor.compute_text_embeddings(sentences)
+    embeddings = get_embeddings_func(sentences)
     if similarity_metric == 'cosine':
         embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True) # normalize
     print(f"embeddings.shape: {embeddings.shape}")

@@ -32,7 +32,7 @@ def _get_balancedly_distributed_class_indices(class_weights):
     ws = [w / w_sum for w in class_weights]
     w_min = min(ws)
     assert w_min > 0
-    freqs = [max(int(10*w/w_min),1) for w in ws]
+    freqs = [max(int(20*w/w_min),1) for w in ws]
     count = sum(freqs)
     indices = [None] * count
     class_ids = list(range(len(class_weights)))

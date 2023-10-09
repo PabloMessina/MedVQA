@@ -154,7 +154,7 @@ class ChestImaGenomeLabelsClassificationDataset(Dataset):
 
 class FactEmbeddingTrainer():
 
-    def __init__(self, batch_size, num_workers, dataset_name,
+    def __init__(self, batch_size, val_batch_size, num_workers, dataset_name,
                  # triplet ranking arguments
                  use_triplets,
                  use_triplets_val,
@@ -180,6 +180,7 @@ class FactEmbeddingTrainer():
                  nli_collate_batch_fn,
                  entcon_collate_batch_fn,
                  gpt4_radnli_labels_jsonl_filepath,
+                 integrated_sentence_facts_jsonl_filepath,
                  # RadGraph NER and RE arguments
                  use_radgraph_ner_re,
                  radgraph_spert_batch_size,
@@ -272,12 +273,19 @@ class FactEmbeddingTrainer():
             categories = []
             health_statuses = []
             comparison_statuses = []
+            sources = []
             print('Loading integrated facts metadata...')
             integrated_facts_metadata = load_jsonl(integrated_facts_metadata_jsonl_filepath)
             improved_comparison_count = 0
+            source2id = {}
             for row in integrated_facts_metadata:
                 fact = row['fact']
                 metadata = row['metadata']
+                try:
+                    source = source2id[row['extraction_method']]
+                except KeyError:
+                    source = len(source2id)
+                    source2id[row['extraction_method']] = source
                 # category
                 cat = _CATEGORY_TO_LABEL[metadata['category']]
                 # health status
@@ -308,8 +316,11 @@ class FactEmbeddingTrainer():
                     categories.append(cat)
                     health_statuses.append(hs)
                     comparison_statuses.append(cs)
+                    sources.append(source)
+            id2source = {v: k for k, v in source2id.items()}
             # print some stats
             print(f'Number of facts: {len(sentences)}')
+            print(f'Number of sources: {len(source2id)}')
             print(f'Number of improved comparisons: {improved_comparison_count}/{len(integrated_facts_metadata)}')
             for x, count in sorted(list(Counter(categories).items()), key=lambda x: x[1], reverse=True):
                 print(f'Category: {_LABEL_TO_CATEGORY[x]} -> {count}')
@@ -333,11 +344,24 @@ class FactEmbeddingTrainer():
             _weights = []
             for cs, indices in cs2indices.items():
                 print(f'Comparison status: {_LABEL_TO_COMPARISON_STATUS[cs]}')
-                print(f'\tNumber of samples: {len(indices)}')
-                _datasets.append(FactMetadataClassificationDataset(
-                    indices, sentences, categories, health_statuses, comparison_statuses,
-                    shuffle=True, infinite=True,
-                ))
+                print(f'Number of samples: {len(indices)}')
+                source2indices = {}
+                for i in indices:
+                    source = sources[i]
+                    if source not in source2indices:
+                        source2indices[source] = []
+                    source2indices[source].append(i)
+                _sub_datasets = []
+                _sub_weights = []
+                for source, sub_indices in source2indices.items():
+                    print(f'\tSource: {id2source[source]}')
+                    print(f'\t\tNumber of samples: {len(sub_indices)}')
+                    _sub_datasets.append(FactMetadataClassificationDataset(
+                        sub_indices, sentences, categories, health_statuses, comparison_statuses,
+                        shuffle=True, infinite=True,
+                    ))
+                    _sub_weights.append(math.log2(len(sub_indices))**3)
+                _datasets.append(CompositeInfiniteDataset(_sub_datasets, _sub_weights))
                 _weights.append(math.log2(len(indices))**3) # weight by log2(N)^3
                 print(f'\tWeight: {_weights[-1]}')
             self.train_metadata_classification_dataset = CompositeInfiniteDataset(_datasets, _weights)
@@ -378,11 +402,20 @@ class FactEmbeddingTrainer():
                 labels_data = load_pickle(labels_filepath)
                 phrases = []
                 labels = []
+                sources = []
+                source2id = {}
                 label_names = labels_data['label_names']
                 for group in labels_data['groups']:
                     phrases.extend(group['sentences'])
                     labels.append(group['labels'])
+                    try:
+                        source = source2id[group['extraction_method']]
+                    except KeyError:
+                        source = len(source2id)
+                        source2id[group['extraction_method']] = source
+                    sources.extend([source] * len(group['sentences']))
                 labels = np.concatenate(labels, axis=0)
+                id2source = {v: k for k, v in source2id.items()}
                 print(f'len(phrases): {len(phrases)}')
                 print(f'len(label_names): {len(label_names)}')
                 print(f'labels.shape: {labels.shape}')
@@ -396,21 +429,51 @@ class FactEmbeddingTrainer():
                 _lines = []
                 for i in range(labels.shape[1]):
                     idxs = np.where(labels.T[i] == 1)[0]
-                    _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
+                    source2idxs = {}
+                    for idx in idxs:
+                        source = sources[idx]
+                        if source not in source2idxs:
+                            source2idxs[source] = []
+                        source2idxs[source].append(idx)
+                    _sub_datasets = []
+                    _sub_weights = []
+                    s2idxs_pairs = list(source2idxs.items())
+                    s2idxs_pairs.sort(key=lambda x: len(x[1]), reverse=True)
+                    while len(s2idxs_pairs) > 1 and len(s2idxs_pairs[-1][1]) < 10:
+                        last_pair = s2idxs_pairs.pop()
+                        s2idxs_pairs[-1][1].extend(last_pair[1])
+                    for s, sub_idxs in s2idxs_pairs:
+                        _sub_datasets.append(ChestImaGenomeLabelsClassificationDataset(sub_idxs, phrases, labels, shuffle=True, infinite=True))
+                        _sub_weights.append(math.log2(len(sub_idxs))**3)
+                    _datasets.append(CompositeInfiniteDataset(_sub_datasets, _sub_weights))
                     _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
                     _lines.append((f'Label: {label_names[i]}\n'
                                 f'\tNumber of idxs: {len(idxs)}\n'
-                                f'\tWeight: {_weights[-1]:.2f}', _weights[-1]))
+                                f'\tWeight: {_weights[-1]:.2f}\n'
+                                f'\tSub-datasets: [{", ".join("(%s, %.2f)" % (id2source[s], len(sub_idxs)) for s, sub_idxs in s2idxs_pairs)}]',
+                                _weights[-1]))
                 _lines.sort(key=lambda x: x[1], reverse=True)
                 for line, _ in _lines:
                     print(line)
                 # special dataset for rows with only "0" labels
                 idxs = np.where(np.all(labels == 0, axis=1))[0]
-                _datasets.append(ChestImaGenomeLabelsClassificationDataset(idxs, phrases, labels, shuffle=True, infinite=True))
+                source2idxs = {}
+                for idx in idxs:
+                    source = sources[idx]
+                    if source not in source2idxs:
+                        source2idxs[source] = []
+                    source2idxs[source].append(idx)
+                _sub_datasets = []
+                _sub_weights = []
+                for s, sub_idxs in source2idxs.items():
+                    _sub_datasets.append(ChestImaGenomeLabelsClassificationDataset(sub_idxs, phrases, labels, shuffle=True, infinite=True))
+                    _sub_weights.append(math.log2(len(sub_idxs))**3)
+                _datasets.append(CompositeInfiniteDataset(_sub_datasets, _sub_weights))
                 _weights.append(math.log2(len(idxs))**3) # weight by log2(N)^3
                 print(f'Label: "omitted"')
                 print(f'\tNumber of idxs: {len(idxs)}')
                 print(f'\tWeight: {_weights[-1]}')
+                print(f'\tSub-datasets: [{", ".join("(%s, %.2f)" % (id2source[s], len(sub_idxs)) for s, sub_idxs in source2idxs.items())}]')
                 setattr(self, f'train_chest_imagenome_{key}_dataset', CompositeInfiniteDataset(_datasets, _weights))
                 setattr(self, f'train_chest_imagenome_{key}_dataloader', DataLoader(
                     getattr(self, f'train_chest_imagenome_{key}_dataset'),
@@ -433,21 +496,60 @@ class FactEmbeddingTrainer():
             hypotheses = [x['hypothesis'] for x in rows]
             label2id = { 'entailment': 0, 'neutral': 1, 'contradiction': 2 }
             labels = [label2id[x['label']] for x in rows]
+            source2id = {}
+            for row in rows:
+                source = row['source']
+                if source not in source2id:
+                    source2id[source] = len(source2id)
+            sources = [source2id[x['source']] for x in rows]
+
+            if integrated_sentence_facts_jsonl_filepath is not None:
+                print(f'Loading integrated sentence facts from {integrated_sentence_facts_jsonl_filepath}...')
+                integrated_sentence_facts = load_jsonl(integrated_sentence_facts_jsonl_filepath)
+                print(f'Number of integrated sentence facts: {len(integrated_sentence_facts)}')
+                entailment_id = label2id['entailment']
+                source_id = len(source2id) # add new source
+                len_bef = len(premises)
+                for row in integrated_sentence_facts:
+                    s = row['sentence']
+                    for f in row['facts']:
+                        if s != f:
+                            premises.append(s)
+                            hypotheses.append(f)
+                            sources.append(source_id)
+                            labels.append(entailment_id)
+                print(f'Number of entailment samples added: {len(premises) - len_bef}')
+            
+            source_label_2_indices = {}
+            unique_sources = set()
+            unique_labels = set()
+            for i, (source, label) in enumerate(zip(sources, labels)):
+                unique_sources.add(source)
+                unique_labels.add(label)
+                key = (source, label)
+                if key not in source_label_2_indices:
+                    source_label_2_indices[key] = []
+                source_label_2_indices[key].append(i)
+            unique_sources = sorted(list(unique_sources))
+            unique_labels = sorted(list(unique_labels))
 
             if use_nli:
                 # Train NLI dataset and dataloader
                 print('----')
-                print_bold('Building train NLI dataset and dataloader...')            
-                ent_indices = [i for i, x in enumerate(labels) if x == 0]
-                neu_indices = [i for i, x in enumerate(labels) if x == 1]
-                con_indices = [i for i, x in enumerate(labels) if x == 2]
-                ent_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=ent_indices)
-                neu_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=neu_indices)
-                con_dataset = NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=con_indices)
-                print(f'Number of entailment samples: {len(ent_indices)}')
-                print(f'Number of neutral samples: {len(neu_indices)}')
-                print(f'Number of contradiction samples: {len(con_indices)}')
-                self.train_nli_dataset = CompositeInfiniteDataset([ent_dataset, neu_dataset, con_dataset], [1, 1, 1])
+                print_bold('Building train NLI dataset and dataloader...')
+                label_datasets = []
+                for label in unique_labels:
+                    _datasets = []
+                    _weights = []
+                    for source in unique_sources:
+                        key = (source, label)
+                        if key in source_label_2_indices:
+                            indices = source_label_2_indices[key]
+                            _datasets.append(NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=indices))
+                            _weights.append(math.log2(len(indices))**3) # weight by log2(N)^3
+                            print(f'Source: {source} | Label: {label} -> {len(indices)} ({_weights[-1]:.2f})')
+                    label_datasets.append(CompositeInfiniteDataset(_datasets, _weights))
+                self.train_nli_dataset = CompositeInfiniteDataset(label_datasets, [1, 1, 1])
                 self.train_nli_dataloader = DataLoader(
                     self.train_nli_dataset,
                     batch_size=batch_size,
@@ -461,7 +563,21 @@ class FactEmbeddingTrainer():
                 # Train entailment/contradiction dataset and dataloader
                 print('----')
                 print_bold('Building train entailment/contradiction dataset and dataloader...')
-                self.train_entcon_dataset = EntailmentContradictionDataset(premises, hypotheses, labels, shuffle=True, infinite=True)
+                ent_label = label2id['entailment']
+                cont_premises = [p for p, l in zip(premises, labels) if l == 2]
+                cont_hypotheses = [h for h, l in zip(hypotheses, labels) if l == 2]
+                datasets = []
+                for source in unique_sources:
+                    key = (source, ent_label)
+                    if key in source_label_2_indices:
+                        indices = source_label_2_indices[key]
+                        ent_premises = [premises[i] for i in indices]
+                        ent_hypotheses = [hypotheses[i] for i in indices]
+                        datasets.append(EntailmentContradictionDataset(ent_premises, ent_hypotheses, cont_premises, cont_hypotheses,
+                                                                       shuffle=True, infinite=True))
+                        print(f'Source: {source} -> (len(ent_premises), len(cont_premises)): ({len(ent_premises)}, {len(cont_premises)})')
+                print(f'Number of datasets: {len(datasets)}')
+                self.train_entcon_dataset = CompositeInfiniteDataset(datasets, [1] * len(datasets))
                 self.train_entcon_dataloader = DataLoader(
                     self.train_entcon_dataset,
                     batch_size=batch_size,
@@ -522,7 +638,7 @@ class FactEmbeddingTrainer():
                 self.val_nli_dataset = NLIDataset(premises, hypotheses, labels, shuffle=False, infinite=False)
                 self.val_nli_dataloader = DataLoader(
                     self.val_nli_dataset,
-                    batch_size=batch_size,
+                    batch_size=val_batch_size,
                     shuffle=False,
                     num_workers=num_workers,
                     collate_fn=nli_collate_batch_fn,
@@ -533,10 +649,15 @@ class FactEmbeddingTrainer():
                 # Val entailment/contradiction dataset and dataloader
                 print('----')
                 print_bold('Building val entailment/contradiction dataset and dataloader...')
-                self.val_entcon_dataset = EntailmentContradictionDataset(premises, hypotheses, labels, shuffle=False, infinite=False)
+                ent_premises = [p for p, l in zip(premises, labels) if l == 0]
+                ent_hypotheses = [h for h, l in zip(hypotheses, labels) if l == 0]
+                cont_premises = [p for p, l in zip(premises, labels) if l == 2]
+                cont_hypotheses = [h for h, l in zip(hypotheses, labels) if l == 2]
+                self.val_entcon_dataset = EntailmentContradictionDataset(ent_premises, ent_hypotheses, cont_premises, cont_hypotheses,
+                                                                         shuffle=False, infinite=False)
                 self.val_entcon_dataloader = DataLoader(
                     self.val_entcon_dataset,
-                    batch_size=batch_size,
+                    batch_size=val_batch_size,
                     shuffle=False,
                     num_workers=num_workers,
                     collate_fn=entcon_collate_batch_fn,
@@ -598,7 +719,7 @@ class FactEmbeddingTrainer():
             self.val_triplets_dataset = CompositeDataset(val_rule_datasets)
             self.val_triplets_dataloader = DataLoader(
                 self.val_triplets_dataset,
-                batch_size=batch_size,
+                batch_size=val_batch_size,
                 shuffle=False,
                 num_workers=num_workers,
                 collate_fn=triplet_collate_batch_fn,

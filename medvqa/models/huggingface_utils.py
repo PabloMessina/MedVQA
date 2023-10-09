@@ -1,13 +1,15 @@
 import os
 import numpy as np
+import torch
+from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 from sklearn.cluster import KMeans
-from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader
+from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader, remove_consecutive_repeated_words_from_text, sentence_tokenize_texts_in_parallel
 from medvqa.models.checkpoint import get_checkpoint_filepath
 from medvqa.models.common import load_model_state_dict
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
-from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string_list, update_hash
+from medvqa.utils.files import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string, hash_string_list, update_hash
 from medvqa.utils.logging import print_bold
 
 class SupportedHuggingfaceMedicalBERTModels:
@@ -75,8 +77,6 @@ def _adapt_checkpoint_keys(checkpoint):
 def compute_text_embeddings(model_name, get_tokenizer_func, texts, device, batch_size=32, num_workers=0,
                             model_checkpoint_folder_path=None, model_checkpoint_filepath=None,
                             is_cxr_bert_variant=False, average_token_embeddings=False):
-    import torch
-    from transformers import AutoTokenizer, AutoModel
 
     if average_token_embeddings:
         assert not is_cxr_bert_variant, 'average_token_embeddings is not supported for CXR-BERT variants'
@@ -336,11 +336,13 @@ class CachedTextEmbeddingExtractor:
         assert output.shape == (len(texts), self.embedding_size)
         return output
     
-    def compute_kmeans_labels(self, texts, n_clusters, num_iterations=300, verbose=2, update_cache_on_disk=True, cache_kmeans_labels=True):
+    def compute_kmeans_labels(self, texts, num_clusters, num_iterations=300, verbose=2, update_cache_on_disk=True, cache_kmeans_labels=True,
+                              embeddings=None):
         if cache_kmeans_labels:
             h = hash_string_list(texts)
-            h = update_hash(h, f'n_clusters={n_clusters}')
+            h = update_hash(h, f'n_clusters={num_clusters}')
             h = update_hash(h, f'num_iterations={num_iterations}')
+            h = update_hash(h, f'cache_path={self.cache_path}')
             save_path = os.path.join(LARGE_FAST_CACHE_DIR, f'kmeans_labels({h[0]},{h[1]}).pkl')
             if save_path in self.cache:
                 return self.cache[save_path]
@@ -348,9 +350,12 @@ class CachedTextEmbeddingExtractor:
                 print(f'Loading cached kmeans labels from {save_path}')
                 output = self.cache[save_path] = load_pickle(save_path)
                 return output
-        embeddings = self.compute_text_embeddings(texts, update_cache_on_disk=update_cache_on_disk)
-        print(f'Running KMeans clustering with k={n_clusters}')
-        kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init='auto', verbose=verbose, max_iter=num_iterations).fit(embeddings)
+        if embeddings is None:
+            embeddings = self.compute_text_embeddings(texts, update_cache_on_disk=update_cache_on_disk)
+        else:
+            assert embeddings.shape[0] == len(texts) # Sanity check
+        print(f'Running KMeans clustering with k={num_clusters}')
+        kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init='auto', verbose=verbose, max_iter=num_iterations).fit(embeddings)
         labels = kmeans.labels_
         if cache_kmeans_labels:
             self.cache[save_path] = labels
@@ -358,19 +363,160 @@ class CachedTextEmbeddingExtractor:
             print(f'Saved kmeans labels to {save_path}')
         return labels
     
+class CachedT5FactExtractor:
+    def __init__(self, model_name, model_checkpoint_folder_path, device='GPU', batch_size=32, num_workers=0):
+        assert os.path.exists(model_checkpoint_folder_path)
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.model_name = model_name
+        self.model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+        self.device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'CPU')
+        self._model = None
+        self._cache = None
+        self._cache_path = os.path.join(LARGE_FAST_CACHE_DIR, f't5_facts_cache({hash_string_list([model_name, self.model_checkpoint_filepath])}).pkl')
+
+    @property
+    def t5_model(self):
+        if self._model is None:
+            from transformers import T5ForConditionalGeneration
+            self._model = T5ForConditionalGeneration.from_pretrained(self.model_name)
+            self._model.to(self.device)
+            self._model.eval()
+            print(f'Loading model weights from {self.model_checkpoint_filepath}')
+            checkpoint = torch.load(self.model_checkpoint_filepath, map_location=self.device)
+            load_model_state_dict(self._model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
+        return self._model
+    
+    @property
+    def cache(self):
+        if self._cache is None:
+            if os.path.exists(self._cache_path):
+                print(f'Loading cached T5 facts from {self._cache_path}')
+                self._cache = load_pickle(self._cache_path)
+            else:
+                # Load environment variables from .env file
+                from dotenv import load_dotenv
+                load_dotenv()
+                INTEGRATED_SENTENCE_FACTS_JSONL_PATH = os.getenv('INTEGRATED_SENTENCE_FACTS_JSONL_PATH')
+                # Populate cache with facts from integrated sentence facts
+                print(f'Populating cache with facts from {INTEGRATED_SENTENCE_FACTS_JSONL_PATH}')
+                rows = load_jsonl(INTEGRATED_SENTENCE_FACTS_JSONL_PATH)
+                cache = {}
+                for row in tqdm(rows, mininterval=2):
+                    cache[hash_string(row['sentence'])] = row['facts']
+                # Save cache to disk
+                self._cache = cache
+                save_pickle(cache, self._cache_path)
+                print(f'Saved T5 facts to {self._cache_path}')
+        return self._cache
+    
+    def _compute_facts(self, sentences):
+
+        # Load model
+        model = self.t5_model
+
+        # Load tokenizer
+        from transformers import T5TokenizerFast
+        tokenizer = T5TokenizerFast.from_pretrained(self.model_name)
+
+        # Create dataset and dataloader
+        _, dataloader = create_text_dataset_and_dataloader(
+            texts=sentences,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            tokenizer_func=lambda x: tokenizer(x, padding='longest', return_tensors='pt'),
+        )
+
+        from medvqa.datasets.text_data_utils import parse_facts
+
+        # Run inference
+        output = [None] * len(sentences)
+        offset = 0
+        with torch.no_grad():
+            for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
+                encoding = batch['encoding']
+                input_ids = encoding['input_ids'].to(self.device)
+                attention_mask = encoding['attention_mask'].to(self.device)
+                max_len = input_ids.shape[1] * 3 # 3x input length
+                output_ids = model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                                                  max_new_tokens=max_len, num_beams=1, early_stopping=True)
+                output_texts_batch = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+                for i, output_text in enumerate(output_texts_batch):
+                    facts = parse_facts(output_text)
+                    facts = [remove_consecutive_repeated_words_from_text(f) for f in facts]
+                    output[offset+i] = facts
+                offset += len(output_texts_batch)
+        assert offset == len(sentences)
+        assert None not in output
+
+        # Return output
+        return output
+    
+    def _aggregate_facts(self, facts_per_sentence):
+        output = []
+        seen = set()
+        for facts in facts_per_sentence:
+            for f in facts:
+                if f not in seen:
+                    seen.add(f)
+                    output.append(f)
+        return output
+
+    def __call__(self, texts, update_cache_on_disk=True):
+        assert isinstance(texts, list)
+        assert isinstance(texts[0], str)
+        sentences_per_text = sentence_tokenize_texts_in_parallel(texts)
+        unique_sentences = []
+        s2i = {}
+        for sentences in sentences_per_text:
+            for s in sentences:
+                if s not in s2i:
+                    s2i[s] = len(unique_sentences)
+                    unique_sentences.append(s)
+        hashes = compute_hashes_in_parallel(unique_sentences)
+        facts_per_sentence = [None] * len(unique_sentences)
+        cache = self.cache
+        sentences_to_process = []
+        for i, s in enumerate(unique_sentences):
+            try:
+                facts_per_sentence[i] = cache[hashes[i]]
+            except KeyError:
+                sentences_to_process.append((s, i)) # (sentence, index)
+        if len(sentences_to_process) > 0:
+            facts_per_sentence_to_process = self._compute_facts([s for s, _ in sentences_to_process])
+            for i, facts in enumerate(facts_per_sentence_to_process):
+                idx = sentences_to_process[i][1]
+                facts_per_sentence[idx] = facts
+                cache[hashes[idx]] = facts # update cache with new facts
+            if update_cache_on_disk:
+                save_pickle(cache, self._cache_path)
+                print(f'Saved updated T5 facts to {self._cache_path}')
+                print(f'New cache size = {len(cache)}')
+        assert None not in facts_per_sentence
+        output = [None] * len(texts)
+        for i, sentences in enumerate(sentences_per_text):
+            output[i] = self._aggregate_facts([facts_per_sentence[s2i[s]] for s in sentences])
+        return output
+    
 class TripletRankingEvaluator:
     def __init__(self, triplets_filepath, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
                  average_token_embeddings=False):
         print(f'Loading triplets from {triplets_filepath}')
         self.triplets_data = get_cached_pickle_file(triplets_filepath)
-        self.embedding_extractor = CachedTextEmbeddingExtractor(
-            model_name=model_name,
-            device=device,
-            model_checkpoint_folder_path=model_checkpoint_folder_path,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            average_token_embeddings=average_token_embeddings,
-        )
+        if model_name == 'CheXbert':
+            from medvqa.metrics.medical.chexbert import CheXbertLabeler            
+            chexbert_labeler =  CheXbertLabeler(device=device)
+            self._get_embeddings_func =chexbert_labeler.get_embeddings
+        else:
+            embedding_extractor = CachedTextEmbeddingExtractor(
+                model_name=model_name,
+                device=device,
+                model_checkpoint_folder_path=model_checkpoint_folder_path,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                average_token_embeddings=average_token_embeddings,
+            )
+            self._get_embeddings_func = embedding_extractor.compute_text_embeddings
 
     def evaluate_triplet_ranking(self, split, category, rule_index):
         assert split in ['train', 'val', 'test']
@@ -383,7 +529,7 @@ class TripletRankingEvaluator:
         anchors = [sentences[i] for i in triplets.T[0]]
         positives = [sentences[i] for i in triplets.T[1]]
         negatives = [sentences[i] for i in triplets.T[2]]
-        embeddings = self.embedding_extractor.compute_text_embeddings(anchors + positives + negatives)
+        embeddings = self._get_embeddings_func(anchors + positives + negatives)
         A = embeddings[:len(anchors)]
         P = embeddings[len(anchors):len(anchors)+len(positives)]
         N = embeddings[len(anchors)+len(positives):]
@@ -411,7 +557,7 @@ class TripletRankingEvaluator:
                 split_idxs.update(triplets.flatten())
         split_idxs = sorted(list(split_idxs))
         split_sentences = [sentences[i] for i in split_idxs]
-        split_embeddings = self.embedding_extractor.compute_text_embeddings(split_sentences)
+        split_embeddings = self._get_embeddings_func(split_sentences)
         split_embeddings /= np.linalg.norm(split_embeddings, axis=1, keepdims=True) # Normalize embeddings
         idx2i = { idx:i for i,idx in enumerate(split_idxs) }
         assert len(idx2i) == len(split_idxs)

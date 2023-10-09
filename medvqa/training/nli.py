@@ -51,7 +51,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, nli_cri
                     losses.append(nli_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
         output = {

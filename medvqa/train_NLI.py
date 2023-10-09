@@ -57,6 +57,7 @@ def parse_args(args=None):
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--integrated_sentence_facts_jsonl_filepath', type=str, default=None)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -213,6 +214,7 @@ def train_from_scratch(
     use_amp,
     iters_to_accumulate,
     integrated_nli_jsonl_filepath,
+    integrated_sentence_facts_jsonl_filepath,
     # Variable traning args
     epochs,
     batches_per_epoch,
@@ -247,6 +249,7 @@ def train_from_scratch(
     
     nli_trainer_kwargs = dict(
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
+        integrated_sentence_facts_jsonl_filepath=integrated_sentence_facts_jsonl_filepath,
         merged=merged_input,
     )
 

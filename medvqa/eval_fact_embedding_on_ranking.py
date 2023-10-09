@@ -5,15 +5,10 @@ import numpy as np
 from nltk import sent_tokenize
 from tqdm import tqdm
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging import print_magenta, print_orange
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
-from medvqa.utils.files import (
-    get_checkpoint_folder_path,
-    get_results_folder_path,
-    load_json, load_pickle,
-    save_pickle,
-)
+from medvqa.utils.files import load_json, load_pickle, save_pickle
 from medvqa.utils.math import (
     rank_vectors_by_dot_product,
     rank_vectors_by_euclidean_distance,
@@ -22,28 +17,22 @@ from medvqa.utils.metrics import jaccard_between_dicts
 
 class _EvaluationModes:
     MIMICCXR_RADIOLOGIST_ANNOTATIONS = 'mimiccxr_radiologist_annotations'
-    IUXRAY_CHEXPERT_LABELER = 'iuxray_chexpert_labeler'
-    IUXRAY_CHEXBERT_LABELER = 'iuxray_chexbert_labeler'
-    IUXRAY_RADGRAPH_LABELER = 'iuxray_radgraph_labeler'
+    IUXRAY_WITH_AUTOMATIC_LABELERS = 'iuxray_with_automatic_labelers' # chexpert + chexbert + radgraph
     @staticmethod
     def get_all():
         return [
             _EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS,
-            _EvaluationModes.IUXRAY_CHEXPERT_LABELER,
-            _EvaluationModes.IUXRAY_CHEXBERT_LABELER,
-            _EvaluationModes.IUXRAY_RADGRAPH_LABELER,
+            _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS,
         ]
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--evaluation_mode', type=str, required=True, choices=_EvaluationModes.get_all())
-    parser.add_argument('--method', type=str, required=True, choices=['oracle'] + SupportedHuggingfaceMedicalBERTModels.get_all())
-    parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU'])
+    parser.add_argument('--model_name', type=str, required=True, choices=SupportedHuggingfaceMedicalBERTModels.get_all() + ['CheXbert'])
+    parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU', 'cuda'])
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--model_checkpoint_folder_path', type=str, default=None)
-    parser.add_argument('--top_k', type=int, default=10)
-    parser.add_argument('--save_embeddings', action='store_true', default=False)
     parser.add_argument('--distance_metric', type=str, default='cosine', choices=['cosine', 'euclidean', 'dot_product'])
     parser.add_argument('--average_token_embeddings', action='store_true', default=False)
     return parser.parse_args(args=args)
@@ -99,115 +88,129 @@ def _load_iuxray_sentences():
     print(f'Longest sentence: {sentences[-1]}')
     return sentences
 
-def _load_iuxray_sentences_and_chexpert_labels():
-    save_path = os.path.join(CACHE_DIR, 'iuxray_sentences_and_chexpert_labels.pkl')
+def _load_mimiccxr_sentences_and_radiologist_based_relevant_sentences():
+    save_path = os.path.join(CACHE_DIR, 'mimiccxr_sentences_and_relevant.pkl')
     if os.path.exists(save_path):
-        print(f'Loading iuxray sentences and chexpert labels from {save_path}')
+        print(f'Loading mimiccxr sentences and relevant sentences from {save_path}')
+        return load_pickle(save_path)
+    
+    sentences, labels = _load_mimiccxr_radiologist_annotations()
+    n = len(sentences)
+    relevant_sentences = [set() for _ in range(n)]
+
+    def _a_entails_b(a, b):
+        for i in range(len(b)):
+            if b[i] == -2: # nan
+                continue
+            if a[i] != b[i]:
+                return False
+        return True
+
+    for i in tqdm(range(n), mininterval=2):
+        for j in range(i+1, n):
+            if _a_entails_b(labels[i], labels[j]) or _a_entails_b(labels[j], labels[i]):
+                relevant_sentences[i].add(j)
+                relevant_sentences[j].add(i)
+
+    print(f'Saving mimiccxr sentences and relevant sentences to {save_path}')
+    output = {
+        'sentences': sentences,
+        'relevant_sentences': relevant_sentences,
+    }
+    save_pickle(output, save_path)
+    return output
+
+def _load_iuxray_sentences_and_automatic_labeler_based_relevant_sentences(thr1=0.4, thr2=0.2):
+    save_path = os.path.join(CACHE_DIR, f'iuxray_sentences_and_relevant(thr1={thr1},thr2={thr2}).pkl')
+    if os.path.exists(save_path):
+        print(f'Loading iuxray sentences and relevant sentences from {save_path}')
         return load_pickle(save_path)
 
     sentences = _load_iuxray_sentences()
 
-    print('Loading Chexpert labeler')
+    print('Loading CheXpert labeler')
     from medvqa.metrics.medical.chexpert import ChexpertLabeler
     chexpert_labeler = ChexpertLabeler()
-    labels = chexpert_labeler.get_labels(sentences, update_cache_on_disk=True)
-    output = {
-        'sentences': sentences,
-        'labels': labels,
-    }
-    print(f'Saving iuxray sentences and chexpert labels to {save_path}')
-    save_pickle(output, save_path)
-    return output
+    chexpert_labels = chexpert_labeler.get_labels(sentences, update_cache_on_disk=True)
 
-def _load_iuxray_sentences_and_chexbert_labels():
-    save_path = os.path.join(CACHE_DIR, 'iuxray_sentences_and_chexbert_labels.pkl')
-    if os.path.exists(save_path):
-        print(f'Loading iuxray sentences and chexbert labels from {save_path}')
-        return load_pickle(save_path)
-
-    sentences = _load_iuxray_sentences()
-    
     print('Loading CheXbert labeler')
     from medvqa.metrics.medical.chexbert import CheXbertLabeler
-    chexbert_labeler = CheXbertLabeler(verbose=True)
-    labels = chexbert_labeler.get_labels(sentences, update_cache_on_disk=True)
-    output = {
-        'sentences': sentences,
-        'labels': labels,
-    }
-    print(f'Saving iuxray sentences and chexpert labels to {save_path}')
-    save_pickle(output, save_path)
-    return output
+    chexbert_labeler = CheXbertLabeler()
+    chexbert_labels = chexbert_labeler.get_labels(sentences, update_cache_on_disk=True)
 
-def _load_iuxray_sentences_and_radgraph_labels():
-    save_path = os.path.join(CACHE_DIR, 'iuxray_sentences_and_radgraph_labels.pkl')
-    if os.path.exists(save_path):
-        print(f'Loading iuxray sentences and radgraph labels from {save_path}')
-        return load_pickle(save_path)
-
-    sentences = _load_iuxray_sentences()
-    
     print('Loading RadGraph labeler')
     from medvqa.metrics.medical.radgraph import RadGraphLabeler
-    radgraph_labeler = RadGraphLabeler(verbose=True)
-    labels = radgraph_labeler.get_labels(sentences, update_cache_on_disk=True)
+    radgraph_labeler = RadGraphLabeler()
+    radgraph_labels = radgraph_labeler.get_labels(sentences, update_cache_on_disk=True)
+
+    # Obtain relevant sentences for each sentence
+    relevant_sentences = [set() for _ in range(len(sentences))]
+    for i in tqdm(range(len(sentences)), mininterval=2):
+        if len(radgraph_labels[i]) == 0: # Skip sentences without any radgraph labels
+            continue
+        for j in range(i+1, len(sentences)):
+            js = jaccard_between_dicts(radgraph_labels[i], radgraph_labels[j])
+            if js >= thr1 or (js >= thr2 and (np.all(chexpert_labels[i] == chexpert_labels[j]) or \
+                np.all(chexbert_labels[i] == chexbert_labels[j]))):
+                relevant_sentences[i].add(j)
+                relevant_sentences[j].add(i)
+    print(f'Saving iuxray sentences and relevant sentences to {save_path}')
     output = {
         'sentences': sentences,
-        'labels': labels,
+        'relevant_sentences': relevant_sentences,
     }
-    print(f'Saving iuxray sentences and radgraph labels to {save_path}')
     save_pickle(output, save_path)
     return output
+
+def _compute_AUC(sorted_idxs, relevant_idxs, query_idx):
+    # Compute AUC
+    assert query_idx not in sorted_idxs
+    assert query_idx not in relevant_idxs
+    assert len(relevant_idxs) > 0
+    assert len(sorted_idxs) > len(relevant_idxs)
+    n_relevant = len(relevant_idxs)
+    n_irrelevant = len(sorted_idxs) - n_relevant
+    n_pairs = n_relevant * n_irrelevant
+    n_wrong_pairs = 0
+    n_irrelevant_below = 0
+    relevant_found = 0
+    for idx in sorted_idxs:
+        if idx in relevant_idxs:
+            n_wrong_pairs += n_irrelevant_below
+            relevant_found += 1
+        else:
+            n_irrelevant_below += 1
+    assert relevant_found == n_relevant
+    AUC = 1 - (n_wrong_pairs / n_pairs)
+    return AUC
 
 def evaluate(
     evaluation_mode,
-    method,
+    model_name,
     device,
     batch_size,
     num_workers,
     model_checkpoint_folder_path,
-    top_k,
-    save_embeddings,
     distance_metric,
     average_token_embeddings,
 ):
-    use_accuracy = False
-    use_jaccard = False
     if evaluation_mode == _EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS:
-        sentences, labels = _load_mimiccxr_radiologist_annotations()
-        dataset_name = 'mimiccxr_rad_annotations'
-        use_accuracy = True
-    elif evaluation_mode == _EvaluationModes.IUXRAY_CHEXPERT_LABELER:
-        tmp = _load_iuxray_sentences_and_chexpert_labels()
-        sentences, labels = tmp['sentences'], tmp['labels']
-        dataset_name = 'iuxray_chexpert_labeler'
-        use_accuracy = True
-    elif evaluation_mode == _EvaluationModes.IUXRAY_CHEXBERT_LABELER:
-        tmp = _load_iuxray_sentences_and_chexbert_labels()
-        sentences, labels = tmp['sentences'], tmp['labels']
-        dataset_name = 'iuxray_chexbert_labeler'
-        use_accuracy = True
-    elif evaluation_mode == _EvaluationModes.IUXRAY_RADGRAPH_LABELER:
-        tmp = _load_iuxray_sentences_and_radgraph_labels()
-        sentences, labels = tmp['sentences'], tmp['labels']
-        dataset_name = 'iuxray_radgraph'
-        use_jaccard = True
+        tmp = _load_mimiccxr_sentences_and_radiologist_based_relevant_sentences()
+        sentences, relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
+    elif evaluation_mode == _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS:
+        tmp = _load_iuxray_sentences_and_automatic_labeler_based_relevant_sentences()
+        sentences, relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
     else:
         raise ValueError(f'Invalid evaluation_mode: {evaluation_mode}')
-    assert sum([use_accuracy, use_jaccard]) == 1 # Only one metric can be used at a time
     
     n = len(sentences)
     print('len(sentences):', len(sentences))
-    print('len(labels):', len(labels))
-
-    if top_k > n:
-        print_orange(f'WARNING: top_k ({top_k}) is greater than the number of sentences ({n}). Setting top_k to {n}.', bold=True)
-        top_k = n
+    print('len(relevant_sentences):', len(relevant_sentences))
     
-    if method in SupportedHuggingfaceMedicalBERTModels.get_all():
-        # Obtain embeddings for each sentence
+    # Obtain embeddings for each sentence
+    if model_name in SupportedHuggingfaceMedicalBERTModels.get_all():
         embedding_extractor = CachedTextEmbeddingExtractor(
-            model_name=method,
+            model_name=model_name,
             device=device,
             model_checkpoint_folder_path=model_checkpoint_folder_path,
             batch_size=batch_size,
@@ -215,120 +218,88 @@ def evaluate(
             average_token_embeddings=average_token_embeddings,
         )
         embeddings = embedding_extractor.compute_text_embeddings(sentences)
-        print('Embeddings shape:', embeddings.shape)
-        assert embeddings.shape[0] == n
-
-        average_token_embeddings_str = ',avgtok' if average_token_embeddings else ''
-        
-        # Define results folder path
-        if model_checkpoint_folder_path is not None:
-            results_folder_path = get_results_folder_path(model_checkpoint_folder_path)
-        else:
-            results_folder_path = get_results_folder_path(get_checkpoint_folder_path('fact_embedding', dataset_name, method))
-
-        rank_vectors_func = None
-        if distance_metric == 'cosine':
-            print('Normalizing embeddings (for cosine similarity)')
-            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
-            rank_vectors_func = rank_vectors_by_dot_product # Cosine similarity is equivalent to dot product when embeddings are normalized
-        elif distance_metric == 'euclidean':
-            rank_vectors_func = rank_vectors_by_euclidean_distance
-        elif distance_metric == 'dot_product':
-            rank_vectors_func = rank_vectors_by_dot_product
-        else:
-            raise ValueError(f'Invalid distance_metric: {distance_metric}')
-        
-        # Evaluate embeddings on ranking
-        if use_accuracy:
-            mean_average_accuracy_up_to = [0] * top_k
-            for i in tqdm(range(n), mininterval=2):
-                sorted_idxs = rank_vectors_func(embeddings, embeddings[i])
-                accsum = 0
-                for k in range(top_k):
-                    accsum += np.mean(labels[i] == labels[sorted_idxs[k]])
-                    mean_average_accuracy_up_to[k] += accsum / (k + 1)
-            for k in range(top_k):
-                mean_average_accuracy_up_to[k] /= n
-            metrics_to_save = mean_average_accuracy_up_to
-            metrics_save_path = os.path.join(results_folder_path,
-                                             f'mean_average_accuracy_up_to_{top_k}({dataset_name},{distance_metric}{average_token_embeddings_str}).pkl')
-        elif use_jaccard:
-            mean_average_jaccard_up_to = [0] * top_k
-            for i in tqdm(range(n), mininterval=2):
-                sorted_idxs = rank_vectors_func(embeddings, embeddings[i])
-                accsum = 0
-                li = labels[i]
-                for k in range(top_k):
-                    accsum += jaccard_between_dicts(li, labels[sorted_idxs[k]])
-                    mean_average_jaccard_up_to[k] += accsum / (k + 1)
-            for k in range(top_k):
-                mean_average_jaccard_up_to[k] /= n
-            metrics_to_save = mean_average_jaccard_up_to
-            metrics_save_path = os.path.join(results_folder_path,
-                                             f'mean_average_jaccard_up_to_{top_k}({dataset_name},{distance_metric}{average_token_embeddings_str}).pkl')
-        else: assert False
-
-        if save_embeddings:
-            embeddings_save_path = os.path.join(results_folder_path, f'embeddings({dataset_name}{average_token_embeddings_str}).pkl')
-            if os.path.exists(embeddings_save_path):
-                print_orange(f'WARNING: embeddings save path {embeddings_save_path} already exists. Skipping.', bold=True)
-            else:
-                print(f'Saving embeddings to {embeddings_save_path}')
-                save_pickle({
-                    'sentences': sentences,
-                    'embeddings': embeddings,
-                }, embeddings_save_path)
-
-    elif method == 'oracle':
-
-        # Define results folder path
-        results_folder_path = get_results_folder_path(get_checkpoint_folder_path('fact_embedding', dataset_name, 'oracle'))
-        
-        # Evaluate oracle on ranking
-        if use_accuracy:
-            mean_average_accuracy_up_to = [0] * top_k
-            for i in tqdm(range(n), mininterval=2):
-                # Sort labels by accuracy
-                sorted_idxs = np.argsort(np.mean(labels == labels[i], axis=1))[::-1]
-                accsum = 0
-                for k in range(top_k):
-                    accsum += np.mean(labels[i] == labels[sorted_idxs[k]])
-                    mean_average_accuracy_up_to[k] += accsum / (k + 1)
-            for k in range(top_k):
-                mean_average_accuracy_up_to[k] /= n
-            metrics_to_save = mean_average_accuracy_up_to
-            metrics_save_path = os.path.join(results_folder_path, f'mean_average_accuracy_up_to_{top_k}({dataset_name}).pkl')
-        elif use_jaccard:
-            mean_average_jaccard_up_to = [0] * top_k
-            for i in tqdm(range(n), mininterval=2):
-                # Sort labels by f1 score
-                sorted_idxs = np.argsort([jaccard_between_dicts(labels[i], labels[j]) for j in range(n)])[::-1]
-                accsum = 0
-                for k in range(top_k):
-                    accsum += jaccard_between_dicts(labels[i], labels[sorted_idxs[k]])
-                    mean_average_jaccard_up_to[k] += accsum / (k + 1)
-            for k in range(top_k):
-                mean_average_jaccard_up_to[k] /= n
-            metrics_to_save = mean_average_jaccard_up_to
-            metrics_save_path = os.path.join(results_folder_path, f'mean_average_jaccard_up_to_{top_k}({dataset_name}).pkl')
-        else: assert False
-        
-        if save_embeddings: # Save labels as embeddings in the case of oracle
-            labels_save_path = os.path.join(results_folder_path, 'labels.pkl')
-            if os.path.exists(labels_save_path):
-                print_orange(f'WARNING: labels save path {labels_save_path} already exists. Skipping.', bold=True)
-            else:
-                print(f'Saving labels to {labels_save_path}')
-                save_pickle({
-                    'sentences': sentences,
-                    'labels': labels,
-                }, labels_save_path)
-
+    elif model_name == 'CheXbert':
+        from medvqa.metrics.medical.chexbert import CheXbertLabeler
+        chexbert_labeler = CheXbertLabeler(device=device)
+        embeddings = chexbert_labeler.get_embeddings(sentences)
     else:
-        raise ValueError(f'Invalid method: {method}')
+        raise ValueError(f'Invalid model_name: {model_name}')
+    print('Embeddings shape:', embeddings.shape)
+    assert embeddings.shape[0] == n
+
+    rank_vectors_func = None
+    if distance_metric == 'cosine':
+        print('Normalizing embeddings (for cosine similarity)')
+        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
+        rank_vectors_func = rank_vectors_by_dot_product # Cosine similarity is equivalent to dot product when embeddings are normalized
+    elif distance_metric == 'euclidean':
+        rank_vectors_func = rank_vectors_by_euclidean_distance
+    elif distance_metric == 'dot_product':
+        rank_vectors_func = rank_vectors_by_dot_product
+    else:
+        raise ValueError(f'Invalid distance_metric: {distance_metric}')
     
-    print(f'Saving metrics to {metrics_save_path}')
-    save_pickle(metrics_to_save, metrics_save_path)
+    # Evaluate embeddings on ranking task with each sentence as query
+    print_orange('Evaluating embeddings on ranking task with each sentence as query', bold=True)
+    mean_AUC = 0
+    mean_relevant = 0
+    count = 0
+    for i in tqdm(range(n), mininterval=2):
+        relevant_idxs = relevant_sentences[i]
+        if len(relevant_idxs) == 0:
+            continue
+        sorted_idxs = rank_vectors_func(embeddings, embeddings[i])
+        sorted_idxs = [idx for idx in sorted_idxs if idx != i] # Remove query_idx
+        AUC = _compute_AUC(sorted_idxs, relevant_idxs, query_idx=i)
+        mean_AUC += AUC
+        mean_relevant += len(relevant_idxs)
+        count += 1
+    mean_AUC /= count
+    mean_relevant /= count
+    print_magenta(f'mean_AUC: {mean_AUC:.4f}', bold=True)
+    print(f'mean_relevant: {mean_relevant:.4f}')
+    print(f'count: {count} / {n} ({100 * count / n:.2f}%)')
+
+class SentenceRanker:
+    def __init__(self, dataset_name):
+        assert dataset_name in _EvaluationModes.get_all()
+        if dataset_name == _EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS:
+            tmp = _load_mimiccxr_sentences_and_radiologist_based_relevant_sentences()
+            self.sentences, self.relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
+        elif dataset_name == _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS:
+            tmp = _load_iuxray_sentences_and_automatic_labeler_based_relevant_sentences()
+            self.sentences, self.relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
+        else:
+            raise ValueError(f'Invalid dataset_name: {dataset_name}')
+        self.cache = {}
+    
+    def rank_sentences(self, query_idx, model_name, checkpoint_folder_path=None, average_token_embeddings=False,
+                       top_k=10, batch_size=32, num_workers=4):
+        assert isinstance(average_token_embeddings, bool)
+        assert top_k > 0
+        assert top_k <= len(self.sentences)
+        assert 0 <= query_idx < len(self.sentences)
+        if checkpoint_folder_path is None:
+            key = (model_name, average_token_embeddings)
+        else:
+            key = (model_name, checkpoint_folder_path, average_token_embeddings)
+        try:
+            embedding_extractor = self.cache[key]
+        except KeyError:
+            embedding_extractor = self.cache[key] = CachedTextEmbeddingExtractor(
+                model_name=model_name,
+                device='GPU',
+                model_checkpoint_folder_path=checkpoint_folder_path,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                average_token_embeddings=average_token_embeddings,
+            )
+        embeddings = embedding_extractor.compute_text_embeddings(self.sentences)
+        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        sorted_idxs = rank_vectors_by_dot_product(embeddings, embeddings[query_idx])
+        sorted_sentences = [self.sentences[i] for i in sorted_idxs[:top_k]]
+        is_relevant = [1 if i in self.relevant_sentences[query_idx] else 0 for i in sorted_idxs[:top_k]]
+        return sorted_sentences, is_relevant
 
 if __name__ == '__main__':
     args = parse_args()

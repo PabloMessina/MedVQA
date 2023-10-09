@@ -1,7 +1,10 @@
 import os
+import torch
+import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from f1chexbert import F1CheXbert
+from f1chexbert.f1chexbert import tokenize, generate_attention_masks
 from nltk.tokenize import sent_tokenize
 from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.constants import CHEXBERT_LABELS
@@ -68,3 +71,18 @@ class CheXbertLabeler(F1CheXbert):
             print('All labels found in cache, no need to invoke chexbert labeler')
         
         return np.array(output_labels)
+    
+    def get_embedding(self, text):
+        assert type(text) == str
+        text = pd.Series([text])
+        out = tokenize(text, self.tokenizer)
+        batch = torch.LongTensor([o for o in out])
+        src_len = [b.shape[0] for b in batch]
+        attn_mask = generate_attention_masks(batch, src_len, self.device)
+        final_hidden = self.model.bert(batch.to(self.device), attention_mask=attn_mask)[0]
+        cls_hidden = final_hidden[:, 0, :].squeeze(dim=1)
+        return cls_hidden.cpu().detach().numpy().squeeze()
+    
+    def get_embeddings(self, texts):
+        assert type(texts) == list or type(texts) == np.ndarray
+        return np.array([self.get_embedding(text) for text in tqdm(texts, mininterval=2)])
