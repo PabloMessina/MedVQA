@@ -78,9 +78,11 @@ def main():
         report['background'] = row['background']
         report['findings'] = row['findings']
         report['impression'] = row['impression']
-        report['sentence_idxs'] = []
-        report['fact_idxs'] = []
-        for x in (row['findings'], row['impression']):
+        report['findings_sentence_idxs'] = []
+        report['findings_fact_idxs'] = []
+        report['impression_sentence_idxs'] = []
+        report['impression_fact_idxs'] = []
+        for x, name in zip((row['findings'], row['impression']), ('findings', 'impression')):
             if x:
                 for s in sent_tokenize(x):
                     try:
@@ -89,7 +91,7 @@ def main():
                         s_idx = len(sentences)
                         sentences.append(s)
                         sentence2idx[s] = s_idx
-                    report['sentence_idxs'].append(s_idx)
+                    report[f'{name}_sentence_idxs'].append(s_idx)
                     for f in sentence2facts[s]:
                         try:
                             f_idx = fact2idx[f]
@@ -97,8 +99,12 @@ def main():
                             f_idx = len(facts)
                             facts.append(f)
                             fact2idx[f] = f_idx
-                        report['fact_idxs'].append(f_idx)
+                        report[f'{name}_fact_idxs'].append(f_idx)
         report['cluster_based_labels'] = [label_id_2_idx[x] for x in cblpr['labeled_reports'][i]['labels']]
+    
+    sentence_fact_idxs = []
+    for s in sentences:
+        sentence_fact_idxs.append([fact2idx[f] for f in sentence2facts[s]])
     
     # Obtain embeddings for each sentence
     print_bold('Obtaining embeddings for each sentence...')
@@ -197,6 +203,7 @@ def main():
         'sentences': sentences,
         'sentence_embeddings': sentence_embeddings,
         'sentence_cluster_ids': sentence_cluster_ids,
+        'sentence_fact_idxs': sentence_fact_idxs,
         'facts': facts,
         'fact_embeddings': fact_embeddings,
         'fact_cluster_ids': fact_cluster_ids,

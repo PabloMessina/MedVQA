@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import random
 import math
@@ -9,8 +10,10 @@ from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PAT
 from medvqa.datasets.nli.nli_dataset_management import EntailmentContradictionDataset, NLIDataset
 from medvqa.datasets.radgraph import RADGRAPH_CONLLFORMAT_DEV_JSON_PATH, RADGRAPH_CONLLFORMAT_TEST_JSON_PATH, RADGRAPH_CONLLFORMAT_TRAIN_JSON_PATH, RADGRAPH_CONLLFORMAT_TYPES_JSON_PATH
 from medvqa.datasets.radgraph.spert_dataset import JsonInputReader, collate_fn_padding as spert_collate_fn_padding
-from medvqa.utils.common import DictWithDefault
-from medvqa.utils.files import get_cached_pickle_file, load_jsonl, load_pickle
+from medvqa.datasets.tokenizer import BasicTokenizer
+from medvqa.utils.common import CACHE_DIR, DictWithDefault
+from medvqa.utils.files import get_cached_pickle_file, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.hashing import hash_string
 from medvqa.utils.logging import print_bold, print_magenta
 
 _GROUP_NAME_TO_SHORT = {
@@ -151,6 +154,32 @@ class ChestImaGenomeLabelsClassificationDataset(Dataset):
             'l': self.labels[idx],
         }
         return output
+    
+class SentenceAutoencoderDataset(Dataset):
+    def __init__(self, indices, sentences, sentence_ids, shuffle=False, infinite=False):
+        self.sentences = sentences
+        self.sentence_ids = sentence_ids
+        self.indices = indices
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+        if shuffle:
+            random.shuffle(self.indices)
+
+    def __len__(self):
+        return self._len
+    
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
+        idx = self.indices[i]
+        output = {
+            's': self.sentences[idx],
+            'ids': self.sentence_ids[idx],
+        }
+        return output
 
 class FactEmbeddingTrainer():
 
@@ -184,7 +213,11 @@ class FactEmbeddingTrainer():
                  # RadGraph NER and RE arguments
                  use_radgraph_ner_re,
                  radgraph_spert_batch_size,
-                 tokenizer=None,
+                 tokenizer,
+                 # Sentence autoencoder arguments
+                 use_sentence_autoencoder,
+                 sentence_autoencoder_collate_batch_fn,
+                 sentences_and_cluster_ids_filepath,
                  ):
         
         assert dataset_name, 'dataset_name must be provided'
@@ -668,6 +701,8 @@ class FactEmbeddingTrainer():
                     print(self.val_entcon_dataset[i])
 
         if use_radgraph_ner_re:
+            print('----')
+            print_bold('Building RadGraph NER and RE dataset and dataloader...')
             # Create RadGraph NER and RE train dataset and dataloader
             assert tokenizer, 'tokenizer must be provided'
             input_reader = JsonInputReader(
@@ -697,6 +732,71 @@ class FactEmbeddingTrainer():
                 drop_last=True,
                 num_workers=num_workers,
                 collate_fn=_collate_fn,
+            )
+
+        if use_sentence_autoencoder:
+            print('----')
+            print_bold('Building sentence autoencoder train/val dataset and dataloader...')
+            assert sentences_and_cluster_ids_filepath, 'sentences_and_cluster_ids_filepath must be provided'
+            sentences_and_cluster_ids = load_pickle(sentences_and_cluster_ids_filepath)
+            sentences = sentences_and_cluster_ids['sentences']
+            cluster_ids = sentences_and_cluster_ids['cluster_ids']
+            assert len(sentences) == len(cluster_ids)
+            print(f'Number of sentences: {len(sentences)}')
+            print(f'Number of cluster IDs: {len(cluster_ids)}')
+            c2idxs = {}
+            for i, c in enumerate(cluster_ids):
+                if c not in c2idxs:
+                    c2idxs[c] = []
+                c2idxs[c].append(i)
+            print(f'Number of clusters: {len(c2idxs)}')
+            print(f'Number of sentences in largest cluster: {max(len(x) for x in c2idxs.values())}')
+            print(f'Number of sentences in smallest cluster: {min(len(x) for x in c2idxs.values())}')
+            vocab_filepath = os.path.join(CACHE_DIR, f'fact_decoding_vocab{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            decoder_tokenizer = BasicTokenizer(
+                vocab_filepath=vocab_filepath,
+                texts=sentences,
+                vocab_min_freq=10,
+            )
+            self.sentence_decoder_tokenizer = decoder_tokenizer
+            print(f'Number of tokens in vocab: {decoder_tokenizer.vocab_size}')
+            sentence_ids_filepath = os.path.join(CACHE_DIR, f'sentence_ids{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            if os.path.exists(sentence_ids_filepath):
+                print('Loading sentence IDs from cache...')
+                sentence_ids = load_pickle(sentence_ids_filepath)
+            else:
+                print('Converting sentences to IDs in parallel...')
+                sentence_ids = decoder_tokenizer.batch_string2ids(sentences, in_parallel=True)
+                print('Saving sentence IDs to cache...')
+                save_pickle(sentence_ids, sentence_ids_filepath)
+            _val_idxs = []
+            _train_datasets = []
+            for idxs in c2idxs.values():
+                # choose 5 random sentences from each cluster for validation
+                sampled_idxs = random.sample(idxs, min(5, len(idxs)))
+                _val_idxs.extend(sampled_idxs)
+                sampled_idxs = set(sampled_idxs)
+                _train_idxs = [i for i in idxs if i not in sampled_idxs]
+                _train_datasets.append(SentenceAutoencoderDataset(_train_idxs, sentences, sentence_ids, shuffle=True, infinite=True))
+            print(f'Number of validation samples: {len(_val_idxs)}')
+            print(f'Number of training samples: {len(sentences) - len(_val_idxs)}')
+            self.train_sentence_autoencoder_dataset = CompositeInfiniteDataset(_train_datasets, [1] * len(_train_datasets))
+            self.train_sentence_autoencoder_dataloader = DataLoader(
+                self.train_sentence_autoencoder_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=sentence_autoencoder_collate_batch_fn,
+                pin_memory=True,
+            )
+            self.val_sentence_autoencoder_dataset = SentenceAutoencoderDataset(_val_idxs, sentences, sentence_ids, shuffle=False, infinite=False)
+            self.val_sentence_autoencoder_dataloader = DataLoader(
+                self.val_sentence_autoencoder_dataset,
+                batch_size=val_batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=sentence_autoencoder_collate_batch_fn,
+                pin_memory=True,
             )
 
         if use_triplets or use_triplets_val:

@@ -1,7 +1,7 @@
 import re
 import json
 from torch.utils.data import Dataset, DataLoader
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize, wordpunct_tokenize
 
 class TextDataset(Dataset):
     def __init__(self, texts):
@@ -74,6 +74,16 @@ def sentence_tokenize_texts_in_parallel(texts, num_workers=None):
     with mp.Pool(num_workers) as pool:
         sentences = pool.map(sent_tokenize, texts)
     return sentences
+
+def wordpunct_tokenize_texts_in_parallel(texts, num_workers=None):
+    import multiprocessing as mp
+    if num_workers is None:
+        num_workers = mp.cpu_count()
+    else:
+        num_workers = min(num_workers, mp.cpu_count())
+    with mp.Pool(num_workers) as pool:
+        tokens = pool.map(wordpunct_tokenize, texts)
+    return tokens
 
 _COMMA_SEPARATED_LIST_REGEX = re.compile(r'\[\s*(\".+?\"(\s*,\s*\".+?\")*)?\s*\]?')
 

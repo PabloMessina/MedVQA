@@ -28,6 +28,8 @@ from medvqa.utils.logging import print_bold, print_red
 INFINITE_DATASET_LENGTH = int(1e18)
 
 def _get_balancedly_distributed_class_indices(class_weights):
+    if all(w == class_weights[0] for w in class_weights):
+        return np.arange(len(class_weights), dtype=int) # all classes have the same weight
     w_sum = sum(class_weights)
     ws = [w / w_sum for w in class_weights]
     w_min = min(ws)
@@ -756,13 +758,15 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
                                         for_metadata_classification=False,
                                         for_chest_imagenome_observation_classification=False,
                                         for_chest_imagenome_anatomical_location_classification=False,
-                                        for_nli=False, for_entcon=False):
+                                        for_nli=False, for_entcon=False,
+                                        for_sentence_autoencoder=False,
+                                        ):
 
     assert sum([for_triplet_ranking,
                 for_metadata_classification,
                 for_chest_imagenome_observation_classification,
                 for_chest_imagenome_anatomical_location_classification,
-                for_nli, for_entcon]) == 1 # only one of these should be true
+                for_nli, for_entcon, for_sentence_autoencoder]) == 1 # only one of these should be true
     
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
@@ -836,6 +840,16 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict['tokenized_ent_h'] = tokenizer([x['ent_h'] for x in batch], padding="longest", return_tensors="pt")
             batch_dict['tokenized_con_p'] = tokenizer([x['con_p'] for x in batch], padding="longest", return_tensors="pt")
             batch_dict['tokenized_con_h'] = tokenizer([x['con_h'] for x in batch], padding="longest", return_tensors="pt")
+            return batch_dict
+    elif for_sentence_autoencoder:
+        def collate_batch_fn(batch):
+            batch_dict = dict(flag='sae')
+            batch_dict['tokenized_sentences'] = tokenizer([x['s'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['decoder_ids'] = nn.utils.rnn.pad_sequence(
+                        sequences = [torch.tensor(x['ids']) for x in batch],
+                        batch_first=True,
+                        padding_value=0,
+                    )
             return batch_dict
     else: assert False
     

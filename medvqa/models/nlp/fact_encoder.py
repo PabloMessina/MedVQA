@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel
 from medvqa.models.common import freeze_parameters
+from medvqa.models.nlp.text_decoder import TransformerTextDecoder
 
 from medvqa.utils.logging import print_orange
 
@@ -107,6 +108,15 @@ class FactEncoder(nn.Module):
                  spert_max_pairs=None,
                  spert_prop_drop=None,
                  spert_cls_token=None,
+                 use_fact_decoder=False,
+                 fact_decoder_embed_size=None,
+                 fact_decoder_hidden_size=None,
+                 fact_decoder_nhead=None,
+                 fact_decoder_dim_feedforward=None,
+                 fact_decoder_num_layers=None,
+                 fact_decoder_start_idx=None,
+                 fact_decoder_vocab_size=None,
+                 fact_decoder_dropout_prob=0,
                  **unused_kwargs):
         super().__init__()
         print('Fact encoder')
@@ -133,6 +143,15 @@ class FactEncoder(nn.Module):
         print(f'  spert_max_pairs: {spert_max_pairs}')
         print(f'  spert_prop_drop: {spert_prop_drop}')
         print(f'  spert_cls_token: {spert_cls_token}')
+        print(f'  use_fact_decoder: {use_fact_decoder}')
+        print(f'  fact_decoder_embed_size: {fact_decoder_embed_size}')
+        print(f'  fact_decoder_hidden_size: {fact_decoder_hidden_size}')
+        print(f'  fact_decoder_nhead: {fact_decoder_nhead}')
+        print(f'  fact_decoder_dim_feedforward: {fact_decoder_dim_feedforward}')
+        print(f'  fact_decoder_num_layers: {fact_decoder_num_layers}')
+        print(f'  fact_decoder_start_idx: {fact_decoder_start_idx}')
+        print(f'  fact_decoder_vocab_size: {fact_decoder_vocab_size}')
+        print(f'  fact_decoder_dropout_prob: {fact_decoder_dropout_prob}')
 
         if len(unused_kwargs) > 0:
             print_orange(f'WARNING: unused_kwargs: {unused_kwargs}', bold=True)
@@ -165,6 +184,8 @@ class FactEncoder(nn.Module):
         self.use_aux_task_hidden_layer = use_aux_task_hidden_layer
         self.do_nli = do_nli
         self.nli_hidden_layer_size = nli_hidden_layer_size
+        self.use_fact_decoder = use_fact_decoder
+        self.fact_decoder_embed_size = fact_decoder_embed_size
         
         # Auxiliary tasks
         if use_aux_task_hidden_layer:
@@ -200,6 +221,35 @@ class FactEncoder(nn.Module):
             self._spert_relation_types = spert_relation_types
             self._spert_entity_types = spert_entity_types
             self._spert_max_pairs = spert_max_pairs
+
+        if use_fact_decoder:
+            assert fact_decoder_embed_size is not None
+            assert fact_decoder_hidden_size is not None
+            assert fact_decoder_nhead is not None
+            assert fact_decoder_dim_feedforward is not None
+            assert fact_decoder_num_layers is not None
+            assert fact_decoder_start_idx is not None
+            assert fact_decoder_vocab_size is not None
+            assert fact_decoder_dropout_prob is not None
+            self.fact_decoder_embedding_table = nn.Embedding(
+                num_embeddings=fact_decoder_vocab_size,
+                embedding_dim=fact_decoder_embed_size,
+                padding_idx=0,
+            )
+            self.fact_decoder = TransformerTextDecoder(
+                embedding_table=self.fact_decoder_embedding_table,
+                embed_size=fact_decoder_embed_size,
+                hidden_size=fact_decoder_hidden_size,
+                nhead=fact_decoder_nhead,
+                dim_feedforward=fact_decoder_dim_feedforward,
+                num_layers=fact_decoder_num_layers,
+                start_idx=fact_decoder_start_idx,
+                vocab_size=fact_decoder_vocab_size,
+                dropout_prob=fact_decoder_dropout_prob,
+                apply_pos_encoding_to_input=False,
+                input_pos_encoding_mode="sinusoidal",
+            )
+            self.fact_decoder_input_layer = nn.Linear(self.embedding_size, fact_decoder_embed_size)
 
     def nli_forward(self, p_input_ids, p_attention_mask, h_input_ids, h_attention_mask):
         p_embeddings = self.model.get_projected_text_embeddings(input_ids=p_input_ids, attention_mask=p_attention_mask)
@@ -397,7 +447,30 @@ class FactEncoder(nn.Module):
         # classify relation candidates
         chunk_rel_logits = self.spert_rel_classifier(rel_repr)
         return chunk_rel_logits
-
+    
+    def fact_decoder_forward_teacher_forcing(self, input_ids, attention_mask, decoder_input_ids):
+        text_embeddings = self.model.get_projected_text_embeddings(input_ids=input_ids, attention_mask=attention_mask)
+        text_embeddings = self.fact_decoder_input_layer(text_embeddings)
+        text_embeddings = text_embeddings.unsqueeze(1) # [batch_size, 1, fact_decoder_embed_size]
+        assert text_embeddings.shape == (input_ids.shape[0], 1, self.fact_decoder_embed_size)
+        decoder_logits = self.fact_decoder.teacher_forcing_decoding(
+            input_memory=text_embeddings,
+            texts=decoder_input_ids,
+            device=input_ids.device,
+        )
+        return decoder_logits
+    
+    def fact_decoder_forward_greedy_decoding(self, input_ids, attention_mask, max_length=100):
+        text_embeddings = self.model.get_projected_text_embeddings(input_ids=input_ids, attention_mask=attention_mask)
+        text_embeddings = self.fact_decoder_input_layer(text_embeddings)
+        text_embeddings = text_embeddings.unsqueeze(1)
+        assert text_embeddings.shape == (input_ids.shape[0], 1, self.fact_decoder_embed_size)
+        decoded_ids = self.fact_decoder.greedy_decoding(
+            input_memory=text_embeddings,
+            max_length=max_length,
+            device=input_ids.device,
+        )
+        return decoded_ids
     
     def get_name(self):
         return f'FactEncoder({self.huggingface_model_name})'

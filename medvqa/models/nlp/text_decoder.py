@@ -40,7 +40,6 @@ class LSTMBasedTextDecoder(nn.Module):
         output = torch.stack(output, 1)
         return output
 
-
 class TransformerTextDecoder(nn.Module):
   
     def __init__(
@@ -87,24 +86,24 @@ class TransformerTextDecoder(nn.Module):
         return mask
     
     def teacher_forcing_decoding(self, input_memory, texts, device, return_input_memory=False):
-        batch_size, max_text_length = texts.shape
-        text_embeddings = self.pos_encoder(self.embedding_table(texts.permute(1,0)))
-        assert text_embeddings.shape == (max_text_length, batch_size, self.embed_size)
-        tgt_mask = self.generate_square_subsequent_mask(max_text_length).to(device)
+        batch_size, max_length = texts.shape
+        word_embeddings = self.pos_encoder(self.embedding_table(texts.permute(1,0)))
+        assert word_embeddings.shape == (max_length, batch_size, self.embed_size)
+        tgt_mask = self.generate_square_subsequent_mask(max_length).to(device)
         input_memory = input_memory.permute(1,0,2)
         if self.apply_pos_encoding_to_input:
             input_memory = self.input_pos_encoder(input_memory)
-        decoded = self.decoder(text_embeddings, input_memory, tgt_mask=tgt_mask)
+        decoded = self.decoder(word_embeddings, input_memory, tgt_mask=tgt_mask)
         vocab_logits = self.W_vocab(decoded)
         vocab_logits = vocab_logits.permute(1, 0, 2)
-        assert vocab_logits.shape == (batch_size, max_text_length, self.vocab_size)
+        assert vocab_logits.shape == (batch_size, max_length, self.vocab_size)
         if return_input_memory:
             return vocab_logits, input_memory.permute(1,0,2)
         else:
             return vocab_logits
 
-    def greedy_search_decoding(self, input_memory, max_text_length, device, return_input_memory=False):
-        # print('DEBUG: greedy_search_decoding')
+    def greedy_decoding(self, input_memory, max_length, device, return_input_memory=False):
+        # print('DEBUG: greedy_decoding')
         batch_size = input_memory.size(0)
         input_memory = input_memory.permute(1,0,2)
         if self.apply_pos_encoding_to_input:
@@ -113,7 +112,7 @@ class TransformerTextDecoder(nn.Module):
         output = []
 
         # generation loop
-        while len(output) < max_text_length:
+        while len(output) < max_length:
             decoded_embedding = self.pos_encoder(self.embedding_table(decoded_tokens))
             tgt_mask = self.generate_square_subsequent_mask(decoded_embedding.size(0)).to(device)
             decoded = self.decoder(decoded_embedding, input_memory, tgt_mask=tgt_mask)
@@ -126,19 +125,19 @@ class TransformerTextDecoder(nn.Module):
             decoded_tokens = torch.cat((decoded_tokens, next_tokens), 0)
 
         output = torch.stack(output, 1)
-        assert output.shape == (batch_size, max_text_length)
+        assert output.shape == (batch_size, max_length)
         if return_input_memory:
             return output, input_memory.permute(1,0,2)
         else:
             return output
 
-    def forward(self, input_memory, device, texts=None, max_text_length=None, mode='train', return_input_memory=False):
+    def forward(self, input_memory, device, texts=None, max_length=None, mode='train', return_input_memory=False):
         if mode == 'train':
             assert texts is not None
             return self.teacher_forcing_decoding(input_memory, texts, device, return_input_memory=return_input_memory)
         else:
-            assert max_text_length is not None
-            return self.greedy_search_decoding(input_memory, max_text_length, device, return_input_memory=return_input_memory)
+            assert max_length is not None
+            return self.greedy_decoding(input_memory, max_length, device, return_input_memory=return_input_memory)
         
     def get_name(self):
         return (f'TransfTextDec({f"posenc({self.input_pos_encoding_mode})," if self.apply_pos_encoding_to_input else ""}'

@@ -219,7 +219,7 @@ class CachedTextEmbeddingExtractor:
         self.average_token_embeddings = average_token_embeddings
         strings = [
             model_name,
-            self.model_checkpoint_filepath or self.model_checkpoint_folder_path or '',
+            self.model_checkpoint_filepath or '',
         ]
         if average_token_embeddings:
             strings.append('average_token_embeddings')

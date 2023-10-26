@@ -1,6 +1,7 @@
 from nltk.tokenize import wordpunct_tokenize
 from tqdm import tqdm
 from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor
+from medvqa.datasets.text_data_utils import wordpunct_tokenize_texts_in_parallel
 from medvqa.utils.files import (
     get_cached_json_file,
     load_pickle,
@@ -12,7 +13,7 @@ from medvqa.datasets.preprocessing import get_sentences
 from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.utils.common import CACHE_DIR
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing import hash_string, hash_string_list
 import os
 import re
 
@@ -189,3 +190,98 @@ class Tokenizer:
             print('batch=',batch)
             raise
         return clean_sentences
+    
+class BasicTokenizer:
+    
+    PAD_TOKEN = '<PAD>'
+    START_TOKEN = '<START>'
+    END_TOKEN = '<END>'
+    
+    def __init__(self, vocab_filepath=None, texts=None, vocab_min_freq=5):
+
+        build_vocab = True
+        if vocab_filepath is not None:
+            if os.path.exists(vocab_filepath):
+                print(f'Loading {vocab_filepath} ...')
+                self.id2token = load_pickle(vocab_filepath)
+                build_vocab = False
+
+        if build_vocab:
+            assert texts is not None
+            assert type(texts) is list
+            print(f'Building vocabulary from {len(texts)} texts ...')
+            token2freq = dict()
+            tokens_per_text = wordpunct_tokenize_texts_in_parallel(texts)
+            for tokens in tokens_per_text:
+                for token in tokens:
+                    token2freq[token] = token2freq.get(token, 0) + 1
+            # filter by frequency
+            filtered_vocab = set(word for word, freq in token2freq.items() if freq >= vocab_min_freq)
+            # sort
+            filtered_vocab = sorted(list(filtered_vocab))
+            self.id2token = [self.PAD_TOKEN, self.START_TOKEN, self.END_TOKEN]
+            self.id2token.extend(filtered_vocab)
+            # save
+            if vocab_filepath is not None:
+                save_pickle(self.id2token, vocab_filepath)
+                print (f'Vocabulary saved to {vocab_filepath}')
+        
+        self.vocab_size = len(self.id2token)
+        print(f'Vocabulary size: {self.vocab_size}')
+        self.token2id = {t:i for i,t in enumerate(self.id2token)}
+        self.vocab = set(self.id2token)
+        self._hash = None
+
+    @property
+    def hash(self):
+        if self._hash is None:
+            self._hash = hash_string_list(self.id2token)
+        return self._hash
+
+    def string2ids(self, s):
+        ids = [self.token2id[self.START_TOKEN]]
+        for token in wordpunct_tokenize(s):
+            try:
+                ids.append(self.token2id[token])
+            except KeyError:
+                pass
+        ids.append(self.token2id[self.END_TOKEN])
+        return ids
+
+    def ids2string(self, ids, remove_special_tokens=False):
+        if remove_special_tokens:
+            ids = self.clean_ids(ids)
+        return ' '.join(self.id2token[i] for i in ids)
+    
+    def batch_string2ids(self, batch, in_parallel=False, num_workers=None):
+        if in_parallel:
+            import multiprocessing
+            if num_workers is None:
+                num_workers = multiprocessing.cpu_count()
+            with multiprocessing.Pool(num_workers) as pool:
+                ids_per_string = pool.map(self.string2ids, batch)
+        else:
+            ids_per_string = [self.string2ids(s) for s in batch]
+        return ids_per_string
+
+    def clean_ids(self, ids):
+        clean_ids = []
+        for id in ids:
+            if not isinstance(id, int):
+                id = id.item()
+            if id == self.token2id[self.END_TOKEN]:
+                break
+            if id >= 3:
+                clean_ids.append(id)
+        return clean_ids
+
+    def clean_string(self, s, remove_special_tokens=False):
+        ids = self.string2ids(s)
+        ids = self.clean_ids(ids)
+        return self.ids2string(ids, remove_special_tokens=remove_special_tokens)
+    
+    def clean_batch(self, batch):
+        clean_batch_ids = [None] * len(batch)
+        for i in range(len(batch)):
+            clean_batch_ids[i] = self.clean_ids(batch[i])
+        return clean_batch_ids

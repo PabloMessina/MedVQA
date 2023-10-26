@@ -721,9 +721,11 @@ def sample_observation_triplets__rule6(
                         continue
                     AP_dotsim = np.dot(sentence_embeddings[A], sentence_embeddings[P])
                     AN_dotsim = np.dot(sentence_embeddings[A], sentence_embeddings[N])
+                    if AN_dotsim > AP_dotsim: # if CXR-BERT disagrees -> skip
+                        continue
                     AP_levsim = _levenshtein_similarity(index2sentence[A], index2sentence[P])
                     AN_levsim = _levenshtein_similarity(index2sentence[A], index2sentence[N])
-                    if not(AP_dotsim > AN_dotsim and AP_levsim > AN_levsim): # if not both CXR-BERT and Leveinshtein agree -> skip
+                    if AN_levsim > AP_levsim: # if Leveinshtein disagrees -> skip
                         continue
                     # if we reach here, then we have found a valid triplet
                     used_triplets.add(triplet)
@@ -927,7 +929,8 @@ def main():
     parser.add_argument('--paraphrased_anatomical_locations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--paraphrased_observations_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--integrated_fact_metadata_filepath', type=str, required=True)
-    parser.add_argument('--chest_imagenome_sentences_and_labels_filepath', type=str, required=True)
+    parser.add_argument('--integrated_chest_imagenome_observations_filepath', type=str, required=True)
+    parser.add_argument('--integrated_chest_imagenome_anatomical_locations_filepath', type=str, required=True)
     parser.add_argument('--radgraph_sentences_and_labels_filepath', type=str, required=True)
     parser.add_argument('--hard_triplets_from_facts_filepaths', type=str, nargs='+', required=True)
     parser.add_argument('--num_anatloc_clusters', type=int, required=True)
@@ -1038,9 +1041,15 @@ def main():
                 anchor2negatives[anchor] = set()
             anchor2negatives[anchor].update(negatives)
 
-    logger.info(f'Loading Chest ImaGenome sentences and labels from {args.chest_imagenome_sentences_and_labels_filepath}...')
-    chest_imagenome_data = load_pickle(args.chest_imagenome_sentences_and_labels_filepath)
-    for group in chest_imagenome_data['groups']:
+    logger.info(f'Loading Chest ImaGenome observations from {args.integrated_chest_imagenome_observations_filepath}...')
+    chest_imagenome_observations_data = load_pickle(args.integrated_chest_imagenome_observations_filepath)
+    for group in chest_imagenome_observations_data['groups']:
+        sentences_set.update(group['sentences'])
+        logger.info(f'len(group["sentences"])={len(group["sentences"])}')
+    
+    logger.info(f'Loading Chest ImaGenome anatomical locations from {args.integrated_chest_imagenome_anatomical_locations_filepath}...')
+    chest_imagenome_anatomical_locations_data = load_pickle(args.integrated_chest_imagenome_anatomical_locations_filepath)
+    for group in chest_imagenome_anatomical_locations_data['groups']:
         sentences_set.update(group['sentences'])
         logger.info(f'len(group["sentences"])={len(group["sentences"])}')
 
@@ -1103,12 +1112,12 @@ def main():
     # Precompute clusters for anatomical locations and observations
     anatloc_clusters = emb_extractor.compute_kmeans_labels(
         texts=anatomical_locations_list,
-        n_clusters=args.num_anatloc_clusters,
+        num_clusters=args.num_anatloc_clusters,
         num_iterations=args.num_kmeans_iterations,
     )
     obs_clusters = emb_extractor.compute_kmeans_labels(
         texts=observations_list,
-        n_clusters=args.num_obs_clusters,
+        num_clusters=args.num_obs_clusters,
         num_iterations=args.num_kmeans_iterations,
     )
 
@@ -1133,7 +1142,7 @@ def main():
     radgraph_sentences = [sentences_list[i] for i in radgraph_indices]
     radgraph_clusters = emb_extractor.compute_kmeans_labels(
         texts=radgraph_sentences,
-        n_clusters=args.num_radgraph_clusters,
+        num_clusters=args.num_radgraph_clusters,
         num_iterations=args.num_kmeans_iterations,
     )
 
@@ -1359,17 +1368,38 @@ def main():
         triplets_dict=triplets,
         logger=logger,
     )
-
-    # Rule 6
-    chest_imagenome_sentences = []
-    chest_imagenome_labels = []
-    for group in chest_imagenome_data['groups']:
-        chest_imagenome_sentences.extend(group['sentences'])
-        chest_imagenome_labels.append(group['labels'])
+    
+    chest_imagenome_obs_sentences = []
+    chest_imagenome_obs_labels = []
+    for group in chest_imagenome_observations_data['groups']:
+        chest_imagenome_obs_sentences.extend(group['sentences'])
+        chest_imagenome_obs_labels.append(group['labels'])
         assert len(group['sentences']) == len(group['labels'])
-    chest_imagenome_labels = np.concatenate(chest_imagenome_labels, axis=0)
+    chest_imagenome_obs_labels = np.concatenate(chest_imagenome_obs_labels, axis=0)
+    logger.info(f'len(chest_imagenome_obs_sentences): {len(chest_imagenome_obs_sentences)}')
+    logger.info(f'chest_imagenome_obs_labels.shape: {chest_imagenome_obs_labels.shape}')
+
+    chest_imagenome_anat_sentences = []
+    chest_imagenome_anat_labels = []
+    for group in chest_imagenome_anatomical_locations_data['groups']:
+        chest_imagenome_anat_sentences.extend(group['sentences'])
+        chest_imagenome_anat_labels.append(group['labels'])
+        assert len(group['sentences']) == len(group['labels'])
+    chest_imagenome_anat_labels = np.concatenate(chest_imagenome_anat_labels, axis=0)
+    logger.info(f'len(chest_imagenome_anat_sentences): {len(chest_imagenome_anat_sentences)}')
+    logger.info(f'chest_imagenome_anat_labels.shape: {chest_imagenome_anat_labels.shape}')
+
+    # find the intersection of observations and anatomical locations
+    chest_imagenome_sentences = list(set(chest_imagenome_obs_sentences) & set(chest_imagenome_anat_sentences))
+    chest_imagenome_obs_s2i = { s: i for i, s in enumerate(chest_imagenome_obs_sentences) }
+    chest_imagenome_anat_s2i = { s: i for i, s in enumerate(chest_imagenome_anat_sentences) }
+    chest_imagenome_obs_labels = chest_imagenome_obs_labels[[chest_imagenome_obs_s2i[s] for s in chest_imagenome_sentences]]
+    chest_imagenome_anat_labels = chest_imagenome_anat_labels[[chest_imagenome_anat_s2i[s] for s in chest_imagenome_sentences]]
+    chest_imagenome_labels = np.concatenate([chest_imagenome_obs_labels, chest_imagenome_anat_labels], axis=1)
     logger.info(f'len(chest_imagenome_sentences): {len(chest_imagenome_sentences)}')
     logger.info(f'chest_imagenome_labels.shape: {chest_imagenome_labels.shape}')
+
+    # Rule 6
     sample_observation_triplets__rule6(
         n_triplets_per_rule=args.num_train_triplets_per_rule,
         sentence2index=sentence2index,

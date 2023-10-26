@@ -17,6 +17,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         nli_loss_criterion=None, # for NLI
         entcon_loss_criterion=None, # for entailment contradiction
         spert_loss_criterion=None, # for SpERT
+        decoder_criterion=None, # for text decoder
         max_grad_norm=None,
         # automatic mixed precision
         use_amp=False,
@@ -32,6 +33,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         chest_imagenome_anatloc_classif_loss_weight=1.0,
         nli_loss_weight=1.0,
         entcon_loss_weight=1.0,
+        sentence_autoencoder_loss_weight=1.0,
     ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -338,6 +340,42 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
+    def step_fn__sentence_autoencoder(batch):
+
+        assert training or validating
+        
+        tokenized_sentences = batch['tokenized_sentences']
+        input_ids = tokenized_sentences['input_ids'].to(device)
+        attention_mask = tokenized_sentences['attention_mask'].to(device)
+        decoder_ids = batch['decoder_ids'].to(device)
+        # shift decoder_ids by one position for teacher forcing
+        decoder_ids_start = decoder_ids[:, :-1] # ignore last token
+        decoder_ids_end = decoder_ids[:, 1:] # ignore first token
+        
+        with torch.set_grad_enabled(training):
+            model.train(training)
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                decoder_logits = model.fact_decoder_forward_teacher_forcing(
+                    input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_ids_start,
+                )
+                decoder_loss = decoder_criterion(decoder_logits.reshape(-1, decoder_logits.shape[-1]), decoder_ids_end.reshape(-1))
+                if training:
+                    decoder_loss = decoder_loss * sentence_autoencoder_loss_weight # scale loss by weight
+                    losses = []
+                    losses.append(decoder_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+
+        # Prepare output
+        output = {}
+        output['sae_loss'] = decoder_loss.detach()
+        if training:
+            output['loss'] = batch_loss.detach()
+
+        return output
+    
     def step_fn_wrapper(unused_engine, batch):
         flag = batch['flag']
         if flag == 't': # triplet ranking
@@ -354,6 +392,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output = step_fn__entcon(batch)
         elif flag == 'spert': # SpERT
             output = step_fn__spert(batch)
+        elif flag == 'sae': # sentence autoencoder
+            output = step_fn__sentence_autoencoder(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -379,6 +419,7 @@ def get_engine(model, device,
                comparison_status_classif_loss_weight=1.0,
                chest_imagenome_obs_classif_loss_weight=1.0,
                chest_imagenome_anatloc_classif_loss_weight=1.0,
+               sentence_autoencoder_loss_weight=1.0,
                nli_loss_weight=1.0,
                entcon_loss_weight=1.0,
             ):
@@ -402,6 +443,9 @@ def get_engine(model, device,
     rel_criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
     entity_criterion = torch.nn.CrossEntropyLoss(reduction='none')
     spert_loss_criterion = SpERTLoss(rel_criterion, entity_criterion)
+
+    # Decoder loss
+    decoder_criterion = nn.CrossEntropyLoss()
     
     # Create engine
     step_fn = get_step_fn(model=model, optimizer=optimizer, device=device,
@@ -413,6 +457,7 @@ def get_engine(model, device,
                           nli_loss_criterion=nli_loss_criterion,
                           entcon_loss_criterion=entcon_loss_criterion,
                           spert_loss_criterion=spert_loss_criterion,
+                          decoder_criterion=decoder_criterion,
                           max_grad_norm=max_grad_norm,
                           use_amp=use_amp,
                           # batchwise learning rate updates
@@ -427,6 +472,7 @@ def get_engine(model, device,
                           chest_imagenome_anatloc_classif_loss_weight=chest_imagenome_anatloc_classif_loss_weight,
                           nli_loss_weight=nli_loss_weight,
                           entcon_loss_weight=entcon_loss_weight,
+                          sentence_autoencoder_loss_weight=sentence_autoencoder_loss_weight,
                           )
     engine = Engine(step_fn)
     return engine

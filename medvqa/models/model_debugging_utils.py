@@ -610,3 +610,74 @@ def run_fact_encoder_nli(
     import gc
     gc.collect()
     torch.cuda.empty_cache()
+
+def run_sentence_autoencoder(sentences, vocab_filepath, model_folder_path=None, model_checkpoint_path=None, use_amp=False, device='GPU'):
+    
+    from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
+    from medvqa.models.nlp.fact_encoder import FactEncoder
+    from torch.cuda.amp.autocast_mode import autocast
+    import torch
+
+    if model_folder_path is None:
+        assert model_checkpoint_path is not None
+        model_folder_path = os.path.dirname(model_checkpoint_path)
+    
+    metadata = load_metadata(model_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    
+    # Create model
+    print_bold('Create model')
+    model = FactEncoder(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    if model_checkpoint_path is None:
+        assert model_folder_path is not None
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('model_checkpoint_path = ', model_checkpoint_path)
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Prepare input
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
+    tokenized_sentences = tokenizer(sentences, padding="longest", return_tensors="pt")    
+    input_ids = tokenized_sentences.input_ids.to(device)
+    attention_mask = tokenized_sentences.attention_mask.to(device)
+    
+    # Run model in inference mode
+    print_bold('Run model in inference mode')
+    with torch.set_grad_enabled(False):
+        model.train(False)
+        with autocast(enabled=use_amp): # automatic mixed precision
+            decoded_ids = model.fact_decoder_forward_greedy_decoding(
+                input_ids=input_ids, attention_mask=attention_mask,
+                max_length=input_ids.shape[1] * 2,
+            )
+    
+    # Convert ids to string
+    from medvqa.datasets.tokenizer import BasicTokenizer
+    decoder_tokenizer = BasicTokenizer(vocab_filepath=vocab_filepath)
+    decoded_ids = decoded_ids.detach().cpu().numpy()
+    generated_sentences = [decoder_tokenizer.ids2string(x) for x in decoded_ids]
+    
+    # Print results
+    print_bold('Results')
+    for i in range(len(sentences)):
+        print(f'Input: {sentences[i]}')
+        print(f'Generated: {generated_sentences[i]}')
+        print('----------------')
+
+    # Release GPU memory
+    del model
+    del input_ids
+    del attention_mask
+    del decoded_ids
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
