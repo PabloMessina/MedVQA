@@ -41,3 +41,19 @@ class PositionalEncoding(nn.Module):
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
         return self.dropout(x)
+    
+def compute_2D_positional_encoding(h, w, d):
+    assert d % 2 == 0, "d must be even"
+    d = d // 2
+    n = max(h, w)
+    pe_1D = torch.zeros(n, d)
+    position = torch.arange(0, n, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d, 2).float() * (-math.log(10000.0) / d))
+    pe_1D[:, 0::2] = torch.sin(position * div_term)
+    pe_1D[:, 1::2] = torch.cos(position * div_term)
+    pe_2D = torch.zeros(h, w, d * 2)
+    for i in range(h):
+        for j in range(w):
+            pe_2D[i, j, :d] = pe_1D[i, :]
+            pe_2D[i, j, d:] = pe_1D[j, :]
+    return pe_2D

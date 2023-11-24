@@ -638,8 +638,11 @@ class MultiPurposeVisualModule(nn.Module):
         return_global_features=False,
         skip_mlc=False,
         yolov8_detection_layer_index=None,
+        only_compute_features=False,
         **unused_kwargs,
     ):
+        
+        only_compute_features = only_compute_features or self.only_compute_features
 
         # Detectron2-specific forward pass
         if detectron2_forward:
@@ -649,7 +652,7 @@ class MultiPurposeVisualModule(nn.Module):
         # General forward pass
         assert (raw_images is not None) or (visual_features is not None)
 
-        if self.only_compute_features:
+        if only_compute_features:
             assert return_global_features or return_local_features
 
         permute_and_flatten_local_feat = False
@@ -754,22 +757,24 @@ class MultiPurposeVisualModule(nn.Module):
 
             elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
                 batch_size = raw_images.size(0)
-                if yolov8_detection_layer_index is None:
-                    local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(raw_images)
+                if only_compute_features:
+                    local_feat_NxCxHxW = self.raw_image_encoder.custom_forward(raw_images, only_return_features=True)
                 else:
-                    local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(
-                        x=raw_images,
-                        detection_layer_index=yolov8_detection_layer_index,
-                    )
-                assert local_feat_NxCxHxW.shape == (batch_size, self.local_feat_size,
-                                                    self.num_regions_sqrt, self.num_regions_sqrt), \
-                 f'local_feat_NxCxHxW.shape = {local_feat_NxCxHxW.shape}, but expected {(batch_size, self.local_feat_size, self.num_regions_sqrt, self.num_regions_sqrt)}'
-                assert type(detection_output) == list or type(detection_output) == tuple
-                assert len(detection_output) == 3 or len(detection_output) == 2
-                if len(detection_output) == 2: # this is the case when the model is in evaluation mode
-                    # print('YOLOv8 output in evaluation mode')
-                    yolov8_features = detection_output[1]
-                    if not self.only_compute_features:
+                    if yolov8_detection_layer_index is None:
+                        local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(raw_images)
+                    else:
+                        local_feat_NxCxHxW, detection_output = self.raw_image_encoder.custom_forward(
+                            x=raw_images,
+                            detection_layer_index=yolov8_detection_layer_index,
+                        )
+                    assert local_feat_NxCxHxW.shape == (batch_size, self.local_feat_size,
+                                                        self.num_regions_sqrt, self.num_regions_sqrt), \
+                    f'local_feat_NxCxHxW.shape = {local_feat_NxCxHxW.shape}, but expected {(batch_size, self.local_feat_size, self.num_regions_sqrt, self.num_regions_sqrt)}'
+                    assert type(detection_output) == list or type(detection_output) == tuple
+                    assert len(detection_output) == 3 or len(detection_output) == 2
+                    if len(detection_output) == 2: # this is the case when the model is in evaluation mode
+                        # print('YOLOv8 output in evaluation mode')
+                        yolov8_features = detection_output[1]
                         yolov8_predictions = detection_output[0]
                         # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
                         if yolov8_detection_layer_index is None:
@@ -780,10 +785,10 @@ class MultiPurposeVisualModule(nn.Module):
                                                                 conf_thres=0.1, iou_thres=0.1,
                                                                 max_det=num_bbox_classes)
                         # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
-                else: # this is the case when the model is in training mode
-                    # print('YOLOv8 output in training mode')
-                    yolov8_predictions = None
-                    yolov8_features = detection_output
+                    else: # this is the case when the model is in training mode
+                        # print('YOLOv8 output in training mode')
+                        yolov8_predictions = None
+                        yolov8_features = detection_output
                 if permute_and_flatten_local_feat:
                     local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, self.local_feat_size)
                 # compute global features
@@ -814,7 +819,7 @@ class MultiPurposeVisualModule(nn.Module):
         if return_local_features:
             output['local_feat'] = local_feat_NxRxC
 
-        if not self.only_compute_features:
+        if not only_compute_features:
             if self.merge_findings:
                 output['pred_findings'] = self.W_findings(global_feat)
                 output['pred_findings_probs'] = torch.sigmoid(output['pred_findings'])
@@ -1365,7 +1370,7 @@ class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
             self.detection_layers = None
             self.using_multiple_detection_layers = False
     
-    def custom_forward(self, x, detection_layer_index=None, detection_layer_indexes=None):
+    def custom_forward(self, x, detection_layer_index=None, detection_layer_indexes=None, only_return_features=False):
         """
         This is a modified version of the original _forward_once() method in BaseModel,
         found in ultralytics/nn/tasks.py.
@@ -1375,6 +1380,24 @@ class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
         each one with a different number of classes. This can be useful for example when
         training a model with multiple datasets, each one with a different number of classes.
         """
+
+        if only_return_features:
+            y = []
+            features = None
+            for m in self.model:
+                # print('----')
+                # print(m)
+                if m.f != -1:  # if not from previous layer
+                    x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                x = m(x)  # run
+                if torch.is_tensor(x):
+                    features = x # keep the last tensor as features
+                y.append(x if m.i in self.save else None)  # save output
+            if torch.is_tensor(x):
+                features = x # keep the last tensor as features
+            return features # return features
         
         if self.using_multiple_detection_layers:
             assert detection_layer_index is not None or detection_layer_indexes is not None

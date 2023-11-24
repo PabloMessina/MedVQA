@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR
+from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR
 
 CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR = os.environ['CHEST_IMAGENOME_SILVER_SCENE_GRAPHS_DIR']
 CHEST_IMAGENOME_SILVER_DATASET_DIR = os.environ['CHEST_IMAGENOME_SILVER_DATASET_DIR']
@@ -11,6 +11,7 @@ CHEST_IMAGENOME_GOLD_BBOX_COORDINATE_ANNOTATIONS_CSV_PATH = os.environ['CHEST_IM
 CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH = os.environ['CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH']
 CHEST_IMAGENOME_CACHE_DIR = os.path.join(CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'chest_imagenome')
+CHEST_IMAGENOME_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'chest_imagenome')
 CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'bboxes.pkl')
 CHEST_IMAGENOME_HORIZONTALLY_FLIPPED_SILVER_BBOXES_FILEPATH = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'horizontally_flipped_bboxes.pkl')
 CHEST_IMAGENOME_YOLOV5_LABELS_DIR = os.environ['CHEST_IMAGENOME_YOLOV5_LABELS_DIR']
@@ -261,6 +262,14 @@ def get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices():
             for j in range(4):
                 coords_indices.append(i*4 + j)
     return coords_indices, presence_indices
+
+def get_chest_imagenome_gold_class_mask():
+    import numpy as np
+    mask = np.zeros((CHEST_IMAGENOME_NUM_BBOX_CLASSES,), dtype=bool)
+    for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+        if name in CHEST_IMAGENOME_GOLD_BBOX_NAMES:
+            mask[i] = True
+    return mask
 
 CHEST_IMAGENOME_GOLD_BBOX_NAMES__SORTED = []
 for name in CHEST_IMAGENOME_BBOX_NAMES:

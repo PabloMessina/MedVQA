@@ -407,6 +407,69 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
     
     plt.show()
 
+def visualize_attention_map(image_path, attention_map, figsize, title=None, attention_factor=1.0):
+    from PIL import Image
+    import matplotlib.patches as patches
+
+    fig, ax = plt.subplots(1, figsize=figsize)
+
+    # Image
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+    ax.imshow(image)
+
+    # Attention map (heatmap): each pixel is a yellow rectangle with opacity proportional to the attention value
+    for i in range(attention_map.shape[0]):
+        for j in range(attention_map.shape[1]):
+            x1 = j * width / attention_map.shape[1]
+            y1 = i * height / attention_map.shape[0]
+            x2 = (j+1) * width / attention_map.shape[1]
+            y2 = (i+1) * height / attention_map.shape[0]
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=0, edgecolor='none', facecolor='yellow', alpha=attention_map[i, j] * attention_factor)
+            ax.add_patch(rect)
+
+    if title is not None:
+        plt.title(title)
+
+    plt.show()
+
+def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, max_cols=3, attention_factor=1.0):
+    from PIL import Image
+    import matplotlib.patches as patches
+
+    # Create a grid of subplots
+    n_cols = min(len(attention_maps), max_cols)
+    n_rows = math.ceil(len(attention_maps) / n_cols)
+    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize)
+
+    # Image
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+
+    # Attention maps (heatmaps): each pixel is a yellow rectangle with opacity proportional to the attention value
+    for k in range(len(attention_maps)):
+        row = k // n_cols
+        col = k % n_cols
+        # show image in subplot
+        ax[row, col].imshow(image) # show image in subplot
+        for i in range(attention_maps[k].shape[0]):
+            for j in range(attention_maps[k].shape[1]):
+                x1 = j * width / attention_maps[k].shape[1]
+                y1 = i * height / attention_maps[k].shape[0]
+                x2 = (j+1) * width / attention_maps[k].shape[1]
+                y2 = (i+1) * height / attention_maps[k].shape[0]
+                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=0, edgecolor='none', facecolor='yellow', alpha=attention_maps[k][i, j] * attention_factor)
+                ax[row, col].add_patch(rect)
+
+        if titles is not None:
+            ax[row, col].set_title(titles[k])
+
+    plt.show()
+
 def plot_embeddings_and_clusters(X_dataset, X_clusters):
     # Apply PCA to reduce dimensionality to 2
     import sklearn.decomposition

@@ -186,6 +186,11 @@ def multi_cyclic_dataloaders_generator(dataloaders):
             for batch in dataloader:
                 yield batch
 
+def multi_dataloaders_generator(dataloaders):
+    for dataloader in dataloaders:
+        for batch in dataloader:
+            yield batch
+
 def simple_yolov8_collate_batch_fn(batch):
     batch_dict = {}
     batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -950,4 +955,89 @@ def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visua
             
             return batch_dict
     else: assert False, f'Unknown dataset_id {dataset_id}'
+    return collate_batch_fn
+
+def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
+    if flag == 'fg': # fact grounding
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': positive phrase embeddings
+            # - 'ne': negative phrase embeddings
+            batch_dict = dict(flag=flag)
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['i'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['ne'] = torch.tensor([x['ne'] for x in batch])
+            return batch_dict
+    elif flag == 'pg': # phrase grounding
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pgm': phrase grounding masks
+            batch_dict = dict(flag=flag)
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['i'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
+            return batch_dict
+    elif flag == 'cibg': # chest imagenome bbox grounding
+        assert use_yolov8
+        def collate_batch_fn(batch, training_mode=True):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pgm': phrase grounding masks
+            # - 'pcl': phrase classification labels
+            # - 'bc': bounding boxes coordinates
+            # - 'bp': bounding boxes presence
+            batch_dict = dict(flag=flag)
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['i'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['pcl'] = torch.tensor([x['pcl'] for x in batch])
+            batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
+            if training_mode:
+                batch_dict['im_file'] = [x['im_file'] for x in batch]
+                batch_dict['ori_shape'] = [x['ori_shape'] for x in batch]
+                batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                bboxes_list, cls_list, batch_idx_list, count = None, None, None, 0
+                for i, x in enumerate(batch):
+                    coords = x['bc']
+                    presence = x['bp']
+                    if bboxes_list is None:
+                        bboxes_list = [None] * len(presence) * len(batch)
+                        cls_list = [None] * len(presence) * len(batch)
+                        batch_idx_list = [None] * len(presence) * len(batch)
+                    for cls in range(len(presence)):
+                        if presence[cls]:
+                            # convert coords[cls] from xyxy to x_c, y_c, w, h
+                            bboxes_list[count] = torch.tensor([
+                                (coords[cls, 0] + coords[cls, 2]) / 2,
+                                (coords[cls, 1] + coords[cls, 3]) / 2,
+                                coords[cls, 2] - coords[cls, 0],
+                                coords[cls, 3] - coords[cls, 1],
+                            ])
+                            cls_list[count] = cls
+                            batch_idx_list[count] = i
+                            count += 1
+                batch_dict['bboxes'] = torch.stack(bboxes_list[:count])
+                assert batch_dict['bboxes'].shape == (count, 4)
+                batch_dict['cls'] = torch.tensor(cls_list[:count])
+                batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
+                assert batch_dict['cls'].shape == (count, 1)
+                batch_dict['batch_idx'] = torch.tensor(batch_idx_list[:count])
+            else:
+                batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                batch_dict['bc'] = torch.tensor([x['bc'] for x in batch])
+                batch_dict['bp'] = torch.tensor([x['bp'] for x in batch])
+            return batch_dict
+    else: assert False, f'Unknown flag {flag}'
     return collate_batch_fn

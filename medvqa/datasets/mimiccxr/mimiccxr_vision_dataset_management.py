@@ -624,7 +624,7 @@ def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch
     )
     return dataset, dataloader
 
-class MIMICCXR_VisualModuleTrainer():
+class MIMICCXR_VisualModuleTrainer:
 
     def __init__(self, 
                 batch_size, collate_batch_fn, num_workers,

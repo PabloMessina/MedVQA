@@ -681,3 +681,117 @@ def run_sentence_autoencoder(sentences, vocab_filepath, model_folder_path=None, 
     import gc
     gc.collect()
     torch.cuda.empty_cache()
+
+class PhraseGroundingVisualizer:
+    def __init__(self, text_embedding_model_name, text_embedding_model_checkpoint_folder_path, phrase_grounder_checkpoint_folder_path, device='GPU'):
+        
+        import torch
+
+        # device
+        print_bold('device = ', device)
+        self.device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+
+        # Load phrase grounder
+        print_bold('Load phrase grounder')
+        self.metadata = load_metadata(phrase_grounder_checkpoint_folder_path)
+        model_kwargs = self.metadata['model_kwargs']
+        from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
+        self.phrase_grounder = PhraseGrounder(**model_kwargs)
+        self.phrase_grounder = self.phrase_grounder.to(self.device)
+
+        # Load model weights
+        print_bold('Load model weights')
+        model_checkpoint_path = get_checkpoint_filepath(phrase_grounder_checkpoint_folder_path)
+        print('model_checkpoint_path = ', model_checkpoint_path)
+        checkpoint = torch.load(model_checkpoint_path, map_location=self.device)
+        self.phrase_grounder.load_state_dict(checkpoint['model'])
+
+        # Load text embedding model
+        print_bold('Load text embedding model')
+        from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
+        self.cached_text_embedding_extractor = CachedTextEmbeddingExtractor(
+            model_name=text_embedding_model_name,
+            model_checkpoint_folder_path=text_embedding_model_checkpoint_folder_path,
+        )
+
+        # Load image transform
+        print_bold('Load image transform')
+        from medvqa.datasets.image_processing import get_image_transform
+        try:
+            self.image_transform_kwargs = self.metadata['val_image_transform_kwargs']
+        except KeyError: # HACK: when val_image_transform_kwargs is missing due to a bug
+            self.image_transform_kwargs = {
+                DATASET_NAMES.MIMICCXR: dict(
+                    image_size=(416, 416),
+                    augmentation_mode=None,
+                    use_bbox_aware_transform=True,
+                    for_yolov8=True,
+                )
+            }
+        self.image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+
+    def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0):
+        
+        import torch
+
+        # Load image
+        print(f'image_path = {image_path}')
+        image, image_size_before, image_size_after = self.image_transform(image_path, return_image_size=True)
+        print(f'image.shape = {image.shape}')
+        print(f'image_size_before = {image_size_before}')
+        print(f'image_size_after = {image_size_after}')
+
+        # Obtain text embeddings
+        print_bold('Obtain text embeddings')
+        text_embeddings = self.cached_text_embedding_extractor.compute_text_embeddings(phrases, update_cache_on_disk=False)
+        print(f'text_embeddings.shape = {text_embeddings.shape}')
+        
+        # Run phrase grounder in inference mode
+        print_bold('Run phrase grounder in inference mode')
+        self.phrase_grounder.eval()
+        with torch.no_grad():
+            image = image.to(self.device)
+            print(f'image.shape = {image.shape}')
+            text_embeddings = torch.tensor(text_embeddings, dtype=torch.float32).to(self.device)
+            output = self.phrase_grounder(
+                raw_images=image.unsqueeze(0),
+                phrase_embeddings=text_embeddings.unsqueeze(0),
+            )
+            print(f'output.keys() = {output.keys()}')
+            yolov8_predictions = output['yolov8_predictions'][0].detach().cpu()
+            yolov8_predictions[:, :4] /= torch.tensor([image_size_after[1], image_size_after[0], image_size_after[1], image_size_after[0]], dtype=torch.float32)
+            pred_coords = yolov8_predictions[:, :4].numpy()
+            pred_classes = yolov8_predictions[:, 5].numpy().astype(int)
+            print(f'pred_coords.shape = {pred_coords.shape}')
+            print(f'pred_classes.shape = {pred_classes.shape}')
+            sigmoid_attention = output['sigmoid_attention'][0].detach().cpu().numpy()
+            sigmoid_attention = sigmoid_attention.reshape(-1, self.phrase_grounder.regions_height, self.phrase_grounder.regions_width)
+            print(f'sigmoid_attention.shape = {sigmoid_attention.shape}')
+        
+        # Visualize bbox predictions
+        from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
+        from medvqa.evaluation.plots import visualize_predicted_bounding_boxes__yolo
+        print_bold('Visualize bbox predictions')
+        visualize_predicted_bounding_boxes__yolo(
+            image_path=image_path,
+            pred_coords=pred_coords,
+            pred_classes=pred_classes,
+            class_names=CHEST_IMAGENOME_BBOX_NAMES,
+            figsize=bbox_figsize,
+            format='xyxy',
+        )
+
+        # Visualize attention maps
+        print_bold('Visualize attention maps')
+        from medvqa.evaluation.plots import visualize_attention_maps
+        n_rows = int(np.ceil(len(phrases) / 3))
+        n_cols = min(len(phrases), 3)
+        figsize = (attention_figsize[0] * n_cols, attention_figsize[1] * n_rows)
+        visualize_attention_maps(
+            image_path=image_path,
+            attention_maps=sigmoid_attention,
+            figsize=figsize,
+            titles=phrases,
+            attention_factor=attention_factor,
+            max_cols=3,
+        )

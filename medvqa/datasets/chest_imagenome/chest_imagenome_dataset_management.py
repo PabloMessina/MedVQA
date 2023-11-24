@@ -256,6 +256,11 @@ def load_chest_imagenome_dicom_ids(decent_images_only=False, avg_coef=0.4, std_c
     save_pickle(dicom_ids, cache_path)
     return dicom_ids
 
+def load_nondecent_chest_imagenome_dicom_ids():
+    all_dicom_ids = load_chest_imagenome_dicom_ids()
+    decent_dicom_ids = load_chest_imagenome_dicom_ids(decent_images_only=True)
+    return list(set(all_dicom_ids) - set(decent_dicom_ids))
+
 def load_chest_imagenome_gold_bboxes():
     cache_path = os.path.join(CHEST_IMAGENOME_CACHE_DIR, 'chest_imagenome_gold_bboxes.pkl')
     if os.path.exists(cache_path):
@@ -607,8 +612,10 @@ def visualize_scene_graph(scene_graph, figsize=(10, 10)):
     with open(report_path, 'r') as f:
         print(f.read())
 
-def visualize_ground_truth_bounding_boxes(dicom_id):
+def visualize_ground_truth_bounding_boxes(dicom_id=None, apply_clamping=False):
     bboxes_dict = load_chest_imagenome_silver_bboxes()
+    if dicom_id is None:
+        dicom_id = random.choice(list(bboxes_dict.keys()))
     imageId2PartPatientStudy = get_imageId2PartPatientStudy()
     bbox = bboxes_dict[dicom_id]
     coords = bbox['coords']
@@ -630,10 +637,22 @@ def visualize_ground_truth_bounding_boxes(dicom_id):
             y1 = coords[i * 4 + 1] * height
             x2 = coords[i * 4 + 2] * width
             y2 = coords[i * 4 + 3] * height
-            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
+            if apply_clamping:
+                x1 = max(min(x1, width), 0)
+                y1 = max(min(y1, height), 0)
+                x2 = max(min(x2, width), 0)
+                y2 = max(min(y2, height), 0)
+            # rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(i % 20), facecolor='none', linestyle='dashed')
             ax.add_patch(rect)
-            ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color=plt.cm.tab20(i))
-            print(f'Object: {CHEST_IMAGENOME_BBOX_NAMES[i]} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})')
+            # ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color=plt.cm.tab20(i))
+            ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+            valid_bbox = 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
+            print(f'Object: {CHEST_IMAGENOME_BBOX_NAMES[i]} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})', end='')
+            if valid_bbox:
+                print_blue(' (valid)', bold=True)
+            else:
+                print_red(' (invalid)', bold=True)
     plt.show()
 
 def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,

@@ -1,5 +1,6 @@
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, DatasetAwareBboxMeanF1
+from medvqa.metrics.bbox.bbox_iou import ConditionAwareBboxIOU
 from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
@@ -39,6 +40,7 @@ import operator
 from medvqa.metrics.nlp.bleu import DatasetAwareBleu
 from medvqa.metrics.nlp.cider import ConditionAwareCiderD, DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
+from medvqa.metrics.segmentation.segmentation_iou import ConditionAwareSegmaskIOU
 
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, MetricNames
 
@@ -333,6 +335,16 @@ def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, u
                                     allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
+def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, use_yolov8=True, class_mask=None):
+    if use_yolov8:
+        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
+                                condition_function=condition_function, use_yolov8=True, class_mask=class_mask)
+    else:
+        raise NotImplementedError
+    met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
+
 def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
     if use_detectron2:
         met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('pred_boxes', 'pred_classes', 'scores',
@@ -517,6 +529,14 @@ def attach_condition_aware_multilabel_multiclass_f1score(engine, pred_field_name
 # General purpose multi-label f1-score
 def attach_condition_aware_multilabel_f1score(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareMultiLabelMacroAvgF1(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose segmentation mask IOU
+def attach_condition_aware_segmask_iou(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
+    met = ConditionAwareSegmaskIOU(
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
     )
