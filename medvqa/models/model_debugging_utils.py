@@ -728,15 +728,26 @@ class PhraseGroundingVisualizer:
                     for_yolov8=True,
                 )
             }
-        self.image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        if DATASET_NAMES.MIMICCXR in self.image_transform_kwargs:
+            self.mimiccxr_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        if DATASET_NAMES.VINBIG in self.image_transform_kwargs:
+            self.vinbigdata_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.VINBIG])
 
-    def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0):
+    def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0,
+                                   mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None):
         
+        assert sum([mimiccxr_forward, vinbig_forward]) == 1
+
         import torch
 
         # Load image
         print(f'image_path = {image_path}')
-        image, image_size_before, image_size_after = self.image_transform(image_path, return_image_size=True)
+        if mimiccxr_forward:
+            image_transform = self.mimiccxr_image_transform
+        elif vinbig_forward:
+            image_transform = self.vinbigdata_image_transform
+        else: assert False
+        image, image_size_before, image_size_after = image_transform(image_path, return_image_size=True)
         print(f'image.shape = {image.shape}')
         print(f'image_size_before = {image_size_before}')
         print(f'image_size_after = {image_size_after}')
@@ -756,6 +767,9 @@ class PhraseGroundingVisualizer:
             output = self.phrase_grounder(
                 raw_images=image.unsqueeze(0),
                 phrase_embeddings=text_embeddings.unsqueeze(0),
+                mimiccxr_forward=mimiccxr_forward,
+                vinbig_forward=vinbig_forward,
+                yolov8_detection_layer_index=yolov8_detection_layer_index,
             )
             print(f'output.keys() = {output.keys()}')
             yolov8_predictions = output['yolov8_predictions'][0].detach().cpu()
@@ -769,14 +783,20 @@ class PhraseGroundingVisualizer:
             print(f'sigmoid_attention.shape = {sigmoid_attention.shape}')
         
         # Visualize bbox predictions
-        from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
+        if mimiccxr_forward:
+            from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
+            bbox_class_names = CHEST_IMAGENOME_BBOX_NAMES
+        elif vinbig_forward:
+            from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES
+            bbox_class_names = VINBIG_BBOX_NAMES
+        else: assert False
         from medvqa.evaluation.plots import visualize_predicted_bounding_boxes__yolo
         print_bold('Visualize bbox predictions')
         visualize_predicted_bounding_boxes__yolo(
             image_path=image_path,
             pred_coords=pred_coords,
             pred_classes=pred_classes,
-            class_names=CHEST_IMAGENOME_BBOX_NAMES,
+            class_names=bbox_class_names,
             figsize=bbox_figsize,
             format='xyxy',
         )

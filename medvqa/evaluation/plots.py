@@ -373,6 +373,43 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.show()
 
+def plot_metrics(metric_names, metric_values, metric_aliases, title, xlabel, ylabel, figsize=(10, 8), color='blue',
+                 horizontal=False, sort_metrics=False, show_metrics_above_bars=False, eps=0.005, draw_grid=False,
+                 append_average_to_title=False):
+    n = len(metric_names)
+    assert n == len(metric_values)
+    assert n == len(metric_aliases)
+    assert n > 0
+    if sort_metrics:
+        metric_idxs = list(range(n))
+        metric_idxs.sort(key=lambda i: metric_values[i], reverse=not horizontal)
+        metric_names = [metric_names[i] for i in metric_idxs]
+        metric_values = [metric_values[i] for i in metric_idxs]
+        metric_aliases = [metric_aliases[i] for i in metric_idxs]
+    plt.figure(figsize=figsize)
+    if horizontal:
+        plt.barh(range(1, n+1), metric_values, tick_label=metric_aliases, color=color)
+        plt.ylabel(ylabel)
+        plt.xlabel(xlabel)
+        if show_metrics_above_bars:
+            for i in range(n):
+                plt.text(metric_values[i] + eps, i+1, f'{metric_values[i]:.3f}', ha='left', va='center')
+        if draw_grid:
+            plt.grid(axis='x')
+    else:
+        plt.bar(range(1, n+1), metric_values, tick_label=metric_aliases, color=color)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        if show_metrics_above_bars:
+            for i in range(n):
+                plt.text(i+1, metric_values[i] + eps, f'{metric_values[i]:.3f}', ha='center', va='bottom')
+        if draw_grid:
+            plt.grid(axis='y')
+    if append_average_to_title:
+        title = f'{title} (average={np.mean(metric_values):.3f})'
+    plt.title(title)
+    plt.show()
+
 def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, class_names, figsize, format='xywh'):
     from PIL import Image
     import matplotlib.patches as patches
@@ -407,7 +444,7 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
     
     plt.show()
 
-def visualize_attention_map(image_path, attention_map, figsize, title=None, attention_factor=1.0):
+def visualize_attention_map(image_path, attention_map, figsize, title=None, attention_factor=1.0, bbox=None, draw_grid=False):
     from PIL import Image
     import matplotlib.patches as patches
 
@@ -429,6 +466,26 @@ def visualize_attention_map(image_path, attention_map, figsize, title=None, atte
             y2 = (i+1) * height / attention_map.shape[0]
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=0, edgecolor='none', facecolor='yellow', alpha=attention_map[i, j] * attention_factor)
             ax.add_patch(rect)
+    
+    # Bounding box
+    if bbox is not None:
+        x1 = bbox[0] * width
+        y1 = bbox[1] * height
+        x2 = bbox[2] * width
+        y2 = bbox[3] * height
+        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor='red', facecolor='none')
+        ax.add_patch(rect)
+
+    # Grid
+    if draw_grid:
+        for i in range(attention_map.shape[0]):
+            for j in range(attention_map.shape[1]):
+                x1 = j * width / attention_map.shape[1]
+                y1 = i * height / attention_map.shape[0]
+                x2 = (j+1) * width / attention_map.shape[1]
+                y2 = (i+1) * height / attention_map.shape[0]
+                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='blue', facecolor='none')
+                ax.add_patch(rect)
 
     if title is not None:
         plt.title(title)
@@ -442,7 +499,8 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
     # Create a grid of subplots
     n_cols = min(len(attention_maps), max_cols)
     n_rows = math.ceil(len(attention_maps) / n_cols)
-    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize)
+    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    assert ax.shape == (n_rows, n_cols)
 
     # Image
     image = Image.open(image_path)

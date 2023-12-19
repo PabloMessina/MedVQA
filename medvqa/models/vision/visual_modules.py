@@ -111,6 +111,7 @@ class MultiPurposeVisualModule(nn.Module):
                 classify_chexpert=False,
                 classify_questions=False,
                 classify_chest_imagenome=False,
+                classify_labels_vinbig=False,
                 chexpert_mlc_version=MLCVersion.DEFAULT,
                 chexpert_mlc_hidden_size=None,
                 predict_bboxes_chest_imagenome=False,
@@ -150,6 +151,7 @@ class MultiPurposeVisualModule(nn.Module):
         self.classify_orientation = classify_orientation
         self.classify_gender = classify_gender
         self.classify_chest_imagenome = classify_chest_imagenome
+        self.classify_labels_vinbig = classify_labels_vinbig
         self.use_mimiccxr = use_mimiccxr
         self.use_iuxray = use_iuxray
         self.use_chexpert = use_chexpert
@@ -214,6 +216,9 @@ class MultiPurposeVisualModule(nn.Module):
             if raw_image_encoding != RawImageEncoding.DETECTRON2:
                 assert chest_imagenome_train_average_bbox_coords is not None
                 assert len(chest_imagenome_train_average_bbox_coords) == 4 * CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
+
+        if classify_labels_vinbig:
+            assert use_vinbig
         
         self._init_visual_backbone()
         self._init_auxiliary_tasks()
@@ -429,14 +434,15 @@ class MultiPurposeVisualModule(nn.Module):
 
             # 8) VinBig specific labels
             if self.use_vinbig:
-                print(f'    Initializing VinBig classification task')
-                self.MLC_vinbig = MultilabelClassifier_v3(
-                    local_feat_dim=self.local_feat_size,
-                    global_feat_dim=self.global_feat_size,
-                    hidden_dim=self.vinbig_mlc_hidden_size,
-                    num_regions=self.num_regions,
-                    num_labels=len(VINBIG_LABELS),
-                )
+                if self.classify_labels_vinbig:
+                    print(f'    Initializing VinBig classification task')
+                    self.MLC_vinbig = MultilabelClassifier_v3(
+                        local_feat_dim=self.local_feat_size,
+                        global_feat_dim=self.global_feat_size,
+                        hidden_dim=self.vinbig_mlc_hidden_size,
+                        num_regions=self.num_regions,
+                        num_labels=len(VINBIG_LABELS),
+                    )
 
         # 9) PadChest specific tasks
         if self.use_padchest:
@@ -840,9 +846,10 @@ class MultiPurposeVisualModule(nn.Module):
                     output['pred_cxr14'] = self.W_cxr14(global_feat)
                     output['pred_cxr14_probs'] = torch.sigmoid(output['pred_cxr14'])
             elif vinbig_forward:
-                if not self.merge_findings:
-                    output['pred_vinbig'] = self.MLC_vinbig(local_feat_NxRxC, global_feat)
-                    output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
+                if self.classify_labels_vinbig:
+                    if not self.merge_findings:
+                        output['pred_vinbig'] = self.MLC_vinbig(local_feat_NxRxC, global_feat)
+                        output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
                 if self.predict_bboxes_vinbig:
                     assert self.raw_image_encoding == RawImageEncoding.YOLOV8
                     output['yolov8_features'] = yolov8_features
@@ -939,6 +946,7 @@ class MultiPurposeVisualModule(nn.Module):
                             pred_bbox_coords, pred_bbox_presence = self.bbox_regressor_chst_imgn(local_feat_NxRxC, global_feat)
                             output['pred_chest_imagenome_bbox_coords'] = pred_bbox_coords
                             output['pred_chest_imagenome_bbox_presence'] = pred_bbox_presence
+            else: assert False, f'Unknown forward pass mode'
 
         return output
 

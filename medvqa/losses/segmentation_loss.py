@@ -1,6 +1,6 @@
 import torch
 
-def compute_balanced_segmentation_loss(pred_mask, gt_mask):
+def compute_balanced_segmentation_loss(pred_mask, gt_mask, foreground_weight=1.0, background_weight=1.0):
         gt_nonzero = gt_mask > 0
         nonzero_count = torch.sum(gt_nonzero).item()
         gt_zeros = ~gt_nonzero
@@ -21,5 +21,5 @@ def compute_balanced_segmentation_loss(pred_mask, gt_mask):
         # print("nonzero_error: ", nonzero_error)
         # print("zero_error: ", zero_error)
 
-        return nonzero_error + zero_error
+        return nonzero_error * foreground_weight + zero_error * background_weight
 

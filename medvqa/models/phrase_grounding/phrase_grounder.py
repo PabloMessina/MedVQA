@@ -16,8 +16,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
             num_regions,
             yolov8_model_name_or_path,
             yolov8_model_alias,
+            yolov8_use_one_detector_per_dataset,
             # Auxiliary tasks
             predict_bboxes_chest_imagenome,
+            predict_bboxes_vinbig,
             # Other
             apply_positional_encoding,
             phrase_embedding_size,
@@ -45,6 +47,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
             yolov8_model_alias=yolov8_model_alias,
             # Auxiliary tasks kwargs
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+            predict_bboxes_vinbig=predict_bboxes_vinbig,
+            yolov8_use_one_detector_per_dataset=yolov8_use_one_detector_per_dataset,
         )
 
         self.regions_width = regions_width
@@ -60,7 +64,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
         self.att_proj = nn.Linear(qkv_size, 1)
 
         # Init phrase classifier (for auxiliary task: true or false)
-        self.phrase_classifier_1 = nn.Linear(phrase_embedding_size * 3, phrase_classifier_hidden_size) # (phrase, grounding, element-wise mult) -> hidden size
+        self.phrase_classifier_1 = nn.Linear(phrase_embedding_size * 3 + num_regions ,
+                                             phrase_classifier_hidden_size) # (phrase, grounding, element-wise mult, attention map) -> hidden size
         self.phrase_classifier_2 = nn.Linear(phrase_classifier_hidden_size, 1) # hidden size -> true or false (binary classification)
 
         # Init positional encoding
@@ -82,15 +87,21 @@ class PhraseGrounder(MultiPurposeVisualModule):
         neg_phrase_embeddings=None, # (batch_size, K_neg, phrase_embedding_size)
         phrase_embeddings=None, # (batch_size, K, phrase_embedding_size)
         skip_phrase_classifier=False,
+        yolov8_detection_layer_index=None,
+        mimiccxr_forward=False,
+        vinbig_forward=False,
     ):  
         assert (pos_phrase_embeddings is not None and neg_phrase_embeddings is not None) or \
             phrase_embeddings is not None, 'Either (pos_phrase_embeddings and neg_phrase_embeddings) or phrase_embeddings must be provided'
+        assert mimiccxr_forward or vinbig_forward
         # Visual Component
         output = super().forward(
             raw_images=raw_images,
             return_local_features=True,
             only_compute_features=only_compute_features,
-            mimiccxr_forward=True,
+            mimiccxr_forward=mimiccxr_forward,
+            vinbig_forward=vinbig_forward,
+            yolov8_detection_layer_index=yolov8_detection_layer_index,
         )
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
         if self.apply_positional_encoding:
@@ -123,13 +134,15 @@ class PhraseGrounder(MultiPurposeVisualModule):
             grounding_vector_neg = torch.nn.functional.normalize(grounding_vector_neg, p=2, dim=-1) # (batch_size, K_neg, phrase_embedding_size)
             # Phrase classifier
             element_wise_mult_pos = pos_phrase_embeddings * grounding_vector_pos # (batch_size, K_pos, phrase_embedding_size)
-            phrase_classifier_input_pos = torch.cat([pos_phrase_embeddings, grounding_vector_pos, element_wise_mult_pos], dim=-1)
+            phrase_classifier_input_pos = torch.cat([pos_phrase_embeddings, grounding_vector_pos,
+                                                     element_wise_mult_pos, sigmoid_attention_pos], dim=-1)
             phrase_classifier_output_pos = self.phrase_classifier_1(phrase_classifier_input_pos)
             phrase_classifier_output_pos = torch.relu(phrase_classifier_output_pos)
             phrase_classifier_output_pos = self.phrase_classifier_2(phrase_classifier_output_pos)
 
             element_wise_mult_neg = neg_phrase_embeddings * grounding_vector_neg
-            phrase_classifier_input_neg = torch.cat([neg_phrase_embeddings, grounding_vector_neg, element_wise_mult_neg], dim=-1)
+            phrase_classifier_input_neg = torch.cat([neg_phrase_embeddings, grounding_vector_neg,
+                                                     element_wise_mult_neg, sigmoid_attention_neg], dim=-1)
             phrase_classifier_output_neg = self.phrase_classifier_1(phrase_classifier_input_neg)
             phrase_classifier_output_neg = torch.relu(phrase_classifier_output_neg)
             phrase_classifier_output_neg = self.phrase_classifier_2(phrase_classifier_output_neg)
@@ -162,7 +175,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             # Phrase classifier
             if not skip_phrase_classifier:
                 element_wise_mult = phrase_embeddings * grounding_vector # (batch_size, K, phrase_embedding_size)
-                phrase_classifier_input = torch.cat([phrase_embeddings, grounding_vector, element_wise_mult], dim=-1)
+                phrase_classifier_input = torch.cat([phrase_embeddings, grounding_vector, element_wise_mult, sigmoid_attention], dim=-1)
                 phrase_classifier_output = self.phrase_classifier_1(phrase_classifier_input)
                 phrase_classifier_output = torch.relu(phrase_classifier_output)
                 phrase_classifier_output = self.phrase_classifier_2(phrase_classifier_output)

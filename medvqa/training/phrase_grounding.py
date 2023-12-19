@@ -19,6 +19,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 use_amp=False,
                 # chest imagenome dataset
                 predict_bboxes_chest_imagenome=False,
+                # vinbig dataset
+                predict_bboxes_vinbig=False,
                 # yolov8
                 using_yolov8=False,
                 yolov8_criterion=None,
@@ -29,6 +31,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 # loss weights
                 attention_supervision_loss_weight=1.0,
                 phrase_classifier_loss_weight=1.0,
+                foreground_loss_weight=1.0,
+                background_loss_weight=1.0,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -74,6 +78,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'pos_phrase_embeddings': pos_phrase_embeddings,
                 'neg_phrase_embeddings': neg_phrase_embeddings,
                 'only_compute_features': True,
+                'mimiccxr_forward': True,
             }
 
             # Forward pass
@@ -132,8 +137,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     
     def step_fn__phrase_grounding(batch):
 
-        assert validating or testing
-
         # Extract elements from batch
         if using_yolov8:
             images = batch['img'].to(device)
@@ -152,6 +155,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
                 'skip_phrase_classifier': True,
+                'mimiccxr_forward': True,
             }
 
             # Forward pass
@@ -164,7 +168,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses = []
 
                     # attention supervision loss
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks)
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
 
@@ -176,14 +181,19 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
 
+                else:
+
+                    # Compute attention supervision loss for validation/testing
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
+
         # Prepare output
         output = {}
 
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-        if training:
-            output['attention_supervision_loss'] = attention_supervision_loss.detach()
-        output['pred_mask'] = sigmoid_attention.detach() > 0.5
+        output['attention_supervision_loss'] = attention_supervision_loss.detach()
+        output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
 
         return output
@@ -201,8 +211,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         phrase_classification_labels = batch['pcl'].to(device)
         phrase_grounding_masks = batch['pgm'].to(device)
         if not training:
-            chest_imagenome_bbox_coords = batch['bc'].to(device)
-            chest_imagenome_bbox_presence = batch['bp'].to(device)
+            chest_imagenome_bbox_coords = batch['bc']
+            chest_imagenome_bbox_presence = batch['bp']
         
         with torch.set_grad_enabled(training):
 
@@ -212,7 +222,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             model_kwargs = {
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
+                'mimiccxr_forward': True,
             }
+            if using_yolov8 and yolov8_use_multiple_detection_layers:
+                model_kwargs['yolov8_detection_layer_index'] = mimiccxr_yolov8_index
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -233,7 +246,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(phrase_classifier_loss)
 
                     # 2. attention supervision loss
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks)
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
 
@@ -253,6 +267,12 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
 
+                else:
+
+                    # Compute attention supervision loss for validation/testing
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
+
         # Prepare output
         output = {}
 
@@ -260,7 +280,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['loss'] = batch_loss.detach()
         if training:
             output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
-            output['attention_supervision_loss'] = attention_supervision_loss.detach()
             output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
             output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
             output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
@@ -275,9 +294,117 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
                 yolov8_predictions[i] = pred
             output['yolov8_predictions'] = yolov8_predictions
-            output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
-            output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
-        output['pred_mask'] = sigmoid_attention.detach() > 0.5
+            output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords
+            output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence
+        output['attention_supervision_loss'] = attention_supervision_loss.detach()
+        output['pred_mask'] = sigmoid_attention.detach()
+        output['gt_mask'] = phrase_grounding_masks.detach()
+        output['pred_phrase_labels'] = (phrase_classifier_output.detach() > 0).view(-1)
+        output['gt_phrase_labels'] = phrase_classification_labels.detach().view(-1)
+
+        return output
+    
+    def step_fn__vinbig_bbox_grounding(batch):
+        
+        assert using_yolov8
+
+        # Extract elements from batch
+        if using_yolov8:
+            images = batch['img'].to(device)
+        else:
+            images = batch['i'].to(device)
+        phrase_embeddings = batch['pe'].to(device)
+        phrase_classification_labels = batch['pcl'].to(device)
+        phrase_grounding_masks = batch['pgm'].to(device)
+        if not training:
+            vinbig_bbox_coords = batch['bboxes']
+            vinbig_bbox_classes = batch['classes']
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'raw_images': images,
+                'phrase_embeddings': phrase_embeddings,
+                'vinbig_forward': True,
+            }
+            if using_yolov8 and yolov8_use_multiple_detection_layers:
+                model_kwargs['yolov8_detection_layer_index'] = vinbig_yolov8_index
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                model_output = model(**model_kwargs)
+                sigmoid_attention = model_output['sigmoid_attention']
+                phrase_classifier_output = model_output['phrase_classifier_output']
+                yolov8_features = model_output['yolov8_features']
+                if not training:
+                    yolov8_predictions = model_output['yolov8_predictions']
+                
+                if training:
+                    # Compute losses
+                    losses = []
+                    
+                    # 1. phrase classification loss
+                    phrase_classifier_loss = phrase_classifier_criterion(phrase_classifier_output.view(-1), phrase_classification_labels.view(-1))
+                    phrase_classifier_loss *= phrase_classifier_loss_weight # weight
+                    losses.append(phrase_classifier_loss)
+
+                    # 2. attention supervision loss
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
+                    attention_supervision_loss *= attention_supervision_loss_weight # weight
+                    losses.append(attention_supervision_loss)
+
+                    # 3. yolov8 loss
+                    if predict_bboxes_vinbig:
+                        batch_size = images.shape[0]
+                        assert batch_size == yolov8_features[0].shape[0]
+                        vinbig_yolov8_loss, yolov8_loss_items = vinbig_yolov8_criterion(yolov8_features, batch)
+                        vinbig_yolov8_loss /= batch_size
+                        losses.append(vinbig_yolov8_loss)
+
+                    if len(losses) > 0:
+                        batch_loss = sum(losses)
+                    else:
+                        batch_loss = None
+
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+
+                else:
+                    
+                    # Compute attention supervision loss for validation/testing
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                    foreground_loss_weight, background_loss_weight)
+
+
+        # Prepare output
+        output = {}
+
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+        if training:
+            output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+            output[MetricNames.YOLOV8_LOSS] = vinbig_yolov8_loss.detach()
+            output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
+            output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
+            output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+        else:
+            # normalize yolov8 predictions
+            resized_shapes = batch['resized_shape']
+            assert len(resized_shapes) == len(yolov8_predictions)
+            for i in range(len(resized_shapes)):
+                resized_shape = resized_shapes[i]
+                pred = yolov8_predictions[i].detach().cpu()
+                pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                yolov8_predictions[i] = pred
+            output['yolov8_predictions'] = yolov8_predictions
+            output['vinbig_bbox_coords'] = vinbig_bbox_coords
+            output['vinbig_bbox_classes'] = vinbig_bbox_classes
+        output['attention_supervision_loss'] = attention_supervision_loss.detach()
+        output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
         output['pred_phrase_labels'] = (phrase_classifier_output.detach() > 0).view(-1)
         output['gt_phrase_labels'] = phrase_classification_labels.detach().view(-1)
@@ -292,6 +419,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output = step_fn__phrase_grounding(batch)
         elif flag == 'cibg': # chest imagenome bbox grounding
             output = step_fn__chest_imagenome_bbox_grounding(batch)
+        elif flag == 'vbg': # vinbig bbox grounding
+            output = step_fn__vinbig_bbox_grounding(batch)
         else:
             raise ValueError(f'Invalid flag: {flag}')
         output['flag'] = flag # propagate flag
@@ -302,10 +431,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     
     return step_fn
 
-def get_engine(model, predict_bboxes_chest_imagenome,
-               device, iters_to_accumulate=1,
+def get_engine(model, device, iters_to_accumulate=1,
                use_amp=False, training=False, validating=False,
                testing=False, optimizer=None,
+               predict_bboxes_chest_imagenome=False,
+               predict_bboxes_vinbig=False,
                update_lr_batchwise=False, lr_scheduler=None,
                using_yolov8=False,
                yolov8_use_multiple_detection_layers=False,
@@ -314,6 +444,8 @@ def get_engine(model, predict_bboxes_chest_imagenome,
                max_grad_norm=None,
                attention_supervision_loss_weight=1.0,
                phrase_classifier_loss_weight=1.0,
+               foreground_loss_weight=1.0,
+               background_loss_weight=1.0,
             #    **unused_kwargs,
             ):
 
@@ -325,7 +457,7 @@ def get_engine(model, predict_bboxes_chest_imagenome,
         phrase_classifier_criterion = contrastive_phrase_grounding_criterion = None
 
     if training and using_yolov8:
-        assert model_for_yolov8 is not None        
+        assert model_for_yolov8 is not None
         from ultralytics.yolo.utils.torch_utils import de_parallel
         if yolov8_use_multiple_detection_layers:
             print_magenta('Using YOLOv8MultiDetectionLayersLoss', bold=True)
@@ -337,6 +469,9 @@ def get_engine(model, predict_bboxes_chest_imagenome,
     else:
         yolov8_criterion = None
 
+    print(f'foreground_loss_weight: {foreground_loss_weight}')
+    print(f'background_loss_weight: {background_loss_weight}')
+
     # Create engine
     step_fn = get_step_fn(model, optimizer, training, validating, testing, device,
                             phrase_classifier_criterion=phrase_classifier_criterion,
@@ -346,6 +481,8 @@ def get_engine(model, predict_bboxes_chest_imagenome,
                             max_grad_norm=max_grad_norm, use_amp=use_amp,
                             # chest imagenome dataset
                             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
+                            # vinbig dataset
+                            predict_bboxes_vinbig=predict_bboxes_vinbig,
                             # yolov8
                             using_yolov8=using_yolov8,
                             yolov8_criterion=yolov8_criterion,
@@ -356,6 +493,8 @@ def get_engine(model, predict_bboxes_chest_imagenome,
                             # loss weights
                             attention_supervision_loss_weight=attention_supervision_loss_weight,
                             phrase_classifier_loss_weight=phrase_classifier_loss_weight,
+                            foreground_loss_weight=foreground_loss_weight,
+                            background_loss_weight=background_loss_weight,
                         )
     engine = Engine(step_fn)
     return engine

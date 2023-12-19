@@ -612,7 +612,11 @@ def visualize_scene_graph(scene_graph, figsize=(10, 10)):
     with open(report_path, 'r') as f:
         print(f.read())
 
-def visualize_ground_truth_bounding_boxes(dicom_id=None, apply_clamping=False):
+def visualize_ground_truth_bounding_boxes(dicom_id=None, apply_clamping=False, bbox_names_to_highlight=None,
+                                          highlight_color='blue'):
+    if bbox_names_to_highlight is not None:
+        assert all(x in CHEST_IMAGENOME_BBOX_NAMES for x in bbox_names_to_highlight)
+        assert len(bbox_names_to_highlight) > 0
     bboxes_dict = load_chest_imagenome_silver_bboxes()
     if dicom_id is None:
         dicom_id = random.choice(list(bboxes_dict.keys()))
@@ -631,6 +635,10 @@ def visualize_ground_truth_bounding_boxes(dicom_id=None, apply_clamping=False):
     fig, ax = plt.subplots(1, figsize=(10, 10))
     ax.imshow(image)
     print(f'Image path: {image_path}')
+    
+    # Bounding boxes
+    bbox_coords = []
+    bbox_names = []
     for i in range(len(presence)):
         if presence[i] == 1:
             x1 = coords[i * 4 + 0] * width
@@ -642,17 +650,49 @@ def visualize_ground_truth_bounding_boxes(dicom_id=None, apply_clamping=False):
                 y1 = max(min(y1, height), 0)
                 x2 = max(min(x2, width), 0)
                 y2 = max(min(y2, height), 0)
-            # rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none')
-            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(i % 20), facecolor='none', linestyle='dashed')
-            ax.add_patch(rect)
-            # ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=16, color=plt.cm.tab20(i))
-            ax.text(x1, y1-3, CHEST_IMAGENOME_BBOX_NAMES[i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+            bbox_name = CHEST_IMAGENOME_BBOX_NAMES[i]
             valid_bbox = 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
-            print(f'Object: {CHEST_IMAGENOME_BBOX_NAMES[i]} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})', end='')
+            print(f'Object: {bbox_name} ({x1:.1f}, {y1:.1f}, {x2-x1:.1f}, {y2-y1:.1f})', end='')
             if valid_bbox:
                 print_blue(' (valid)', bold=True)
             else:
                 print_red(' (invalid)', bold=True)
+            bbox_coords.append([x1, y1, x2-x1, y2-y1])
+            bbox_names.append(bbox_name)
+
+    if bbox_names_to_highlight is not None:
+        bbox_coords_background = []
+        bbox_names_background = []
+        bbox_coords_foreground = []
+        bbox_names_foreground = []
+        for i, bbox_name in enumerate(bbox_names):
+            if bbox_name in bbox_names_to_highlight:
+                bbox_coords_foreground.append(bbox_coords[i])
+                bbox_names_foreground.append(bbox_name)
+            else:
+                bbox_coords_background.append(bbox_coords[i])
+                bbox_names_background.append(bbox_name)
+        # Draw background bounding boxes first
+        for i in range(len(bbox_coords_background)):
+            x1, y1, w, h = bbox_coords_background[i]
+            rect = patches.Rectangle((x1, y1), w, h, linewidth=3, edgecolor=plt.cm.tab20(i % 20),
+                                     facecolor='none', alpha=0.3, linestyle='dashed')
+            ax.add_patch(rect)
+            ax.text(x1, y1-3, bbox_names_background[i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1), alpha=0.3)
+        # Draw foreground bounding boxes second
+        offset = len(bbox_coords_background)
+        for i in range(len(bbox_coords_foreground)):
+            x1, y1, w, h = bbox_coords_foreground[i]
+            rect = patches.Rectangle((x1, y1), w, h, linewidth=3, edgecolor=highlight_color, facecolor='none', linestyle='dashed')
+            ax.add_patch(rect)
+            ax.text(x1, y1-3, bbox_names_foreground[i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+    else:
+        for i in range(len(bbox_coords)):
+            x1, y1, w, h = bbox_coords[i]
+            rect = patches.Rectangle((x1, y1), w, h, linewidth=3, edgecolor=plt.cm.tab20(i % 20),
+                                     facecolor='none', linestyle='dashed')
+            ax.add_patch(rect)
+            ax.text(x1, y1-3, bbox_names[i], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
     plt.show()
 
 def visualize_predicted_bounding_boxes(dicom_id, pred_coords, pred_presence,

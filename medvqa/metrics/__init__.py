@@ -40,7 +40,7 @@ import operator
 from medvqa.metrics.nlp.bleu import DatasetAwareBleu
 from medvqa.metrics.nlp.cider import ConditionAwareCiderD, DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
-from medvqa.metrics.segmentation.segmentation_iou import ConditionAwareSegmaskIOU
+from medvqa.metrics.segmentation.segmentation_iou import ConditionAwareSegmaskIOU, ConditionAwareSegmaskIOUperClass
 
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, MetricNames
 
@@ -335,7 +335,7 @@ def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, u
                                     allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
-def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, use_yolov8=True, class_mask=None):
+def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, use_yolov8=True, class_mask=None, metric_name=None):
     if use_yolov8:
         met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
                                                                         'chest_imagenome_bbox_coords',
@@ -343,7 +343,9 @@ def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, 
                                 condition_function=condition_function, use_yolov8=True, class_mask=class_mask)
     else:
         raise NotImplementedError
-    met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
+    if metric_name is None:
+        metric_name = MetricNames.CHESTIMAGENOMEBBOXIOU
+    met.attach(engine, metric_name)
 
 def attach_dataset_aware_chest_imagenome_bbox_meanf1(engine, allowed_dataset_ids, use_detectron2=False, use_yolov8=False):
     if use_detectron2:
@@ -427,6 +429,18 @@ def attach_dataset_aware_vinbig_bbox_iou(engine, allowed_dataset_ids):
                                                                      'vinbig_bbox_classes'),
                             allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True, for_vinbig=True)
     met.attach(engine, MetricNames.VINBIGBBOXIOU)
+
+def attach_condition_aware_vinbig_bbox_iou(engine, condition_function, use_yolov8=True, metric_name=None):
+    if use_yolov8:
+        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
+                                                                        'vinbig_bbox_coords',
+                                                                        'vinbig_bbox_classes'),
+                                condition_function=condition_function, use_yolov8=True, for_vinbig=True)
+    else:
+        raise NotImplementedError
+    if metric_name is None:
+        metric_name = MetricNames.VINBIGBBOXIOU
+    met.attach(engine, metric_name)
 
 def attach_dataset_aware_vinbig_bbox_meanf1(engine, allowed_dataset_ids):
     met = DatasetAwareBboxMeanF1(output_transform=_get_output_transform('yolov8_predictions',
@@ -537,6 +551,14 @@ def attach_condition_aware_multilabel_f1score(engine, pred_field_name, gt_field_
 # General purpose segmentation mask IOU
 def attach_condition_aware_segmask_iou(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareSegmaskIOU(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+def attach_condition_aware_segmask_iou_per_class(engine, pred_field_name, gt_field_name, metric_name, nc, condition_function=lambda _: True):
+    met = ConditionAwareSegmaskIOUperClass(
+        nc=nc,
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
     )

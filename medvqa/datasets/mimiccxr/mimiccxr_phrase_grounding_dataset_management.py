@@ -13,6 +13,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_gold_bbox_dicom_ids,
     load_nondecent_chest_imagenome_dicom_ids,
 )
+from medvqa.datasets.dataloading_utils import SequentialDataLoader
 from medvqa.datasets.ms_cxr import get_ms_cxr_dicom_id_2_phrases_and_masks, get_ms_cxr_dicom_ids
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.datasets.mimiccxr import (
@@ -60,9 +61,10 @@ class MIMICCXR_FactGroundingDataset(Dataset):
     
 class MIMICCXR_PhraseGroundingDataset(Dataset):
 
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, indices):
+    def __init__(self, image_paths, image_transform, phrases, phrase_embeddings, phrase_grounding_masks, indices):
         self.image_paths = image_paths
         self.image_transform = image_transform
+        self.phrases = phrases
         self.phrase_embeddings = phrase_embeddings
         self.phrase_grounding_masks = phrase_grounding_masks
         self.indices = indices
@@ -74,7 +76,7 @@ class MIMICCXR_PhraseGroundingDataset(Dataset):
         idx = self.indices[i]
         image_path = self.image_paths[idx]
         image = self.image_transform(image_path)
-        phrase_embeddings = self.phrase_embeddings
+        phrase_embeddings = self.phrase_embeddings[idx]
         phrase_grounding_masks = self.phrase_grounding_masks[idx]
         return {
             'i': image,
@@ -201,8 +203,8 @@ class MIMICCXR_PhraseGroundingTrainer:
 
     def __init__(self, 
                 max_images_per_batch, max_phrases_per_batch, max_phrases_per_image,
-                num_train_workers, num_test_workers,
-                train_image_transform, test_image_transform,
+                num_train_workers=None, num_test_workers=None,
+                train_image_transform=None, test_image_transform=None,
                 fact_grounding_collate_batch_fn=None,
                 phrase_grounding_collate_batch_fn=None,
                 bbox_grounding_collate_batch_fn=None,
@@ -210,6 +212,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 mask_width=None, mask_height=None,
                 use_facts_for_train=False,
                 dicom_id_to_pos_neg_facts_filepath=None,
+                use_mscxr_for_train=False,
                 use_mscxr_for_test=False,
                 mscxr_phrase2embedding_filepath=None,
                 use_chest_imagenome_for_train=False,
@@ -218,6 +221,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 exclude_noisy_images=False,
                 use_yolov8=False,
+                mask_exponent=1,
                 **unused_kwargs,
             ):
 
@@ -225,11 +229,14 @@ class MIMICCXR_PhraseGroundingTrainer:
             # Print warning in orange and bold
             print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
         # Sanity checks
-        assert sum([use_facts_for_train, use_chest_imagenome_for_train]) > 0
-        assert sum([use_mscxr_for_test, use_chest_imagenome_gold_for_test]) > 0
+        assert sum([use_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
+                    use_mscxr_for_test, use_chest_imagenome_gold_for_test]) > 0 # at least one of them must be True
+        assert 0 < mask_exponent <= 1
+        print(f'mask_exponent = {mask_exponent}')
         
         self.use_facts_for_train = use_facts_for_train
         self.use_chest_imagenome_for_train = use_chest_imagenome_for_train
+        self.use_mscxr_for_train = use_mscxr_for_train
         self.use_mscxr_for_test = use_mscxr_for_test
         self.use_chest_imagenome_gold_for_test = use_chest_imagenome_gold_for_test
         
@@ -243,7 +250,8 @@ class MIMICCXR_PhraseGroundingTrainer:
 
         if use_mscxr_for_test:
             ms_cxr_dicom_ids = set(get_ms_cxr_dicom_ids())
-            forbidden_train_dicom_ids |= ms_cxr_dicom_ids
+            if not use_mscxr_for_train:
+                forbidden_train_dicom_ids |= ms_cxr_dicom_ids
 
         if use_chest_imagenome_gold_for_test:
             gold_dicom_ids = set(load_gold_bbox_dicom_ids())
@@ -256,6 +264,8 @@ class MIMICCXR_PhraseGroundingTrainer:
             print_bold('Preparing MIMIC-CXR-Facts datasets and dataloaders for training...')
             assert dicom_id_to_pos_neg_facts_filepath is not None
             assert fact_grounding_collate_batch_fn is not None
+            assert num_train_workers is not None
+            assert train_image_transform is not None
 
             tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
             fact_embeddings = tmp['fact_embeddings']
@@ -305,8 +315,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                     num_facts_2_idxs[num_facts] = [i]
             
             # Create dataset and dataloader for training
-            self.train_fact_datasets = []
-            self.train_fact_dataloaders = []
+            train_fact_datasets = []
+            train_fact_dataloaders = []
             for num_facts, indices in num_facts_2_idxs.items():
                 print(f'Number of facts: {num_facts}, # images: {len(indices)}')
                 dataset = MIMICCXR_FactGroundingDataset(
@@ -322,8 +332,111 @@ class MIMICCXR_PhraseGroundingTrainer:
                     collate_fn=fact_grounding_collate_batch_fn,
                     pin_memory=True,
                 )
-                self.train_fact_datasets.append(dataset)
-                self.train_fact_dataloaders.append(dataloader)
+                train_fact_datasets.append(dataset)
+                train_fact_dataloaders.append(dataloader)
+            self.train_fact_dataloader = SequentialDataLoader(train_fact_dataloaders)
+
+        # Create mscxr train/test dataset and dataloader
+        if use_mscxr_for_train or use_mscxr_for_test:
+            print_bold('Preparing MS-CXR dataset and dataloader for training/testing...')
+            assert mask_width is not None
+            assert mask_height is not None
+            assert mscxr_phrase2embedding_filepath is not None
+            assert phrase_grounding_collate_batch_fn is not None
+            assert num_test_workers is not None
+            assert test_image_transform is not None
+            
+            dicom_id_2_phrases_and_masks = get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width)
+            print(f'len(dicom_id_2_phrases_and_masks) = {len(dicom_id_2_phrases_and_masks)}')
+
+            phrase2embedding = load_pickle(mscxr_phrase2embedding_filepath)
+            print(f'len(phrase2embedding) = {len(phrase2embedding)}')
+
+            BIG_ENOGUGH = 1000000
+            image_paths = [None] * BIG_ENOGUGH
+            phrases = [None] * BIG_ENOGUGH
+            phrase_embeddings = [None] * BIG_ENOGUGH
+            phrase_grounding_masks = [None] * BIG_ENOGUGH
+            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
+
+            mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+
+            idx = 0
+            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
+                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
+                    mimiccxr_metadata['subject_ids'],
+                    mimiccxr_metadata['study_ids'],
+                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                    if dicom_id not in dicom_id_2_phrases_and_masks:
+                        continue
+                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                    phrases_, masks_ = dicom_id_2_phrases_and_masks[dicom_id]
+                    phrases[idx] = phrases_
+                    phrase_embeddings[idx] = np.array([phrase2embedding[p] for p in phrases_])
+                    phrase_grounding_masks[idx] = np.array(masks_) ** mask_exponent # apply mask exponent
+                    idx += 1
+
+            print(f'Total number of images: {idx}')
+            image_paths = image_paths[:idx]
+            phrases = phrases[:idx]
+            phrase_embeddings = phrase_embeddings[:idx]
+            phrase_grounding_masks = phrase_grounding_masks[:idx]
+
+            # Create a mapping from number of phrases to indices
+            num_phrases_2_idxs = {}
+            for i, pe in enumerate(phrase_embeddings):
+                num_phrases = len(pe)
+                try:
+                    num_phrases_2_idxs[num_phrases].append(i)
+                except KeyError:
+                    num_phrases_2_idxs[num_phrases] = [i]
+
+            # Create datasets and dataloaders for testing
+            mscxr_datasets = []
+            if use_mscxr_for_train:
+                train_mscxr_dataloaders = []
+            if use_mscxr_for_test:
+                test_mscxr_dataloaders = []
+            for num_phrases, indices in num_phrases_2_idxs.items():
+                print(f'Number of phrases: {num_phrases}, # images: {len(indices)}')
+                # Sanity checks
+                for i in indices:
+                    assert phrase_embeddings[i].shape == phrase_embeddings[indices[0]].shape
+                    assert phrase_grounding_masks[i].shape == phrase_grounding_masks[indices[0]].shape
+                    assert phrase_embeddings[i].shape[0] == phrase_grounding_masks[i].shape[0] == num_phrases
+                dataset = MIMICCXR_PhraseGroundingDataset(
+                    image_paths=image_paths, image_transform=test_image_transform, phrases=phrases,
+                    phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
+                    indices=indices)
+                mscxr_datasets.append(dataset)
+                if use_mscxr_for_train:
+                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1)
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=True,
+                        num_workers=num_train_workers,
+                        collate_fn=phrase_grounding_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    train_mscxr_dataloaders.append(dataloader)
+                if use_mscxr_for_test:
+                    batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1) * test_batch_size_factor)
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=phrase_grounding_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    test_mscxr_dataloaders.append(dataloader)
+            self.mscxr_datasets = mscxr_datasets
+            if use_mscxr_for_train:
+                self.train_mscxr_dataloader = SequentialDataLoader(train_mscxr_dataloaders)
+            if use_mscxr_for_test:
+                self.test_mscxr_dataloader = SequentialDataLoader(test_mscxr_dataloaders)
 
         # Create train chest imagenome dataset
         if use_chest_imagenome_for_train:
@@ -333,7 +446,10 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert mask_width is not None
             assert mask_height is not None
             assert bbox_grounding_collate_batch_fn is not None
+            assert num_train_workers is not None
+            assert train_image_transform is not None
 
+            print(f'Loding bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']
@@ -374,7 +490,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     i = did2idx[dicom_id]
                     chest_imagenome_bbox_coords[idx] = bbox_coords_array[i]
                     chest_imagenome_bbox_presence[idx] = bbox_presence_array[i]
-                    phrase_grounding_masks[idx] = phrase_grounding_masks_array[i]
+                    phrase_grounding_masks[idx] = phrase_grounding_masks_array[i] ** mask_exponent # apply mask exponent
                     idx += 1
 
             print(f'Total number of images: {idx}')
@@ -399,78 +515,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                 collate_fn=lambda batch: bbox_grounding_collate_batch_fn(batch, training_mode=True),
                 pin_memory=True,
             )
-
-        # Create mscxr test dataset and dataloader
-        if use_mscxr_for_test:
-            print_bold('Preparing MS-CXR dataset and dataloader for testing...')
-            assert mask_width is not None
-            assert mask_height is not None
-            assert mscxr_phrase2embedding_filepath is not None
-            assert phrase_grounding_collate_batch_fn is not None
-            
-            dicom_id_2_phrases_and_masks = get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width)
-            print(f'len(dicom_id_2_phrases_and_masks) = {len(dicom_id_2_phrases_and_masks)}')
-
-            phrase2embedding = load_pickle(mscxr_phrase2embedding_filepath)
-            print(f'len(phrase2embedding) = {len(phrase2embedding)}')
-
-            BIG_ENOGUGH = 1000000
-            image_paths = [None] * BIG_ENOGUGH
-            phrase_embeddings = [None] * BIG_ENOGUGH
-            phrase_grounding_masks = [None] * BIG_ENOGUGH
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
-
-            mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-
-            idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                    mimiccxr_metadata['subject_ids'],
-                    mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
-                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id not in dicom_id_2_phrases_and_masks:
-                        continue
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    phrases, masks = dicom_id_2_phrases_and_masks[dicom_id]
-                    phrase_embeddings[idx] = np.array([phrase2embedding[phrase] for phrase in phrases])
-                    phrase_grounding_masks[idx] = np.array(masks)
-                    idx += 1
-
-            print(f'Total number of images: {idx}')
-            image_paths = image_paths[:idx]
-            phrase_embeddings = phrase_embeddings[:idx]
-            phrase_grounding_masks = phrase_grounding_masks[:idx]
-
-            # Create a mapping from number of phrases to indices
-            num_phrases_2_idxs = {}
-            for i, pe in enumerate(phrase_embeddings):
-                num_phrases = len(pe)
-                try:
-                    num_phrases_2_idxs[num_phrases].append(i)
-                except KeyError:
-                    num_phrases_2_idxs[num_phrases] = [i]
-
-            # Create datasets and dataloaders for testing
-            self.test_mscxr_datasets = []
-            self.test_mscxr_dataloaders = []
-            for num_phrases, indices in num_phrases_2_idxs.items():
-                print(f'Number of phrases: {num_phrases}, # images: {len(indices)}')
-                dataset = MIMICCXR_PhraseGroundingDataset(
-                    image_paths=image_paths, image_transform=test_image_transform,
-                    phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
-                    indices=indices)
-                batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1) * test_batch_size_factor
-                dataloader = DataLoader(
-                    dataset,
-                    batch_size=batch_size,
-                    shuffle=False,
-                    num_workers=num_test_workers,
-                    collate_fn=phrase_grounding_collate_batch_fn,
-                    pin_memory=True,
-                )
-                self.test_mscxr_datasets.append(dataset)
-                self.test_mscxr_dataloaders.append(dataloader)
         
         # Create chest imagenome test dataset and dataloader
         if use_chest_imagenome_gold_for_test:
@@ -479,9 +523,12 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert mask_height is not None
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
             assert bbox_grounding_collate_batch_fn is not None
+            assert num_test_workers is not None
+            assert test_image_transform is not None
 
             _, gold_pres_indices = get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices()
 
+            print(f'Loding bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']
@@ -522,7 +569,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     chest_imagenome_bbox_presence[idx] = bbox_presence
                     phrase_grounding_masks[idx] = _compute_mask_from_bounding_boxes(mask_height, mask_width,
                                                                                     bbox_coords[gold_pres_indices], # use only gold subset
-                                                                                    bbox_presence[gold_pres_indices])
+                                                                                    bbox_presence[gold_pres_indices]) ** mask_exponent # apply mask exponent
                     phrase_classification_labels[idx] = bbox_presence[gold_pres_indices] # use bbox_presence as classification labels, use only gold subset
                     idx += 1
 
@@ -543,7 +590,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 phrase_embeddings=bbox_phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
                 phrase_classification_labels=phrase_classification_labels,
                 bbox_coords=chest_imagenome_bbox_coords, bbox_presence=chest_imagenome_bbox_presence, use_yolov8=use_yolov8)
-            batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) * test_batch_size_factor
+            batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) * test_batch_size_factor)
             self.test_chest_imagenome_gold_dataloader = DataLoader(
                 self.test_chest_imagenome_gold_dataset,
                 batch_size=batch_size,

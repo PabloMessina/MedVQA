@@ -61,11 +61,12 @@ class PhraseGroundingAnnotationsVisualizer:
         assert dicom_id in self.dicom_id_2_rows
         rows = self.dicom_id_2_rows[dicom_id]
         print(f'Found {len(rows)} rows for dicom_id {dicom_id}')
-        # show image with bounding box
+        # show image with bounding box        
         from PIL import Image
         from matplotlib import pyplot as plt
         fig = plt.figure(figsize=figsize)
         image_path = os.path.join(MIMICCXR_JPG_IMAGES_LARGE_DIR, rows[0]['path'][6:])
+        print(f'Image path: {image_path}')
         img = Image.open(image_path)
         img = img.convert('RGB')
         plt.imshow(img)
@@ -77,7 +78,7 @@ class PhraseGroundingAnnotationsVisualizer:
             if label_text not in label_text_2_color:
                 label_text_2_color[label_text] = len(label_text_2_color)
         # Create a Rectangle patch for each row
-        import matplotlib.patches as patches        
+        import matplotlib.patches as patches
         for row in rows:
             x = row['x']
             y = row['y']
@@ -95,6 +96,11 @@ class PhraseGroundingAnnotationsVisualizer:
             label_text = row['label_text']
             plt.text(x, y-10, label_text, fontsize=12, color=color)
         plt.show()
+
+    def visualize_random_dicom_id(self, figsize=(10, 10)):
+        dicom_ids = list(self.dicom_id_2_rows.keys())
+        dicom_id = random.choice(dicom_ids)
+        self.visualize_dicom_id(dicom_id, figsize=figsize)
 
 def export_images_and_annotations_to_zip(folder_path, zip_filename, num_images=None):
     # Image paths
@@ -132,7 +138,13 @@ def get_ms_cxr_dicom_ids():
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
     return list(set(df['dicom_id']))
 
-def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width):
+def get_ms_cxr_phrases():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    phrases = list(set(df['label_text']))
+    phrases.sort()
+    return phrases
+
+def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width, flatten=True):
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
     dicom_id_2_rows = {}
     for _, row in df.iterrows():
@@ -161,7 +173,7 @@ def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width):
                 phrase2bboxes[phrase] = []
             phrase2bboxes[phrase].append((x, y, x + w, y + h))
         for phrase, bboxes in phrase2bboxes.items():
-            mask = compute_mask_from_bounding_boxes(mask_height, mask_width, bboxes)
+            mask = compute_mask_from_bounding_boxes(mask_height, mask_width, bboxes, flatten=flatten)
             phrases.append(phrase)
             masks.append(mask)
         dicom_id_2_phrases_and_masks[dicom_id] = (phrases, masks)

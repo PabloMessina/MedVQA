@@ -1,4 +1,3 @@
-import bs4
 import torch
 import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler

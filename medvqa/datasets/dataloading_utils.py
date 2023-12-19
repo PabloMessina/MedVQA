@@ -191,6 +191,67 @@ def multi_dataloaders_generator(dataloaders):
         for batch in dataloader:
             yield batch
 
+class SequentialDataLoader:
+    def __init__(self, dataloaders):
+        """
+        Initialize a sequential dataloader with a list of dataloaders.
+        """
+        self.dataloaders = dataloaders
+        self.total_len = sum(len(d) for d in dataloaders)
+
+    def __iter__(self):
+        for dataloader in self.dataloaders:
+            for batch in dataloader:
+                yield batch
+
+    def __len__(self):
+        return self.total_len
+    
+def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=None, min_group_size=100):
+    assert len(label_matrix.shape) == 2
+    n_labels = label_matrix.shape[1]
+    grouped_indices = [[] for _ in range(n_labels+1)]
+    if indices is None:
+        n_samples = label_matrix.shape[0]
+        for i in range(n_samples):
+            has_label = False
+            for j in range(n_labels):
+                if label_matrix[i,j] == 1:
+                    grouped_indices[j].append(i)
+                    has_label = True
+            if not has_label:
+                grouped_indices[-1].append(i)
+    else:
+        for i in indices:
+            has_label = False
+            for j in range(n_labels):
+                if label_matrix[i,j] == 1:
+                    grouped_indices[j].append(i)
+                    has_label = True
+            if not has_label:
+                grouped_indices[-1].append(i)
+    group_indices = list(range(len(grouped_indices)))
+    group_indices.sort(key = lambda i : len(grouped_indices[i]))
+    if label_names is not None:
+        for gi in group_indices:
+            if gi < n_labels:
+                print(f'{label_names[gi]}: {len(grouped_indices[gi])}')
+            else:
+                print(f'No labels: {len(grouped_indices[gi])}')
+    seen = [False] * label_matrix.shape[0]
+    dedup_indices = [[] for _ in range(len(group_indices))]
+    for gi in group_indices:
+        for i in grouped_indices[gi]:
+            if not seen[i]:
+                dedup_indices[gi].append(i)
+                seen[i] = True
+    dedup_indices.sort(key = lambda x : len(x), reverse=True)
+    while len(dedup_indices) > 1 and len(dedup_indices[-1]) < min_group_size:
+        dedup_indices[-2].extend(dedup_indices[-1])
+        dedup_indices.pop()
+    print(f'Group sizes: {[len(x) for x in dedup_indices]}')
+    return dedup_indices
+
 def simple_yolov8_collate_batch_fn(batch):
     batch_dict = {}
     batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -983,7 +1044,13 @@ def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
                 batch_dict['img'] = torch.stack([x['i'] for x in batch])
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            # try:
             batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            # except ValueError:
+            #     print('Error in collate_batch_fn')
+            #     for x in batch:
+            #         print(f'x[\'pe\'].shape = {x["pe"].shape}')
+            #     raise
             batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
             return batch_dict
     elif flag == 'cibg': # chest imagenome bbox grounding
@@ -1038,6 +1105,55 @@ def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
                 batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
                 batch_dict['bc'] = torch.tensor([x['bc'] for x in batch])
                 batch_dict['bp'] = torch.tensor([x['bp'] for x in batch])
+            return batch_dict
+    elif flag == 'vbg': # vinbig bbox grounding
+        assert use_yolov8
+        def collate_batch_fn(batch, training_mode=True):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pgm': phrase grounding masks
+            # - 'pcl': phrase classification labels
+            # - 'bboxes': bounding boxes coordinates
+            # - 'classes': bounding boxes classes
+            batch_dict = dict(flag=flag)
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['i'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['pcl'] = torch.tensor([x['pcl'] for x in batch])
+            batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
+            if training_mode:
+                batch_dict['im_file'] = [x['im_file'] for x in batch]
+                batch_dict['ori_shape'] = [x['ori_shape'] for x in batch]
+                batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                bboxes_list, cls_list, batch_idx_list = [], [], []
+                for i, x in enumerate(batch):
+                    bboxes = x['bboxes']
+                    classes = x['classes']
+                    for bbox, cls in zip(bboxes, classes):
+                        # convert bbox from xyxy to x_c, y_c, w, h
+                        bboxes_list.append(torch.tensor([
+                            (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2, bbox[2] - bbox[0], bbox[3] - bbox[1],
+                        ]))
+                        cls_list.append(cls)
+                        batch_idx_list.append(i)
+                if len(bboxes_list) > 0:
+                    batch_dict['bboxes'] = torch.stack(bboxes_list)
+                    assert batch_dict['bboxes'].shape == (len(bboxes_list), 4)
+                    batch_dict['cls'] = torch.tensor(cls_list)
+                    batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
+                    assert batch_dict['cls'].shape == (len(cls_list), 1)
+                    batch_dict['batch_idx'] = torch.tensor(batch_idx_list)
+                else: # no bboxes
+                    batch_dict['bboxes'] =  torch.zeros((0, 4), dtype=torch.float32)
+                    batch_dict['cls'] = torch.zeros((0, 1), dtype=torch.int64)
+                    batch_dict['batch_idx'] = torch.zeros((0,), dtype=torch.int64)
+            else:
+                batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+                batch_dict['classes'] = [x['classes'] for x in batch]
             return batch_dict
     else: assert False, f'Unknown flag {flag}'
     return collate_batch_fn

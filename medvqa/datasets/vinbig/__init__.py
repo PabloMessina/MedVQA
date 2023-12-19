@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from imagesize import get as get_image_size
+from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_LABELS
 load_dotenv()
@@ -18,6 +19,11 @@ VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH = os.environ['VINBIG_IMAGE_LABELS_TRAIN_CSV_P
 VINBIG_IMAGE_LABELS_TEST_CSV_PATH = os.environ['VINBIG_IMAGE_LABELS_TEST_CSV_PATH']
 VINBIG_ANNOTATIONS_TRAIN_CSV_PATH = os.environ['VINBIG_ANNOTATIONS_TRAIN_CSV_PATH']
 VINBIG_ANNOTATIONS_TEST_CSV_PATH = os.environ['VINBIG_ANNOTATIONS_TEST_CSV_PATH']
+
+from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR
+VINBIG_CACHE_DIR = os.path.join(CACHE_DIR, 'vinbig')
+VINBIG_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'vinbig')
+VINBIG_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'vinbig')
 
 N_IMAGES_TRAIN = 15000
 N_IMAGES_TEST = 3000
@@ -84,6 +90,17 @@ def load_train_image_id_2_bboxes(for_training=False, normalize=False, class_id_o
 
 def load_test_image_id_2_bboxes(for_training=False, normalize=False, class_id_offset=0):
     return _load_image_id_2_bboxes(VINBIG_ANNOTATIONS_TEST_CSV_PATH, for_training, normalize, class_id_offset)
+
+def compute_masks_and_binary_labels_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_classes, flatten_grid=True):
+    mask = np.zeros((len(VINBIG_BBOX_NAMES), mask_height, mask_width), dtype=np.float32)
+    binary_labels = np.zeros((len(VINBIG_BBOX_NAMES),), dtype=np.float32)
+    for bbox, class_id in zip(bbox_coords, bbox_classes):
+        x1, y1, x2, y2 = bbox
+        compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, mask=mask[class_id])
+        binary_labels[class_id] = 1
+    if flatten_grid:
+        mask = mask.reshape((len(VINBIG_BBOX_NAMES), -1))
+    return mask, binary_labels
 
 def _merge_labels(*labels_list):
     merged = np.zeros((len(VINBIG_LABELS),), np.int8)
