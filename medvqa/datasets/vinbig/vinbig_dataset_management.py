@@ -44,7 +44,7 @@ class VinBigTrainingMode:
 class VinBigTrainerBase(LabelBasedVQAClass):
     
     def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None, load_bouding_boxes=False,
-                 class_id_offset=0):
+                 class_id_offset=0, verbose=False):
 
         # Load labels
         image_id_to_labels = load_labels()
@@ -88,10 +88,11 @@ class VinBigTrainerBase(LabelBasedVQAClass):
                 for y in x[1]:
                     assert 0 <= (y - class_id_offset) < len(VINBIG_BBOX_NAMES)
             print(f'  Loaded {len(image_id_2_bboxes)} bounding boxes')
-            # print 5 random bboxes
-            import random
-            for i in random.sample(range(len(self.bboxes)), 5):
-                print(f'  self.bboxes[{i}]: {self.bboxes[i]}')
+            if verbose:
+                # print 5 random bboxes
+                import random
+                for i in random.sample(range(len(self.bboxes)), 5):
+                    print(f'  self.bboxes[{i}]: {self.bboxes[i]}')
         else:
             self.image_id_2_bboxes = None
             self.bboxes = None
@@ -591,7 +592,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                     infinite=True,
                     shuffle_indices=True,
                 )
-                weight = math.log2(len(indices)) ** 2
+                weight = math.log2(len(indices)) ** 3
                 train_datasets.append(dataset)
                 train_weights.append(weight)
                 print(f'  len(indices) = {len(indices)}, weight = {weight}')

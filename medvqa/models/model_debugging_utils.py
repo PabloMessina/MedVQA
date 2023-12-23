@@ -734,7 +734,8 @@ class PhraseGroundingVisualizer:
             self.vinbigdata_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.VINBIG])
 
     def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0,
-                                   mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None):
+                                   mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None,
+                                   run_also_in_training_mode=False):
         
         assert sum([mimiccxr_forward, vinbig_forward]) == 1
 
@@ -759,8 +760,9 @@ class PhraseGroundingVisualizer:
         
         # Run phrase grounder in inference mode
         print_bold('Run phrase grounder in inference mode')
-        self.phrase_grounder.eval()
-        with torch.no_grad():
+        with torch.set_grad_enabled(False):
+            self.phrase_grounder.eval()
+            print('self.phrase_grounder.training = ', self.phrase_grounder.training)
             image = image.to(self.device)
             print(f'image.shape = {image.shape}')
             text_embeddings = torch.tensor(text_embeddings, dtype=torch.float32).to(self.device)
@@ -772,6 +774,8 @@ class PhraseGroundingVisualizer:
                 yolov8_detection_layer_index=yolov8_detection_layer_index,
             )
             print(f'output.keys() = {output.keys()}')
+            print('local_feat:')
+            print(output['local_feat'])
             yolov8_predictions = output['yolov8_predictions'][0].detach().cpu()
             yolov8_predictions[:, :4] /= torch.tensor([image_size_after[1], image_size_after[0], image_size_after[1], image_size_after[0]], dtype=torch.float32)
             pred_coords = yolov8_predictions[:, :4].numpy()
@@ -781,6 +785,7 @@ class PhraseGroundingVisualizer:
             sigmoid_attention = output['sigmoid_attention'][0].detach().cpu().numpy()
             sigmoid_attention = sigmoid_attention.reshape(-1, self.phrase_grounder.regions_height, self.phrase_grounder.regions_width)
             print(f'sigmoid_attention.shape = {sigmoid_attention.shape}')
+        
         
         # Visualize bbox predictions
         if mimiccxr_forward:
@@ -815,3 +820,35 @@ class PhraseGroundingVisualizer:
             attention_factor=attention_factor,
             max_cols=3,
         )
+
+        # Run phrase grounder in training mode
+        if run_also_in_training_mode:
+            print_bold('Run phrase grounder in training mode')
+            with torch.set_grad_enabled(False):
+                self.phrase_grounder.train(True)
+                print('self.phrase_grounder.training = ', self.phrase_grounder.training)
+                print(f'image.shape = {image.shape}')
+                output = self.phrase_grounder(
+                    raw_images=image.unsqueeze(0),
+                    phrase_embeddings=text_embeddings.unsqueeze(0),
+                    mimiccxr_forward=mimiccxr_forward,
+                    vinbig_forward=vinbig_forward,
+                    yolov8_detection_layer_index=yolov8_detection_layer_index,
+                )
+                print(f'output.keys() = {output.keys()}')
+                print('local_feat:')
+                print(output['local_feat'])
+                sigmoid_attention = output['sigmoid_attention'][0].detach().cpu().numpy()
+                sigmoid_attention = sigmoid_attention.reshape(-1, self.phrase_grounder.regions_height, self.phrase_grounder.regions_width)
+                print(f'sigmoid_attention.shape = {sigmoid_attention.shape}')
+
+                # Visualize attention maps
+                print_bold('Visualize attention maps')
+                visualize_attention_maps(
+                    image_path=image_path,
+                    attention_maps=sigmoid_attention,
+                    figsize=figsize,
+                    titles=phrases,
+                    attention_factor=attention_factor,
+                    max_cols=3,
+                )

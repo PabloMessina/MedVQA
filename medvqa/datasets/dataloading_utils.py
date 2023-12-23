@@ -28,8 +28,23 @@ from medvqa.utils.logging import print_bold, print_red
 INFINITE_DATASET_LENGTH = int(1e18)
 
 def _get_balancedly_distributed_class_indices(class_weights):
+    assert len(class_weights) > 0
+    assert all(w >= 0 for w in class_weights)
     if all(w == class_weights[0] for w in class_weights):
         return np.arange(len(class_weights), dtype=int) # all classes have the same weight
+    if any(w == 0 for w in class_weights):
+        # remove classes with zero weight
+        i2i = {}
+        class_weights_ = []
+        for i, w in enumerate(class_weights):
+            if w > 0:
+                i2i[len(i2i)] = i
+                class_weights_.append(w)
+        class_weights = class_weights_
+        assert len(class_weights) > 0
+        assert all(w > 0 for w in class_weights)
+    else:
+        i2i = None
     w_sum = sum(class_weights)
     ws = [w / w_sum for w in class_weights]
     w_min = min(ws)
@@ -48,6 +63,8 @@ def _get_balancedly_distributed_class_indices(class_weights):
             indices[available_slots[jj]] = i
         available_slots = [s for s in available_slots if indices[s] is None]
     indices = [i for i in indices if i is not None]
+    if i2i is not None:
+        indices = [i2i[i] for i in indices]
     return np.array(indices, dtype=int)
 
 class CompositeDataset(Dataset):
@@ -1154,6 +1171,19 @@ def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
                 batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
                 batch_dict['bboxes'] = [x['bboxes'] for x in batch]
                 batch_dict['classes'] = [x['classes'] for x in batch]
+            return batch_dict
+    elif flag == 'cl': # chexlocalize
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pgm': phrase grounding masks
+            # - 'pcl': phrase classification labels
+            batch_dict = dict(flag=flag)
+            batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
+            batch_dict['pcl'] = torch.tensor([x['pcl'] for x in batch])
             return batch_dict
     else: assert False, f'Unknown flag {flag}'
     return collate_batch_fn

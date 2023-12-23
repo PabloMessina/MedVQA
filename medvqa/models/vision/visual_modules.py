@@ -1422,21 +1422,36 @@ class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
                 return_list = True
             
             # Run the model up to the last convolutional layer
+            count = 0
+            debug_list = []
             y = []
             features = None
             for m in self.model:
-                # print('----')
+                # print(f'---- {count}')
                 # print(m)
                 if m.f != -1:  # if not from previous layer
                     x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
                 if torch.is_tensor(x):
                     features = x # keep the last tensor as features
+                    # print(f'features.shape: {features.shape}')
+                    # print(f'features: {features}')
+                    debug_list.append((count, features.shape, features.view(-1)[0].item(), features.sum().item()))
                 x = m(x) # run
                 if torch.is_tensor(x):
                     features = x # keep the last tensor as features
+                    # print(f'features.shape: {features.shape}')
+                    # print(f'features: {features}')
+                    debug_list.append((count, features.shape, features.view(-1)[0].item(), features.sum().item()))
                 y.append(x if m.i in self.save else None)  # save output
+                count += 1
             if torch.is_tensor(x):
                 features = x # keep the last tensor as features
+                # print(f'features.shape: {features.shape}')
+                # print(f'features: {features}')
+                debug_list.append((count, features.shape, features.view(-1)[0].item(), features.sum().item()))
+            print('debug_list')
+            for row in debug_list:
+                print(row)
             # Run the detection layers
             detection_output = []
             xx = x

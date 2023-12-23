@@ -23,6 +23,7 @@ class GradientAccumulator:
         self._max_grad_norm = max_grad_norm
 
     def step(self, batch_loss, model):
+        # print(f'GradientAccumulator.step(): batch_loss = {batch_loss}')
         assert batch_loss is not None
         batch_loss = batch_loss / self.num_accumulation_steps
         self.scaler.scale(batch_loss).backward()
@@ -30,6 +31,7 @@ class GradientAccumulator:
             clip_grad_norm_(model.parameters(), self._max_grad_norm)
         self.step_count += 1
         if self.step_count % self.num_accumulation_steps == 0:
+            print(f'*** GradientAccumulator.step(): step_count = {self.step_count}, num_accumulation_steps = {self.num_accumulation_steps}')
             self.scaler.step(self.optimizer)
             self.scaler.update()
             # batch_loss.backward()

@@ -18,7 +18,7 @@ def main():
 
     args = parser.parse_args()
 
-# Define bbox phrases
+    # Define bbox phrases
     bbox_phrases = VINBIG_BBOX_NAMES
     
     # Obtain embeddings for each sentence

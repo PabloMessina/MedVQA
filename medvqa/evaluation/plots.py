@@ -528,6 +528,55 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
     plt.show()
 
+def visualize_image_and_polygons(image_path, polygons_list, polygon_names, figsize, title=None, as_segmentation=False, mask_resolution=None):
+    from PIL import Image, ImageDraw
+
+    fig, ax = plt.subplots(1, figsize=figsize)
+
+    # Image
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    image_width = image.size[0]
+    image_height = image.size[1]
+    
+    if as_segmentation:
+        # Draw polygons as segmentation masks
+        if mask_resolution is None:
+            for i, polygon in enumerate(polygons):
+                coords = [(point[0], point[1]) for point in polygon]
+                ImageDraw.Draw(image).polygon(coords, outline='red', fill='red')
+            ax.imshow(image)
+        else:
+            mask_height, mask_width = mask_resolution
+            mask = Image.new('1', (mask_width, mask_height))
+            for i, polygon in enumerate(polygons):
+                coords = [(point[0] * mask_width / image_width, point[1] * mask_height / image_height) for point in polygon]
+                ImageDraw.Draw(mask).polygon(coords, outline='red', fill='red')
+            mask = mask.resize((image_width, image_height), Image.NEAREST)
+            ax.imshow(image)
+            ax.imshow(mask, alpha=0.5)
+    else:
+        ax.imshow(image)
+        i = 0
+        for polygons, name in zip(polygons_list, polygon_names):
+            # Draw polygons
+            for polygon in polygons:
+                x = [p[0] for p in polygon]
+                y = [p[1] for p in polygon]
+                ax.plot(x, y, linewidth=3, color=_COLORS[i % len(_COLORS)])
+                i += 1
+            # Draw polygon names
+            for polygon in polygons:
+                # find upper left corner of polygon
+                y, x = min((y, x) for x, y in polygon)
+                ax.text(x, y, name, fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
+        print(f'i = {i}')
+
+    if title is not None:
+        plt.title(title)
+
+    plt.show()
+
 def plot_embeddings_and_clusters(X_dataset, X_clusters):
     # Apply PCA to reduce dimensionality to 2
     import sklearn.decomposition

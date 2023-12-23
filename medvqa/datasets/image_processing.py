@@ -470,6 +470,23 @@ def get_pretrain_vit_mae_image_transform(feature_extractor):
     )
     return transforms
 
+def resize_image(src_image_path, tgt_image_path, new_size, keep_aspect_ratio):
+    image = cv2.imread(src_image_path)
+    if keep_aspect_ratio:
+        # Resize image so that the smallest side is new_size
+        h, w, _ = image.shape
+        if h < w:
+            new_h = new_size
+            new_w = int(w * new_size / h)
+        else:
+            new_w = new_size
+            new_h = int(h * new_size / w)
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    else:
+        image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+    # Save image to new path
+    cv2.imwrite(tgt_image_path, image)
+
 inv_normalize = T.Normalize(
     mean=[-0.485/0.229, -0.456/0.224, -0.406/0.255],
     std=[1/0.229, 1/0.224, 1/0.255]

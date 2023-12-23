@@ -1,9 +1,10 @@
 import multiprocessing as mp
-import cv2
 import os
 import argparse
 import time
 from pprint import pprint
+
+from medvqa.datasets.image_processing import resize_image
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -14,23 +15,6 @@ def parse_args():
     parser.add_argument('--target-folder', type=str, required=True)
     parser.add_argument('--num-workers', type=int, default=6)
     return parser.parse_args()
-
-def resize_image(src_image_path, tgt_image_path, new_size, keep_aspect_ratio):
-    image = cv2.imread(src_image_path)
-    if keep_aspect_ratio:
-        # Resize image so that the smallest side is new_size
-        h, w, _ = image.shape
-        if h < w:
-            new_h = new_size
-            new_w = int(w * new_size / h)
-        else:
-            new_w = new_size
-            new_h = int(h * new_size / w)
-        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    else:
-        image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
-    # Save image to new path
-    cv2.imwrite(tgt_image_path, image)
 
 if __name__ == '__main__':
     args = parse_args()

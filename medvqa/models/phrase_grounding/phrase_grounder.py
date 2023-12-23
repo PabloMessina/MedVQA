@@ -93,7 +93,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
     ):  
         assert (pos_phrase_embeddings is not None and neg_phrase_embeddings is not None) or \
             phrase_embeddings is not None, 'Either (pos_phrase_embeddings and neg_phrase_embeddings) or phrase_embeddings must be provided'
-        assert mimiccxr_forward or vinbig_forward
+        assert mimiccxr_forward or vinbig_forward or only_compute_features
         # Visual Component
         output = super().forward(
             raw_images=raw_images,

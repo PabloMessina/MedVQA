@@ -437,6 +437,7 @@ class DATASET_NAMES:
     PADCHEST = 'padchest'
     MIMICCXR_CHEST_IMAGENOME_MODE = 'mimic-cxr-chest-imagenome-mode'
     MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE = 'mimic-cxr-chest-imagenome-detectron2-mode'
+    CHEXLOCALIZE = 'chexlocalize'
 
 DATASET_NAME_TO_SHORT = {
     DATASET_NAMES.IUXRAY: 'iux',

@@ -73,6 +73,7 @@ class MIMICCXR_PhraseGroundingDataset(Dataset):
         return len(self.indices)
     
     def __getitem__(self, i):
+        # print(f'MIMICCXR_PhraseGroundingDataset.__getitem__({i})')
         idx = self.indices[i]
         image_path = self.image_paths[idx]
         image = self.image_transform(image_path)
@@ -343,8 +344,12 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert mask_height is not None
             assert mscxr_phrase2embedding_filepath is not None
             assert phrase_grounding_collate_batch_fn is not None
-            assert num_test_workers is not None
-            assert test_image_transform is not None
+            if use_mscxr_for_train:
+                assert num_train_workers is not None
+                assert train_image_transform is not None
+            if use_mscxr_for_test:
+                assert num_test_workers is not None
+                assert test_image_transform is not None                
             
             dicom_id_2_phrases_and_masks = get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width)
             print(f'len(dicom_id_2_phrases_and_masks) = {len(dicom_id_2_phrases_and_masks)}')
@@ -393,7 +398,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                     num_phrases_2_idxs[num_phrases] = [i]
 
             # Create datasets and dataloaders for testing
-            mscxr_datasets = []
             if use_mscxr_for_train:
                 train_mscxr_dataloaders = []
             if use_mscxr_for_test:
@@ -405,13 +409,13 @@ class MIMICCXR_PhraseGroundingTrainer:
                     assert phrase_embeddings[i].shape == phrase_embeddings[indices[0]].shape
                     assert phrase_grounding_masks[i].shape == phrase_grounding_masks[indices[0]].shape
                     assert phrase_embeddings[i].shape[0] == phrase_grounding_masks[i].shape[0] == num_phrases
-                dataset = MIMICCXR_PhraseGroundingDataset(
-                    image_paths=image_paths, image_transform=test_image_transform, phrases=phrases,
-                    phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
-                    indices=indices)
-                mscxr_datasets.append(dataset)
+                
                 if use_mscxr_for_train:
                     batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1)
+                    dataset = MIMICCXR_PhraseGroundingDataset(
+                        image_paths=image_paths, image_transform=train_image_transform, phrases=phrases,
+                        phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
+                        indices=indices)
                     dataloader = DataLoader(
                         dataset,
                         batch_size=batch_size,
@@ -423,6 +427,10 @@ class MIMICCXR_PhraseGroundingTrainer:
                     train_mscxr_dataloaders.append(dataloader)
                 if use_mscxr_for_test:
                     batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1) * test_batch_size_factor)
+                    dataset = MIMICCXR_PhraseGroundingDataset(
+                        image_paths=image_paths, image_transform=test_image_transform, phrases=phrases,
+                        phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
+                        indices=indices)
                     dataloader = DataLoader(
                         dataset,
                         batch_size=batch_size,
@@ -432,7 +440,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                         pin_memory=True,
                     )
                     test_mscxr_dataloaders.append(dataloader)
-            self.mscxr_datasets = mscxr_datasets
             if use_mscxr_for_train:
                 self.train_mscxr_dataloader = SequentialDataLoader(train_mscxr_dataloaders)
             if use_mscxr_for_test:
