@@ -1,6 +1,7 @@
 import  os
 import argparse
 import torch
+import json
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
@@ -13,10 +14,11 @@ from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
 
 from medvqa.training.utils import append_metric_name
 from medvqa.utils.constants import MetricNames
-from medvqa.utils.common import WORKSPACE_DIR
+from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_loss,
-    attach_condition_aware_seq2seq_output_logger,
+    attach_condition_aware_seq2seq_exactmatch,
+    # attach_condition_aware_seq2seq_output_logger,
     attach_loss,
 )
 from medvqa.models.checkpoint import (
@@ -78,22 +80,37 @@ def parse_args(args=None):
     parser.add_argument('--warmup_and_cosine_args', type=str, default=None)
     parser.add_argument('--warmup_decay_and_cyclic_decay_args', type=str, default=None)
     parser.add_argument('--iters_to_accumulate', type=int, default=1, help='For gradient accumulation')
-    parser.add_argument('--override_lr', action='store_true', default=False)
+    parser.add_argument('--override_lr', action='store_true')
 
     # Data loading arguments
     parser.add_argument('--task_name', type=str, default=None, choices=Seq2SeqTaskNames.get_all())
+    parser.add_argument('--experiment_name', type=str, default=None)
+    parser.add_argument('--multitask_name_list', type=str, nargs='+', default=None, choices=Seq2SeqTaskNames.get_all())
+    parser.add_argument('--task2weight', type=json.loads, default={}, help='JSON mapping task names to weights')
     parser.add_argument('--val_size', type=int, default=200, help='Number of samples to use for validation')
-    parser.add_argument('--input_output_jsonl_filepaths', type=str, nargs='+', default=None,
-                        help='List of paths to jsonl files with input-output pairs')
+    parser.add_argument('--mlm_min_token_count', type=int, default=20, help='Minimum number of tokens to mask for MLM')
+    parser.add_argument('--mlm_masking_fraction', type=float, default=0.15, help='Fraction of tokens to mask for MLM')
     parser.add_argument('--integrated_facts_metadata_jsonl_filepath', type=str, default=None,
                         help='Path to json file with integrated fact metadata')
     parser.add_argument('--paraphrased_inputs_jsonl_filepaths', type=str, nargs='+', default=None,
                         help='List of paths to jsonl files with paraphrased inputs')
     parser.add_argument('--chest_imagenome_phrases2labels_filepath', type=str, default=None,
                         help='Path to pickle file with chest imagenome phrases to labels mapping')
+    parser.add_argument('--sentence_to_facts_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--fact_to_metadata_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--fact_to_comparison_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--chest_imagenome_obs_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--chest_imagenome_anatloc_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--use_sentence2facts_for_nli', action='store_true')
+    parser.add_argument('--use_anli', action='store_true')
+    parser.add_argument('--use_multinli', action='store_true')
+    parser.add_argument('--use_snli', action='store_true')
+    parser.add_argument('--only_validate_nli', action='store_true')
+    parser.add_argument('--nli1_only_on_val', action='store_true')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
-    parser.add_argument('--use_amp', action='store_true', default=False)
+    parser.add_argument('--use_amp', action='store_true')
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -102,9 +119,7 @@ def parse_args(args=None):
     
     return parser.parse_args(args=args)
 
-_METRIC_WEIGHTS = {
-    MetricNames.SEQ2SEQ_LOSS: 1,
-}
+_METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
 
 def _metric_getter(metrics_dict, key):
     if '_loss' in key:
@@ -135,6 +150,8 @@ def train_model(
     batch_size = dataloading_kwargs['batch_size']
     use_t5 = training_kwargs['use_t5']
     use_bart = training_kwargs['use_bart']
+    nli1_only_on_val = seq2seq_trainer_kwargs['nli1_only_on_val']
+    only_validate_nli = seq2seq_trainer_kwargs['only_validate_nli']
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -198,9 +215,16 @@ def train_model(
             tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
         attach_condition_aware_loss(trainer_engine, 'seq2seq_loss')
         attach_condition_aware_loss(validator_engine, 'seq2seq_loss')
-        attach_condition_aware_seq2seq_output_logger(validator_engine, tokenizer, field_name='pred_output_ids')
+        if only_validate_nli and nli1_only_on_val:
+            attach_condition_aware_seq2seq_exactmatch(validator_engine,
+                                                      pred_field_name='pred_output_ids',
+                                                      gt_field_name='gt_text', metric_name='exact_match',
+                                                      tokenizer=tokenizer, check_is_prefix=True)
+        # attach_condition_aware_seq2seq_output_logger(validator_engine, tokenizer, field_name='pred_output_ids')
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'seq2seq_loss')
+        if only_validate_nli and nli1_only_on_val:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'exact_match', train=False)
     
     # Timer
     timer = Timer()
@@ -306,12 +330,28 @@ def train_from_scratch(
     warmup_and_cosine_args,
     warmup_decay_and_cyclic_decay_args,
     # Dataset args
-    input_output_jsonl_filepaths,
     integrated_facts_metadata_jsonl_filepath,
     paraphrased_inputs_jsonl_filepaths,
     chest_imagenome_phrases2labels_filepath,
+    sentence_to_facts_input_output_jsonl_filepaths,
+    fact_to_metadata_input_output_jsonl_filepaths,
+    fact_to_comparison_input_output_jsonl_filepaths,
+    chest_imagenome_obs_input_output_jsonl_filepaths,
+    chest_imagenome_anatloc_input_output_jsonl_filepaths,
+    integrated_nli_jsonl_filepath,
+    use_sentence2facts_for_nli,
+    use_anli,
+    use_multinli,
+    use_snli,
     task_name,
+    experiment_name,
+    multitask_name_list,
+    task2weight,
     val_size,
+    mlm_min_token_count,
+    mlm_masking_fraction,
+    only_validate_nli,
+    nli1_only_on_val,
     # Dataloading args
     batch_size,
     num_workers,
@@ -367,11 +407,25 @@ def train_from_scratch(
     )
     
     seq2seq_trainer_kwargs = dict(
-        input_output_jsonl_filepaths=input_output_jsonl_filepaths,
         integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
         paraphrased_inputs_jsonl_filepaths=paraphrased_inputs_jsonl_filepaths,
         chest_imagenome_phrases2labels_filepath=chest_imagenome_phrases2labels_filepath,
+        sentence_to_facts_input_output_jsonl_filepaths=sentence_to_facts_input_output_jsonl_filepaths,
+        fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
+        fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
+        chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
+        chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,
+        integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
+        use_sentence2facts_for_nli=use_sentence2facts_for_nli,
+        use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
         task_name=task_name,
+        experiment_name=experiment_name,
+        multitask_name_list=multitask_name_list,
+        task2weight=task2weight,
+        mlm_min_token_count=mlm_min_token_count,
+        mlm_masking_fraction=mlm_masking_fraction,
+        only_validate_nli=only_validate_nli,
+        nli1_only_on_val=nli1_only_on_val,
         val_size=val_size,
     )
 

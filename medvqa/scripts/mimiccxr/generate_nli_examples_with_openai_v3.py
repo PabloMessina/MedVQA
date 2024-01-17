@@ -18,28 +18,50 @@ from medvqa.utils.nlp import sort_sentences
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
 from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_json, load_jsonl, load_pickle, save_pickle
 
+# INSTRUCTIONS = """Context: natural language inference.
+
+# Given a premise and a hypothesis, output "entailment", "contradiction", or "neutral".
+
+# Use "entailment" when the facts stated by the premise necessarily entail the truth of the hypothesis.
+
+# Use "contradiction" when premise and hypothesis are mutually exclusive/contradictory (both cannot be true at the same time).
+
+# Use "neutral", if there is no contradiction (premise and hypothesis are compatible), but the premise does not entail the hypothesis (it's possible for the premise to be true and the hypothesis still be false). In other words, use "neutral" when neither "entailment" nor "contradiction" adequately fit."""
+
 INSTRUCTIONS = """Context: natural language inference.
 
-Given a premise and a hypothesis, output "entailment", "contradiction", or "neutral".
+Given a premise (#P) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} is a short sentence and {label} is one of "entailment," "contradiction," or "neutral."
 
-Use "entailment" when the facts stated by the premise necessarily entail the truth of the hypothesis.
+Use "entailment" when the premise necessarily entails the truth of the hypothesis.
 
-Use "contradiction" when premise and hypothesis are mutually exclusive/contradictory (both cannot be true at the same time).
+Use "contradiction" when premise and hypothesis are mutually exclusive/contradictory. Pay attention to logical inconsistencies, such as expressions suggesting presence vs. absence, etc.
 
-Use "neutral", if there is no contradiction (premise and hypothesis are compatible), but the premise does not entail the hypothesis (it's possible for the premise to be true and the hypothesis still be false). In other words, use "neutral" when neither "entailment" nor "contradiction" adequately fit."""
+Use "neutral" when there's no contradiction, but the premise doesn't necessarily entail the hypothesis.
+
+Examples:
+
+1. #P: increased pulmonary edema. | #H: worsened pulmonary edema.
+Label: entailment
+
+2. #P: No pulmonary edema, consolidation, or pneumothorax. | #H: No focal consolidation, pleural effusion, or pneumothorax is present.
+Label: neutral"""
+
+print(INSTRUCTIONS)
 
 def parse_openai_model_output(text):
     """
     Parse the output of the OpenAI API call.
     """
+    assert isinstance(text, str), f'Unexpected type: {type(text)} (text = {text})'
     if GPT_IS_ACTING_WEIRD_REGEX.search(text):
         raise RuntimeError(f"GPT is protesting: {text}")
     text = text.lower()
-    if 'entailment' in text:
+    assert isinstance(text, str), f'Unexpected type: {type(text)} (text = {text})'
+    if 'label: entailment' in text:
         return 'entailment'
-    if 'contradiction' in text:
+    if 'label: contradiction' in text:
         return 'contradiction'
-    if 'neutral' in text:
+    if 'label: neutral' in text:
         return 'neutral'
     raise RuntimeError(f"Could not parse output: {text}")
 
@@ -73,6 +95,7 @@ if __name__ == '__main__':
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--alias", type=str, default="")
+    parser.add_argument("--not_delete_api_requests_and_responses", action="store_true", default=False)
     args = parser.parse_args()
 
     processed_texts_save_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_nli_queries_from_clusters{args.alias}.jsonl")
@@ -141,7 +164,8 @@ if __name__ == '__main__':
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
             )
-            kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, n_clusters=args.num_clusters, num_iterations=args.num_iterations)
+            kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, num_clusters=args.num_clusters,
+                                                                num_iterations=args.num_iterations)
             assert len(kmeans_labels) == len(unique_sentences)
             label2idxs = {}
             for i, label in enumerate(kmeans_labels):
@@ -223,7 +247,7 @@ if __name__ == '__main__':
             # shuffle pairs
             random.shuffle(pairs)
             logger.info(f"Generated {len(pairs)} pairs of sentences")
-            nli_queries = [f'Premise: {unique_sentences[i]} | Hypothesis: {unique_sentences[j]}' for i, j in pairs]
+            nli_queries = [f'#P: {unique_sentences[i]} | #H: {unique_sentences[j]}' for i, j in pairs]
 
             # Save nli_queries
             logger.info(f"Saving {len(nli_queries)} NLI pairs to {nli_queries_filepath}")
@@ -240,7 +264,7 @@ if __name__ == '__main__':
                     texts_to_skip.update(row['metadata']['query'] for row in rows)
                 else:
                     for row in rows:
-                        text = f'Premise: {row["premise"]} | Hypothesis: {row["hypothesis"]}'
+                        text = f'#P: {row["premise"]} | #H: {row["hypothesis"]}'
                         texts_to_skip.add(text)
         
         # Remove texts to skip
@@ -304,4 +328,5 @@ if __name__ == '__main__':
         parse_openai_output=parse_openai_model_output,
         tmp_dir=MIMICCXR_FAST_TMP_DIR,
         save_filepath=processed_texts_save_filepath,
+        delete_api_requests_and_responses=not args.not_delete_api_requests_and_responses,
     )

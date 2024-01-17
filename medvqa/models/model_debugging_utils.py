@@ -611,6 +611,101 @@ def run_fact_encoder_nli(
     gc.collect()
     torch.cuda.empty_cache()
 
+def run_nli_model(
+        premises, hypotheses, model_folder_path=None, model_checkpoint_path=None, use_amp=False,
+        device='GPU', use_precomputed_embeddings=False):
+    assert len(premises) == len(hypotheses)
+    
+    from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
+    from medvqa.models.nlp.nli import BertBasedNLI
+    from torch.cuda.amp.autocast_mode import autocast
+    from medvqa.datasets.nli.nli_dataset_management import _INDEX_TO_LABEL
+    import torch
+
+    if model_folder_path is None:
+        assert model_checkpoint_path is not None
+        model_folder_path = os.path.dirname(model_checkpoint_path)
+    
+    metadata = load_metadata(model_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    if 'hidden_size' not in model_kwargs:
+        assert 'nli_hidden_layer_size' in model_kwargs
+        model_kwargs['hidden_size'] = model_kwargs['nli_hidden_layer_size'] # for compatibility with other models
+    
+    # device
+    print_bold('device = ', device)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    
+    # Create model
+    print_bold('Create model')
+    model = BertBasedNLI(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print_bold('Load model weights')
+    if model_checkpoint_path is None:
+        assert model_folder_path is not None
+        model_checkpoint_path = get_checkpoint_filepath(model_folder_path)
+    print('model_checkpoint_path = ', model_checkpoint_path)
+    checkpoint = torch.load(model_checkpoint_path, map_location=device)
+    load_model_state_dict(model, checkpoint['model'])
+
+    if use_precomputed_embeddings:
+        print_bold('Use precomputed embeddings')
+        from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
+        ctee = CachedTextEmbeddingExtractor(
+            model_name=model_kwargs['huggingface_model_name'],
+            model_checkpoint_folder_path=model_folder_path,
+        )
+        texts = premises + hypotheses
+        embeddings = ctee.compute_text_embeddings(texts)
+        p_embeddings = embeddings[:len(premises)]
+        h_embeddings = embeddings[len(premises):]
+        print(f'p_embeddings.shape = {p_embeddings.shape}')
+        print(f'h_embeddings.shape = {h_embeddings.shape}')
+        with torch.set_grad_enabled(False):
+            model.train(False)
+            with autocast(enabled=use_amp): # automatic mixed precision
+                p_embeddings = torch.tensor(p_embeddings, dtype=torch.float32).to(device)
+                h_embeddings = torch.tensor(h_embeddings, dtype=torch.float32).to(device)
+                logits = model.forward_with_precomputed_embeddings(p_embeddings, h_embeddings)
+    else:
+        # Prepare input
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
+        tokenized_premises = tokenizer(premises, padding="longest", return_tensors="pt")
+        tokenized_hypotheses = tokenizer(hypotheses, padding="longest", return_tensors="pt")
+        tokenized_premises = {k: v.to(device) for k, v in tokenized_premises.items()}
+        tokenized_hypotheses = {k: v.to(device) for k, v in tokenized_hypotheses.items()}
+        
+        # Run model in inference mode
+        print_bold('Run model in inference mode')
+        with torch.set_grad_enabled(False):
+            model.train(False)
+            with autocast(enabled=use_amp): # automatic mixed precision
+                logits = model(tokenized_premises, tokenized_hypotheses)
+    
+    # Convert logits to labels
+    print_bold('Convert logits to labels')
+    softmax = torch.softmax(logits, dim=1)
+    # labels = logits.argmax(dim=1).detach().cpu().numpy()
+    labels = softmax.argmax(dim=1).detach().cpu().numpy()
+    assert labels.shape == (len(premises),)
+    labels = [_INDEX_TO_LABEL[x] for x in labels]
+    
+    # Print results
+    print_bold('Results')
+    for i in range(len(premises)):
+        print(f'Premise: {premises[i]}')
+        print(f'Hypothesis: {hypotheses[i]}')
+        print(f'Label: {labels[i]}')
+        for j in range(3):
+            print(f'\t{softmax[i, j]:.4f} ({_INDEX_TO_LABEL[j]})')
+        if use_precomputed_embeddings:
+            print(f'\tp_embeddings[{i}][0] = {p_embeddings[i][0]}')
+            print(f'\th_embeddings[{i}][0] = {h_embeddings[i][0]}')
+        print('----------------')
+
 def run_sentence_autoencoder(sentences, vocab_filepath, model_folder_path=None, model_checkpoint_path=None, use_amp=False, device='GPU'):
     
     from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath

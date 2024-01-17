@@ -14,7 +14,7 @@ from medvqa.metrics.classification.singlelabel_accuracy import ConditionAwareLog
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareSeq2SeqOutputLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
-from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch
+from medvqa.metrics.nlp import Bleu, RougeL, Meteor, CiderD, ExactMatch, ConditionAwareSeq2SeqExactMatch
 from medvqa.metrics.medical import (
     MedicalCompleteness,
     WeightedMedicalCompleteness,
@@ -137,6 +137,16 @@ def attach_dataset_aware_exactmatch_answer(engine, allowed_dataset_ids, record_s
                 allowed_dataset_ids=allowed_dataset_ids,
                 record_scores=record_scores)
     em.attach(engine, MetricNames.EXACTMATCH_ANSWER)
+
+def attach_condition_aware_seq2seq_exactmatch(engine, pred_field_name, gt_field_name, metric_name, tokenizer,
+                                              condition_function=lambda _: True, check_is_prefix=False):
+    met = ConditionAwareSeq2SeqExactMatch(
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        tokenizer=tokenizer,
+        condition_function=condition_function,
+        check_is_prefix=check_is_prefix,
+    )
+    met.attach(engine, metric_name)
 
 # ------------------------------------------------------------------------------
 # Medical Completeness related metrics (these evaluate natural language answers)

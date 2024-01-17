@@ -269,6 +269,21 @@ def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=
     print(f'Group sizes: {[len(x) for x in dedup_indices]}')
     return dedup_indices
 
+def group_indices_into_bins_by_scores(scores, num_bins, min_bin_size=100):
+    assert len(scores) > 0
+    bin_edges = np.linspace(min(scores), max(scores), num_bins + 1)
+    score_bins = np.digitize(scores, bin_edges[:-1])
+    bin_indices = [[] for _ in range(num_bins)]
+    for i, bin_idx in enumerate(score_bins):
+        bin_indices[bin_idx-1].append(i)
+    bin_indices = [x for x in bin_indices if len(x) > 0]
+    bin_indices.sort(key = lambda x : len(x), reverse=True)
+    while len(bin_indices) > 1 and len(bin_indices[-1]) < min_bin_size:
+        bin_indices[-2].extend(bin_indices[-1])
+        bin_indices.pop()
+    assert sum(len(x) for x in bin_indices) == len(scores)
+    return bin_indices
+
 def simple_yolov8_collate_batch_fn(batch):
     batch_dict = {}
     batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -813,7 +828,6 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
     def collate_batch_fn(batch):
 
         batch_dict = dict()
-        batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
         if use_t5 or use_bart:
             output_text = [x['output_text'] for x in batch]
             assert type(output_text[0]) == str, type(output_text[0])
@@ -825,6 +839,7 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
             labels = output_encoding.input_ids
             labels[labels == tokenizer.pad_token_id] = -100
             batch_dict['output_ids'] = labels
+            batch_dict['output_text'] = output_text
             input_text = [x['input_text'] for x in batch]
             input_encoding = tokenizer(
                 input_text,

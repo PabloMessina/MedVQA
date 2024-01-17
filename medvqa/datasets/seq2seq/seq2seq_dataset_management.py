@@ -3,9 +3,12 @@ import math
 import random
 import os
 import json
+import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset, group_indices_into_bins_by_scores
+from medvqa.datasets.nli import ANLI_V1_DATASET_DIR, MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, MULTI_NLI_DATASET_DIR, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH, SNLI_DATASET_DIR
+from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
 from medvqa.utils.files import load_jsonl, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
@@ -36,6 +39,9 @@ class Seq2SeqTaskNames:
     FACT_TO_COMPARISON = 'fact2comparison'
     SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS = 'sentence2chestimagenome_observations'
     SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS = 'sentence2chestimagenome_anatomical_locations'
+    NLI = 'nli'
+    MLM = 'mlm' # masked language modeling
+    MULTITASK = 'multitask'
     @staticmethod
     def get_all():
         return [
@@ -46,6 +52,9 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.FACT_TO_COMPARISON,
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS,
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS,
+            Seq2SeqTaskNames.NLI,
+            Seq2SeqTaskNames.MLM,
+            Seq2SeqTaskNames.MULTITASK,
         ]
 
 class Seq2SeqDataset(Dataset):
@@ -68,167 +77,839 @@ class Seq2SeqDataset(Dataset):
         if self.infinite:
             i = i % len(self.indices)
         idx = self.indices[i]
-        output = { 'idx': idx, 'input_text': self.input_texts[idx], 'output_text': self.output_texts[idx] }
+        output = { 'input_text': self.input_texts[idx], 'output_text': self.output_texts[idx] }
         return output
+    
+def _print_input_output_pair(input_text, output_text):
+    print_bold(f'Input:')
+    print_magenta(input_text, bold=True)
+    print_bold(f'Output:')
+    print_magenta(output_text, bold=True)
 
-def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name, batch_size, collate_batch_fn, num_workers,
-                                         integrated_facts_metadata_jsonl_filepath=None,
-                                         paraphrased_inputs_jsonl_filepaths=None,
-                                         chest_imagenome_phrases2labels_filepath=None,
-                                         val_size=200, verbose=True):
-    assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
-    # Load input and output texts
+def _print_random_input_output_pair(input_texts, output_texts):
+    i = random.randint(0, len(input_texts) - 1)
+    _print_input_output_pair(input_texts[i], output_texts[i])
+
+def _apply_input2paraphrases(input2paraphrases, input_texts, output_texts, verbose=True):
+    if input2paraphrases is None:
+        return # no paraphrases
+    count = 0
+    n = len(input_texts)
+    for i in range(n):
+        input_text = input_texts[i]
+        output_text = output_texts[i]
+        if input_text in input2paraphrases:
+            paraphrases = input2paraphrases[input_text]
+            paraphrases = set(paraphrases) # remove duplicates
+            paraphrases.discard(input_text) # remove original input
+            for p in paraphrases:
+                input_texts.append(p)
+                output_texts.append(output_text) # keep same output
+                count += 1
+    if verbose:
+        print(f'Added {count} paraphrased inputs (total {len(input_texts)})')
+        # print random paraphrased input/output pair
+        i = random.randint(n, len(input_texts) - 1)
+        _print_input_output_pair(input_texts[i], output_texts[i])
+
+def _prepare_fact_to_comparison_data(
+        integrated_facts_metadata_jsonl_filepath,
+        input_output_jsonl_filepaths,
+        input2paraphrases=None,
+        apply_task_prefix=False,
+        medical_sentences=None,
+        verbose=True,
+    ):
+    assert integrated_facts_metadata_jsonl_filepath is not None, 'integrated_facts_metadata_jsonl_filepath must be provided'
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+
+    # 1) input/output pairs from integrated_facts_metadata_jsonl_filepath
+    integrated_facts_metadata = load_jsonl(integrated_facts_metadata_jsonl_filepath)
     input_texts = []
     output_texts = []
-
-    if task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
-        assert integrated_facts_metadata_jsonl_filepath is not None, 'integrated_facts_metadata_jsonl_filepath must be provided'
-        integrated_facts_metadata = load_jsonl(integrated_facts_metadata_jsonl_filepath)
-        for row in integrated_facts_metadata:
-            metadata = row['metadata']
-            comp = metadata['comparison status']
-            psc = metadata['prev_study_comparison?']
-            em = row['extraction_method']
-            is_psc_invalid = psc not in ('yes', 'no')
-            is_comp_inconsistent = (psc == 'yes') != (comp != '')
-            if is_psc_invalid or is_comp_inconsistent:
-                continue
-            if 'gpt' in em:
-                if comp == '':
-                    input_texts.append(row['fact'])
-                    output_texts.append('no comparison')
-                elif comp in _ALLOWED_COMPARISONS:
-                    input_texts.append(row['fact'])
-                    output_texts.append(comp)
-        print(f'Loaded {len(input_texts)} input/output pairs from {integrated_facts_metadata_jsonl_filepath}')
-
-    if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
-         task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
-        assert chest_imagenome_phrases2labels_filepath is not None, 'chest_imagenome_phrases2labels_filepath must be provided'
-        chest_imagenome_phrases2labels = load_pickle(chest_imagenome_phrases2labels_filepath)
-        phrases = chest_imagenome_phrases2labels['phrases']
-        
-        if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
-            labels = chest_imagenome_phrases2labels['observation_labels']
-            label_names = chest_imagenome_phrases2labels['observation_names']
-            # Remove nlp labels and prefixes
-            _idxs = [i for i, x in enumerate(label_names) if not x.startswith('nlp|')]
-            assert len(_idxs) + 2 == len(label_names) # 2 nlp labels
-            labels = labels[:, _idxs]
-            label_names = [label_names[i][label_names[i].index('|') + 1:] for i in _idxs]
-        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
-            labels = chest_imagenome_phrases2labels['anatomy_labels']
-            label_names = chest_imagenome_phrases2labels['anatomy_names']
-            # Remove 'unknown' label
-            _idxs = [i for i, x in enumerate(label_names) if x != 'unknown']
-            assert len(_idxs) + 1 == len(label_names) # 1 unknown label
-            labels = labels[:, _idxs]
-            label_names = [label_names[i] for i in _idxs]
-            assert set(label_names) == set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING), \
-                (f'Expected {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)} but got {set(label_names)}\n'
-                 f'Difference (->): {set(label_names) - set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)}\n'
-                    f'Difference (<-): {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING) - set(label_names)}')
-        else: assert False
-
-        n, m = labels.shape
-        assert len(phrases) == n
-        assert len(label_names) == m
-        for i in tqdm(range(n), total=n, mininterval=2):
-            input_texts.append(phrases[i])
-            output_text = json.dumps([label_names[j] for j in range(m) if labels[i, j] == 1])
-            output_texts.append(output_text)
-        if verbose:
-            print(f'Loaded {len(input_texts)} input/output pairs from {chest_imagenome_phrases2labels_filepath}')
-            print('Examples:')
-            for _ in range(3):
-                i = random.randint(0, n - 1)
-                print_bold(f'Input:')
-                print_magenta(input_texts[i], bold=True)
-                print_bold(f'Output:')
-                print_magenta(output_texts[i], bold=True)
-
+    for row in integrated_facts_metadata:
+        metadata = row['metadata']
+        comp = metadata['comparison status']
+        psc = metadata['prev_study_comparison?']
+        em = row['extraction_method']
+        is_psc_invalid = psc not in ('yes', 'no')
+        is_comp_inconsistent = (psc == 'yes') != (comp != '')
+        if is_psc_invalid or is_comp_inconsistent:
+            continue
+        if 'gpt' in em:
+            if comp == '':
+                input_texts.append(row['fact'])
+                output_texts.append('no comparison')
+            elif comp in _ALLOWED_COMPARISONS:
+                input_texts.append(row['fact'])
+                output_texts.append(comp)
+    print(f'Loaded {len(input_texts)} input/output pairs from {integrated_facts_metadata_jsonl_filepath}')
+    
+    # 2) input/output pairs from input_output_jsonl_filepaths
     for input_output_jsonl_filepath in input_output_jsonl_filepaths:
         input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
         if verbose:
             print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
-        if task_name == Seq2SeqTaskNames.REPORT_TO_SENTENCES:
-            for input_output in input_output_jsonl:
-                report = input_output['metadata']['report']
-                input_text = '\n'.join([report['findings'], report['impression']])
-                output_text = json.dumps([f'{s} {"#pos" if p else "#neg"}' for s, p in input_output['parsed_response']])
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
-            for input_output in input_output_jsonl:
-                try:
-                    sentence = input_output['metadata']['query']
-                except KeyError:
-                    sentence = input_output['metadata']['sentence'] # backward compatibility                    
-                input_text = sentence
-                output_text = json.dumps(input_output['parsed_response'])
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.BACKGROUND_TO_FACTS:
-            for input_output in input_output_jsonl:
-                background = input_output['metadata']['background']
-                input_text = background
-                output_text = json.dumps(input_output['parsed_response'])
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA:
-            for input_output in input_output_jsonl:
-                fact = input_output['metadata']['fact']
-                input_text = fact
-                output_text = json.dumps(input_output['parsed_response'])
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
-            for input_output in input_output_jsonl:
-                fact = input_output['metadata']['sentence']
-                input_text = fact
-                output_text = input_output['parsed_response']
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
-                task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
-            for input_output in input_output_jsonl:
-                sentence = input_output['metadata']['query']
-                input_text = sentence
-                output_text = json.dumps(input_output['parsed_response'])
-                input_texts.append(input_text)
-                output_texts.append(output_text)
-        else:
-            raise ValueError(f'Unknown task name {task_name}')
-        
-    # if task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
-    #     # Add additional input/output pairs from integrated_facts_metadata_jsonl_filepath
-    #     # where the anatomical location is missing
-    #     assert integrated_facts_metadata_jsonl_filepath is not None
-    #     integrated_facts_metadata = load_jsonl(integrated_facts_metadata_jsonl_filepath)
-    #     used_input_texts = set(input_texts)
-    #     len_before = len(input_texts)
-    #     for row in integrated_facts_metadata:
-    #         metadata = row['metadata']
-    #         if len(metadata['anatomical location']) > 0:
-    #             continue
-    #         fact = row['fact']
-    #         detailed_obs = metadata['detailed observation']
-    #         short_obs = metadata['short observation']
-    #         for x in (fact, detailed_obs, short_obs):
-    #             if x and x not in used_input_texts:
-    #                 input_texts.append(x)
-    #                 output_texts.append('[]')
-    #                 used_input_texts.add(x)
-    #     if verbose:
-    #         print(f'Loaded {len(input_texts) - len_before} additional input/output pairs from {integrated_facts_metadata_jsonl_filepath}'
-    #                 ' where the anatomical location is missing')
-    #         print('Example:')
-    #         print_bold(f'Input:')
-    #         print_magenta(input_texts[-1], bold=True)
-    #         print_bold(f'Output:')
-    #         print_magenta(output_texts[-1], bold=True)
+        for input_output in input_output_jsonl:
+            fact = input_output['metadata']['sentence']
+            input_text = fact
+            output_text = input_output['parsed_response']
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+
+    # 3) add to medical_sentences
+    if medical_sentences is not None:
+        medical_sentences.update(input_texts)
+
+    # 4) add paraphrased inputs
+    _apply_input2paraphrases(input2paraphrases, input_texts, output_texts, verbose=verbose)
+
+    # 5) apply task prefix
+    if apply_task_prefix:
+        input_texts = [f'F2C: {x}' for x in input_texts]
+
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+
+    return input_texts, output_texts
+
+def _prepare_sentence_to_chest_imagenome_observations_data(
+        chest_imagenome_phrases2observations_filepath,
+        input_output_jsonl_filepaths,
+        input2paraphrases=None,
+        apply_task_prefix=False,
+        medical_sentences=None,
+        verbose=True):
     
-    # Add paraphrased inputs (if provided)
+    assert chest_imagenome_phrases2observations_filepath is not None, 'chest_imagenome_phrases2observations_filepath must be provided'
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+
+    # 1) input/output pairs from chest_imagenome_phrases2observations_filepath
+    chest_imagenome_phrases2observations = load_pickle(chest_imagenome_phrases2observations_filepath)
+    phrases = chest_imagenome_phrases2observations['phrases']
+    labels = chest_imagenome_phrases2observations['observation_labels']
+    label_names = chest_imagenome_phrases2observations['observation_names']
+    # Remove nlp labels and prefixes
+    _idxs = [i for i, x in enumerate(label_names) if not x.startswith('nlp|')]
+    assert len(_idxs) + 2 == len(label_names) # 2 nlp labels
+    labels = labels[:, _idxs]
+    label_names = [label_names[i][label_names[i].index('|') + 1:] for i in _idxs]
+
+    input_texts = []
+    output_texts = []
+    n, m = labels.shape
+    assert len(phrases) == n
+    assert len(label_names) == m
+    for i in tqdm(range(n), total=n, mininterval=2):
+        input_texts.append(phrases[i])
+        output_text = json.dumps([label_names[j] for j in range(m) if labels[i, j] == 1])
+        output_texts.append(output_text)
+    if verbose:
+        print(f'Loaded {len(input_texts)} input/output pairs from {chest_imagenome_phrases2observations_filepath}')
+        print('Examples:')
+        for _ in range(3):
+            _print_random_input_output_pair(input_texts, output_texts)
+    
+    # 2) input/output pairs from input_output_jsonl_filepaths
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            sentence = input_output['metadata']['query']
+            input_text = sentence
+            output_text = json.dumps(input_output['parsed_response'])
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+
+    # 3) add to medical_sentences
+    if medical_sentences is not None:
+        medical_sentences.update(input_texts)
+    
+    # 4) add paraphrased inputs
+    _apply_input2paraphrases(input2paraphrases, input_texts, output_texts, verbose=verbose)
+
+    # 5) apply task prefix
+    if apply_task_prefix:
+        input_texts = [f'S2CO: {x}' for x in input_texts]
+    
+    return input_texts, output_texts, label_names
+
+def _prepare_sentence_to_chest_imagenome_anatlocs_data(
+        chest_imagenome_phrases2anatlocs_filepath,
+        input_output_jsonl_filepaths,
+        input2paraphrases=None,
+        apply_task_prefix=False,
+        medical_sentences=None,
+        verbose=True):
+    
+    assert chest_imagenome_phrases2anatlocs_filepath is not None, 'chest_imagenome_phrases2anatlocs_filepath must be provided'
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+
+    # 1) input/output pairs from chest_imagenome_phrases2anatlocs_filepath
+    chest_imagenome_phrases2anatlocs = load_pickle(chest_imagenome_phrases2anatlocs_filepath)
+    phrases = chest_imagenome_phrases2anatlocs['phrases']
+    labels = chest_imagenome_phrases2anatlocs['anatomy_labels']
+    label_names = chest_imagenome_phrases2anatlocs['anatomy_names']
+    # Remove 'unknown' label
+    _idxs = [i for i, x in enumerate(label_names) if x != 'unknown']
+    assert len(_idxs) + 1 == len(label_names) # 1 unknown label
+    labels = labels[:, _idxs]
+    label_names = [label_names[i] for i in _idxs]
+    assert set(label_names) == set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING), \
+        (f'Expected {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)} but got {set(label_names)}\n'
+            f'Difference (->): {set(label_names) - set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING)}\n'
+            f'Difference (<-): {set(CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING) - set(label_names)}')
+
+    input_texts = []
+    output_texts = []
+    n, m = labels.shape
+    assert len(phrases) == n
+    assert len(label_names) == m
+    for i in tqdm(range(n), total=n, mininterval=2):
+        input_texts.append(phrases[i])
+        output_text = json.dumps([label_names[j] for j in range(m) if labels[i, j] == 1])
+        output_texts.append(output_text)
+    if verbose:
+        print(f'Loaded {len(input_texts)} input/output pairs from {chest_imagenome_phrases2anatlocs_filepath}')
+        print('Examples:')
+        for _ in range(3):
+            _print_random_input_output_pair(input_texts, output_texts)
+
+    # 2) input/output pairs from input_output_jsonl_filepaths
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            sentence = input_output['metadata']['query']
+            input_text = sentence
+            output_text = json.dumps(input_output['parsed_response'])
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+
+    # 3) add to medical_sentences
+    if medical_sentences is not None:
+        medical_sentences.update(input_texts)
+    
+    # 4) add paraphrased inputs
+    _apply_input2paraphrases(input2paraphrases, input_texts, output_texts, verbose=verbose)
+
+    # 5) apply task prefix
+    if apply_task_prefix:
+        input_texts = [f'S2CA: {x}' for x in input_texts]
+
+    return input_texts, output_texts, label_names
+
+def _prepare_reports_to_sentences_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True):
+    input_texts = []
+    output_texts = []
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            report = input_output['metadata']['report']
+            input_text = '\n'.join([report['findings'], report['impression']])
+            output_text = json.dumps([f'{s} {"#pos" if p else "#neg"}' for s, p in input_output['parsed_response']])
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+    if apply_task_prefix:
+        input_texts = [f'R2S: {x}' for x in input_texts]
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+    return input_texts, output_texts
+
+def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True,
+                                    collect_input_output_for_nli=False, medical_sentences=None):
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+    input_texts = []
+    output_texts = []
+    if collect_input_output_for_nli:
+        input_output_for_nli = []
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            try:
+                sentence = input_output['metadata']['query']
+            except KeyError:
+                sentence = input_output['metadata']['sentence'] # backward compatibility
+            if collect_input_output_for_nli:
+                input_output_for_nli.append((sentence, input_output['parsed_response']))
+            input_text = sentence
+            facts = input_output['parsed_response']
+            output_text = json.dumps(facts)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            if medical_sentences is not None:
+                medical_sentences.add(input_text)
+                for f in facts:
+                    medical_sentences.add(f)
+    if apply_task_prefix:
+        input_texts = [f'S2F: {x}' for x in input_texts]
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+    if collect_input_output_for_nli:
+        return input_texts, output_texts, input_output_for_nli
+    return input_texts, output_texts
+
+def _prepare_background_to_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True):
+    input_texts = []
+    output_texts = []
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            background = input_output['metadata']['background']
+            input_text = background
+            output_text = json.dumps(input_output['parsed_response'])
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+    if apply_task_prefix:
+        input_texts = [f'B2F: {x}' for x in input_texts]
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+    return input_texts, output_texts
+
+def _prepare_fact_to_metadata_data(input_output_jsonl_filepaths, apply_task_prefix=False, medical_sentences=None, verbose=True):
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+    input_texts = []
+    output_texts = []
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            fact = input_output['metadata']['fact']
+            metadata = input_output['parsed_response']
+            input_text = fact
+            output_text = json.dumps(metadata)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            if medical_sentences is not None:
+                medical_sentences.add(input_text)
+                al = metadata['anatomical location']
+                do = metadata['detailed observation']
+                so = metadata['short observation']
+                if al: medical_sentences.add(al)
+                if do: medical_sentences.add(do)
+                if so: medical_sentences.add(so)
+                
+    if apply_task_prefix:
+        input_texts = [f'F2M: {x}' for x in input_texts]
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+    return input_texts, output_texts
+
+_ALLOWED_NLI_LABELS = [
+    'entailment',
+    'neutral',
+    'contradiction',
+]
+
+_NLI_SHORT2LONG = {
+    'e': 'entailment',
+    'n': 'neutral',
+    'c': 'contradiction',
+}
+
+def _get_nli_input_output_1(premise, hypothesis, label):
+    assert label in _ALLOWED_NLI_LABELS, f'Unknown label {label}'
+    return f'NLI1: {premise} #Hypothesis: {hypothesis}', 'Most likely: ' + label
+
+def _get_nli_input_output_2(premise, hypothesis, label):
+    assert label in _ALLOWED_NLI_LABELS, f'Unknown label {label}'
+    return f'NLI2: {premise} #Generate {label}', hypothesis
+
+def load_radnli_dev_data(nli1_only=False, verbose=True):
+    rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
+    if verbose:
+        print(f'Number of RadNLI dev samples: {len(rows)}')
+    input_texts = []
+    output_texts = []
+    for x in rows:
+        p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+        input_text, output_text = _get_nli_input_output_1(p, h, l)
+        input_texts.append(input_text)
+        output_texts.append(output_text)
+
+        if not nli1_only:
+            input_text, output_text = _get_nli_input_output_2(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+    
+    return input_texts, output_texts
+
+def load_radnli_test_data(nli1_only=False, verbose=True):
+    rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
+    if verbose:
+        print(f'Number of RadNLI test samples: {len(rows)}')
+    input_texts = []
+    output_texts = []
+    for x in rows:
+        p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+        input_text, output_text = _get_nli_input_output_1(p, h, l)
+        input_texts.append(input_text)
+        output_texts.append(output_text)
+
+        if not nli1_only:
+            input_text, output_text = _get_nli_input_output_2(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+    
+    return input_texts, output_texts
+
+def load_ms_cxr_t_temporal_sentence_similarity_v1_data(nli1_only=False, verbose=True):
+    df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
+    if verbose:
+        print(f'Number of MS_CXR_T samples: {len(df)}')
+    input_texts = []
+    output_texts = []
+    for p, h, l in zip(df.sentence_1, df.sentence_2, df.category):
+        if l == 'paraphrase':
+            l = 'entailment'
+        elif l == 'contradiction':
+            pass
+        else:
+            raise ValueError(f'Unknown label {l}')
+        input_text, output_text = _get_nli_input_output_1(p, h, l)
+        input_texts.append(input_text)
+        output_texts.append(output_text)
+
+        if not nli1_only:
+            input_text, output_text = _get_nli_input_output_2(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+    
+    return input_texts, output_texts
+
+def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True):
+    input_texts = []
+    output_texts = []
+    for filepath in filepaths:
+        rows = load_jsonl(filepath)
+        if verbose:
+            print(f'Loaded {len(rows)} rows from {filepath}')
+        for row in rows:
+            query = row['metadata']['query']
+            p_idx = query.index('#P: ')
+            h_idx = query.index('| #H: ')
+            p = query[p_idx+4:h_idx].strip()
+            h = query[h_idx+6:].strip()
+            l = row['parsed_response']
+            input_text, output_text = _get_nli_input_output_1(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            if not nli1_only:
+                input_text, output_text = _get_nli_input_output_2(p, h, l)
+                input_texts.append(input_text)
+                output_texts.append(output_text)
+    return input_texts, output_texts
+            
+
+def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, use_anli=False, use_multinli=False,
+                      use_snli=False, verbose=True, medical_sentences=None, general_sentences=None, nli1_only_on_val=False):
+
+    assert integrated_nli_jsonl_filepath, 'integrated_nli_jsonl_filepath must be provided'
+
+    input_texts = []
+    output_texts = []
+    labels = []
+    sources = []
+    source2type = {}
+    
+    if verbose:
+        print('----')
+        print(f'Loading integrated NLI from {integrated_nli_jsonl_filepath}...')
+    rows = load_jsonl(integrated_nli_jsonl_filepath)
+    source2id = {}
+    id2source = {}
+    for row in rows:
+        source = row['source']
+        if source not in source2id:
+            source2id[source] = len(source2id)
+            id2source[source2id[source]] = source
+            source2type[source] = 'medical'
+    if verbose:
+        print(f'Number of samples: {len(rows)}')
+        print(f'Number of sources: {len(source2id)}')
+
+    for row in rows:
+        p, h, l, s = row['premise'], row['hypothesis'], row['label'], row['source']
+        s = source2id[s]
+
+        if medical_sentences is not None:
+            medical_sentences.add(p)
+            medical_sentences.add(h)
+        
+        input_text, output_text = _get_nli_input_output_1(p, h, l)
+        input_texts.append(input_text)
+        output_texts.append(output_text)
+        labels.append(l)
+        sources.append(s)
+        
+        input_text, output_text = _get_nli_input_output_2(p, h, l)
+        input_texts.append(input_text)
+        output_texts.append(output_text)
+        labels.append(l)
+        sources.append(s)
+
+    source_id = len(source2id) # to add a new source
+
+    if s2f_input_output_for_nli is not None:
+        if verbose:
+            print('----')
+            print_bold('Loading sentence2facts input/output pairs for NLI...')
+        source2id['s2f'] = source_id
+        id2source[source_id] = 's2f'
+        source2type['s2f'] = 'medical'
+        l = 'entailment'
+        len_bef = len(input_texts)
+        for (s, fs) in s2f_input_output_for_nli: # s: sentence, fs: facts
+            if medical_sentences is not None:
+                medical_sentences.add(s)
+                for f in fs:
+                    medical_sentences.add(f)
+            for f in fs:
+                if s != f:
+                    p, h = s, f
+                    
+                    input_text, output_text = _get_nli_input_output_1(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+
+                    input_text, output_text = _get_nli_input_output_2(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+
+        if verbose:
+            print(f'Number of entailment samples added: {len(input_texts) - len_bef}')
+
+        source_id += 1 # to add a new source
+
+    if use_anli or use_multinli or use_snli:
+        # General domain datasets
+        if verbose:
+            print('----')
+            print_bold('Loading general domain datasets...')
+        if use_anli:
+            if verbose:
+                print('Loading ANLI...')
+            for r in ('R1', 'R2', 'R3'):
+                anli_train_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'train.jsonl'))
+                anli_dev_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'dev.jsonl'))
+                anli_test_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'test.jsonl'))
+                if verbose:
+                    print(f'Number of ANLI {r} samples: {len(anli_train_rows) + len(anli_dev_rows) + len(anli_test_rows)}')
+                for rows in (anli_train_rows, anli_dev_rows, anli_test_rows):
+                    for row in rows:
+                        p, h, l = row['context'], row['hypothesis'], row['label']
+                        l = _NLI_SHORT2LONG[l]
+
+                        if general_sentences is not None:
+                            general_sentences.add(p)
+                            general_sentences.add(h)
+                        
+                        input_text, output_text = _get_nli_input_output_1(p, h, l)
+                        input_texts.append(input_text)
+                        output_texts.append(output_text)
+                        labels.append(l)
+                        sources.append(source_id)
+
+                        input_text, output_text = _get_nli_input_output_2(p, h, l)
+                        input_texts.append(input_text)
+                        output_texts.append(output_text)
+                        labels.append(l)
+                        sources.append(source_id)
+            source2id['anli'] = source_id
+            id2source[source_id] = 'anli'
+            source2type['anli'] = 'general'
+            source_id += 1 # to add a new source
+
+        if use_multinli:
+            if verbose:
+                print('Loading MultiNLI...')
+            for r in ('train', 'dev_matched', 'dev_mismatched'):
+                rows = load_jsonl(os.path.join(MULTI_NLI_DATASET_DIR, f'multinli_1.0_{r}.jsonl'))
+                if verbose:
+                    print(f'Number of MultiNLI {r} samples: {len(rows)}')
+                for row in rows:
+                    p, h, l = row['sentence1'], row['sentence2'], row['gold_label']
+
+                    if general_sentences is not None:
+                        general_sentences.add(p)
+                        general_sentences.add(h)
+
+                    if l == '-':
+                        continue # ignore samples with no label
+                    input_text, output_text = _get_nli_input_output_1(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+
+                    input_text, output_text = _get_nli_input_output_2(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+            source2id['multinli'] = source_id
+            id2source[source_id] = 'multinli'
+            source2type['multinli'] = 'general'
+            source_id += 1 # to add a new source
+                    
+        if use_snli:
+            if verbose:
+                print('Loading SNLI...')
+            for r in ('train', 'dev', 'test'):
+                rows = load_jsonl(os.path.join(SNLI_DATASET_DIR, f'snli_1.0_{r}.jsonl'))
+                if verbose:
+                    print(f'Number of SNLI {r} samples: {len(rows)}')
+                for row in rows:
+                    p, h, l = row['sentence1'], row['sentence2'], row['gold_label']
+
+                    if general_sentences is not None:
+                        general_sentences.add(p)
+                        general_sentences.add(h)
+
+                    if l == '-':
+                        continue # ignore samples with no label
+                    input_text, output_text = _get_nli_input_output_1(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+
+                    input_text, output_text = _get_nli_input_output_2(p, h, l)
+                    input_texts.append(input_text)
+                    output_texts.append(output_text)
+                    labels.append(l)
+                    sources.append(source_id)
+            source2id['snli'] = source_id
+            id2source[source_id] = 'snli'
+            source2type['snli'] = 'general'
+            source_id += 1 # to add a new source
+
+    source_label_2_indices = {}
+    unique_sources = set()
+    unique_labels = set()
+    for i, (source, label) in enumerate(zip(sources, labels)):
+        unique_sources.add(source)
+        unique_labels.add(label)
+        key = (source, label)
+        if key not in source_label_2_indices:
+            source_label_2_indices[key] = []
+        source_label_2_indices[key].append(i)
+    unique_sources = sorted(list(unique_sources))
+    unique_labels = sorted(list(unique_labels))
+    
+    # Train dataset
+    if verbose:
+        print('----')
+        print_bold('Building train NLI dataset...')
+    label_datasets = []
+    for label in unique_labels:
+        _general_datasets = []
+        _general_weights = []
+        _medical_datasets = []
+        _medical_weights = []
+        for source in unique_sources:
+            key = (source, label)
+            if key in source_label_2_indices:
+                indices = source_label_2_indices[key]
+                weight = math.log2(len(indices))**3 # weight by log2(N)^3
+                dataset = Seq2SeqDataset(indices, input_texts, output_texts, shuffle=True, infinite=True)
+                if source2type[id2source[source]] == 'general':
+                    _general_datasets.append(dataset)
+                    _general_weights.append(weight)
+                elif source2type[id2source[source]] == 'medical':
+                    _medical_datasets.append(dataset)
+                    _medical_weights.append(weight)
+                else:
+                    raise ValueError(f'Unknown source type {source2type[id2source[source]]}')
+                if verbose:
+                    print_bold(f'Source: {id2source[source]} | Label: {label} -> {len(indices)} ({weight:.2f})')
+                    print('Example:')
+                    i = random.choice(indices)
+                    _print_input_output_pair(input_texts[i], output_texts[i])
+        if len(_general_datasets) > 0:
+            label_datasets.append(CompositeInfiniteDataset(_general_datasets, _general_weights))
+        if len(_medical_datasets) > 0:
+            label_datasets.append(CompositeInfiniteDataset(_medical_datasets, _medical_weights))
+    train_dataset = CompositeInfiniteDataset(label_datasets, [1] * len(label_datasets)) # equal weights
+    
+    # Val dataset
+    if verbose:
+        print('----')
+    val_input_texts = []
+    val_output_texts = []
+    
+    # RadNLI
+    _input_texts, _output_texts = load_radnli_test_data(verbose=verbose, nli1_only=nli1_only_on_val)
+    val_input_texts.extend(_input_texts)
+    val_output_texts.extend(_output_texts)
+        
+    # MS_CXR_T
+    _input_texts, _output_texts = load_ms_cxr_t_temporal_sentence_similarity_v1_data(verbose=verbose, nli1_only=nli1_only_on_val)
+    val_input_texts.extend(_input_texts)
+    val_output_texts.extend(_output_texts)
+
+    # Print val examples
+    if verbose:
+        for  _ in range(5):
+            i = random.randint(0, len(val_input_texts) - 1)
+            _print_input_output_pair(val_input_texts[i], val_output_texts[i])
+    
+    # Val NLI dataset and dataloader
+    if verbose:
+        print('----')
+        print_bold('Building val NLI dataset...')
+    val_dataset = Seq2SeqDataset(list(range(len(val_input_texts))), val_input_texts, val_output_texts, shuffle=False)
+
+    return train_dataset, val_dataset
+
+class MaskedLMDataset(Dataset):
+    def __init__(self, indices, sentences, tokenized_sentences, maskable_token_indices, masking_fraction,
+                 apply_task_prefix=False, shuffle=False, infinite=False):
+        self.indices = indices
+        self.sentences = sentences
+        self.tokenized_sentences = tokenized_sentences
+        self.maskable_token_indices = maskable_token_indices
+        self.masking_fraction = masking_fraction
+        self.apply_task_prefix = apply_task_prefix
+        self.shuffle = shuffle
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+        if shuffle:
+            random.shuffle(self.indices)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
+        i = self.indices[i]
+        tokens = self.tokenized_sentences[i][:] # copy
+        maskable_token_indices = self.maskable_token_indices[i]
+        n = math.ceil(len(maskable_token_indices) * self.masking_fraction)
+        assert n > 0
+        if n >= len(maskable_token_indices):
+            n = len(maskable_token_indices) - 1
+        assert n > 0
+        indices = random.sample(maskable_token_indices, n)
+        indices.sort()
+        output_list = []
+        for idx, j in enumerate(indices):
+            original_token = tokens[j]
+            masked_token = f'[tok{idx+1}]'
+            output_list.append(masked_token)
+            output_list.append(original_token)
+            tokens[j] = masked_token
+        input_text = ' '.join(tokens)
+        if self.apply_task_prefix:
+            input_text = f'MLM: {input_text}'
+        output_text = ' '.join(output_list)
+        output = { 'input_text': input_text, 'output_text': output_text }
+        return output
+
+def _prepare_masked_lm_dataset(sentences, apply_task_prefix=False, verbose=True, min_token_count=20, masking_fraction=0.2, num_bins=10):
+    assert sentences is not None, 'sentences must be provided'
+    print('Preparing masked LM dataset with masking')
+    print(f'\tmin_token_count: {min_token_count}')
+    print(f'\tmasking_fraction: {masking_fraction}')
+    print(f'\tlen(sentences): {len(sentences)}')
+    from nltk.corpus import stopwords
+    from string import punctuation
+    import re
+    has_puctuation = re.compile(f'[{punctuation}]')
+    has_letter = re.compile('[a-zA-Z]')
+    stop_words = set(stopwords.words('english'))
+    print('Tokenizing sentences...')
+    tokenized_sentences = word_tokenize_texts_in_parallel(sentences)
+    print('Lowercasing tokens...')
+    lower_tokenized_sentences = tokenized_texts_to_lower_in_parallel(tokenized_sentences)
+    token2count = {}
+    for tokens in tqdm(lower_tokenized_sentences, total=len(tokenized_sentences), mininterval=2):
+        for token in tokens:
+            if token not in token2count:
+                token2count[token] = 0
+            token2count[token] += 1
+    valid_tokens = [token for token, count in token2count.items() if count >= min_token_count and token not in stop_words \
+                    and not has_puctuation.search(token) and has_letter.search(token)]
+    valid_tokens = set(valid_tokens)
+    print(f'\tlen(valid_tokens): {len(valid_tokens)}')
+    valid_tokenized_sentences = [None] * len(tokenized_sentences)
+    valid_maskable_token_indices = [None] * len(tokenized_sentences)
+    valid_sentences = [None] * len(tokenized_sentences)
+    valid_sentence_scores = [None] * len(tokenized_sentences)
+    i = 0
+    for tokens, lower_tokens in tqdm(zip(tokenized_sentences, lower_tokenized_sentences),
+                                     total=len(tokenized_sentences), mininterval=2):
+        token_indices = [j for j, token in enumerate(lower_tokens) if token in valid_tokens]
+        if len(token_indices) == 0:
+            continue
+        n = math.ceil(len(token_indices) * masking_fraction)
+        assert n > 0
+        if n >= len(token_indices):
+            n = len(token_indices) - 1
+        if n == 0:
+            continue
+        valid_tokenized_sentences[i] = tokens
+        valid_maskable_token_indices[i] = token_indices
+        valid_sentences[i] = sentences[i]
+        valid_sentence_scores[i] = sum(token2count[lower_tokens[j]] for j in token_indices) / len(token_indices)
+        i += 1
+    valid_tokenized_sentences = valid_tokenized_sentences[:i]
+    valid_maskable_token_indices = valid_maskable_token_indices[:i]
+    valid_sentences = valid_sentences[:i]
+    valid_sentence_scores = valid_sentence_scores[:i]
+    if verbose:
+        print(f'Number of sentences: {len(valid_sentences)}')
+    grouped_indices = group_indices_into_bins_by_scores(valid_sentence_scores, num_bins)
+    print(f'Number of bins: {len(grouped_indices)}')
+    datasets = []
+    weights = []
+    for indices in grouped_indices:
+        weight = math.log2(len(indices))**3 # weight by log^3 of number of examples
+        dataset = MaskedLMDataset(indices, valid_sentences, valid_tokenized_sentences, valid_maskable_token_indices,
+                                masking_fraction, apply_task_prefix=apply_task_prefix, shuffle=True, infinite=True)
+        datasets.append(dataset)
+        weights.append(weight)
+        print(f'Bin size: {len(indices)}, weight: {weight}')
+    dataset = CompositeInfiniteDataset(datasets, weights)
+    if verbose:
+        print('Examples:')
+        for _ in range(4):
+            i = random.randint(0, len(dataset) - 1)
+            output = dataset[i]
+            print_bold('Input:')
+            print_magenta(output['input_text'])
+            print_bold('Output:')
+            print_magenta(output['output_text'])
+    return dataset
+
+def _compute_input2paraphrases(paraphrased_inputs_jsonl_filepaths, verbose=True):
     if paraphrased_inputs_jsonl_filepaths is not None:
         assert type(paraphrased_inputs_jsonl_filepaths) == list
         input2paraphrases = {}
@@ -262,46 +943,25 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
             print('--------')
             print_bold(f'Number of unique inputs: {len(input2paraphrases)}')
             print_bold(f'Number of total paraphrases: {sum(len(x) for x in input2paraphrases.values())}')
-        count = 0
-        print_count = 0
-        for i in range(len(input_texts)):
-            input_text = input_texts[i]
-            output_text = output_texts[i]
-            if input_text in input2paraphrases:
-                paraphrases = input2paraphrases[input_text]
-                paraphrases = set(paraphrases) # remove duplicates
-                paraphrases.discard(input_text) # remove original input
-                for p in paraphrases:
-                    input_texts.append(p)
-                    output_texts.append(output_text) # keep same output
-                    count += 1
-                if verbose and len(paraphrases) > 0 and print_count < 20:
-                    print_count += 1
-                    print_bold(f'Input:')
-                    print_magenta(input_texts[-1], bold=True)
-                    print_bold(f'Output:')
-                    print_magenta(output_texts[-1], bold=True)
-        if verbose:
-            print('--------')
-            print(f'Added {count} paraphrased inputs')
-            print_bold(f'Number of total examples: {len(input_texts)}')
+        return input2paraphrases
     
-    if task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
+def _get_fact_to_comparison_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True):
 
-        if verbose:
-            from collections import Counter
-            counter = Counter(output_texts)
-            print('Counter:')
-            print(counter)
+    if verbose:
+        from collections import Counter
+        counter = Counter(output_texts)
+        print('Counter:')
+        print(counter)
 
-        # Specific balanced train/val split for fact2comparison
+    # Specific balanced train/val split for fact2comparison
 
-        output2indices = {}
-        for i, output_text in enumerate(output_texts):
-            if output_text not in output2indices:
-                output2indices[output_text] = []
-            output2indices[output_text].append(i)
+    output2indices = {}
+    for i, output_text in enumerate(output_texts):
+        if output_text not in output2indices:
+            output2indices[output_text] = []
+        output2indices[output_text].append(i)
 
+    if include_val:
         val_indices_set = set()
         val_sizes = [0]  * len(output2indices)
         count = 0
@@ -312,67 +972,80 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                     count += 1
                     if count >= val_size:
                         break
-        train_datasets = []
-        train_weights = []
-        train_size = 0
-        for i, (output, indices) in enumerate(output2indices.items()):
+    train_datasets = []
+    train_weights = []
+    train_size = 0
+    for i, (output, indices) in enumerate(output2indices.items()):
+        if include_val:
             assert val_sizes[i] * 10 <= len(indices), f'val_size {val_sizes[i]} is too large for output {output} (len {len(indices)})'
             indices.sort(key=lambda i: (len(output_texts[i]), output_texts[i])) # sort by output length, then alphabetically
             val_indices_set.update(indices[j] for j in np.linspace(0, len(indices) - 1, val_sizes[i], dtype=int))
             train_indices = [i for i in indices if i not in val_indices_set]
-            train_datasets.append(Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True))
-            train_weights.append(math.log2(len(train_indices))**2) # weight by log^2 of number of examples
-            train_size += len(train_indices)
-            if verbose:
-                print(f'Output: {output}, train size: {len(train_indices)}, val size: {val_sizes[i]}, weight: {train_weights[-1]}')
-
-        val_indices = list(val_indices_set)
-        
-        # Create datasets
-        train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
-        val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False)
-
+        else:
+            train_indices = indices
+        train_datasets.append(Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True))
+        train_weights.append(math.log2(len(train_indices))**3) # weight by log^3 of number of examples
+        train_size += len(train_indices)
         if verbose:
-            # Print stats
-            print(f'Number of train examples: {train_size}')
+            if include_val:
+                print(f'Output: {output}, train size: {len(train_indices)}, val size: {val_sizes[i]}, weight: {train_weights[-1]}')
+            else:
+                print(f'Output: {output}, train size: {len(train_indices)}, weight: {train_weights[-1]}')
+
+    if include_val:
+        val_indices = list(val_indices_set)
+    
+    # Create datasets
+    train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+    if include_val:
+        val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False)
+    else:
+        val_dataset = None
+
+    if verbose:
+        # Print stats
+        print(f'Number of train examples: {train_size}')
+        if include_val:
             print(f'Number of val examples: {len(val_indices)}')
             print(f'Number of total examples: {train_size + len(val_indices)}')
 
-    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS or \
-            task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
+    return train_dataset, val_dataset
 
-        label_name_2_idx = { label_name: i for i, label_name in enumerate(label_names) }
-        assert len(label_name_2_idx) == len(label_names)
-        label2idxs = [[] for _ in range(len(label_name_2_idx))]
-        idxs_without_labels = []
-        unknown_labels = set()
-        unknown_count = 0
-        
-        for i, output_text in tqdm(enumerate(output_texts), total=len(output_texts), mininterval=2):
-            labels = json.loads(output_text)
-            clean_labels = []
-            for label in labels:
-                try:
-                    label2idxs[label_name_2_idx[label]].append(i)
-                    clean_labels.append(label)
-                except KeyError:
-                    unknown_count += 1
-                    unknown_labels.add(label)
-            if len(clean_labels) == 0:
-                idxs_without_labels.append(i)
-            if len(clean_labels) < len(labels):
-                output_texts[i] = json.dumps(clean_labels) # remove unknown labels
+def _get_sentence_to_chest_imagenome_labels_datasets(input_texts, output_texts, val_size, label_names, verbose=True, include_val=True):
+    
+    label_name_2_idx = { label_name: i for i, label_name in enumerate(label_names) }
+    assert len(label_name_2_idx) == len(label_names)
+    label2idxs = [[] for _ in range(len(label_name_2_idx))]
+    idxs_without_labels = []
+    unknown_labels = set()
+    unknown_count = 0
+    
+    for i, output_text in tqdm(enumerate(output_texts), total=len(output_texts), mininterval=2):
+        labels = json.loads(output_text)
+        clean_labels = []
+        for label in labels:
+            try:
+                label2idxs[label_name_2_idx[label]].append(i)
+                clean_labels.append(label)
+            except KeyError:
+                unknown_count += 1
+                unknown_labels.add(label)
+        if len(clean_labels) == 0:
+            idxs_without_labels.append(i)
+        if len(clean_labels) < len(labels):
+            output_texts[i] = json.dumps(clean_labels) # remove unknown labels
 
-        if verbose:
-            print(f'Number of total examples: {len(output_texts)}')
-            print(f'Number of examples without labels: {len(idxs_without_labels)}')
-            if unknown_count > 0:
-                print_orange(f'WARNING: Number of unknown labels: {unknown_count}', bold=True)
-                unknown_labels = list(unknown_labels)
-                print_orange('Some unknown labels:', bold=True)
-                for x in random.sample(unknown_labels, min(10, len(unknown_labels))):
-                    print_orange(f'  {x}', bold=True)
+    if verbose:
+        print(f'Number of total examples: {len(output_texts)}')
+        print(f'Number of examples without labels: {len(idxs_without_labels)}')
+        if unknown_count > 0:
+            print_orange(f'WARNING: Number of unknown labels: {unknown_count}', bold=True)
+            unknown_labels = list(unknown_labels)
+            print_orange('Some unknown labels:', bold=True)
+            for x in random.sample(unknown_labels, min(10, len(unknown_labels))):
+                print_orange(f'  {x}', bold=True)
 
+    if include_val:
         # Split into train & val
         val_idxs_set = set()
         val_sizes = [0] * (len(label2idxs) + 1) # +1 for idxs_without_labels
@@ -389,57 +1062,90 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
                 count += 1
                 if count >= val_size:
                     break
-        train_datasets = []
-        train_weights = []
+    train_datasets = []
+    train_weights = []
+    if verbose:
         print_messages = []
-        train_size = 0
+    train_size = 0
+    if include_val:
         for i, idxs in enumerate(label2idxs):
             assert val_sizes[i] * 10 <= len(idxs), f'val_size {val_sizes[i]} is too large for label {label_names[i]} (len {len(idxs)})'
             val_idxs = random.sample(idxs, val_sizes[i])
             val_idxs_set.update(val_idxs)
         val_idxs_set.update(random.sample(idxs_without_labels, val_sizes[-1]))
-        for i, idxs in enumerate(label2idxs):
+    for i, idxs in enumerate(label2idxs):
+        if include_val:
             train_idxs = [i for i in idxs if i not in val_idxs_set]
-            train_datasets.append(Seq2SeqDataset(train_idxs, input_texts, output_texts, shuffle=True, infinite=True))
-            train_weights.append(math.log2(len(train_idxs))**3) # weight by log^3 of number of examples
-            train_size += len(train_idxs)
-            print_messages.append((
-                len(train_idxs),
-                f'Label: {label_names[i]}, train size: {len(train_idxs)}, val size: {val_sizes[i]}, weight: {train_weights[-1]}'
-            ))
-        train_idxs = [i for i in idxs_without_labels if i not in val_idxs_set]
+        else:
+            train_idxs = idxs
         train_datasets.append(Seq2SeqDataset(train_idxs, input_texts, output_texts, shuffle=True, infinite=True))
         train_weights.append(math.log2(len(train_idxs))**3) # weight by log^3 of number of examples
         train_size += len(train_idxs)
-        print_messages.append((
-            len(train_idxs),
-            f'Label: None, train size: {len(train_idxs)}, val size: {val_sizes[-1]}, weight: {train_weights[-1]}'
-        ))
+        if verbose:
+            if include_val:
+                print_messages.append((
+                    len(train_idxs),
+                    f'Label: {label_names[i]}, train size: {len(train_idxs)}, val size: {val_sizes[i]}, weight: {train_weights[-1]}'
+                ))
+            else:
+                print_messages.append((
+                    len(train_idxs),
+                    f'Label: {label_names[i]}, train size: {len(train_idxs)}, weight: {train_weights[-1]}'
+                ))
+    if include_val:
+        train_idxs = [i for i in idxs_without_labels if i not in val_idxs_set]
+    else:
+        train_idxs = idxs_without_labels
+    train_datasets.append(Seq2SeqDataset(train_idxs, input_texts, output_texts, shuffle=True, infinite=True))
+    train_weights.append(math.log2(len(train_idxs))**3) # weight by log^3 of number of examples
+    train_size += len(train_idxs)
+    if verbose:
+        if include_val:
+            print_messages.append((
+                len(train_idxs),
+                f'Label: None, train size: {len(train_idxs)}, val size: {val_sizes[-1]}, weight: {train_weights[-1]}'
+            ))
+        else:
+            print_messages.append((
+                len(train_idxs),
+                f'Label: None, train size: {len(train_idxs)}, weight: {train_weights[-1]}'
+            ))
+    if include_val:
         val_idxs = list(val_idxs_set)
 
-        if verbose:
-            # Print label stats
-            print('--------')
-            print_bold('Label stats:')
-            print_messages.sort(key=lambda x: x[0], reverse=True)
-            for _, msg in print_messages:
-                print(msg)
-            print('--------')
-            print(f'Number of train examples: {train_size}')
+    if verbose:
+        # Print label stats
+        print('--------')
+        print_bold('Label stats:')
+        print_messages.sort(key=lambda x: x[0], reverse=True)
+        for _, msg in print_messages:
+            print(msg)
+        print('--------')
+        print(f'Number of train examples: {train_size}')
+        if include_val:
             print(f'Number of val examples: {len(val_idxs)}')
             print(f'Number of total examples: {train_size + len(val_idxs)}')
-            print(f'Number of train datasets: {len(train_datasets)}')
+        print(f'Number of train datasets: {len(train_datasets)}')
+        print('--------')
+        print_bold('Examples:')
+        for _ in range(4):
+            _print_random_input_output_pair(input_texts, output_texts)
 
-        # Create datasets
-        train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+    # Create datasets
+    train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+    if include_val:
         val_dataset = Seq2SeqDataset(val_idxs, input_texts, output_texts, shuffle=False)
-        
-    else:        
-    
-        # Split intro train & val
-        indices = list(range(len(input_texts)))
-        indices.sort(key=lambda i: (len(output_texts[i]), output_texts[i])) # sort by output length, then alphabetically
+    else:
+        val_dataset = None
 
+    return train_dataset, val_dataset
+
+def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True):
+    indices = list(range(len(input_texts)))
+    if include_val:
+        # Split intro train & val
+        indices.sort(key=lambda i: (len(output_texts[i]), output_texts[i])) # sort by output length, then alphabetically
+        
         # Choose val_size random indices uniformly distributed across the dataset
         val_indices = np.linspace(0, len(indices) - 1, val_size, dtype=int)
         val_indices_set = set(val_indices)
@@ -448,21 +1154,247 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
         # Create datasets
         train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True)
         val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False)
-    
-        if verbose:
-            # Print stats
-            print_bold(f'Number of train examples: {len(train_indices)}')
-            print_bold(f'Number of val examples: {len(val_indices)}')
-            print_bold(f'Number of total examples: {len(indices)}')
-        
+    else:
+        # Create datasets
+        train_indices = indices
+        train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True)
+        val_dataset = None
+
     if verbose:
-        # Print random example
-        print_bold('Input/output example:')
-        i = random.randint(0, len(input_texts) - 1)
-        print_bold(f'Input:')
-        print_magenta(input_texts[i], bold=True)
-        print_bold(f'Output:')
-        print_magenta(output_texts[i], bold=True)
+        # Print stats
+        print(f'Number of train examples: {len(train_indices)}')
+        if include_val:
+            print(f'Number of val examples: {len(val_indices)}')
+            print(f'Number of total examples: {len(indices)}')
+
+    return train_dataset, val_dataset
+
+def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn, num_workers,
+                                        fact_to_comparison_input_output_jsonl_filepaths=None,
+                                        chest_imagenome_obs_input_output_jsonl_filepaths=None,
+                                        chest_imagenome_anatloc_input_output_jsonl_filepaths=None,
+                                        report_to_sentences_input_output_jsonl_filepaths=None,
+                                        sentence_to_facts_input_output_jsonl_filepaths=None,
+                                        background_to_facts_input_output_jsonl_filepaths=None,
+                                        fact_to_metadata_input_output_jsonl_filepaths=None,
+                                        integrated_facts_metadata_jsonl_filepath=None,
+                                        paraphrased_inputs_jsonl_filepaths=None,
+                                        chest_imagenome_phrases2labels_filepath=None,
+                                        multitask_name_list=None,
+                                        task2weight=None,
+                                        integrated_nli_jsonl_filepath=None,
+                                        use_sentence2facts_for_nli=False,
+                                        use_anli=False, use_multinli=False, use_snli=False,
+                                        mlm_min_token_count=20, mlm_masking_fraction=0.2,
+                                        only_validate_nli=False, nli1_only_on_val=False, val_size=200, verbose=True):
+    assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
+
+    if use_sentence2facts_for_nli:
+        assert task_name == Seq2SeqTaskNames.MULTITASK, 'use_sentence2facts_for_nli can only be used with multitask'
+        assert Seq2SeqTaskNames.SENTENCE_TO_FACTS in multitask_name_list
+        assert Seq2SeqTaskNames.NLI in multitask_name_list
+
+    if only_validate_nli or nli1_only_on_val:
+        assert task_name == Seq2SeqTaskNames.NLI or (
+            task_name == Seq2SeqTaskNames.MULTITASK and Seq2SeqTaskNames.NLI in multitask_name_list), \
+            'only_validate_nli and nli1_only_on_val can only be used with NLI or multitask with NLI'
+
+    input2paraphrases = _compute_input2paraphrases(paraphrased_inputs_jsonl_filepaths, verbose=verbose)
+
+    if task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
+        input_texts, output_texts = _prepare_fact_to_comparison_data(
+            integrated_facts_metadata_jsonl_filepath, fact_to_comparison_input_output_jsonl_filepaths, input2paraphrases)
+        train_dataset, val_dataset = _get_fact_to_comparison_train_val_datasets(
+            input_texts, output_texts, val_size, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
+        input_texts, output_texts, _label_names = _prepare_sentence_to_chest_imagenome_observations_data(
+            chest_imagenome_phrases2labels_filepath, chest_imagenome_obs_input_output_jsonl_filepaths, input2paraphrases)
+        train_dataset, val_dataset = _get_sentence_to_chest_imagenome_labels_datasets(
+            input_texts, output_texts, val_size, label_names=_label_names, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
+        input_texts, output_texts, _label_names = _prepare_sentence_to_chest_imagenome_anatlocs_data(
+            chest_imagenome_phrases2labels_filepath, chest_imagenome_anatloc_input_output_jsonl_filepaths, input2paraphrases)
+        train_dataset, val_dataset = _get_sentence_to_chest_imagenome_labels_datasets(
+            input_texts, output_texts, val_size, label_names=_label_names, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA:
+        input_texts, output_texts = _prepare_fact_to_metadata_data(fact_to_metadata_input_output_jsonl_filepaths)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+    
+    elif task_name == Seq2SeqTaskNames.REPORT_TO_SENTENCES:
+        input_texts, output_texts = _prepare_reports_to_sentences_data(report_to_sentences_input_output_jsonl_filepaths)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
+        input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.BACKGROUND_TO_FACTS:
+        input_texts, output_texts = _prepare_background_to_facts_data(background_to_facts_input_output_jsonl_filepaths)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.NLI:
+        train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
+                          use_anli, use_multinli, use_snli, verbose=verbose, nli1_only_on_val=nli1_only_on_val)
+
+    elif task_name == Seq2SeqTaskNames.MULTITASK:
+        assert multitask_name_list is not None, 'multitask_name_list must be provided'
+        assert type(multitask_name_list) == list
+        assert len(multitask_name_list) > 0
+        assert len(set(multitask_name_list)) == len(multitask_name_list)
+        assert all(task_name in Seq2SeqTaskNames.get_all() for task_name in multitask_name_list), \
+            f'Unknown task name in multitask_name_list: {multitask_name_list}'
+        assert task2weight is not None, 'task2weight must be provided'
+        assert set(multitask_name_list) == set(task2weight.keys()), \
+            f'Inconsistent task names in multitask_name_list and task2weight: {multitask_name_list}, {task2weight.keys()}'
+
+        if use_sentence2facts_for_nli:
+            # make sure SENTENCE_TO_FACTS is the first task
+            multitask_name_list = [Seq2SeqTaskNames.SENTENCE_TO_FACTS] + [x for x in multitask_name_list if x != Seq2SeqTaskNames.SENTENCE_TO_FACTS]
+
+        if Seq2SeqTaskNames.MLM in multitask_name_list:
+            # make sure MLM is the last task
+            multitask_name_list = [x for x in multitask_name_list if x != Seq2SeqTaskNames.MLM] + [Seq2SeqTaskNames.MLM]
+            general_sentences = set()
+            medical_sentences = set()
+
+            if input2paraphrases is not None:
+                for input_text, paraphrases in input2paraphrases.items():
+                    medical_sentences.add(input_text)
+                    for p in paraphrases:
+                        medical_sentences.add(p)
+                print(f'Number of medical sentences from paraphrases: {len(medical_sentences)}')
+
+        else:
+            general_sentences = None
+            medical_sentences = None
+        
+        train_datasets = []
+        train_weights = []
+        val_datasets = []
+        
+        for task_name in multitask_name_list:
+            print_bold('----------------------------------------')
+            print_bold(f'Preparing {task_name} dataset')
+
+            include_val = task_name != Seq2SeqTaskNames.MLM and (not only_validate_nli or task_name == Seq2SeqTaskNames.NLI)
+
+            if task_name == Seq2SeqTaskNames.FACT_TO_COMPARISON:
+                input_texts, output_texts = _prepare_fact_to_comparison_data(
+                    integrated_facts_metadata_jsonl_filepath, fact_to_comparison_input_output_jsonl_filepaths, input2paraphrases,
+                    apply_task_prefix=True, medical_sentences=medical_sentences)
+                train_dataset, val_dataset = _get_fact_to_comparison_train_val_datasets(
+                    input_texts, output_texts, val_size, verbose=verbose, include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
+                input_texts, output_texts, _label_names = _prepare_sentence_to_chest_imagenome_observations_data(
+                    chest_imagenome_phrases2labels_filepath, chest_imagenome_obs_input_output_jsonl_filepaths, input2paraphrases,
+                    apply_task_prefix=True, medical_sentences=medical_sentences)
+                train_dataset, val_dataset = _get_sentence_to_chest_imagenome_labels_datasets(
+                    input_texts, output_texts, val_size, label_names=_label_names, verbose=verbose, include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
+                input_texts, output_texts, _label_names = _prepare_sentence_to_chest_imagenome_anatlocs_data(
+                    chest_imagenome_phrases2labels_filepath, chest_imagenome_anatloc_input_output_jsonl_filepaths, input2paraphrases,
+                    apply_task_prefix=True, medical_sentences=medical_sentences)
+                train_dataset, val_dataset = _get_sentence_to_chest_imagenome_labels_datasets(
+                    input_texts, output_texts, val_size, label_names=_label_names, verbose=verbose, include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA:
+                input_texts, output_texts = _prepare_fact_to_metadata_data(fact_to_metadata_input_output_jsonl_filepaths,
+                                                                            apply_task_prefix=True, medical_sentences=medical_sentences)
+                train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                             include_val=include_val)
+            
+            elif task_name == Seq2SeqTaskNames.REPORT_TO_SENTENCES:
+                input_texts, output_texts = _prepare_reports_to_sentences_data(report_to_sentences_input_output_jsonl_filepaths,
+                                                                                apply_task_prefix=True)
+                train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                             include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
+                if use_sentence2facts_for_nli:
+                    input_texts, output_texts, s2f_input_output_for_nli = _prepare_sentence_to_facts_data(
+                        sentence_to_facts_input_output_jsonl_filepaths, apply_task_prefix=True, collect_input_output_for_nli=True,
+                        medical_sentences=medical_sentences)
+                else:
+                    input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths,
+                                                                                apply_task_prefix=True,
+                                                                                medical_sentences=medical_sentences)
+                    
+                train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                             include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.BACKGROUND_TO_FACTS:
+                input_texts, output_texts = _prepare_background_to_facts_data(background_to_facts_input_output_jsonl_filepaths,
+                                                                                apply_task_prefix=True)
+                train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                             include_val=include_val)
+
+            elif task_name == Seq2SeqTaskNames.NLI:
+                if use_sentence2facts_for_nli:
+                    train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli,
+                                                                   use_anli, use_multinli, use_snli, verbose=verbose,
+                                                                   medical_sentences=medical_sentences,
+                                                                   general_sentences=general_sentences,
+                                                                   nli1_only_on_val=nli1_only_on_val)
+                else:
+                    train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
+                                                                   use_anli, use_multinli, use_snli, verbose=verbose,
+                                                                   medical_sentences=medical_sentences,
+                                                                   general_sentences=general_sentences,
+                                                                   nli1_only_on_val=nli1_only_on_val)
+                    
+            elif task_name == Seq2SeqTaskNames.MLM:
+                mlm_datasets = []
+                if general_sentences is not None:
+                    general_sentences = list(general_sentences)
+                    print(f'Number of general sentences: {len(general_sentences)}')
+                    general_mlm_dataset = _prepare_masked_lm_dataset(
+                        sentences=general_sentences, apply_task_prefix=True, verbose=verbose,
+                        min_token_count=mlm_min_token_count, masking_fraction=mlm_masking_fraction)
+                    mlm_datasets.append(general_mlm_dataset)
+                if medical_sentences is not None:
+                    medical_sentences = list(medical_sentences)
+                    print(f'Number of medical sentences: {len(medical_sentences)}')
+                    medical_mlm_dataset = _prepare_masked_lm_dataset(
+                        sentences=medical_sentences, apply_task_prefix=True, verbose=verbose,
+                        min_token_count=mlm_min_token_count, masking_fraction=mlm_masking_fraction)
+                    mlm_datasets.append(medical_mlm_dataset)
+                assert len(mlm_datasets) > 0
+                val_dataset = None # no val dataset for MLM
+                if len(mlm_datasets) == 1:
+                    train_dataset = mlm_datasets[0]
+                else:
+                    train_dataset = CompositeInfiniteDataset(mlm_datasets, [1] * len(mlm_datasets))
+            
+            else:
+                raise ValueError(f'Unknown task name {task_name}')
+            
+            train_datasets.append(train_dataset)
+            train_weights.append(task2weight[task_name])
+            assert include_val == (val_dataset is not None)
+            if val_dataset is not None:
+                val_datasets.append(val_dataset)
+
+        assert len(train_datasets) > 0
+        assert len(val_datasets) > 0
+        print('----------------------------------------')
+        print(f'Number of train datasets: {len(train_datasets)}')
+        print(f'Number of val datasets: {len(val_datasets)}')
+        train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+        val_dataset = CompositeDataset(val_datasets)
+        print('----------------------------------------')
+        print('Examples of val datasets:')
+        for _ in range(4):
+            i = random.randint(0, len(val_dataset) - 1)
+            tmp = val_dataset[i]
+            _print_input_output_pair(tmp['input_text'], tmp['output_text'])
+
+    else:
+        raise ValueError(f'Unknown task name {task_name}')
 
     # Create dataloaders
     train_dataloader = DataLoader(
@@ -491,26 +1423,48 @@ def get_seq2seq_datasets_and_dataloaders(input_output_jsonl_filepaths, task_name
 
 class Seq2SeqTrainer():
 
-    def __init__(self, batch_size, collate_batch_fn, num_workers, input_output_jsonl_filepaths, task_name,
+    def __init__(self, batch_size, collate_batch_fn, num_workers, task_name, experiment_name,
                  integrated_facts_metadata_jsonl_filepath=None,
                  paraphrased_inputs_jsonl_filepaths=None,
                  chest_imagenome_phrases2labels_filepath=None,
+                 sentence_to_facts_input_output_jsonl_filepaths=None,
+                 fact_to_metadata_input_output_jsonl_filepaths=None,
+                 fact_to_comparison_input_output_jsonl_filepaths=None,
+                 chest_imagenome_obs_input_output_jsonl_filepaths=None,
+                 chest_imagenome_anatloc_input_output_jsonl_filepaths=None,
+                 integrated_nli_jsonl_filepath=None,
+                 use_sentence2facts_for_nli=False,
+                 use_anli=False, use_multinli=False, use_snli=False,
+                 multitask_name_list=None, task2weight=None,
+                 mlm_min_token_count=20, mlm_masking_fraction=0.2,
+                 only_validate_nli=False, nli1_only_on_val=False,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
-        assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+        assert experiment_name is not None, 'experiment_name must be provided'
         
         self.batch_size = batch_size
         self.collate_batch_fn = collate_batch_fn
         self.num_workers = num_workers
-        self.input_output_jsonl_filepaths = input_output_jsonl_filepaths
         self.task_name = task_name
+        self.experiment_name = experiment_name
 
         tmp = get_seq2seq_datasets_and_dataloaders(
-            input_output_jsonl_filepaths, task_name, batch_size, collate_batch_fn, num_workers,
+            task_name, batch_size, collate_batch_fn, num_workers,
             integrated_facts_metadata_jsonl_filepath=integrated_facts_metadata_jsonl_filepath,
             paraphrased_inputs_jsonl_filepaths=paraphrased_inputs_jsonl_filepaths,
             chest_imagenome_phrases2labels_filepath=chest_imagenome_phrases2labels_filepath,
+            sentence_to_facts_input_output_jsonl_filepaths=sentence_to_facts_input_output_jsonl_filepaths,
+            fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
+            fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
+            chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
+            chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,
+            integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
+            use_sentence2facts_for_nli=use_sentence2facts_for_nli,
+            use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
+            multitask_name_list=multitask_name_list, task2weight=task2weight,
+            mlm_min_token_count=mlm_min_token_count, mlm_masking_fraction=mlm_masking_fraction,
+            only_validate_nli=only_validate_nli, nli1_only_on_val=nli1_only_on_val,
             val_size=val_size, verbose=verbose)
         self.train_dataset = tmp['train_dataset']
         self.val_dataset = tmp['val_dataset']
@@ -519,11 +1473,4 @@ class Seq2SeqTrainer():
 
     @property
     def name(self):
-        filenames = [os.path.basename(filepath) for filepath in self.input_output_jsonl_filepaths]
-        short_filenames = [filename[:filename.rfind('.')] for filename in filenames]
-        for i in range(len(short_filenames)):
-            x = short_filenames[i]
-            if len(x) > 16:
-                short_filenames[i] = x[:8] + '..' + x[-6:]
-        filenames_str = ';'.join(short_filenames)
-        return f'{self.task_name}({filenames_str})'
+        return f'{self.task_name}({self.experiment_name})'

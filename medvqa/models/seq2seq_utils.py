@@ -12,7 +12,7 @@ from medvqa.utils.files import save_jsonl
 
 def apply_seq2seq_model_to_sentences(
         checkpoint_folder_path, sentences, logger, device, batch_size, num_workers, max_length, num_beams,
-        save_dir, save_filename_prefix, postprocess_input_output_func):
+        postprocess_input_output_func, save_outputs=True, save_dir=None, save_filename_prefix=None):
 
     # Print example sentences
     logger.info(f"Example sentences to process:")
@@ -25,7 +25,7 @@ def apply_seq2seq_model_to_sentences(
     model_kwargs = metadata['model_kwargs']
     
     # Device
-    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'CPU')
+    device = torch.device('cuda' if torch.cuda.is_available() and device in ['cuda', 'gpu', 'GPU'] else 'cpu')
     
     # Create model
     logger.info(f"Creating Seq2SeqModel")
@@ -63,8 +63,9 @@ def apply_seq2seq_model_to_sentences(
 
     with torch.no_grad():
         for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
+            encoding = batch['encoding']
+            input_ids = encoding['input_ids'].to(device)
+            attention_mask = encoding['attention_mask'].to(device)
             output_ids = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -99,17 +100,23 @@ def apply_seq2seq_model_to_sentences(
 
     assert len(sentences) == len(outputs) + len(unprocessed_sentences)
     
-    # Save outputs
-    timestamp = get_timestamp()
-    save_filename = f"{save_filename_prefix}_{model.get_name()}_{max_length}_{num_beams}_{timestamp}.jsonl"
-    save_filepath = os.path.join(save_dir, save_filename)
-    logger.info(f"Saving outputs to {save_filepath}")
-    save_jsonl(outputs, save_filepath)
+    if save_outputs:
+        assert save_dir is not None
+        assert save_filename_prefix is not None
 
-    # Save unprocessed sentences
-    if len(unprocessed_sentences) > 0:
-        save_filepath = save_filepath[:-7] + ".unprocessed.jsonl" # replace .jsonl with .unprocessed.jsonl
-        logger.info(f"Saving unprocessed sentences to {save_filepath}")
-        save_jsonl(unprocessed_sentences, save_filepath)
+        # Save outputs
+        timestamp = get_timestamp()
+        save_filename = f"{save_filename_prefix}_{model.get_name()}_{max_length}_{num_beams}_{timestamp}.jsonl"
+        save_filepath = os.path.join(save_dir, save_filename)
+        logger.info(f"Saving outputs to {save_filepath}")
+        save_jsonl(outputs, save_filepath)
+
+        # Save unprocessed sentences
+        if len(unprocessed_sentences) > 0:
+            save_filepath = save_filepath[:-7] + ".unprocessed.jsonl" # replace .jsonl with .unprocessed.jsonl
+            logger.info(f"Saving unprocessed sentences to {save_filepath}")
+            save_jsonl(unprocessed_sentences, save_filepath)
 
     logger.info(f"DONE")
+
+    return outputs, unprocessed_sentences

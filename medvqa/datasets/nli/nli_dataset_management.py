@@ -1,8 +1,9 @@
 import random
 import math
+import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
-from medvqa.datasets.nli import RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
+from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
 from medvqa.utils.files import load_jsonl
 from medvqa.utils.logging import print_bold
 
@@ -94,11 +95,14 @@ class NLI_Trainer:
 
     def __init__(self, batch_size, num_workers, collate_batch_fn, integrated_nli_jsonl_filepath=None,
                  integrated_sentence_facts_jsonl_filepath=None, merged=False,
-                 train_mode=True, test_mode=False, dev_mode=False):
+                 train_mode=True, test_mode=False, dev_mode=False, use_mscxrt=False, use_radnli_test=True):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
         assert sum([train_mode, dev_mode, test_mode]) == 1 # only one mode must be True
+
+        if use_mscxrt or use_radnli_test:
+            assert train_mode or test_mode
 
         if train_mode:
             assert integrated_nli_jsonl_filepath is not None
@@ -141,16 +145,38 @@ class NLI_Trainer:
                 print(f'Number of train entailment samples added: {len(train_premises) - len_bef}')
         
         if train_mode or test_mode:
-            radnli_test_rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
-            test_premises = [x['sentence1'] for x in radnli_test_rows]
-            test_hypotheses = [x['sentence2'] for x in radnli_test_rows]
-            test_labels = [_LABEL_TO_INDEX[x['gold_label']] for x in radnli_test_rows]
-            print(f'Number of test samples: {len(test_premises)}')
-            print_bold('Example test text:')
-            _i = random.randint(0, len(test_premises)-1)
-            print(f'Premise: {test_premises[_i]}')
-            print(f'Hypothesis: {test_hypotheses[_i]}')
-            print(f'Label: {_INDEX_TO_LABEL[test_labels[_i]]}')
+            test_premises = []
+            test_hypotheses = []
+            test_labels = []
+            if use_radnli_test:
+                radnli_test_rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
+                test_premises.extend(x['sentence1'] for x in radnli_test_rows)
+                test_hypotheses.extend(x['sentence2'] for x in radnli_test_rows)
+                test_labels.extend(_LABEL_TO_INDEX[x['gold_label']] for x in radnli_test_rows)
+                print(f'Number of test samples: {len(test_premises)}')
+                print_bold('Example test text:')
+                _i = random.randint(0, len(test_premises)-1)
+                print(f'Premise: {test_premises[_i]}')
+                print(f'Hypothesis: {test_hypotheses[_i]}')
+                print(f'Label: {_INDEX_TO_LABEL[test_labels[_i]]}')
+            if use_mscxrt: # MS_CXR_T
+                df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
+                n = len(df)
+                for premise, hypothesis, label in zip(df.sentence_1, df.sentence_2, df.category):
+                    test_premises.append(premise)
+                    test_hypotheses.append(hypothesis)
+                    if label == 'paraphrase':
+                        test_labels.append(_LABEL_TO_INDEX['entailment'])                
+                    elif label == 'contradiction':
+                        test_labels.append(_LABEL_TO_INDEX['contradiction'])
+                    else:
+                        raise ValueError(f'Unknown label {label}')
+                print(f'Number of test samples: {len(test_premises)}')
+                print_bold('Example test text:')
+                _i = random.randint(len(test_premises)-n, len(test_premises)-1)
+                print(f'Premise: {test_premises[_i]}')
+                print(f'Hypothesis: {test_hypotheses[_i]}')
+                print(f'Label: {_INDEX_TO_LABEL[test_labels[_i]]}')
 
         if dev_mode:
             radnli_dev_rows = load_jsonl(RADNLI_DEV_JSONL_PATH)

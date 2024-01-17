@@ -62,6 +62,13 @@ class BertBasedNLI(nn.Module):
         # concatenate the vectors
         concat_vectors = torch.cat([p_vectors, h_vectors, element_wise_product], dim=-1)
         return self.nli_classifier(self.nli_hidden_layer(concat_vectors))
+    
+    def forward_with_precomputed_embeddings(self, p_vectors, h_vectors):
+        assert not self.merged_input
+        element_wise_product = p_vectors * h_vectors
+        # concatenate the vectors
+        concat_vectors = torch.cat([p_vectors, h_vectors, element_wise_product], dim=-1)
+        return self.nli_classifier(self.nli_hidden_layer(concat_vectors))
 
     def forward(self, *args):
         if self.merged_input:

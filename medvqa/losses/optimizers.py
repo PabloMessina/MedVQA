@@ -31,7 +31,7 @@ class GradientAccumulator:
             clip_grad_norm_(model.parameters(), self._max_grad_norm)
         self.step_count += 1
         if self.step_count % self.num_accumulation_steps == 0:
-            print(f'*** GradientAccumulator.step(): step_count = {self.step_count}, num_accumulation_steps = {self.num_accumulation_steps}')
+            # print(f'*** GradientAccumulator.step(): step_count = {self.step_count}, num_accumulation_steps = {self.num_accumulation_steps}')
             self.scaler.step(self.optimizer)
             self.scaler.update()
             # batch_loss.backward()

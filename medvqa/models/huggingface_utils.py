@@ -82,7 +82,7 @@ def compute_text_embeddings(model_name, get_tokenizer_func, texts, device, batch
         assert not is_cxr_bert_variant, 'average_token_embeddings is not supported for CXR-BERT variants'
     
     # Device
-    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'CPU')
+    device = torch.device('cuda' if torch.cuda.is_available() and device in ['GPU', 'cuda'] else 'CPU')
 
     # Load model
     model = AutoModel.from_pretrained(model_name, trust_remote_code=True)

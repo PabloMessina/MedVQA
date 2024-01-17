@@ -6,9 +6,16 @@ from collections import Counter
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset
-from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_TEST_JSONL_PATH
+from medvqa.datasets.nli import (
+    MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH,
+    RADNLI_TEST_JSONL_PATH,
+    ANLI_V1_DATASET_DIR, MULTI_NLI_DATASET_DIR, SNLI_DATASET_DIR,
+)
 from medvqa.datasets.nli.nli_dataset_management import EntailmentContradictionDataset, NLIDataset
-from medvqa.datasets.radgraph import RADGRAPH_CONLLFORMAT_DEV_JSON_PATH, RADGRAPH_CONLLFORMAT_TEST_JSON_PATH, RADGRAPH_CONLLFORMAT_TRAIN_JSON_PATH, RADGRAPH_CONLLFORMAT_TYPES_JSON_PATH
+from medvqa.datasets.radgraph import (
+    RADGRAPH_CONLLFORMAT_DEV_JSON_PATH, RADGRAPH_CONLLFORMAT_TEST_JSON_PATH,
+    RADGRAPH_CONLLFORMAT_TRAIN_JSON_PATH, RADGRAPH_CONLLFORMAT_TYPES_JSON_PATH,
+)
 from medvqa.datasets.radgraph.spert_dataset import JsonInputReader, collate_fn_padding as spert_collate_fn_padding
 from medvqa.datasets.tokenizer import BasicTokenizer
 from medvqa.utils.common import CACHE_DIR, DictWithDefault
@@ -157,6 +164,8 @@ class ChestImaGenomeLabelsClassificationDataset(Dataset):
     
 class SentenceAutoencoderDataset(Dataset):
     def __init__(self, indices, sentences, sentence_ids, shuffle=False, infinite=False):
+        assert len(sentences) == len(sentence_ids)
+        assert all(0 <= x < len(sentences) for x in indices)
         self.sentences = sentences
         self.sentence_ids = sentence_ids
         self.indices = indices
@@ -208,8 +217,11 @@ class FactEmbeddingTrainer():
                  integrated_nli_jsonl_filepath,
                  nli_collate_batch_fn,
                  entcon_collate_batch_fn,
-                 gpt4_radnli_labels_jsonl_filepath,
                  integrated_sentence_facts_jsonl_filepath,
+                 use_nli_val_in_train,
+                 use_anli, # general domain NLI dataset
+                 use_multinli, # general domain NLI dataset
+                 use_snli, # general domain NLI dataset
                  # RadGraph NER and RE arguments
                  use_radgraph_ner_re,
                  radgraph_spert_batch_size,
@@ -225,6 +237,9 @@ class FactEmbeddingTrainer():
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.dataset_name = dataset_name
+
+        if use_anli or use_multinli or use_snli:
+            assert use_nli
 
         if use_triplets or use_triplets_val:
 
@@ -518,6 +533,72 @@ class FactEmbeddingTrainer():
                 ))
 
         if use_nli or use_entcon:
+            print('----')
+            val_premises = []
+            val_hypotheses = []
+            val_labels = []
+            val_sources = []
+            label2id = { 'entailment': 0, 'neutral': 1, 'contradiction': 2,
+                         'e': 0, 'n': 1, 'c': 2, }
+            # RadNLI
+            rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
+            print(f'Number of RadNLI samples: {len(rows)}')
+            for x in rows:
+                val_premises.append(x['sentence1'])
+                val_hypotheses.append(x['sentence2'])
+                val_labels.append(label2id[x['gold_label']])
+                val_sources.append('radnli_test')
+            # MS_CXR_T
+            df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
+            for premise, hypothesis, label in zip(df.sentence_1, df.sentence_2, df.category):
+                val_premises.append(premise)
+                val_hypotheses.append(hypothesis)
+                if label == 'paraphrase':
+                    val_labels.append(label2id['entailment'])
+                elif label == 'contradiction':
+                    val_labels.append(label2id['contradiction'])
+                else:
+                    raise ValueError(f'Unknown label {label}')
+                val_sources.append('ms_cxr_t')
+            print(f'Number of MS_CXR_T samples: {len(df)}')
+            print(f'Number of total samples: {len(val_premises)}')
+            assert len(val_premises) == len(val_hypotheses) == len(val_labels) == len(val_sources)
+        
+            if use_nli:
+                # Val NLI dataset and dataloader
+                print('----')
+                print_bold('Building val NLI dataset and dataloader...')
+                self.val_nli_dataset = NLIDataset(val_premises, val_hypotheses, val_labels, shuffle=False, infinite=False)
+                self.val_nli_dataloader = DataLoader(
+                    self.val_nli_dataset,
+                    batch_size=val_batch_size,
+                    shuffle=False,
+                    num_workers=num_workers,
+                    collate_fn=nli_collate_batch_fn,
+                    pin_memory=True,
+                )
+
+            if use_entcon:
+                # Val entailment/contradiction dataset and dataloader
+                print('----')
+                print_bold('Building val entailment/contradiction dataset and dataloader...')
+                val_ent_premises = [p for p, l in zip(val_premises, val_labels) if l == 0]
+                val_ent_hypotheses = [h for h, l in zip(val_hypotheses, val_labels) if l == 0]
+                val_cont_premises = [p for p, l in zip(val_premises, val_labels) if l == 2]
+                val_cont_hypotheses = [h for h, l in zip(val_hypotheses, val_labels) if l == 2]
+                self.val_entcon_dataset = EntailmentContradictionDataset(val_ent_premises, val_ent_hypotheses, val_cont_premises,
+                                                                         val_cont_hypotheses, shuffle=False, infinite=False)
+                self.val_entcon_dataloader = DataLoader(
+                    self.val_entcon_dataset,
+                    batch_size=val_batch_size,
+                    shuffle=False,
+                    num_workers=num_workers,
+                    collate_fn=entcon_collate_batch_fn,
+                    pin_memory=True,
+                )
+                print('Example entailment/contradiction samples:')
+                for i in range(4):
+                    print(self.val_entcon_dataset[i])
 
             assert integrated_nli_jsonl_filepath, 'integrated_nli_jsonl_filepath must be provided'
             
@@ -527,7 +608,6 @@ class FactEmbeddingTrainer():
             print(f'Number of samples: {len(rows)}')
             premises = [x['premise'] for x in rows]
             hypotheses = [x['hypothesis'] for x in rows]
-            label2id = { 'entailment': 0, 'neutral': 1, 'contradiction': 2 }
             labels = [label2id[x['label']] for x in rows]
             source2id = {}
             for row in rows:
@@ -535,6 +615,17 @@ class FactEmbeddingTrainer():
                 if source not in source2id:
                     source2id[source] = len(source2id)
             sources = [source2id[x['source']] for x in rows]
+            
+            if use_nli_val_in_train:
+                print_bold('Adding val NLI samples to train NLI dataset and dataloader...')
+                for s in val_sources:
+                    if s not in source2id:
+                        source2id[s] = len(source2id)
+                premises.extend(val_premises)
+                hypotheses.extend(val_hypotheses)
+                labels.extend(val_labels)
+                sources.extend(source2id[x] for x in val_sources)
+                print(f'Number of total samples: {len(premises)}')
 
             if integrated_sentence_facts_jsonl_filepath is not None:
                 print(f'Loading integrated sentence facts from {integrated_sentence_facts_jsonl_filepath}...')
@@ -583,6 +674,86 @@ class FactEmbeddingTrainer():
                             print(f'Source: {source} | Label: {label} -> {len(indices)} ({_weights[-1]:.2f})')
                     label_datasets.append(CompositeInfiniteDataset(_datasets, _weights))
                 self.train_nli_dataset = CompositeInfiniteDataset(label_datasets, [1, 1, 1])
+
+                if use_anli or use_multinli or use_snli:
+                    # Train general domain NLI dataset and dataloader
+                    print('----')
+                    print_bold('Building train general domain NLI dataset and dataloader...')
+                    general_domain_premises = []
+                    general_domain_hypotheses = []
+                    general_domain_labels = []
+                    general_domain_sentences = set()
+                    if use_anli:
+                        print('Loading ANLI...')
+                        for r in ('R1', 'R2', 'R3'):
+                            anli_train_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'train.jsonl'))
+                            anli_dev_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'dev.jsonl'))
+                            anli_test_rows = load_jsonl(os.path.join(ANLI_V1_DATASET_DIR, r, 'test.jsonl'))
+                            print(f'Number of ANLI {r} samples: {len(anli_train_rows) + len(anli_dev_rows) + len(anli_test_rows)}')
+                            for rows in (anli_train_rows, anli_dev_rows, anli_test_rows):
+                                for row in rows:
+                                    p, h, l = row['context'], row['hypothesis'], label2id[row['label']]
+                                    general_domain_premises.append(p)
+                                    general_domain_hypotheses.append(h)
+                                    general_domain_labels.append(l)
+                                    general_domain_sentences.add(p)
+                                    general_domain_sentences.add(h)
+                    if use_multinli:
+                        print('Loading MultiNLI...')
+                        for r in ('train', 'dev_matched', 'dev_mismatched'):
+                            rows = load_jsonl(os.path.join(MULTI_NLI_DATASET_DIR, f'multinli_1.0_{r}.jsonl'))
+                            print(f'Number of MultiNLI {r} samples: {len(rows)}')
+                            for row in rows:
+                                try:
+                                    p, h, l = row['sentence1'], row['sentence2'], label2id[row['gold_label']]
+                                except KeyError:
+                                    assert row['gold_label'] == '-' # ignore samples with no label
+                                    continue
+                                general_domain_premises.append(p)
+                                general_domain_hypotheses.append(h)
+                                general_domain_labels.append(l)
+                                general_domain_sentences.add(p)
+                                general_domain_sentences.add(h)
+                    if use_snli:
+                        print('Loading SNLI...')
+                        for r in ('train', 'dev', 'test'):
+                            rows = load_jsonl(os.path.join(SNLI_DATASET_DIR, f'snli_1.0_{r}.jsonl'))
+                            print(f'Number of SNLI {r} samples: {len(rows)}')
+                            for row in rows:
+                                try:
+                                    p, h, l = row['sentence1'], row['sentence2'], label2id[row['gold_label']]
+                                except KeyError:
+                                    assert row['gold_label'] == '-'
+                                    continue
+                                general_domain_premises.append(p)
+                                general_domain_hypotheses.append(h)
+                                general_domain_labels.append(l)
+                                general_domain_sentences.add(p)
+                                general_domain_sentences.add(h)
+                    general_domain_sentences = list(general_domain_sentences)
+                    general_domain_sentences.sort()
+                    print(f'Number of general domain samples: {len(general_domain_premises)}')
+                    print(f'Number of general domain sentences: {len(general_domain_sentences)}')
+                    assert len(general_domain_premises) == len(general_domain_hypotheses) == len(general_domain_labels)
+                    # add general domain samples to train NLI dataset
+                    _datasets = []
+                    for l in range(3):
+                        indices = [i for i, x in enumerate(general_domain_labels) if x == l]
+                        print(f'Label: {l} -> {len(indices)}')
+                        _datasets.append(NLIDataset(general_domain_premises, general_domain_hypotheses, general_domain_labels,
+                                                    shuffle=True, infinite=True, indices=indices))
+                    _general_domain_dataset = CompositeInfiniteDataset(_datasets, [1, 1, 1]) # equal weights
+                    self.train_nli_dataset = CompositeInfiniteDataset([self.train_nli_dataset, _general_domain_dataset], [1, 1])
+
+                print('NLI dataset examples:')
+                for i in range(5):
+                    print_bold(f'Example {i}:')
+                    x = self.train_nli_dataset[i]
+                    p, h, l = x['p'], x['h'], x['l']
+                    print(f'Premise: {p}')
+                    print(f'Hypothesis: {h}')
+                    print(f'Label: {l}')
+
                 self.train_nli_dataloader = DataLoader(
                     self.train_nli_dataset,
                     batch_size=batch_size,
@@ -622,83 +793,6 @@ class FactEmbeddingTrainer():
                 print('Example entailment/contradiction samples:')
                 for i in range(4):
                     print(self.train_entcon_dataset[i])
-
-        if use_nli or use_entcon:
-            print('----')
-            # RadNLI
-            rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
-            print(f'Number of RadNLI samples: {len(rows)}')
-            premises = []
-            hypotheses = []
-            labels = []
-            if gpt4_radnli_labels_jsonl_filepath is not None: # use GPT-4 labels
-                gpt4_radnli_labels = load_jsonl(gpt4_radnli_labels_jsonl_filepath)
-                print(f'Number of GPT-4 RadNLI labels: {len(gpt4_radnli_labels)}')
-                gpt4_query_to_label = {x['metadata']['query'] : x['parsed_response'] for x in gpt4_radnli_labels}
-                for x in rows:
-                    premises.append(x['sentence1'])
-                    hypotheses.append(x['sentence2'])
-                    labels.append(label2id[x['gold_label']])
-                    query = f'Premise: {x["sentence1"]} | Hypothesis: {x["sentence2"]}'
-                    if gpt4_query_to_label[query] != x['gold_label']: # only add if GPT-4 disagrees
-                        premises.append(x['sentence1'])
-                        hypotheses.append(x['sentence2'])
-                        labels.append(label2id[gpt4_query_to_label[query]])
-            else:
-                for x in rows:
-                    premises.append(x['sentence1'])
-                    hypotheses.append(x['sentence2'])
-                    labels.append(label2id[x['gold_label']])
-            # MS_CXR_T
-            df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
-            for premise, hypothesis, label in zip(df.sentence_1, df.sentence_2, df.category):
-                premises.append(premise)
-                hypotheses.append(hypothesis)
-                if label == 'paraphrase':
-                    labels.append(label2id['entailment'])                
-                elif label == 'contradiction':
-                    labels.append(label2id['contradiction'])
-                else:
-                    raise ValueError(f'Unknown label {label}')
-            print(f'Number of MS_CXR_T samples: {len(df)}')
-            print(f'Number of total samples: {len(premises)}')
-            assert len(premises) == len(hypotheses) == len(labels)
-        
-            if use_nli:
-                # Val NLI dataset and dataloader
-                print('----')
-                print_bold('Building val NLI dataset and dataloader...')
-                self.val_nli_dataset = NLIDataset(premises, hypotheses, labels, shuffle=False, infinite=False)
-                self.val_nli_dataloader = DataLoader(
-                    self.val_nli_dataset,
-                    batch_size=val_batch_size,
-                    shuffle=False,
-                    num_workers=num_workers,
-                    collate_fn=nli_collate_batch_fn,
-                    pin_memory=True,
-                )
-
-            if use_entcon:
-                # Val entailment/contradiction dataset and dataloader
-                print('----')
-                print_bold('Building val entailment/contradiction dataset and dataloader...')
-                ent_premises = [p for p, l in zip(premises, labels) if l == 0]
-                ent_hypotheses = [h for h, l in zip(hypotheses, labels) if l == 0]
-                cont_premises = [p for p, l in zip(premises, labels) if l == 2]
-                cont_hypotheses = [h for h, l in zip(hypotheses, labels) if l == 2]
-                self.val_entcon_dataset = EntailmentContradictionDataset(ent_premises, ent_hypotheses, cont_premises, cont_hypotheses,
-                                                                         shuffle=False, infinite=False)
-                self.val_entcon_dataloader = DataLoader(
-                    self.val_entcon_dataset,
-                    batch_size=val_batch_size,
-                    shuffle=False,
-                    num_workers=num_workers,
-                    collate_fn=entcon_collate_batch_fn,
-                    pin_memory=True,
-                )
-                print('Example entailment/contradiction samples:')
-                for i in range(4):
-                    print(self.val_entcon_dataset[i])
 
         if use_radgraph_ner_re:
             print('----')
@@ -752,15 +846,25 @@ class FactEmbeddingTrainer():
             print(f'Number of clusters: {len(c2idxs)}')
             print(f'Number of sentences in largest cluster: {max(len(x) for x in c2idxs.values())}')
             print(f'Number of sentences in smallest cluster: {min(len(x) for x in c2idxs.values())}')
-            vocab_filepath = os.path.join(CACHE_DIR, f'fact_decoding_vocab{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            if use_anli or use_multinli or use_snli:
+                sentences += general_domain_sentences # add general domain sentences
+                print(f'Number of sentences after adding general domain sentences: {len(sentences)}')
+                vocab_filepath = os.path.join(CACHE_DIR, f'fact_decoding_vocab(gendoms={len(general_domain_sentences)})'
+                                              f'{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            else:
+                vocab_filepath = os.path.join(CACHE_DIR, f'fact_decoding_vocab{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
             decoder_tokenizer = BasicTokenizer(
                 vocab_filepath=vocab_filepath,
                 texts=sentences,
-                vocab_min_freq=10,
+                vocab_min_freq=20,
             )
             self.sentence_decoder_tokenizer = decoder_tokenizer
             print(f'Number of tokens in vocab: {decoder_tokenizer.vocab_size}')
-            sentence_ids_filepath = os.path.join(CACHE_DIR, f'sentence_ids{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            if use_anli or use_multinli or use_snli:
+                sentence_ids_filepath = os.path.join(CACHE_DIR, f'sentence_ids(gendoms={len(general_domain_sentences)})'
+                                                        f'{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
+            else:
+                sentence_ids_filepath = os.path.join(CACHE_DIR, f'sentence_ids{hash_string(sentences_and_cluster_ids_filepath)}.pkl')
             if os.path.exists(sentence_ids_filepath):
                 print('Loading sentence IDs from cache...')
                 sentence_ids = load_pickle(sentence_ids_filepath)
@@ -769,6 +873,7 @@ class FactEmbeddingTrainer():
                 sentence_ids = decoder_tokenizer.batch_string2ids(sentences, in_parallel=True)
                 print('Saving sentence IDs to cache...')
                 save_pickle(sentence_ids, sentence_ids_filepath)
+            assert len(sentences) == len(sentence_ids)
             _val_idxs = []
             _train_datasets = []
             for idxs in c2idxs.values():
@@ -781,6 +886,22 @@ class FactEmbeddingTrainer():
             print(f'Number of validation samples: {len(_val_idxs)}')
             print(f'Number of training samples: {len(sentences) - len(_val_idxs)}')
             self.train_sentence_autoencoder_dataset = CompositeInfiniteDataset(_train_datasets, [1] * len(_train_datasets))
+            if use_anli or use_multinli or use_snli:
+                # add general domain samples to train dataset
+                _indices = list(range(len(sentences) - len(general_domain_sentences), len(sentences)))
+                _dataset = SentenceAutoencoderDataset(_indices, sentences, sentence_ids, shuffle=True, infinite=True)
+                self.train_sentence_autoencoder_dataset = CompositeInfiniteDataset([
+                    self.train_sentence_autoencoder_dataset, _dataset], [1, 1])
+
+            print('Dataset examples:')
+            for i in range(5):
+                print_bold(f'Example {i}:')
+                x = self.train_sentence_autoencoder_dataset[i]
+                s, ids  = x["s"], x["ids"]
+                print(f'Sentence: {s}')
+                print(f'Sentence ID: {ids}')
+                print(f'Sentence ID to string: {decoder_tokenizer.ids2string(ids)}')
+
             self.train_sentence_autoencoder_dataloader = DataLoader(
                 self.train_sentence_autoencoder_dataset,
                 batch_size=batch_size,

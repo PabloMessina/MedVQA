@@ -125,7 +125,6 @@ def parse_args(args=None):
     parser.add_argument('--integrated_chest_imagenome_anatomical_locations_filepath', type=str, default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
     parser.add_argument('--integrated_sentence_facts_jsonl_filepath', type=str, default=None)
-    parser.add_argument('--gpt4_radnli_labels_jsonl_filepath', type=str, default=None)
     parser.add_argument('--sentences_and_cluster_ids_filepath', type=str, default=None)
     parser.add_argument('--dataset_name', type=str, default=None, help='Name of dataset to use')
     parser.add_argument('--triplets_weight', type=float, default=0, help='Weight for triplet sampling during training')
@@ -139,6 +138,10 @@ def parse_args(args=None):
     parser.add_argument('--entcon_weight', type=float, default=0, help='Weight for entailment/contradiction sampling during training')
     parser.add_argument('--radgraph_ner_re_weight', type=float, default=0, help='Weight for RadGraph NER/RE sampling during training')
     parser.add_argument('--sentence_autoencoder_weight', type=float, default=0, help='Weight for sentence autoencoder sampling during training')
+    parser.add_argument('--use_nli_val_in_train', action='store_true', default=False, help='Use NLI validation set in training')
+    parser.add_argument('--use_anli', action='store_true', default=False)
+    parser.add_argument('--use_multinli', action='store_true', default=False)
+    parser.add_argument('--use_snli', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--use_amp', action='store_true', default=False)
@@ -507,7 +510,6 @@ def train_from_scratch(
     integrated_chest_imagenome_anatomical_locations_filepath,
     integrated_nli_jsonl_filepath,
     integrated_sentence_facts_jsonl_filepath,
-    gpt4_radnli_labels_jsonl_filepath,
     sentences_and_cluster_ids_filepath,
     dataset_name,
     triplets_weight,
@@ -518,6 +520,10 @@ def train_from_scratch(
     entcon_weight,
     radgraph_ner_re_weight,
     sentence_autoencoder_weight,
+    use_nli_val_in_train,
+    use_anli,
+    use_multinli,
+    use_snli,
     # Dataloading args
     batch_size,
     val_batch_size,
@@ -635,7 +641,6 @@ def train_from_scratch(
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
         integrated_sentence_facts_jsonl_filepath=integrated_sentence_facts_jsonl_filepath,
         sentences_and_cluster_ids_filepath=sentences_and_cluster_ids_filepath,
-        gpt4_radnli_labels_jsonl_filepath=gpt4_radnli_labels_jsonl_filepath,
         dataset_name=dataset_name,
         use_triplets=use_triplets,
         use_triplets_val=use_triplets or (not use_nli and not use_entcon and not use_sentence_autoencoder),
@@ -646,6 +651,10 @@ def train_from_scratch(
         use_entcon=use_entcon,
         use_radgraph_ner_re=use_radgraph_ner_re,
         use_sentence_autoencoder=use_sentence_autoencoder,
+        use_nli_val_in_train=use_nli_val_in_train,
+        use_anli=use_anli,
+        use_multinli=use_multinli,
+        use_snli=use_snli,
     )
 
     collate_batch_fn_kwargs = dict(

@@ -31,8 +31,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
     def step_fn(batch):
 
         # Extract elements from batch
-        idxs = batch['idx']
         output_ids = batch['output_ids'].to(device)
+        output_text = batch['output_text']
         if use_t5 or use_bart:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
@@ -79,12 +79,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
                     else:
                         batch_loss = None
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
-        output = {
-            'idxs': idxs,
-        }
+        output = {}
+        output['gt_text'] = output_text
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
         if use_t5 or use_bart:

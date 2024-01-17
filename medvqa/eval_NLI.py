@@ -35,6 +35,8 @@ def evaluate(
     compare_with_gpt4_predictions=False,    
     gpt4_predictions_path=None,
     use_bert_based_nli=False,
+    use_mscxrt=False,
+    use_radnli_test=False,
     sns_font_scale=1.8,
     font_size=25,
 ):
@@ -77,6 +79,8 @@ def evaluate(
         train_mode=train_mode,
         test_mode=test_mode,
         dev_mode=dev_mode,
+        use_mscxrt=use_mscxrt,
+        use_radnli_test=use_radnli_test,
     )
     if train_mode:
         dataloader = nli_trainer.train_dataloader
@@ -124,12 +128,10 @@ def evaluate(
     accuracy = np.mean(labels == pred_labels)
     print(f'Accuracy = {accuracy:.4f}')
 
+    # Plot a confusion matrix
     if plot_confusion_matrix:
         import seaborn as sns
         sns.set(font_scale=sns_font_scale)
-
-    # Plot a confusion matrix
-    if plot_confusion_matrix:
         from sklearn.metrics import confusion_matrix
         import matplotlib.pyplot as plt
         import seaborn as sns

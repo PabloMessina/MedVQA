@@ -27,6 +27,7 @@ _ALLOWED_GPT_CHAT_MODELS = (
     "gpt-3.5-turbo-16k-0613",
     "gpt-4",
     "gpt-4-0613",
+    "gpt-4-1106-preview",
 )
 
 GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
@@ -160,8 +161,8 @@ def run_common_boilerplate_for_api_requests(
             })
         except Exception as e:
             api_response_string = json.dumps(api_response)
-            if len(api_response_string) > 300:
-                api_response_string = api_response_string[:150] + "..." + api_response_string[-150:]
+            if len(api_response_string) > 500:
+                api_response_string = api_response_string[:250] + "..." + api_response_string[-250:]
             logger.error(f"Error parsing response {api_response_string} for query \"{metadata['query']}\": {e}")
             continue
 
