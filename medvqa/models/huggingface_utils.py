@@ -463,7 +463,7 @@ class CachedT5FactExtractor:
         return output
 
     def __call__(self, texts, update_cache_on_disk=True):
-        assert isinstance(texts, list)
+        assert type(texts) in [list, tuple, np.ndarray]
         assert isinstance(texts[0], str)
         sentences_per_text = sentence_tokenize_texts_in_parallel(texts)
         unique_sentences = []

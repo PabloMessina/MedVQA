@@ -55,7 +55,7 @@ Use "neutral" when there's no contradiction, but the premise doesn't necessarily
 Examples:
 
 1. #P: increased pulmonary edema. | #H: worsened pulmonary edema.
-Label: entailment
+Label: entailment-
 
 2. #P: No pulmonary edema, consolidation, or pneumothorax. | #H: No focal consolidation, pleural effusion, or pneumothorax is present.
 Label: neutral"""

@@ -25,10 +25,14 @@ MIMICCXR_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'mimiccxr')
 MIMICCXR_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'mimiccxr')
 MIMICCXR_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
+MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH']
+MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH']
+
 MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO', 'RAO', 
                                     'AP LLD', 'AP AXIAL', 'SWIMMERS', 'PA LLD', 'XTABLE LATERAL',
                                     'PA RLD', 'AP RLD', 'LPO']
 MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP', 'LATERAL']
+
 def get_mimiccxr_image_orientation_id(o):
     if type(o) != str:
         o = 'UNKNOWN'

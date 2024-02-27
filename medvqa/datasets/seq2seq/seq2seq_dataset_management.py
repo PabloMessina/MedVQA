@@ -57,6 +57,18 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.MULTITASK,
         ]
 
+Task2Prefix = {
+    Seq2SeqTaskNames.REPORT_TO_SENTENCES: 'R2S',
+    Seq2SeqTaskNames.SENTENCE_TO_FACTS: 'S2F',
+    Seq2SeqTaskNames.BACKGROUND_TO_FACTS: 'B2F',
+    Seq2SeqTaskNames.FACT_TO_METADATA: 'F2M',
+    Seq2SeqTaskNames.FACT_TO_COMPARISON: 'F2C',
+    Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS: 'S2CO',
+    Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS: 'S2CA',
+    Seq2SeqTaskNames.NLI: 'NLI',
+    Seq2SeqTaskNames.MLM: 'MLM',
+}
+
 class Seq2SeqDataset(Dataset):
     def __init__(self, indices, input_texts, output_texts, shuffle=False, infinite=False):
         self.indices = indices

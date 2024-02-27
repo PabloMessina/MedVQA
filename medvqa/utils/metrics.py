@@ -67,3 +67,14 @@ def recall_between_dicts(gt_dict, pred_dict):
     gt_sum = sum(gt_dict.values())
     return inters_size / gt_sum if gt_sum > 0 else 0
             
+def auc(scores, binary_labels):
+    assert len(scores) == len(binary_labels)
+    order = np.argsort(scores)
+    n = len(scores)
+    pos = 0
+    count = 0
+    for i in range(n):
+        if binary_labels[order[i]] == 1:
+            count += i - pos
+            pos += 1
+    return count / (pos * (n - pos)) if pos > 0 and pos < n else 0.5

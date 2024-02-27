@@ -1,7 +1,10 @@
 import argparse
+import json
 import numpy as np
+from sklearn.metrics import precision_recall_fscore_support
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     Seq2SeqTaskNames,
+    Task2Prefix,
     load_gpt4_nli_examples_filepaths,
     load_ms_cxr_t_temporal_sentence_similarity_v1_data,
     load_radnli_test_data,
@@ -9,7 +12,8 @@ from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
 )
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.logging import get_console_logger, print_blue, print_bold
+from medvqa.utils.files import load_pickle
+from medvqa.utils.logging import get_console_logger, print_blue, print_bold, print_orange
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -71,6 +75,13 @@ def parse_args():
         help='Paths to the GPT-4 NLI examples files.',
     )
 
+    parser.add_argument(
+        '--chest_imagenome_gold_phrase2labels_filepath',
+        type=str,
+        default=None,
+        help='Path to the chest imagenome gold phrase2labels file.',
+    )
+
 logger = None
    
 def evaluate(
@@ -83,9 +94,11 @@ def evaluate(
         logging_level,
         task_name,
         gpt4_nli_examples_filepaths,
+        chest_imagenome_gold_phrase2labels_filepath,
         plot_confusion_matrix=False,
         sns_font_scale=1.8,
         font_size=25,
+        append_task_prefix=True,
         return_outputs=False,
     ):
 
@@ -101,6 +114,39 @@ def evaluate(
         if gpt4_nli_examples_filepaths is not None:
             gpt4_nli_input_texts, gpt4_nli_output_texts = load_gpt4_nli_examples_filepaths(gpt4_nli_examples_filepaths, nli1_only=True)
             sentences += gpt4_nli_input_texts
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
+        assert chest_imagenome_gold_phrase2labels_filepath is not None
+        tmp = load_pickle(chest_imagenome_gold_phrase2labels_filepath)
+        print(f'Loaded data from {chest_imagenome_gold_phrase2labels_filepath}.')
+        sentences = tmp['phrases']
+        observation_labels = tmp['observation_labels']
+        observation_names = tmp['observation_names']
+        # remove 'normal' and 'abnormal' labels
+        idxs = [i for i, name in enumerate(observation_names) if name not in ['normal', 'abnormal']]
+        observation_labels = observation_labels[:, idxs]
+        observation_labels[observation_labels == -1] = 0 # convert -1 to 0
+        observation_names = [observation_names[i] for i in idxs]
+        name2idx = {name: i for i, name in enumerate(observation_names)}
+        print(f'len(sentences): {len(sentences)}')
+        print(f'len(observation_names): {len(observation_names)}')
+        print(f'observation_labels.shape: {observation_labels.shape}')
+        if append_task_prefix:
+            prefix = Task2Prefix[task_name]
+            sentences = [f'{prefix}: {sentence}' for sentence in sentences]
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
+        assert chest_imagenome_gold_phrase2labels_filepath is not None
+        tmp = load_pickle(chest_imagenome_gold_phrase2labels_filepath)
+        print(f'Loaded data from {chest_imagenome_gold_phrase2labels_filepath}.')
+        sentences = tmp['phrases']
+        anatomy_labels = tmp['anatomy_labels']
+        anatomy_names = tmp['anatomy_names']
+        name2idx = {name: i for i, name in enumerate(anatomy_names)}
+        print(f'len(sentences): {len(sentences)}')
+        print(f'len(anatomy_names): {len(anatomy_names)}')
+        print(f'anatomy_labels.shape: {anatomy_labels.shape}')
+        if append_task_prefix:
+            prefix = Task2Prefix[task_name]
+            sentences = [f'{prefix}: {sentence}' for sentence in sentences]
     else:
         raise NotImplementedError()
 
@@ -186,6 +232,90 @@ def evaluate(
                 'mscxrt_gen_outputs': mscxrt_gen_outputs,
                 'mscxrt_output_texts': mscxrt_output_texts,
             }
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
+        assert len(gen_outputs) == len(sentences)
+        gen_labels = np.zeros((len(gen_outputs), len(observation_names)), dtype=np.int32)
+        unknown_observation_names = set()
+        for i, gen_output in enumerate(gen_outputs):
+            try:
+                parsed_output = json.loads(gen_output)
+                
+            except:
+                print(f'gen_output: {gen_output}')
+                raise
+            for name in parsed_output:
+                try:
+                    gen_labels[i, name2idx[name]] = 1
+                except:
+                    unknown_observation_names.add(name)
+        if len(unknown_observation_names) > 0:
+            print_orange(f'WARNING: {len(unknown_observation_names)} unknown observation names.')
+            print(f'Unknown observation names: {unknown_observation_names}')
+        assert gen_labels.shape == observation_labels.shape
+        accuracy = (gen_labels == observation_labels).mean()
+        print_bold(f'Accuracy: {accuracy}')
+        # precision, recall, f1 (macro)
+        precision, recall, f1, _ = precision_recall_fscore_support(observation_labels, gen_labels, average='macro')
+        print_bold(f'Precision (macro): {precision}')
+        print_bold(f'Recall (macro): {recall}')
+        print_bold(f'F1 (macro): {f1}')
+        # precision, recall, f1 (micro)
+        precision, recall, f1, _ = precision_recall_fscore_support(observation_labels, gen_labels, average='micro')
+        print_bold(f'Precision (micro): {precision}')
+        print_bold(f'Recall (micro): {recall}')
+        print_bold(f'F1 (micro): {f1}')
+
+        if return_outputs:
+            return {
+                'sentences': sentences,
+                'gen_outputs': gen_outputs,
+                'gen_labels': gen_labels,
+                'observation_names': observation_names,
+                'observation_labels': observation_labels,
+            }
+        
+    elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS:
+        assert len(gen_outputs) == len(sentences)
+        gen_labels = np.zeros((len(gen_outputs), len(anatomy_names)), dtype=np.int32)
+        unknown_anatomy_names = set()
+        for i, gen_output in enumerate(gen_outputs):
+            try:
+                parsed_output = json.loads(gen_output)
+            except:
+                print(f'gen_output: {gen_output}')
+                raise
+            for name in parsed_output:
+                try:
+                    gen_labels[i, name2idx[name]] = 1
+                except:
+                    unknown_anatomy_names.add(name)
+        if len(unknown_anatomy_names) > 0:
+            print_orange(f'WARNING: {len(unknown_anatomy_names)} unknown anatomy names.')
+            print(f'Unknown anatomy names: {unknown_anatomy_names}')
+
+        assert gen_labels.shape == anatomy_labels.shape
+        accuracy = (gen_labels == anatomy_labels).mean()
+        print_bold(f'Accuracy: {accuracy}')
+        # precision, recall, f1 (macro)
+        precision, recall, f1, _ = precision_recall_fscore_support(anatomy_labels, gen_labels, average='macro')
+        print_bold(f'Precision (macro): {precision}')
+        print_bold(f'Recall (macro): {recall}')
+        print_bold(f'F1 (macro): {f1}')
+        # precision, recall, f1 (micro)
+        precision, recall, f1, _ = precision_recall_fscore_support(anatomy_labels, gen_labels, average='micro')
+        print_bold(f'Precision (micro): {precision}')
+        print_bold(f'Recall (micro): {recall}')
+        print_bold(f'F1 (micro): {f1}')
+
+        if return_outputs:
+            return {
+                'sentences': sentences,
+                'gen_outputs': gen_outputs,
+                'gen_labels': gen_labels,
+                'anatomy_names': anatomy_names,
+                'anatomy_labels': anatomy_labels,
+            }
+
     else:
         raise NotImplementedError()
 

@@ -5,24 +5,34 @@ import numpy as np
 from nltk import sent_tokenize
 from tqdm import tqdm
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
+from medvqa.eval_report_gen_metrics import (
+    compute_AUC,
+    compute_chest_imagenome_gold_contradiction_matrix,
+    compute_chest_imagenome_gold_relevance_matrix,
+    compute_gold_accuracy_matrix,
+    compute_mean_average_accuracy_at_k,
+    compute_mean_contradictions_at_k,
+)
+from medvqa.evaluation.ranking_evaluation_utils import load_mimiccxr_custom_radiologist_annotations
 from medvqa.utils.logging import print_magenta, print_orange
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
 from medvqa.utils.files import load_json, load_pickle, save_pickle
 from medvqa.utils.math import (
     rank_vectors_by_dot_product,
-    rank_vectors_by_euclidean_distance,
 )
 from medvqa.utils.metrics import jaccard_between_dicts
 
 class _EvaluationModes:
     MIMICCXR_RADIOLOGIST_ANNOTATIONS = 'mimiccxr_radiologist_annotations'
     IUXRAY_WITH_AUTOMATIC_LABELERS = 'iuxray_with_automatic_labelers' # chexpert + chexbert + radgraph
+    CHEST_IMAGENOME_GOLD = 'chest_imagenome_gold'
     @staticmethod
     def get_all():
         return [
             _EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS,
             _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS,
+            _EvaluationModes.CHEST_IMAGENOME_GOLD,
         ]
 
 def parse_args(args=None):
@@ -33,40 +43,10 @@ def parse_args(args=None):
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--model_checkpoint_folder_path', type=str, default=None)
-    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['cosine', 'euclidean', 'dot_product'])
+    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['cosine', 'dot_product'])
     parser.add_argument('--average_token_embeddings', action='store_true', default=False)
+    parser.add_argument('--chest_imagenome_sentence2labels_gold_filepath', type=str, default=None)
     return parser.parse_args(args=args)
-
-def _load_mimiccxr_radiologist_annotations():
-    df1 = pd.read_csv("/home/pdpino/workspace-medical-ai/report_generation/nlp-chex-gold-sentences/cxr-sentence-assessment-expert1.csv")
-    df2 = pd.read_csv("/home/pdpino/workspace-medical-ai/report_generation/nlp-chex-gold-sentences/cxr-sentence-assessment-expert2.csv")
-    assert df1['Sentence'].equals(df2['Sentence'])
-    
-    finding_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Lung Opacity', 'Pleural Effusion', 'Any other finding']
-    n_rows = len(df1)
-    n_labels = len(finding_columns)
-    labels = np.empty((n_rows, n_labels * 2), dtype=np.int8) # 2 experts
-    
-    for i, col in enumerate(finding_columns):
-        # Map string values to integers
-        # Abnormal: 1, Normal: 0, Uncertain: -1, nan: -2
-        values = df1[col]
-        values.fillna(-2, inplace=True)
-        values.replace('Uncertain', -1, inplace=True)
-        values.replace('Normal', 0, inplace=True)
-        values.replace('Abnormal', 1, inplace=True)
-        labels[:, i] = values.values
-        
-        values = df2[col]
-        values.fillna(-2, inplace=True)
-        values.replace('Uncertain', -1, inplace=True)
-        values.replace('Normal', 0, inplace=True)
-        values.replace('Abnormal', 1, inplace=True)
-        labels[:, i + n_labels] = values.values
-
-    assert set(labels.flatten()) == {-2, -1, 0, 1}
-    sentences = df1['Sentence'].values
-    return sentences, labels
 
 def _load_iuxray_sentences():
     print(f'Loading iuxray reports from {IUXRAY_REPORTS_MIN_JSON_PATH}')
@@ -94,7 +74,7 @@ def _load_mimiccxr_sentences_and_radiologist_based_relevant_sentences():
         print(f'Loading mimiccxr sentences and relevant sentences from {save_path}')
         return load_pickle(save_path)
     
-    sentences, labels = _load_mimiccxr_radiologist_annotations()
+    sentences, labels = load_mimiccxr_custom_radiologist_annotations()
     n = len(sentences)
     relevant_sentences = [set() for _ in range(n)]
 
@@ -193,19 +173,35 @@ def evaluate(
     model_checkpoint_folder_path,
     distance_metric,
     average_token_embeddings,
+    chest_imagenome_sentence2labels_gold_filepath,
 ):
     if evaluation_mode == _EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS:
         tmp = _load_mimiccxr_sentences_and_radiologist_based_relevant_sentences()
         sentences, relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
+        print('len(sentences):', len(sentences))
+        print('len(relevant_sentences):', len(relevant_sentences))
     elif evaluation_mode == _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS:
         tmp = _load_iuxray_sentences_and_automatic_labeler_based_relevant_sentences()
         sentences, relevant_sentences = tmp['sentences'], tmp['relevant_sentences']
+        print('len(sentences):', len(sentences))
+        print('len(relevant_sentences):', len(relevant_sentences))
+    elif evaluation_mode == _EvaluationModes.CHEST_IMAGENOME_GOLD:
+        assert chest_imagenome_sentence2labels_gold_filepath is not None
+        print(f'Loading sentence2labels_gold from {chest_imagenome_sentence2labels_gold_filepath}')
+        sentence2labels_gold = load_pickle(chest_imagenome_sentence2labels_gold_filepath)
+        sentences = sentence2labels_gold['phrases']
+        observation_labels = sentence2labels_gold['observation_labels']
+        anatomy_labels = sentence2labels_gold['anatomy_labels']
+        labels =  np.concatenate([observation_labels, anatomy_labels], axis=1)
+        print(f'Number of sentences: {len(sentences)}')
+        print(f'label.shape: {labels.shape}')
+        gold_relevance_matrix = compute_chest_imagenome_gold_relevance_matrix(observation_labels, anatomy_labels)
+        gold_accuracy_matrix = compute_gold_accuracy_matrix(labels)
+        gold_contradiction_matrix = compute_chest_imagenome_gold_contradiction_matrix(observation_labels)
     else:
         raise ValueError(f'Invalid evaluation_mode: {evaluation_mode}')
     
     n = len(sentences)
-    print('len(sentences):', len(sentences))
-    print('len(relevant_sentences):', len(relevant_sentences))
     
     # Obtain embeddings for each sentence
     if model_name in SupportedHuggingfaceMedicalBERTModels.get_all():
@@ -227,38 +223,61 @@ def evaluate(
     print('Embeddings shape:', embeddings.shape)
     assert embeddings.shape[0] == n
 
-    rank_vectors_func = None
-    if distance_metric == 'cosine':
-        print('Normalizing embeddings (for cosine similarity)')
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
-        rank_vectors_func = rank_vectors_by_dot_product # Cosine similarity is equivalent to dot product when embeddings are normalized
-    elif distance_metric == 'euclidean':
-        rank_vectors_func = rank_vectors_by_euclidean_distance
-    elif distance_metric == 'dot_product':
-        rank_vectors_func = rank_vectors_by_dot_product
-    else:
-        raise ValueError(f'Invalid distance_metric: {distance_metric}')
+    if evaluation_mode in (_EvaluationModes.MIMICCXR_RADIOLOGIST_ANNOTATIONS, _EvaluationModes.IUXRAY_WITH_AUTOMATIC_LABELERS):
+        rank_vectors_func = None
+        if distance_metric == 'cosine':
+            print('Normalizing embeddings (for cosine similarity)')
+            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
+            rank_vectors_func = rank_vectors_by_dot_product # Cosine similarity is equivalent to dot product when embeddings are normalized
+        elif distance_metric == 'dot_product':
+            rank_vectors_func = rank_vectors_by_dot_product
+        else:
+            raise ValueError(f'Invalid distance_metric: {distance_metric}')
+        
+        # Evaluate embeddings on ranking task with each sentence as query
+        print_orange('Evaluating embeddings on ranking task with each sentence as query', bold=True)
+        mean_AUC = 0
+        mean_relevant = 0
+        count = 0
+        for i in tqdm(range(n), mininterval=2):
+            relevant_idxs = relevant_sentences[i]
+            if len(relevant_idxs) == 0:
+                continue
+            sorted_idxs = rank_vectors_func(embeddings, embeddings[i])
+            sorted_idxs = [idx for idx in sorted_idxs if idx != i] # Remove query_idx
+            AUC = _compute_AUC(sorted_idxs, relevant_idxs, query_idx=i)
+            mean_AUC += AUC
+            mean_relevant += len(relevant_idxs)
+            count += 1
+        mean_AUC /= count
+        mean_relevant /= count
+        print_magenta(f'mean_AUC: {mean_AUC:.4f}', bold=True)
+        print(f'mean_relevant: {mean_relevant:.4f}')
+        print(f'count: {count} / {n} ({100 * count / n:.2f}%)')
     
-    # Evaluate embeddings on ranking task with each sentence as query
-    print_orange('Evaluating embeddings on ranking task with each sentence as query', bold=True)
-    mean_AUC = 0
-    mean_relevant = 0
-    count = 0
-    for i in tqdm(range(n), mininterval=2):
-        relevant_idxs = relevant_sentences[i]
-        if len(relevant_idxs) == 0:
-            continue
-        sorted_idxs = rank_vectors_func(embeddings, embeddings[i])
-        sorted_idxs = [idx for idx in sorted_idxs if idx != i] # Remove query_idx
-        AUC = _compute_AUC(sorted_idxs, relevant_idxs, query_idx=i)
-        mean_AUC += AUC
-        mean_relevant += len(relevant_idxs)
-        count += 1
-    mean_AUC /= count
-    mean_relevant /= count
-    print_magenta(f'mean_AUC: {mean_AUC:.4f}', bold=True)
-    print(f'mean_relevant: {mean_relevant:.4f}')
-    print(f'count: {count} / {n} ({100 * count / n:.2f}%)')
+    elif evaluation_mode == _EvaluationModes.CHEST_IMAGENOME_GOLD:
+
+        if distance_metric == 'cosine':
+            print('Normalizing embeddings (for cosine similarity)')
+            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True) # Normalize embeddings
+        print('Computing score matrix')
+        score_matrix = np.dot(embeddings, embeddings.T)
+        print('score_matrix.shape:', score_matrix.shape)
+        
+        # Compute AUC
+        print_magenta(f'mean_AUC: {compute_AUC(gold_relevance_matrix, score_matrix):.4f}', bold=True)
+
+        # Compute mean average accuracy @k for each metric
+        max_k = 200
+        mean_average_accuracy_at_k = compute_mean_average_accuracy_at_k(gold_accuracy_matrix, score_matrix, max_k)
+        for k in (1, 5, 10, 20, 50, 100, 200):
+            print(f'mean_average_accuracy_at_{k}: {mean_average_accuracy_at_k[k-1]:.4f}')
+
+        # Compute mean average contradiction @k
+        mean_num_contradictions_at_k = compute_mean_contradictions_at_k(gold_contradiction_matrix, score_matrix, max_k)
+        for k in (1, 5, 10, 20, 50, 100, 200):
+            print(f'mean_num_contradictions_at_{k}: {mean_num_contradictions_at_k[k-1]:.4f}')
+        
 
 class SentenceRanker:
     def __init__(self, dataset_name):

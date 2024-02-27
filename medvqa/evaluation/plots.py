@@ -608,7 +608,7 @@ def plot_embeddings(X):
 def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10), first_k=None):
     assert type(metric_lists) == list
     assert len(metric_lists) > 0
-    assert all(type(metric_list) == list for metric_list in metric_lists)
+    assert all(type(metric_list) == list or type(metric_list) == np.ndarray for metric_list in metric_lists)
     assert all(len(metric_list) > 0 for metric_list in metric_lists)
     assert all(len(metric_list) == len(metric_lists[0]) for metric_list in metric_lists)
     assert len(method_names) == len(metric_lists)
@@ -632,6 +632,29 @@ def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Ep
     plt.ylabel(ylabel if ylabel is not None else metric_name)
     plt.grid(axis='y')
     plt.legend()
+    plt.show()
+
+def plot_correlation_matrix(correlation_matrix, method_names, title, figsize=(10, 10)):
+    assert type(correlation_matrix) == np.ndarray
+    assert correlation_matrix.shape[0] == correlation_matrix.shape[1]
+    assert correlation_matrix.shape[0] == len(method_names)
+
+    # plt.figure(figsize=figsize)
+    # plt.title(title)
+    # plt.imshow(correlation_matrix, vmin=vmin, vmax=vmax)
+    # plt.xticks(range(len(method_names)), method_names, rotation=45, ha='right')
+    # plt.yticks(range(len(method_names)), method_names)
+    # plt.colorbar()
+    # plt.show()
+
+    # Create a DataFrame from the correlation matrix and names
+    correlation_df = pd.DataFrame(data=correlation_matrix, columns=method_names, index=method_names)
+    
+    # Create a heatmap using seaborn
+    plt.figure(figsize=figsize)
+    import seaborn as sns
+    sns.heatmap(correlation_df, annot=True, cmap='coolwarm', fmt=".2f", linewidths=.5)
+    plt.title(title)
     plt.show()
 
 class SentenceClusteringVisualizer:

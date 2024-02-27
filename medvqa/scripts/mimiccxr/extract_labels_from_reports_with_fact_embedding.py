@@ -815,7 +815,7 @@ class ClusteringBasedLabelVisualizer:
         print()
         
         print_bold('Findings:')
-        print(row['findings'])        
+        print(row['findings'])
         print()
 
         print_bold('Impression:')
