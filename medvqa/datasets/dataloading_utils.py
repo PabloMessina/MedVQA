@@ -23,7 +23,7 @@ from medvqa.utils.constants import (
     VINBIG_DATASET_ID,
     PADCHEST_DATASET_ID,    
 )
-from medvqa.utils.logging import print_bold, print_red
+from medvqa.utils.logging import print_bold, print_orange, print_red
 
 INFINITE_DATASET_LENGTH = int(1e18)
 
@@ -88,6 +88,15 @@ class CompositeDataset(Dataset):
 
 class CompositeInfiniteDataset(Dataset):
     def __init__(self, datasets, weights):
+        assert len(datasets) == len(weights)
+        assert all(w >= 0 for w in weights)
+        n_bef = len(datasets)
+        val_indices = [i for i in range(n_bef) if weights[i] > 0]
+        datasets = [datasets[i] for i in val_indices]
+        weights = [weights[i] for i in val_indices]
+        n_aft = len(datasets)
+        if n_aft < n_bef:
+            print_orange(f'WARNING: CompositeInfiniteDataset(): Removed {n_bef - n_aft} datasets with zero weight', bold=True)
         self.datasets = datasets
         self._init_indices(datasets, weights)
     

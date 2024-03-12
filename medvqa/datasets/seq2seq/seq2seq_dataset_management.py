@@ -440,11 +440,13 @@ _NLI_SHORT2LONG = {
 
 def _get_nli_input_output_1(premise, hypothesis, label):
     assert label in _ALLOWED_NLI_LABELS, f'Unknown label {label}'
-    return f'NLI1: {premise} #Hypothesis: {hypothesis}', 'Most likely: ' + label
+    # return f'NLI1: {premise} #Hypothesis: {hypothesis}', 'Most likely: ' + label
+    return f'NLI1: {premise} #H: {hypothesis}', label
 
 def _get_nli_input_output_2(premise, hypothesis, label):
     assert label in _ALLOWED_NLI_LABELS, f'Unknown label {label}'
-    return f'NLI2: {premise} #Generate {label}', hypothesis
+    # return f'NLI2: {premise} #Generate {label}', hypothesis
+    return f'NLI2: {premise} #G {label}', hypothesis
 
 def load_radnli_dev_data(nli1_only=False, verbose=True):
     rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
@@ -530,12 +532,58 @@ def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True):
                 input_texts.append(input_text)
                 output_texts.append(output_text)
     return input_texts, output_texts
+
+def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True, medical_sentences=None):
+    input_texts = []
+    output_texts = []
+    labels = []
+    if type(filepaths) is str:
+        filepaths = [filepaths] # make it a list
+    for input_output_jsonl_filepath in filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            query = input_output['metadata']['query']
+            report_start_idx = query.find("#F") + 3
+            report_end_idx = query.find(" | #H")
+            p = query[report_start_idx:report_end_idx]
+            h = query[report_end_idx+6:]
+            l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[input_output['parsed_response']]
+
+            if medical_sentences is not None:
+                medical_sentences.add(p)
+                medical_sentences.add(h)
             
+            input_text, output_text = _get_nli_input_output_1(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            labels.append(l)
+
+            if not nli1_only:
+                input_text, output_text = _get_nli_input_output_2(p, h, l)
+                input_texts.append(input_text)
+                output_texts.append(output_text)
+                labels.append(l)
+
+    return input_texts, output_texts, labels
+
+_REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL = {
+    "definitely true": "entailment",
+    "likely true": "entailment",
+    "unknown": "neutral",
+    "likely false": "contradiction",
+    "definitely false": "contradiction",
+}
 
 def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, use_anli=False, use_multinli=False,
-                      use_snli=False, verbose=True, medical_sentences=None, general_sentences=None, nli1_only_on_val=False):
+                      use_snli=False, use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
+                      use_report_nli_entailment_dataset=False, integrated_report_facts_metadata_jsonl_filepath=None,
+                      verbose=True, medical_sentences=None, general_sentences=None, nli1_only_on_train=False, nli1_only_on_val=False):
 
     assert integrated_nli_jsonl_filepath, 'integrated_nli_jsonl_filepath must be provided'
+    if nli1_only_on_train:
+        assert nli1_only_on_val, 'nli1_only_on_val must be True if nli1_only_on_train is True'
 
     input_texts = []
     output_texts = []
@@ -573,11 +621,12 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
         labels.append(l)
         sources.append(s)
         
-        input_text, output_text = _get_nli_input_output_2(p, h, l)
-        input_texts.append(input_text)
-        output_texts.append(output_text)
-        labels.append(l)
-        sources.append(s)
+        if not nli1_only_on_train:
+            input_text, output_text = _get_nli_input_output_2(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            labels.append(l)
+            sources.append(s)
 
     source_id = len(source2id) # to add a new source
 
@@ -605,11 +654,12 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     labels.append(l)
                     sources.append(source_id)
 
-                    input_text, output_text = _get_nli_input_output_2(p, h, l)
-                    input_texts.append(input_text)
-                    output_texts.append(output_text)
-                    labels.append(l)
-                    sources.append(source_id)
+                    if not nli1_only_on_train:
+                        input_text, output_text = _get_nli_input_output_2(p, h, l)
+                        input_texts.append(input_text)
+                        output_texts.append(output_text)
+                        labels.append(l)
+                        sources.append(source_id)
 
         if verbose:
             print(f'Number of entailment samples added: {len(input_texts) - len_bef}')
@@ -645,11 +695,12 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                         labels.append(l)
                         sources.append(source_id)
 
-                        input_text, output_text = _get_nli_input_output_2(p, h, l)
-                        input_texts.append(input_text)
-                        output_texts.append(output_text)
-                        labels.append(l)
-                        sources.append(source_id)
+                        if not nli1_only_on_train:
+                            input_text, output_text = _get_nli_input_output_2(p, h, l)
+                            input_texts.append(input_text)
+                            output_texts.append(output_text)
+                            labels.append(l)
+                            sources.append(source_id)
             source2id['anli'] = source_id
             id2source[source_id] = 'anli'
             source2type['anli'] = 'general'
@@ -677,11 +728,12 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     labels.append(l)
                     sources.append(source_id)
 
-                    input_text, output_text = _get_nli_input_output_2(p, h, l)
-                    input_texts.append(input_text)
-                    output_texts.append(output_text)
-                    labels.append(l)
-                    sources.append(source_id)
+                    if not nli1_only_on_train:
+                        input_text, output_text = _get_nli_input_output_2(p, h, l)
+                        input_texts.append(input_text)
+                        output_texts.append(output_text)
+                        labels.append(l)
+                        sources.append(source_id)
             source2id['multinli'] = source_id
             id2source[source_id] = 'multinli'
             source2type['multinli'] = 'general'
@@ -709,15 +761,59 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     labels.append(l)
                     sources.append(source_id)
 
-                    input_text, output_text = _get_nli_input_output_2(p, h, l)
-                    input_texts.append(input_text)
-                    output_texts.append(output_text)
-                    labels.append(l)
-                    sources.append(source_id)
+                    if not nli1_only_on_train:
+                        input_text, output_text = _get_nli_input_output_2(p, h, l)
+                        input_texts.append(input_text)
+                        output_texts.append(output_text)
+                        labels.append(l)
+                        sources.append(source_id)
             source2id['snli'] = source_id
             id2source[source_id] = 'snli'
             source2type['snli'] = 'general'
             source_id += 1 # to add a new source
+
+    if use_report_nli:
+        # Report NLI datasets
+        if verbose:
+            print('----')
+            print_bold('Loading report NLI datasets...')
+        
+        assert report_nli_input_output_jsonl_filepaths is not None, 'report_nli_input_output_jsonl_filepaths must be provided'
+        assert len(report_nli_input_output_jsonl_filepaths) == 2
+        if '(from_facts)' in report_nli_input_output_jsonl_filepaths[0]:
+            assert '(from_labels)' in report_nli_input_output_jsonl_filepaths[1]
+            from_facts_filepath = report_nli_input_output_jsonl_filepaths[0]
+            from_labels_filepath = report_nli_input_output_jsonl_filepaths[1]
+        elif '(from_facts)' in report_nli_input_output_jsonl_filepaths[1]:
+            assert '(from_labels)' in report_nli_input_output_jsonl_filepaths[0]
+            from_facts_filepath = report_nli_input_output_jsonl_filepaths[1]
+            from_labels_filepath = report_nli_input_output_jsonl_filepaths[0]
+        else:
+            raise ValueError(f'Unknown report NLI input/output filepaths {report_nli_input_output_jsonl_filepaths}')
+
+        from_facts_input_texts, from_facts_output_texts, from_facts_labels = load_report_nli_examples_filepaths(
+            from_facts_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences)
+
+        input_texts.extend(from_facts_input_texts)
+        output_texts.extend(from_facts_output_texts)
+        labels.extend(from_facts_labels)
+        sources.extend([source_id] * len(from_facts_input_texts))
+        source2id['report_nli_from_facts'] = source_id
+        id2source[source_id] = 'report_nli_from_facts'
+        source2type['report_nli_from_facts'] = 'medical_report_from_facts'
+        source_id += 1
+        
+        from_labels_input_texts, from_labels_output_texts, from_labels_labels = load_report_nli_examples_filepaths(
+            from_labels_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences)
+        
+        input_texts.extend(from_labels_input_texts)
+        output_texts.extend(from_labels_output_texts)
+        labels.extend(from_labels_labels)
+        sources.extend([source_id] * len(from_labels_input_texts))
+        source2id['report_nli_from_labels'] = source_id
+        id2source[source_id] = 'report_nli_from_labels'
+        source2type['report_nli_from_labels'] = 'medical_report_from_labels'
+        source_id += 1
 
     source_label_2_indices = {}
     unique_sources = set()
@@ -742,6 +838,10 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
         _general_weights = []
         _medical_datasets = []
         _medical_weights = []
+        _medical_report_from_facts_datasets = []
+        _medical_report_from_facts_weights = []
+        _medical_report_from_labels_datasets = []
+        _medical_report_from_labels_weights = []
         for source in unique_sources:
             key = (source, label)
             if key in source_label_2_indices:
@@ -754,6 +854,12 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                 elif source2type[id2source[source]] == 'medical':
                     _medical_datasets.append(dataset)
                     _medical_weights.append(weight)
+                elif source2type[id2source[source]] == 'medical_report_from_facts':
+                    _medical_report_from_facts_datasets.append(dataset)
+                    _medical_report_from_facts_weights.append(weight)
+                elif source2type[id2source[source]] == 'medical_report_from_labels':
+                    _medical_report_from_labels_datasets.append(dataset)
+                    _medical_report_from_labels_weights.append(weight)
                 else:
                     raise ValueError(f'Unknown source type {source2type[id2source[source]]}')
                 if verbose:
@@ -763,8 +869,26 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     _print_input_output_pair(input_texts[i], output_texts[i])
         if len(_general_datasets) > 0:
             label_datasets.append(CompositeInfiniteDataset(_general_datasets, _general_weights))
+            print_orange(f'General datasets for label {label}: {len(_general_datasets)}')
         if len(_medical_datasets) > 0:
             label_datasets.append(CompositeInfiniteDataset(_medical_datasets, _medical_weights))
+            print_orange(f'Medical datasets for label {label}: {len(_medical_datasets)}')
+        if len(_medical_report_from_facts_datasets) > 0:
+            assert type(label) is str
+            if label == 'entailment':
+                if use_report_nli_entailment_dataset:
+                    assert integrated_report_facts_metadata_jsonl_filepath is not None
+                    fbred = FactBasedReportEntailmentDataset(
+                        integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+                        nli1_only=nli1_only_on_train, shuffle=True, infinite=True)
+                    weight = sum(_medical_report_from_facts_weights) / len(_medical_report_from_facts_weights) # average weight
+                    _medical_report_from_facts_datasets.append(fbred)
+                    _medical_report_from_facts_weights.append(weight)
+            label_datasets.append(CompositeInfiniteDataset(_medical_report_from_facts_datasets, _medical_report_from_facts_weights))
+            print_orange(f'Medical report from facts datasets for label {label}: {len(_medical_report_from_facts_datasets)}')
+        if len(_medical_report_from_labels_datasets) > 0:
+            label_datasets.append(CompositeInfiniteDataset(_medical_report_from_labels_datasets, _medical_report_from_labels_weights))
+            print_orange(f'Medical report from labels datasets for label {label}: {len(_medical_report_from_labels_datasets)}')
     train_dataset = CompositeInfiniteDataset(label_datasets, [1] * len(label_datasets)) # equal weights
     
     # Val dataset
@@ -783,6 +907,28 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
     val_input_texts.extend(_input_texts)
     val_output_texts.extend(_output_texts)
 
+    # Report NLI
+    if use_report_nli:
+        label2idxs = {}
+        for report_nli_labels, report_nli_input_texts, report_nli_output_texts in zip(
+            [from_labels_labels, from_facts_labels],
+            [from_labels_input_texts, from_facts_input_texts],
+            [from_labels_output_texts, from_facts_output_texts]):
+            for i, l in enumerate(report_nli_labels):
+                if l not in label2idxs:
+                    label2idxs[l] = []
+                label2idxs[l].append(i)
+            count = 0
+            for l, idxs in label2idxs.items(): # sample 100 examples for each label
+                sub_idxs = random.sample(idxs, min(100, len(idxs)))
+                count += len(sub_idxs)
+                val_input_texts.extend([report_nli_input_texts[i] for i in sub_idxs])
+                val_output_texts.extend([report_nli_output_texts[i] for i in sub_idxs])
+            if verbose:
+                print(f'Number of report NLI samples added to val: {count}')
+
+    print(f'Number of val NLI samples: {len(val_input_texts)}')
+    
     # Print val examples
     if verbose:
         for  _ in range(5):
@@ -796,6 +942,40 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
     val_dataset = Seq2SeqDataset(list(range(len(val_input_texts))), val_input_texts, val_output_texts, shuffle=False)
 
     return train_dataset, val_dataset
+
+class FactBasedReportEntailmentDataset(Dataset):
+    def __init__(self, integrated_report_facts_metadata_jsonl_filepath, nli1_only=True, shuffle=False, infinite=False):
+        print('FactBasedReportEntailmentDataset')
+        reports = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
+        print(f'Loaded {len(reports)} reports from {integrated_report_facts_metadata_jsonl_filepath}')
+        indices = [i for i in range(len(reports)) if len(reports[i]['facts']) > 0]
+        self.indices = indices
+        self.reports = reports
+        self.nli1_only = nli1_only
+        self.shuffle = shuffle
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+        if shuffle:
+            random.shuffle(self.indices)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
+        i = self.indices[i]
+        r = self.reports[i]
+        p = r['fact_based_report']
+        h = random.choice(r['facts'])
+        if self.nli1_only or random.random() < 0.5:
+            input_text, output_text = _get_nli_input_output_1(p, h, 'entailment')
+        else:
+            input_text, output_text = _get_nli_input_output_2(p, h, 'entailment')
+        return { 'input_text': input_text, 'output_text': output_text }
 
 class MaskedLMDataset(Dataset):
     def __init__(self, indices, sentences, tokenized_sentences, maskable_token_indices, masking_fraction,
@@ -1197,8 +1377,13 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         integrated_nli_jsonl_filepath=None,
                                         use_sentence2facts_for_nli=False,
                                         use_anli=False, use_multinli=False, use_snli=False,
+                                        use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
+                                        use_fact_based_reports_in_mlm=False,
+                                        use_report_nli_entailment_dataset=False,
+                                        integrated_report_facts_metadata_jsonl_filepath=None,
                                         mlm_min_token_count=20, mlm_masking_fraction=0.2,
-                                        only_validate_nli=False, nli1_only_on_val=False, val_size=200, verbose=True):
+                                        only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
+                                        val_size=200, verbose=True):
     assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
 
     if use_sentence2facts_for_nli:
@@ -1249,7 +1434,10 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
     elif task_name == Seq2SeqTaskNames.NLI:
         train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
-                          use_anli, use_multinli, use_snli, verbose=verbose, nli1_only_on_val=nli1_only_on_val)
+                          use_anli, use_multinli, use_snli, use_report_nli, report_nli_input_output_jsonl_filepaths,
+                          use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
+                          integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+                          verbose=verbose, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val)
 
     elif task_name == Seq2SeqTaskNames.MULTITASK:
         assert multitask_name_list is not None, 'multitask_name_list must be provided'
@@ -1347,17 +1535,18 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
             elif task_name == Seq2SeqTaskNames.NLI:
                 if use_sentence2facts_for_nli:
-                    train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli,
-                                                                   use_anli, use_multinli, use_snli, verbose=verbose,
-                                                                   medical_sentences=medical_sentences,
-                                                                   general_sentences=general_sentences,
-                                                                   nli1_only_on_val=nli1_only_on_val)
+                    s2f_aux = s2f_input_output_for_nli
                 else:
-                    train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
-                                                                   use_anli, use_multinli, use_snli, verbose=verbose,
-                                                                   medical_sentences=medical_sentences,
-                                                                   general_sentences=general_sentences,
-                                                                   nli1_only_on_val=nli1_only_on_val)
+                    s2f_aux = None
+                train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_aux,
+                                                                use_anli, use_multinli, use_snli, verbose=verbose,
+                                                                medical_sentences=medical_sentences,
+                                                                general_sentences=general_sentences,
+                                                                use_report_nli=use_report_nli,
+                                                                use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
+                                                                report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
+                                                                integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+                                                                nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val)
                     
             elif task_name == Seq2SeqTaskNames.MLM:
                 mlm_datasets = []
@@ -1369,6 +1558,13 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                         min_token_count=mlm_min_token_count, masking_fraction=mlm_masking_fraction)
                     mlm_datasets.append(general_mlm_dataset)
                 if medical_sentences is not None:
+                    if use_fact_based_reports_in_mlm:
+                        assert integrated_report_facts_metadata_jsonl_filepath is not None
+                        rows = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
+                        print(f"Loaded {len(rows)} reports from {integrated_report_facts_metadata_jsonl_filepath}")
+                        for row in rows:
+                            medical_sentences.add(row['fact_based_report'])
+                            medical_sentences.update(row['facts'])
                     medical_sentences = list(medical_sentences)
                     print(f'Number of medical sentences: {len(medical_sentences)}')
                     medical_mlm_dataset = _prepare_masked_lm_dataset(
@@ -1447,9 +1643,13 @@ class Seq2SeqTrainer():
                  integrated_nli_jsonl_filepath=None,
                  use_sentence2facts_for_nli=False,
                  use_anli=False, use_multinli=False, use_snli=False,
+                 use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
                  multitask_name_list=None, task2weight=None,
+                 use_fact_based_reports_in_mlm=False,
+                 use_report_nli_entailment_dataset=False,
+                 integrated_report_facts_metadata_jsonl_filepath=None,
                  mlm_min_token_count=20, mlm_masking_fraction=0.2,
-                 only_validate_nli=False, nli1_only_on_val=False,
+                 only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -1474,9 +1674,13 @@ class Seq2SeqTrainer():
             integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
             use_sentence2facts_for_nli=use_sentence2facts_for_nli,
             use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
+            use_report_nli=use_report_nli, report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
             multitask_name_list=multitask_name_list, task2weight=task2weight,
+            use_fact_based_reports_in_mlm=use_fact_based_reports_in_mlm,
+            use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
+            integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
             mlm_min_token_count=mlm_min_token_count, mlm_masking_fraction=mlm_masking_fraction,
-            only_validate_nli=only_validate_nli, nli1_only_on_val=nli1_only_on_val,
+            only_validate_nli=only_validate_nli, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val,
             val_size=val_size, verbose=verbose)
         self.train_dataset = tmp['train_dataset']
         self.val_dataset = tmp['val_dataset']

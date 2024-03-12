@@ -48,6 +48,17 @@ CHEXPERT_LABELS_5 = ["Cardiomegaly", "Edema", "Consolidation", "Atelectasis", "P
 CHEXBERT_LABELS_5_INDICES = np.where(np.isin(CHEXBERT_LABELS, CHEXBERT_LABELS_5))[0]
 CHEXPERT_LABELS_5_INDICES = np.where(np.isin(CHEXPERT_LABELS, CHEXPERT_LABELS_5))[0]
 
+MIMIC_CXR_LT_LABELS = [
+    'Atelectasis', 'Calcification of the Aorta', 'Cardiomegaly', 'Consolidation', 'Edema',
+    'Emphysema', 'Enlarged Cardiomediastinum', 'Fibrosis', 'Fracture',
+    'Hernia', 'Infiltration', 'Lung Lesion', 'Lung Opacity', 'Mass',
+    'No Finding', 'Nodule', 'Pleural Effusion', 'Pleural Other',
+    'Pleural Thickening', 'Pneumomediastinum', 'Pneumonia',
+    'Pneumoperitoneum', 'Pneumothorax', 'Subcutaneous Emphysema',
+    'Support Devices', 'Tortuous Aorta',
+]
+assert len(MIMIC_CXR_LT_LABELS) == 26
+
 CXR14_LABELS = [
     'No Finding',
     'Atelectasis',

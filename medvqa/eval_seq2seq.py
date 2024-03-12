@@ -9,8 +9,11 @@ from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     load_ms_cxr_t_temporal_sentence_similarity_v1_data,
     load_radnli_test_data,
     load_radnli_dev_data,
+    load_report_nli_examples_filepaths,
 )
+from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
+from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.files import load_pickle
 from medvqa.utils.logging import get_console_logger, print_blue, print_bold, print_orange
@@ -93,11 +96,13 @@ def evaluate(
         num_beams,
         logging_level,
         task_name,
-        gpt4_nli_examples_filepaths,
-        chest_imagenome_gold_phrase2labels_filepath,
+        gpt4_nli_examples_filepaths=None,
+        report_nli_input_output_jsonl_filepaths=None,
+        chest_imagenome_gold_phrase2labels_filepath=None,
         plot_confusion_matrix=False,
         sns_font_scale=1.8,
         font_size=25,
+        f1_figsize=(10, 20),
         append_task_prefix=True,
         return_outputs=False,
     ):
@@ -114,6 +119,9 @@ def evaluate(
         if gpt4_nli_examples_filepaths is not None:
             gpt4_nli_input_texts, gpt4_nli_output_texts = load_gpt4_nli_examples_filepaths(gpt4_nli_examples_filepaths, nli1_only=True)
             sentences += gpt4_nli_input_texts
+        if report_nli_input_output_jsonl_filepaths is not None:
+            report_nli_input_texts, report_nli_output_texts, _ = load_report_nli_examples_filepaths(report_nli_input_output_jsonl_filepaths, nli1_only=True)
+            sentences += report_nli_input_texts
     elif task_name == Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS:
         assert chest_imagenome_gold_phrase2labels_filepath is not None
         tmp = load_pickle(chest_imagenome_gold_phrase2labels_filepath)
@@ -175,17 +183,25 @@ def evaluate(
         if gpt4_nli_examples_filepaths is not None:
             gpt4_nli_gen_outputs = gen_outputs[offset:offset+len(gpt4_nli_input_texts)]
             offset += len(gpt4_nli_input_texts)
+        if report_nli_input_output_jsonl_filepaths is not None:
+            report_nli_gen_outputs = gen_outputs[offset:offset+len(report_nli_input_texts)]
+            offset += len(report_nli_input_texts)
         assert offset == len(gen_outputs)
         assert len(radnli_dev_gen_outputs) == len(radnli_dev_output_texts)
         assert len(radnli_test_gen_outputs) == len(radnli_test_output_texts)
         assert len(mscxrt_gen_outputs) == len(mscxrt_output_texts)
         if gpt4_nli_examples_filepaths is not None:
             assert len(gpt4_nli_gen_outputs) == len(gpt4_nli_output_texts)
+        if report_nli_input_output_jsonl_filepaths is not None:
+            assert len(report_nli_gen_outputs) == len(report_nli_output_texts)
         
         output2label = {
             'Most likely: entailment': 0,
             'Most likely: neutral': 1,
             'Most likely: contradiction': 2,
+            'entailment': 0,
+            'neutral': 1,
+            'contradiction': 2,
         }
 
         if plot_confusion_matrix:
@@ -203,6 +219,9 @@ def evaluate(
         if gpt4_nli_examples_filepaths is not None:
             aux.append(
                 (gpt4_nli_gen_outputs, gpt4_nli_output_texts, 'GPT-4 NLI examples'))
+        if report_nli_input_output_jsonl_filepaths is not None:
+            aux.append(
+                (report_nli_gen_outputs, report_nli_output_texts, 'Report NLI examples'))
         for gen_outputs, output_texts, dataset_name in aux:
             print_blue(f'--- {dataset_name} ---', bold=True)
             pred_labels = np.array([output2label[output] for output in gen_outputs])
@@ -219,6 +238,43 @@ def evaluate(
                 plt.xlabel('Predicted', fontsize=font_size)
                 plt.ylabel('True', fontsize=font_size)
                 plt.show()
+        if report_nli_input_output_jsonl_filepaths is not None:
+            print_blue('--- Report NLI examples (by fact) ---', bold=True)
+            fact2stats = { fact: {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0} for fact in LABEL_BASED_FACTS }
+            other2stats = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
+            for input_text, output_text, gen_output in zip(report_nli_input_texts, report_nli_output_texts, report_nli_gen_outputs):
+                fact = input_text[input_text.index('#H: ')+4:] # fact is after '#H: '
+                gt_label = output2label[output_text] == 0 # binary
+                pred_label = output2label[gen_output] == 0 # binary
+                try:
+                    stats = fact2stats[fact]
+                except:
+                    stats = other2stats
+                if gt_label == pred_label:
+                    if gt_label:
+                        stats['tp'] += 1
+                    else:
+                        stats['tn'] += 1
+                else:
+                    if gt_label:
+                        stats['fn'] += 1
+                    else:
+                        stats['fp'] += 1
+
+            metric_names = [f'{fact} (tp: {stats["tp"]}, fp: {stats["fp"]}, tn: {stats["tn"]}, fn: {stats["fn"]})' for fact, stats in fact2stats.items()]
+            metric_names.append(f'Other (tp: {other2stats["tp"]}, fp: {other2stats["fp"]}, tn: {other2stats["tn"]}, fn: {other2stats["fn"]})')
+            
+            f1s = [2 * stats["tp"] / max(stats["tp"] + stats["fp"] + stats["tp"] + stats["fn"], 1) for _, stats in fact2stats.items()]
+            f1s.append(2 * other2stats["tp"] / max(other2stats["tp"] + other2stats["fp"] + other2stats["tp"] + other2stats["fn"], 1))
+            plot_metrics(metric_names=metric_names, metric_values=f1s, title="F1",
+                    ylabel="Label", xlabel="F1", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                 show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+            
+            recalls = [stats["tp"] / max(stats["tp"] + stats["fn"], 1) for _, stats in fact2stats.items()]
+            recalls.append(other2stats["tp"] / max(other2stats["tp"] + other2stats["fn"], 1))
+            plot_metrics(metric_names=metric_names, metric_values=recalls, title="Recall",
+                    ylabel="Label", xlabel="Recall", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                 show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
 
         if return_outputs:
             return {

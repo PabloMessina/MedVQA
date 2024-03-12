@@ -13,7 +13,6 @@ from medvqa.models.common import load_model_state_dict
 from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
 
 from medvqa.training.utils import append_metric_name
-from medvqa.utils.constants import MetricNames
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_loss,
@@ -101,12 +100,18 @@ def parse_args(args=None):
     parser.add_argument('--fact_to_comparison_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_obs_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_anatloc_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--report_nli_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--integrated_report_facts_metadata_jsonl_filepath', type=str, default=None)
     parser.add_argument('--use_sentence2facts_for_nli', action='store_true')
     parser.add_argument('--use_anli', action='store_true')
     parser.add_argument('--use_multinli', action='store_true')
     parser.add_argument('--use_snli', action='store_true')
+    parser.add_argument('--use_report_nli', action='store_true')
+    parser.add_argument('--use_fact_based_reports_in_mlm', action='store_true')
+    parser.add_argument('--use_report_nli_entailment_dataset', action='store_true')
     parser.add_argument('--only_validate_nli', action='store_true')
+    parser.add_argument('--nli1_only_on_train', action='store_true')
     parser.add_argument('--nli1_only_on_val', action='store_true')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
@@ -338,11 +343,16 @@ def train_from_scratch(
     fact_to_comparison_input_output_jsonl_filepaths,
     chest_imagenome_obs_input_output_jsonl_filepaths,
     chest_imagenome_anatloc_input_output_jsonl_filepaths,
+    report_nli_input_output_jsonl_filepaths,
     integrated_nli_jsonl_filepath,
+    integrated_report_facts_metadata_jsonl_filepath,
     use_sentence2facts_for_nli,
     use_anli,
     use_multinli,
     use_snli,
+    use_report_nli,
+    use_fact_based_reports_in_mlm,
+    use_report_nli_entailment_dataset,
     task_name,
     experiment_name,
     multitask_name_list,
@@ -351,6 +361,7 @@ def train_from_scratch(
     mlm_min_token_count,
     mlm_masking_fraction,
     only_validate_nli,
+    nli1_only_on_train,
     nli1_only_on_val,
     # Dataloading args
     batch_size,
@@ -418,13 +429,19 @@ def train_from_scratch(
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
         use_sentence2facts_for_nli=use_sentence2facts_for_nli,
         use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
+        use_report_nli=use_report_nli,
+        report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
         task_name=task_name,
         experiment_name=experiment_name,
         multitask_name_list=multitask_name_list,
         task2weight=task2weight,
+        use_fact_based_reports_in_mlm=use_fact_based_reports_in_mlm,
+        use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
+        integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
         mlm_min_token_count=mlm_min_token_count,
         mlm_masking_fraction=mlm_masking_fraction,
         only_validate_nli=only_validate_nli,
+        nli1_only_on_train=nli1_only_on_train,
         nli1_only_on_val=nli1_only_on_val,
         val_size=val_size,
     )

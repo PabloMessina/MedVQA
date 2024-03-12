@@ -200,6 +200,54 @@ def compute_text_embeddings_with_BERT_variant(model_name, texts, device, batch_s
         average_token_embeddings=average_token_embeddings,
     )
 
+def generate_text_with_T5(input_texts, model_name, model_checkpoint_folder_path, max_len=None, num_beams=1, device='GPU', batch_size=32, num_workers=0):
+    assert os.path.exists(model_checkpoint_folder_path)
+    model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'CPU')
+    
+    # Load model
+    from transformers import T5ForConditionalGeneration
+    model = T5ForConditionalGeneration.from_pretrained(model_name)
+    model.to(device)
+    model.eval()
+    print(f'Loading model weights from {model_checkpoint_filepath}')
+    checkpoint = torch.load(model_checkpoint_filepath, map_location=device)
+    load_model_state_dict(model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
+
+    # Load tokenizer
+    from transformers import T5TokenizerFast
+    tokenizer = T5TokenizerFast.from_pretrained(model_name)
+
+    # Create dataset and dataloader
+    _, dataloader = create_text_dataset_and_dataloader(
+        texts=input_texts,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        tokenizer_func=lambda x: tokenizer(x, padding='longest', return_tensors='pt'),
+    )
+
+    # Run inference
+    output_texts = [None] * len(input_texts)
+    offset = 0
+    with torch.no_grad():
+        for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
+            encoding = batch['encoding']
+            input_ids = encoding['input_ids'].to(device)
+            attention_mask = encoding['attention_mask'].to(device)
+            if max_len is None:
+                max_len = input_ids.shape[1] * 4 # 4x input length
+            output_ids = model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                                                max_new_tokens=max_len, num_beams=num_beams, early_stopping=True)
+            output_texts_batch = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+            for i, output_text in enumerate(output_texts_batch):
+                output_texts[offset+i] = output_text
+            offset += len(output_texts_batch)
+    assert offset == len(input_texts)
+    assert None not in output_texts
+
+    # Return output
+    return output_texts
+
 class CachedTextEmbeddingExtractor:
     def __init__(self, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
                  average_token_embeddings=False):
@@ -437,7 +485,7 @@ class CachedT5FactExtractor:
                 encoding = batch['encoding']
                 input_ids = encoding['input_ids'].to(self.device)
                 attention_mask = encoding['attention_mask'].to(self.device)
-                max_len = input_ids.shape[1] * 3 # 3x input length
+                max_len = input_ids.shape[1] * 4 # 4x input length
                 output_ids = model.generate(input_ids=input_ids, attention_mask=attention_mask,
                                                   max_new_tokens=max_len, num_beams=1, early_stopping=True)
                 output_texts_batch = tokenizer.batch_decode(output_ids, skip_special_tokens=True)

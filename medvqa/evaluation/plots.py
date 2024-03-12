@@ -373,22 +373,21 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.show()
 
-def plot_metrics(metric_names, metric_values, metric_aliases, title, xlabel, ylabel, figsize=(10, 8), color='blue',
+def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10, 8), color='blue',
                  horizontal=False, sort_metrics=False, show_metrics_above_bars=False, eps=0.005, draw_grid=False,
                  append_average_to_title=False):
-    n = len(metric_names)
+    n = len(metric_values)
     assert n == len(metric_values)
-    assert n == len(metric_aliases)
+    assert n == len(metric_names)
     assert n > 0
     if sort_metrics:
         metric_idxs = list(range(n))
         metric_idxs.sort(key=lambda i: metric_values[i], reverse=not horizontal)
-        metric_names = [metric_names[i] for i in metric_idxs]
         metric_values = [metric_values[i] for i in metric_idxs]
-        metric_aliases = [metric_aliases[i] for i in metric_idxs]
+        metric_names = [metric_names[i] for i in metric_idxs]
     plt.figure(figsize=figsize)
     if horizontal:
-        plt.barh(range(1, n+1), metric_values, tick_label=metric_aliases, color=color)
+        plt.barh(range(1, n+1), metric_values, tick_label=metric_names, color=color)
         plt.ylabel(ylabel)
         plt.xlabel(xlabel)
         if show_metrics_above_bars:
@@ -397,7 +396,7 @@ def plot_metrics(metric_names, metric_values, metric_aliases, title, xlabel, yla
         if draw_grid:
             plt.grid(axis='x')
     else:
-        plt.bar(range(1, n+1), metric_values, tick_label=metric_aliases, color=color)
+        plt.bar(range(1, n+1), metric_values, tick_label=metric_names, color=color)
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         if show_metrics_above_bars:
