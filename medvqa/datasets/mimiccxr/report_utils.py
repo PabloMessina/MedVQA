@@ -26,6 +26,7 @@ class ReportFactsDisplayer:
 
         self.sentence2facts = {}
         self.sentence2filename = {}
+        duplicate_count = 0
         for extracted_facts_filepath in extracted_facts_filepaths:
             assert os.path.exists(extracted_facts_filepath)
             print(f'Loading extracted facts from {extracted_facts_filepath}...')
@@ -45,9 +46,12 @@ class ReportFactsDisplayer:
                 except KeyError:
                     print(f'KeyError: {x}')
                     raise
-                assert s not in self.sentence2facts
+                if s in self.sentence2facts:
+                    duplicate_count += 1
                 self.sentence2facts[s] = fs
                 self.sentence2filename[s] = filename
+        if duplicate_count > 0:
+            print_orange(f'Warning: {duplicate_count} sentences with extracted facts are duplicated in the extracted facts files', bold=True)
 
         print('Building facts...')
         self.facts = set()
@@ -88,6 +92,7 @@ class ReportFactsDisplayer:
             for s in sent_tokenize(x):
                 print(f'\t{s}')
                 if s in self.sentence2facts:
+                    print(f'\t\tExtracted facts from {self.sentence2filename[s]}:')
                     for f in self.sentence2facts[s]:
                         print(f'\t\t{f}')
                         facts.append(f)
@@ -142,6 +147,7 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
 
     sentence2facts = {}
     sentence_facts_rows = []
+    duplicate_count = 0
     for extracted_facts_filepath, extraction_method in zip(extracted_facts_filepaths, extraction_methods):
         assert os.path.exists(extracted_facts_filepath)
         print(f'Loading extracted facts from {extracted_facts_filepath}...')
@@ -160,7 +166,8 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
             except KeyError:
                 print(f'KeyError: {x}')
                 raise
-            assert s not in sentence2facts
+            if s in sentence2facts:
+                duplicate_count += 1
             if remove_consecutive_repeated_words:
                 fs = [remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
@@ -169,6 +176,8 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
                 'facts': fs,
                 'extraction_method': extraction_method
             })
+    if duplicate_count > 0:
+        print_orange(f'Warning: {duplicate_count} sentences with extracted facts are duplicated in the extracted facts files', bold=True)
 
     print('Integrating reports and facts...')
     report_facts_rows = [None] * len(preprocessed_reports)

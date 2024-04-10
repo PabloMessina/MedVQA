@@ -78,3 +78,64 @@ def auc(scores, binary_labels):
             count += i - pos
             pos += 1
     return count / (pos * (n - pos)) if pos > 0 and pos < n else 0.5
+
+def best_threshold_and_f1_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    fp = len(gt) - tp
+    fn = 0
+    best_f1 = 2 * tp / (2 * tp + fp + fn)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+            fn += 1
+        else:
+            fp -= 1
+        if tp == 0:
+            break
+        f1 = 2 * tp / (2 * tp + fp + fn)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_thrs = probs[i]
+    return best_thrs, best_f1
+
+def best_threshold_and_precision_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    fp = len(gt) - tp
+    best_precision = tp / (tp + fp)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+        else:
+            fp -= 1
+        if tp == 0:
+            break
+        precision = tp / (tp + fp)
+        if precision > best_precision:
+            best_precision = precision
+            best_thrs = probs[i]
+    return best_thrs, best_precision
+
+def best_threshold_and_accuracy_score(probs, gt):
+    idxs = np.argsort(probs)
+    best_thrs = 0
+    tp = gt.sum()
+    tn = 0
+    fp = len(gt) - tp
+    fn = 0
+    best_acc = (tp + tn) / (tp + tn + fp + fn)
+    for i in idxs:
+        if gt[i]:
+            tp -= 1
+            fn += 1
+        else:
+            tn += 1
+            fp -= 1
+        acc = (tp + tn) / (tp + tn + fp + fn)
+        if acc > best_acc:
+            best_acc = acc
+            best_thrs = probs[i]
+    return best_thrs, best_acc

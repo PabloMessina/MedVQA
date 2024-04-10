@@ -275,6 +275,12 @@ def evaluate(
             plot_metrics(metric_names=metric_names, metric_values=recalls, title="Recall",
                     ylabel="Label", xlabel="Recall", append_average_to_title=True, horizontal=True, sort_metrics=True,
                  show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+            
+            accs = [(stats["tp"] + stats["tn"]) / max(stats["tp"] + stats["tn"] + stats["fp"] + stats["fn"], 1) for _, stats in fact2stats.items()]
+            accs.append((other2stats["tp"] + other2stats["tn"]) / max(other2stats["tp"] + other2stats["tn"] + other2stats["fp"] + other2stats["fn"], 1))
+            plot_metrics(metric_names=metric_names, metric_values=accs, title="Accuracy",
+                    ylabel="Label", xlabel="Accuracy", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                 show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
 
         if return_outputs:
             return {

@@ -17,6 +17,7 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     get_imageId2reportId,
+    load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
 from medvqa.utils.files import load_jsonl, load_pickle
@@ -86,12 +87,19 @@ def parse_openai_model_output(text):
 
 def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jsonl_filepath,
                                chest_imagenome_image_id_to_labels_filepath, chest_imagenome_label_names_filepath,
-                               already_processed_queries, allowed_label_based_facts=None):
+                               already_processed_queries, allowed_label_based_facts=None,
+                               use_mimiccxr_dev_test_sets_only=False):
     """
     Sample queries for the label-based data mode.
     """
 
     logger.info(f"Sampling {num_samples} queries for the label-based data mode")
+
+    if use_mimiccxr_dev_test_sets_only:
+        logger.info("Using MIMIC-CXR dev and test sets only")
+        metadata = load_mimiccxr_reports_detailed_metadata()
+        splits = metadata['splits']
+        logger.info(f"len(splits): {len(splits)}")
 
     # Load integrated report facts metadata
     reports = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
@@ -119,7 +127,11 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
         for i, study_id in enumerate(df['study_id']):
             for j, x in enumerate(labels[i]):
                 if x == 1:
-                    mcxrlt_label_id_to_report_idxs[j].add(study_id_to_report_idx[study_id])
+                    ridx = study_id_to_report_idx[study_id]
+                    if use_mimiccxr_dev_test_sets_only:
+                        if splits[ridx] == 'train':
+                            continue
+                    mcxrlt_label_id_to_report_idxs[j].add(ridx)
 
     # print the number of reports for each label
     for i, label in enumerate(MIMIC_CXR_LT_LABELS):
@@ -145,6 +157,9 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
 
     ci_label_id_to_report_idxs = [set() for _ in range(len(ci_label_names))]
     for i in range(n_reports):
+        if use_mimiccxr_dev_test_sets_only:
+            if splits[i] == 'train':
+                continue
         for j in range(len(ci_label_names)):
             if ci_label_matrix[i, j] == 1:
                 ci_label_id_to_report_idxs[j].add(i)
@@ -152,7 +167,6 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
     # print the number of reports for each label
     for i, label in enumerate(ci_label_names):
         logger.info(f"{label}: {len(ci_label_id_to_report_idxs[i])}")
-
        
     # Define label aliases
     mcxrlt_label2alias = { label: f'{label.lower()} seen' for label in MIMIC_CXR_LT_LABELS }
@@ -171,19 +185,19 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
         ci_label2alias[label] = alias
 
     label_based_facts = list(mcxrlt_label2alias.values()) + list(ci_label2alias.values())
-    print('Label based facts:', label_based_facts)
+    logger.info(f'Label based facts: {label_based_facts}')
     assert set(label_based_facts) == set(LABEL_BASED_FACTS)
     assert len(ci_label2alias) == len(ci_label_names)
 
     if allowed_label_based_facts is not None:
-        print('Allowed label based facts:', allowed_label_based_facts)
+        logger.info(f'Allowed label based facts: {allowed_label_based_facts}')
         assert set(allowed_label_based_facts).issubset(set(label_based_facts))
         mcxrlt_label_names = [label for label in mcxrlt_label2alias if mcxrlt_label2alias[label] in allowed_label_based_facts]
         ci_label_names = [label for label in ci_label2alias if ci_label2alias[label] in allowed_label_based_facts]
-        print(f'len(mcxrlt_label_names): {len(mcxrlt_label_names)}')
-        print('mcxrlt_label_names:', mcxrlt_label_names)
-        print(f'len(ci_label_names): {len(ci_label_names)}')
-        print('ci_label_names:', ci_label_names)
+        logger.info(f'len(mcxrlt_label_names): {len(mcxrlt_label_names)}')
+        logger.info(f'mcxrlt_label_names: {mcxrlt_label_names}')
+        logger.info(f'len(ci_label_names): {len(ci_label_names)}')
+        logger.info(f'ci_label_names: {ci_label_names}')
 
     # Sample queries
     queries = []
@@ -193,6 +207,12 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
     logger.info(f"n_queries_per_label: {n_queries_per_label}")
     logger.info(f"n_pos_queries_per_label: {n_pos_queries_per_label}")
     logger.info(f"n_neg_queries_per_label: {n_neg_queries_per_label}")
+
+    if use_mimiccxr_dev_test_sets_only:
+        all_report_idxs = [i for i in range(n_reports) if splits[i] != 'train']
+    else:
+        all_report_idxs = list(range(n_reports))
+    logger.info(f"len(all_report_idxs): {len(all_report_idxs)}")
 
     for (label_names, label2alias, label_id_to_report_idxs) in [
         (mcxrlt_label_names, mcxrlt_label2alias, mcxrlt_label_id_to_report_idxs),
@@ -205,6 +225,8 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
             random.shuffle(report_idxs_list)
             cnt = 0
             for j, report_idx in enumerate(report_idxs_list):
+                if use_mimiccxr_dev_test_sets_only:
+                    assert splits[report_idx] in ['validate', 'test']
                 fact_based_report = reports[report_idx]['fact_based_report']
                 query = f"#F {fact_based_report} | #H {label_alias}"
                 query_hash = hash_string(query)
@@ -218,7 +240,7 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
                 logger.info(f"Only {cnt}/{n_pos_queries_per_label} positive queries for label {label_alias}")
             cnt -= n_pos_queries_per_label # transfer deficit to negative queries
             while cnt < n_neg_queries_per_label:
-                report_idx = random.randint(0, n_reports-1)
+                report_idx = random.choice(all_report_idxs)
                 if report_idx not in report_idxs_set:
                     fact_based_report = reports[report_idx]['fact_based_report']
                     query = f"#F {fact_based_report} | #H {label_alias}"
@@ -237,13 +259,19 @@ def _max_sim(mat, vec):
 def sample_queries_fact_based(num_samples, integrated_report_facts_metadata_jsonl_filepath,
                               cxr_bert_model_name, cxr_bert_checkpoint_folder_path,
                               batch_size, num_workers, num_clusters, num_iterations,
-                              already_processed_queries):
+                              already_processed_queries, use_mimiccxr_dev_test_sets_only=False):
 
     """
     Sample queries for the fact-based data mode.
     """
 
     logger.info(f"Sampling {num_samples} queries for the fact-based data mode")
+
+    if use_mimiccxr_dev_test_sets_only:
+        logger.info("Using MIMIC-CXR dev and test sets only")
+        metadata = load_mimiccxr_reports_detailed_metadata()
+        splits = metadata['splits']
+        logger.info(f"len(splits): {len(splits)}")
         
     # Load integrated report facts metadata
     reports = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
@@ -265,6 +293,13 @@ def sample_queries_fact_based(num_samples, integrated_report_facts_metadata_json
     fact2idx = {fact: i for i, fact in enumerate(unique_facts)}
     factidx2reportidxs = [fact2reportidxs[fact] for fact in unique_facts]
     reportidx2factidxs = [[fact2idx[fact] for fact in row['facts']] for row in reports]
+
+    if use_mimiccxr_dev_test_sets_only:
+        factidx2reportidxs_ = [None] * len(factidx2reportidxs)
+        for fidx, ridxs in enumerate(factidx2reportidxs):
+            factidx2reportidxs_[fidx] = [ridx for ridx in ridxs if splits[ridx] != 'train']
+    else:
+        factidx2reportidxs_ = factidx2reportidxs
 
     # Obtain kmeans cluster labels for facts
     emb_extractor = CachedTextEmbeddingExtractor(
@@ -294,19 +329,25 @@ def sample_queries_fact_based(num_samples, integrated_report_facts_metadata_json
     logger.info(f"num_neg_samples_per_cluster: {num_neg_samples_per_cluster}")
     
     for cluster_fact_idxs in tqdm(label2idxs, mininterval=2):
-        random.shuffle(cluster_fact_idxs)
-        n_pos = min(num_pos_samples_per_cluster, len(cluster_fact_idxs))
-        n_pos_per_report = math.ceil(n_pos / len(cluster_fact_idxs))
+        if use_mimiccxr_dev_test_sets_only:
+            cluster_fact_idxs_ = [fidx for fidx in cluster_fact_idxs if factidx2reportidxs_[fidx]]
+        else:
+            cluster_fact_idxs_ = cluster_fact_idxs
+        if len(cluster_fact_idxs_) == 0:
+            continue
+        
+        random.shuffle(cluster_fact_idxs_)
+        n_pos = min(num_pos_samples_per_cluster, len(cluster_fact_idxs_))
+        n_pos_per_report = math.ceil(n_pos / len(cluster_fact_idxs_))
         for i in range(n_pos):
-            fact_idx = cluster_fact_idxs[i]
-            report_idxs = factidx2reportidxs[fact_idx]
+            fact_idx = cluster_fact_idxs_[i]
+            report_idxs = factidx2reportidxs_[fact_idx]
             for _ in range(n_pos_per_report):
                 tries = 0
                 while tries < 10:
                     tries += 1
                     report_idx = random.choice(report_idxs)
                     fact_based_report = reports[report_idx]['fact_based_report']
-                    other_fact_idx = random.choice(cluster_fact_idxs)
                     assert fact_idx in reportidx2factidxs[report_idx]
                     sampled_fact_idxs = random.sample(cluster_fact_idxs, min(10, len(cluster_fact_idxs)))
                     max_sim = -1
@@ -323,14 +364,16 @@ def sample_queries_fact_based(num_samples, integrated_report_facts_metadata_json
                     query_hash = hash_string(query)
                     if query_hash in already_processed_queries:
                         continue
+                    if use_mimiccxr_dev_test_sets_only:
+                        assert splits[report_idx] in ['validate', 'test']
                     queries.append(query)
                     already_processed_queries.add(query_hash)
                     break
-        n_neg = min(num_neg_samples_per_cluster, len(cluster_fact_idxs))
-        n_neg_per_report = math.ceil(n_neg / len(cluster_fact_idxs))
+        n_neg = min(num_neg_samples_per_cluster, len(cluster_fact_idxs_))
+        n_neg_per_report = math.ceil(n_neg / len(cluster_fact_idxs_))
         for i in range(n_neg):
-            fact_idx = cluster_fact_idxs[i]
-            report_idxs = factidx2reportidxs[fact_idx]
+            fact_idx = cluster_fact_idxs_[i]
+            report_idxs = factidx2reportidxs_[fact_idx]
             for _ in range(n_neg_per_report):
                 tries = 0
                 while tries < 10:
@@ -349,6 +392,8 @@ def sample_queries_fact_based(num_samples, integrated_report_facts_metadata_json
                     query_hash = hash_string(query)
                     if query_hash in already_processed_queries:
                         continue
+                    if use_mimiccxr_dev_test_sets_only:
+                        assert splits[report_idx] in ['validate', 'test']
                     queries.append(query)
                     already_processed_queries.add(query_hash)
                     break
@@ -531,6 +576,9 @@ if __name__ == '__main__':
     parser.add_argument("--chest_imagenome_label_names_filepath", type=str, default=None)
     parser.add_argument("--allowed_label_based_facts", type=str, nargs="+", default=None)
 
+    parser.add_argument("--queries_to_skip_filepaths", type=str, nargs="+", default=None)
+    parser.add_argument("--use_mimiccxr_dev_test_sets_only", action="store_true", default=False)
+
     parser.add_argument("--cxr_bert_model_name", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized")
     parser.add_argument("--cxr_bert_checkpoint_folder_path", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=200)
@@ -565,6 +613,14 @@ if __name__ == '__main__':
                 already_processed.add(hash_string(row['metadata']['query']))
             logger.info(f"Loaded {len(rows)} already processed queries from {processed_queries_save_filepath}")
 
+        # Load queries to skip
+        if args.queries_to_skip_filepaths is not None:
+            for queries_to_skip_filepath in args.queries_to_skip_filepaths:
+                rows = load_jsonl(queries_to_skip_filepath)
+                for row in rows:
+                    already_processed.add(hash_string(row['metadata']['query']))
+                logger.info(f"Loaded {len(rows)} queries to skip from {queries_to_skip_filepath}")
+
         # Sample queries
         if args.data_mode == "label_based":
             assert args.chest_imagenome_image_id_to_labels_filepath is not None
@@ -576,6 +632,7 @@ if __name__ == '__main__':
                 chest_imagenome_label_names_filepath=args.chest_imagenome_label_names_filepath,
                 already_processed_queries=already_processed,
                 allowed_label_based_facts=args.allowed_label_based_facts,
+                use_mimiccxr_dev_test_sets_only=args.use_mimiccxr_dev_test_sets_only,
             )
         elif args.data_mode == "fact_based":
             assert args.cxr_bert_checkpoint_folder_path is not None
@@ -589,6 +646,7 @@ if __name__ == '__main__':
                 num_clusters=args.num_clusters,
                 num_iterations=args.num_iterations,
                 already_processed_queries=already_processed,
+                use_mimiccxr_dev_test_sets_only=args.use_mimiccxr_dev_test_sets_only,
             )
         
         queries_to_process = queries

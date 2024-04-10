@@ -123,9 +123,14 @@ def get_results_folder_path(checkpoint_folder_path):
 
 def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings=[], ext='pkl', force_hashing=False):
     assert os.path.sep not in prefix # prevent path-related bugs
-    for i in range(len(strings)):
-        if os.path.sep in strings[i]:
-            strings[i] = strings[i].replace(os.path.sep, '_') # prevent path-related bugs
+    clean_strings = []
+    for s in strings:
+        if s is None:
+            continue
+        if os.path.sep in s:
+            s = s.replace(os.path.sep, '_') # prevent path-related bugs
+        clean_strings.append(s)
+    strings = clean_strings
     if strings:
         file_path = os.path.join(folder_path, f'{prefix}({";".join(strings)}).{ext}')
     else:

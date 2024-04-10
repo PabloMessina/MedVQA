@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset, group_indices_into_bins_by_scores
 from medvqa.datasets.nli import ANLI_V1_DATASET_DIR, MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, MULTI_NLI_DATASET_DIR, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH, SNLI_DATASET_DIR
 from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
-from medvqa.utils.files import load_jsonl, load_pickle
+from medvqa.utils.files import get_cached_jsonl_file, load_jsonl, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
 
@@ -339,8 +339,7 @@ def _prepare_reports_to_sentences_data(input_output_jsonl_filepaths, apply_task_
 def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True,
                                     collect_input_output_for_nli=False, medical_sentences=None):
     assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
-    input_texts = []
-    output_texts = []
+    sentence2facts = dict()
     if collect_input_output_for_nli:
         input_output_for_nli = []
     for input_output_jsonl_filepath in input_output_jsonl_filepaths:
@@ -354,17 +353,20 @@ def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_pre
                 sentence = input_output['metadata']['sentence'] # backward compatibility
             if collect_input_output_for_nli:
                 input_output_for_nli.append((sentence, input_output['parsed_response']))
-            input_text = sentence
             facts = input_output['parsed_response']
-            output_text = json.dumps(facts)
-            input_texts.append(input_text)
-            output_texts.append(output_text)
+            sentence2facts[sentence] = facts
             if medical_sentences is not None:
-                medical_sentences.add(input_text)
+                medical_sentences.add(sentence)
                 for f in facts:
                     medical_sentences.add(f)
+    input_texts = []
+    output_texts = []
+    for sentence, facts in sentence2facts.items():
+        input_texts.append(sentence)
+        output_texts.append(json.dumps(facts))
     if apply_task_prefix:
         input_texts = [f'S2F: {x}' for x in input_texts]
+    print(f'Number of sentence2facts pairs: {len(input_texts)}')
     if verbose:
         # Print random example
         print_bold('Input/output example:')
@@ -448,7 +450,7 @@ def _get_nli_input_output_2(premise, hypothesis, label):
     # return f'NLI2: {premise} #Generate {label}', hypothesis
     return f'NLI2: {premise} #G {label}', hypothesis
 
-def load_radnli_dev_data(nli1_only=False, verbose=True):
+def load_radnli_dev_data(nli1_only=False, verbose=True, medical_sentences=None, whole_sentences=None):
     rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
     if verbose:
         print(f'Number of RadNLI dev samples: {len(rows)}')
@@ -456,6 +458,12 @@ def load_radnli_dev_data(nli1_only=False, verbose=True):
     output_texts = []
     for x in rows:
         p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+        if medical_sentences is not None:
+            medical_sentences.add(p)
+            medical_sentences.add(h)
+        if whole_sentences is not None:
+            whole_sentences.add(p)
+            whole_sentences.add(h)
         input_text, output_text = _get_nli_input_output_1(p, h, l)
         input_texts.append(input_text)
         output_texts.append(output_text)
@@ -467,7 +475,7 @@ def load_radnli_dev_data(nli1_only=False, verbose=True):
     
     return input_texts, output_texts
 
-def load_radnli_test_data(nli1_only=False, verbose=True):
+def load_radnli_test_data(nli1_only=False, verbose=True, medical_sentences=None, whole_sentences=None):
     rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
     if verbose:
         print(f'Number of RadNLI test samples: {len(rows)}')
@@ -475,6 +483,12 @@ def load_radnli_test_data(nli1_only=False, verbose=True):
     output_texts = []
     for x in rows:
         p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+        if medical_sentences is not None:
+            medical_sentences.add(p)
+            medical_sentences.add(h)
+        if whole_sentences is not None:
+            whole_sentences.add(p)
+            whole_sentences.add(h)
         input_text, output_text = _get_nli_input_output_1(p, h, l)
         input_texts.append(input_text)
         output_texts.append(output_text)
@@ -486,7 +500,8 @@ def load_radnli_test_data(nli1_only=False, verbose=True):
     
     return input_texts, output_texts
 
-def load_ms_cxr_t_temporal_sentence_similarity_v1_data(nli1_only=False, verbose=True):
+def load_ms_cxr_t_temporal_sentence_similarity_v1_data(nli1_only=False, verbose=True, medical_sentences=None,
+                                                       whole_sentences=None):
     df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
     if verbose:
         print(f'Number of MS_CXR_T samples: {len(df)}')
@@ -499,6 +514,12 @@ def load_ms_cxr_t_temporal_sentence_similarity_v1_data(nli1_only=False, verbose=
             pass
         else:
             raise ValueError(f'Unknown label {l}')
+        if medical_sentences is not None:
+            medical_sentences.add(p)
+            medical_sentences.add(h)
+        if whole_sentences is not None:
+            whole_sentences.add(p)
+            whole_sentences.add(h)
         input_text, output_text = _get_nli_input_output_1(p, h, l)
         input_texts.append(input_text)
         output_texts.append(output_text)
@@ -510,7 +531,7 @@ def load_ms_cxr_t_temporal_sentence_similarity_v1_data(nli1_only=False, verbose=
     
     return input_texts, output_texts
 
-def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True):
+def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True, medical_sentences=None, whole_sentences=None):
     input_texts = []
     output_texts = []
     for filepath in filepaths:
@@ -523,6 +544,12 @@ def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True):
             h_idx = query.index('| #H: ')
             p = query[p_idx+4:h_idx].strip()
             h = query[h_idx+6:].strip()
+            if medical_sentences is not None:
+                medical_sentences.add(p)
+                medical_sentences.add(h)
+            if whole_sentences is not None:
+                whole_sentences.add(p)
+                whole_sentences.add(h)
             l = row['parsed_response']
             input_text, output_text = _get_nli_input_output_1(p, h, l)
             input_texts.append(input_text)
@@ -533,7 +560,8 @@ def load_gpt4_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True):
                 output_texts.append(output_text)
     return input_texts, output_texts
 
-def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True, medical_sentences=None):
+def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True, medical_sentences=None,
+                                        whole_sentences=None, splittable_sentences=None):
     input_texts = []
     output_texts = []
     labels = []
@@ -545,8 +573,8 @@ def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True,
             print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
         for input_output in input_output_jsonl:
             query = input_output['metadata']['query']
-            report_start_idx = query.find("#F") + 3
-            report_end_idx = query.find(" | #H")
+            report_start_idx = query.index("#F ") + 3
+            report_end_idx = query.index(" | #H ")
             p = query[report_start_idx:report_end_idx]
             h = query[report_end_idx+6:]
             l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[input_output['parsed_response']]
@@ -554,6 +582,10 @@ def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True,
             if medical_sentences is not None:
                 medical_sentences.add(p)
                 medical_sentences.add(h)
+            if splittable_sentences is not None:
+                splittable_sentences.add(p)
+            if whole_sentences is not None:
+                whole_sentences.add(h)
             
             input_text, output_text = _get_nli_input_output_1(p, h, l)
             input_texts.append(input_text)
@@ -577,9 +609,13 @@ _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL = {
 }
 
 def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, use_anli=False, use_multinli=False,
-                      use_snli=False, use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
-                      use_report_nli_entailment_dataset=False, integrated_report_facts_metadata_jsonl_filepath=None,
-                      verbose=True, medical_sentences=None, general_sentences=None, nli1_only_on_train=False, nli1_only_on_val=False):
+                      use_snli=False, use_report_nli=False,
+                      report_nli_input_output_train_jsonl_filepaths=None,
+                      report_nli_input_output_val_jsonl_filepaths=None,
+                      use_report_nli_entailment_dataset=False, integrated_report_facts_jsonl_filepath=None,
+                      use_report_nli_paraphrases_dataset=False, input_to_paraphrases=None,
+                      verbose=True, medical_sentences=None, general_sentences=None, nli1_only_on_train=False, nli1_only_on_val=False,
+                      whole_sentences=None, splittable_sentences=None):
 
     assert integrated_nli_jsonl_filepath, 'integrated_nli_jsonl_filepath must be provided'
     if nli1_only_on_train:
@@ -614,6 +650,9 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
         if medical_sentences is not None:
             medical_sentences.add(p)
             medical_sentences.add(h)
+        if whole_sentences is not None:
+            whole_sentences.add(p)
+            whole_sentences.add(h)
         
         input_text, output_text = _get_nli_input_output_1(p, h, l)
         input_texts.append(input_text)
@@ -644,6 +683,10 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                 medical_sentences.add(s)
                 for f in fs:
                     medical_sentences.add(f)
+            if whole_sentences is not None:
+                whole_sentences.add(s)
+                for f in fs:
+                    whole_sentences.add(f)
             for f in fs:
                 if s != f:
                     p, h = s, f
@@ -688,6 +731,9 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                         if general_sentences is not None:
                             general_sentences.add(p)
                             general_sentences.add(h)
+                        if whole_sentences is not None:
+                            whole_sentences.add(p)
+                            whole_sentences.add(h)
                         
                         input_text, output_text = _get_nli_input_output_1(p, h, l)
                         input_texts.append(input_text)
@@ -719,6 +765,9 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     if general_sentences is not None:
                         general_sentences.add(p)
                         general_sentences.add(h)
+                    if whole_sentences is not None:
+                        whole_sentences.add(p)
+                        whole_sentences.add(h)
 
                     if l == '-':
                         continue # ignore samples with no label
@@ -752,6 +801,9 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     if general_sentences is not None:
                         general_sentences.add(p)
                         general_sentences.add(h)
+                    if whole_sentences is not None:
+                        whole_sentences.add(p)
+                        whole_sentences.add(h)
 
                     if l == '-':
                         continue # ignore samples with no label
@@ -778,21 +830,22 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
             print('----')
             print_bold('Loading report NLI datasets...')
         
-        assert report_nli_input_output_jsonl_filepaths is not None, 'report_nli_input_output_jsonl_filepaths must be provided'
-        assert len(report_nli_input_output_jsonl_filepaths) == 2
-        if '(from_facts)' in report_nli_input_output_jsonl_filepaths[0]:
-            assert '(from_labels)' in report_nli_input_output_jsonl_filepaths[1]
-            from_facts_filepath = report_nli_input_output_jsonl_filepaths[0]
-            from_labels_filepath = report_nli_input_output_jsonl_filepaths[1]
-        elif '(from_facts)' in report_nli_input_output_jsonl_filepaths[1]:
-            assert '(from_labels)' in report_nli_input_output_jsonl_filepaths[0]
-            from_facts_filepath = report_nli_input_output_jsonl_filepaths[1]
-            from_labels_filepath = report_nli_input_output_jsonl_filepaths[0]
+        assert report_nli_input_output_train_jsonl_filepaths is not None, 'report_nli_input_output_train_jsonl_filepaths must be provided'
+        assert len(report_nli_input_output_train_jsonl_filepaths) == 2
+        if '(from_facts)' in report_nli_input_output_train_jsonl_filepaths[0]:
+            assert '(from_labels)' in report_nli_input_output_train_jsonl_filepaths[1]
+            from_facts_filepath = report_nli_input_output_train_jsonl_filepaths[0]
+            from_labels_filepath = report_nli_input_output_train_jsonl_filepaths[1]
+        elif '(from_facts)' in report_nli_input_output_train_jsonl_filepaths[1]:
+            assert '(from_labels)' in report_nli_input_output_train_jsonl_filepaths[0]
+            from_facts_filepath = report_nli_input_output_train_jsonl_filepaths[1]
+            from_labels_filepath = report_nli_input_output_train_jsonl_filepaths[0]
         else:
-            raise ValueError(f'Unknown report NLI input/output filepaths {report_nli_input_output_jsonl_filepaths}')
+            raise ValueError(f'Unknown report NLI input/output filepaths {report_nli_input_output_train_jsonl_filepaths}')
 
         from_facts_input_texts, from_facts_output_texts, from_facts_labels = load_report_nli_examples_filepaths(
-            from_facts_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences)
+            from_facts_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences,
+            whole_sentences=whole_sentences, splittable_sentences=splittable_sentences)
 
         input_texts.extend(from_facts_input_texts)
         output_texts.extend(from_facts_output_texts)
@@ -804,7 +857,8 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
         source_id += 1
         
         from_labels_input_texts, from_labels_output_texts, from_labels_labels = load_report_nli_examples_filepaths(
-            from_labels_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences)
+            from_labels_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences,
+            whole_sentences=whole_sentences, splittable_sentences=splittable_sentences)
         
         input_texts.extend(from_labels_input_texts)
         output_texts.extend(from_labels_output_texts)
@@ -867,28 +921,65 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
                     print('Example:')
                     i = random.choice(indices)
                     _print_input_output_pair(input_texts[i], output_texts[i])
+        
         if len(_general_datasets) > 0:
             label_datasets.append(CompositeInfiniteDataset(_general_datasets, _general_weights))
             print_orange(f'General datasets for label {label}: {len(_general_datasets)}')
+        
         if len(_medical_datasets) > 0:
             label_datasets.append(CompositeInfiniteDataset(_medical_datasets, _medical_weights))
             print_orange(f'Medical datasets for label {label}: {len(_medical_datasets)}')
+        
+        if label == 'entailment':
+            if use_report_nli_entailment_dataset:
+                assert integrated_report_facts_jsonl_filepath is not None
+                if splittable_sentences is not None or whole_sentences is not None or medical_sentences is not None:
+                    reports = get_cached_jsonl_file(integrated_report_facts_jsonl_filepath)
+                    print(f'Loaded {len(reports)} reports from {integrated_report_facts_jsonl_filepath}')
+                    if splittable_sentences is not None:
+                        for r in reports:
+                            splittable_sentences.add(r['fact_based_report'])
+                    if whole_sentences is not None:
+                        for r in reports:
+                            for f in r['facts']:
+                                whole_sentences.add(f)
+                    if medical_sentences is not None:
+                        for r in reports:
+                            medical_sentences.add(r['fact_based_report'])
+                            for f in r['facts']:
+                                medical_sentences.add(f)
+                fbred = FactBasedReportEntailmentDataset(
+                    integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
+                    nli1_only=nli1_only_on_train, shuffle=True, infinite=True)
+                weight = sum(_medical_report_from_facts_weights) / len(_medical_report_from_facts_weights) # average weight
+                _medical_report_from_facts_datasets.append(fbred)
+                _medical_report_from_facts_weights.append(weight)
+            
+            if use_report_nli_paraphrases_dataset:
+                assert input_to_paraphrases is not None
+                assert integrated_report_facts_jsonl_filepath is not None
+                fbrpd = FactBasedReportParaphrasesDataset(
+                    integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
+                    input2paraphrases=input_to_paraphrases, nli1_only=nli1_only_on_train, infinite=True,
+                    splitable_sentences=splittable_sentences, whole_sentences=whole_sentences,
+                    medical_sentences=medical_sentences)
+                weight = sum(_medical_report_from_labels_weights) / len(_medical_report_from_labels_weights) # average weight
+                _medical_report_from_labels_datasets.append(fbrpd)
+                _medical_report_from_labels_weights.append(weight)
+                # print 3 examples
+                for _ in range(3):
+                    i = random.randint(0, len(fbrpd) - 1)
+                    print_bold('Example:')
+                    print(fbrpd[i])
+        
         if len(_medical_report_from_facts_datasets) > 0:
-            assert type(label) is str
-            if label == 'entailment':
-                if use_report_nli_entailment_dataset:
-                    assert integrated_report_facts_metadata_jsonl_filepath is not None
-                    fbred = FactBasedReportEntailmentDataset(
-                        integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
-                        nli1_only=nli1_only_on_train, shuffle=True, infinite=True)
-                    weight = sum(_medical_report_from_facts_weights) / len(_medical_report_from_facts_weights) # average weight
-                    _medical_report_from_facts_datasets.append(fbred)
-                    _medical_report_from_facts_weights.append(weight)
             label_datasets.append(CompositeInfiniteDataset(_medical_report_from_facts_datasets, _medical_report_from_facts_weights))
             print_orange(f'Medical report from facts datasets for label {label}: {len(_medical_report_from_facts_datasets)}')
+        
         if len(_medical_report_from_labels_datasets) > 0:
             label_datasets.append(CompositeInfiniteDataset(_medical_report_from_labels_datasets, _medical_report_from_labels_weights))
             print_orange(f'Medical report from labels datasets for label {label}: {len(_medical_report_from_labels_datasets)}')
+
     train_dataset = CompositeInfiniteDataset(label_datasets, [1] * len(label_datasets)) # equal weights
     
     # Val dataset
@@ -898,34 +989,28 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
     val_output_texts = []
     
     # RadNLI
-    _input_texts, _output_texts = load_radnli_test_data(verbose=verbose, nli1_only=nli1_only_on_val)
+    _input_texts, _output_texts = load_radnli_test_data(verbose=verbose, nli1_only=nli1_only_on_val,
+                                                        medical_sentences=medical_sentences,
+                                                        whole_sentences=whole_sentences)
     val_input_texts.extend(_input_texts)
     val_output_texts.extend(_output_texts)
         
     # MS_CXR_T
-    _input_texts, _output_texts = load_ms_cxr_t_temporal_sentence_similarity_v1_data(verbose=verbose, nli1_only=nli1_only_on_val)
+    _input_texts, _output_texts = load_ms_cxr_t_temporal_sentence_similarity_v1_data(verbose=verbose, nli1_only=nli1_only_on_val,
+                                                                                    medical_sentences=medical_sentences,
+                                                                                    whole_sentences=whole_sentences)
     val_input_texts.extend(_input_texts)
     val_output_texts.extend(_output_texts)
 
     # Report NLI
     if use_report_nli:
-        label2idxs = {}
-        for report_nli_labels, report_nli_input_texts, report_nli_output_texts in zip(
-            [from_labels_labels, from_facts_labels],
-            [from_labels_input_texts, from_facts_input_texts],
-            [from_labels_output_texts, from_facts_output_texts]):
-            for i, l in enumerate(report_nli_labels):
-                if l not in label2idxs:
-                    label2idxs[l] = []
-                label2idxs[l].append(i)
-            count = 0
-            for l, idxs in label2idxs.items(): # sample 100 examples for each label
-                sub_idxs = random.sample(idxs, min(100, len(idxs)))
-                count += len(sub_idxs)
-                val_input_texts.extend([report_nli_input_texts[i] for i in sub_idxs])
-                val_output_texts.extend([report_nli_output_texts[i] for i in sub_idxs])
-            if verbose:
-                print(f'Number of report NLI samples added to val: {count}')
+        if report_nli_input_output_val_jsonl_filepaths is not None:
+            for input_output_jsonl_filepath in report_nli_input_output_val_jsonl_filepaths:
+                _input_texts, _output_texts, _ = load_report_nli_examples_filepaths(
+                    input_output_jsonl_filepath, nli1_only=nli1_only_on_val, verbose=verbose,
+                    medical_sentences=medical_sentences, whole_sentences=whole_sentences)
+                val_input_texts.extend(_input_texts)
+                val_output_texts.extend(_output_texts)
 
     print(f'Number of val NLI samples: {len(val_input_texts)}')
     
@@ -944,10 +1029,10 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
     return train_dataset, val_dataset
 
 class FactBasedReportEntailmentDataset(Dataset):
-    def __init__(self, integrated_report_facts_metadata_jsonl_filepath, nli1_only=True, shuffle=False, infinite=False):
+    def __init__(self, integrated_report_facts_jsonl_filepath, nli1_only=True, shuffle=False, infinite=False):
         print('FactBasedReportEntailmentDataset')
-        reports = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
-        print(f'Loaded {len(reports)} reports from {integrated_report_facts_metadata_jsonl_filepath}')
+        reports = get_cached_jsonl_file(integrated_report_facts_jsonl_filepath)
+        print(f'Loaded {len(reports)} reports from {integrated_report_facts_jsonl_filepath}')
         indices = [i for i in range(len(reports)) if len(reports[i]['facts']) > 0]
         self.indices = indices
         self.reports = reports
@@ -971,6 +1056,87 @@ class FactBasedReportEntailmentDataset(Dataset):
         r = self.reports[i]
         p = r['fact_based_report']
         h = random.choice(r['facts'])
+        if self.nli1_only or random.random() < 0.5:
+            input_text, output_text = _get_nli_input_output_1(p, h, 'entailment')
+        else:
+            input_text, output_text = _get_nli_input_output_2(p, h, 'entailment')
+        return { 'input_text': input_text, 'output_text': output_text }
+
+class FactBasedReportParaphrasesDataset(Dataset):
+    def __init__(self, integrated_report_facts_jsonl_filepath, input2paraphrases, nli1_only=True, infinite=False,
+                 splitable_sentences=None, whole_sentences=None, medical_sentences=None):
+        print('FactBasedReportParaphrasesDataset')
+        reports = get_cached_jsonl_file(integrated_report_facts_jsonl_filepath)
+        print(f'Loaded {len(reports)} reports from {integrated_report_facts_jsonl_filepath}')
+        
+        fact2ridxs = {}
+        for i, r in enumerate(reports):
+            for f in r['facts']:
+                if f not in fact2ridxs:
+                    fact2ridxs[f] = []
+                fact2ridxs[f].append(i)
+        print(f'Number of facts: {len(fact2ridxs)}')
+        
+        inputs_with_reports = []
+        inputs_without_reports = []
+        for input_text, paraphrases in input2paraphrases.items():
+            assert len(paraphrases) > 0
+            if input_text in fact2ridxs:
+                inputs_with_reports.append(input_text)
+            else:
+                inputs_without_reports.append(input_text)
+        print(f'Number of inputs with reports: {len(inputs_with_reports)}')
+        print(f'Number of inputs without reports: {len(inputs_without_reports)}')
+
+        self.fact2ridxs = fact2ridxs
+        self.inputs_with_reports = inputs_with_reports
+        self.inputs_without_reports = inputs_without_reports
+        self.input2paraphrases = input2paraphrases
+        self.reports = reports
+        self.nli1_only = nli1_only
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.inputs_with_reports) + len(self.inputs_without_reports)
+
+        if splitable_sentences is not None:
+            for r in reports:
+                splitable_sentences.add(r['fact_based_report'])
+        if whole_sentences is not None:
+            for r in reports:
+                for f in r['facts']:
+                    whole_sentences.add(f)
+            for input_text, paraphrases in input2paraphrases.items():
+                whole_sentences.add(input_text)
+                whole_sentences.update(paraphrases)
+        if medical_sentences is not None:
+            for r in reports:
+                medical_sentences.add(r['fact_based_report'])
+                for f in r['facts']:
+                    medical_sentences.add(f)
+            for input_text, paraphrases in input2paraphrases.items():
+                medical_sentences.add(input_text)
+                for p in paraphrases:
+                    medical_sentences.add(p)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        if random.random() < 0.5:
+            input_text = random.choice(self.inputs_with_reports)
+            ridxs = self.fact2ridxs[input_text]
+            ridx = random.choice(ridxs)
+            r = self.reports[ridx]
+            p = r['fact_based_report']
+            paraphrases = self.input2paraphrases[input_text]
+            h = random.choice(paraphrases)
+        else:
+            input_text = random.choice(self.inputs_without_reports)
+            paraphrases = self.input2paraphrases[input_text]
+            p = input_text
+            h = random.choice(paraphrases)
         if self.nli1_only or random.random() < 0.5:
             input_text, output_text = _get_nli_input_output_1(p, h, 'entailment')
         else:
@@ -1105,6 +1271,7 @@ def _compute_input2paraphrases(paraphrased_inputs_jsonl_filepaths, verbose=True)
     if paraphrased_inputs_jsonl_filepaths is not None:
         assert type(paraphrased_inputs_jsonl_filepaths) == list
         input2paraphrases = {}
+        empty_count = 0
         for filepath in paraphrased_inputs_jsonl_filepaths:
             paraphrased_inputs = load_jsonl(filepath)
             if verbose:
@@ -1121,6 +1288,10 @@ def _compute_input2paraphrases(paraphrased_inputs_jsonl_filepaths, verbose=True)
                     paraphrases = parsed_response['positives'] # only use positives
                 else:
                     raise ValueError(f'Unknown type {type(parsed_response)}')
+                assert len(input_text) > 0
+                if len(paraphrases) == 0:
+                    empty_count += 1
+                    continue
                 if verbose and print_count < 1:
                     print_count += 1
                     print_bold(f'Input:')
@@ -1135,6 +1306,10 @@ def _compute_input2paraphrases(paraphrased_inputs_jsonl_filepaths, verbose=True)
             print('--------')
             print_bold(f'Number of unique inputs: {len(input2paraphrases)}')
             print_bold(f'Number of total paraphrases: {sum(len(x) for x in input2paraphrases.values())}')
+            if empty_count > 0:
+                print_orange(f'WARNING: Number of empty paraphrases: {empty_count}', bold=True)
+        assert len(input2paraphrases) > 0
+        assert all(len(x) > 0 for x in input2paraphrases.values())
         return input2paraphrases
     
 def _get_fact_to_comparison_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True):
@@ -1377,10 +1552,13 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         integrated_nli_jsonl_filepath=None,
                                         use_sentence2facts_for_nli=False,
                                         use_anli=False, use_multinli=False, use_snli=False,
-                                        use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
+                                        use_report_nli=False,
+                                        report_nli_input_output_train_jsonl_filepaths=None,
+                                        report_nli_input_output_val_jsonl_filepaths=None,
                                         use_fact_based_reports_in_mlm=False,
                                         use_report_nli_entailment_dataset=False,
-                                        integrated_report_facts_metadata_jsonl_filepath=None,
+                                        use_report_nli_paraphrases_dataset=False,
+                                        integrated_report_facts_jsonl_filepath=None,
                                         mlm_min_token_count=20, mlm_masking_fraction=0.2,
                                         only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
                                         val_size=200, verbose=True):
@@ -1434,9 +1612,13 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
     elif task_name == Seq2SeqTaskNames.NLI:
         train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
-                          use_anli, use_multinli, use_snli, use_report_nli, report_nli_input_output_jsonl_filepaths,
+                          use_anli, use_multinli, use_snli, use_report_nli,
+                          report_nli_input_output_train_jsonl_filepaths,
+                          report_nli_input_output_val_jsonl_filepaths,
                           use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
-                          integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+                          use_report_nli_paraphrases_dataset=use_report_nli_paraphrases_dataset,
+                          integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
+                          input_to_paraphrases=input2paraphrases,
                           verbose=verbose, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val)
 
     elif task_name == Seq2SeqTaskNames.MULTITASK:
@@ -1544,8 +1726,11 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                                                 general_sentences=general_sentences,
                                                                 use_report_nli=use_report_nli,
                                                                 use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
-                                                                report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
-                                                                integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+                                                                use_report_nli_paraphrases_dataset=use_report_nli_paraphrases_dataset,
+                                                                input_to_paraphrases=input2paraphrases,
+                                                                report_nli_input_output_train_jsonl_filepaths=report_nli_input_output_train_jsonl_filepaths,
+                                                                report_nli_input_output_val_jsonl_filepaths=report_nli_input_output_val_jsonl_filepaths,
+                                                                integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
                                                                 nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val)
                     
             elif task_name == Seq2SeqTaskNames.MLM:
@@ -1559,9 +1744,9 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                     mlm_datasets.append(general_mlm_dataset)
                 if medical_sentences is not None:
                     if use_fact_based_reports_in_mlm:
-                        assert integrated_report_facts_metadata_jsonl_filepath is not None
-                        rows = load_jsonl(integrated_report_facts_metadata_jsonl_filepath)
-                        print(f"Loaded {len(rows)} reports from {integrated_report_facts_metadata_jsonl_filepath}")
+                        assert integrated_report_facts_jsonl_filepath is not None
+                        rows = load_jsonl(integrated_report_facts_jsonl_filepath)
+                        print(f"Loaded {len(rows)} reports from {integrated_report_facts_jsonl_filepath}")
                         for row in rows:
                             medical_sentences.add(row['fact_based_report'])
                             medical_sentences.update(row['facts'])
@@ -1643,11 +1828,14 @@ class Seq2SeqTrainer():
                  integrated_nli_jsonl_filepath=None,
                  use_sentence2facts_for_nli=False,
                  use_anli=False, use_multinli=False, use_snli=False,
-                 use_report_nli=False, report_nli_input_output_jsonl_filepaths=None,
+                 use_report_nli=False,
+                 report_nli_input_output_train_jsonl_filepaths=None,
+                 report_nli_input_output_val_jsonl_filepaths=None,
                  multitask_name_list=None, task2weight=None,
                  use_fact_based_reports_in_mlm=False,
                  use_report_nli_entailment_dataset=False,
-                 integrated_report_facts_metadata_jsonl_filepath=None,
+                 use_report_nli_paraphrases_dataset=False,
+                 integrated_report_facts_jsonl_filepath=None,
                  mlm_min_token_count=20, mlm_masking_fraction=0.2,
                  only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
                  val_size=200, verbose=True):
@@ -1674,11 +1862,14 @@ class Seq2SeqTrainer():
             integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
             use_sentence2facts_for_nli=use_sentence2facts_for_nli,
             use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
-            use_report_nli=use_report_nli, report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
+            use_report_nli=use_report_nli,
+            report_nli_input_output_train_jsonl_filepaths=report_nli_input_output_train_jsonl_filepaths,
+            report_nli_input_output_val_jsonl_filepaths=report_nli_input_output_val_jsonl_filepaths,
             multitask_name_list=multitask_name_list, task2weight=task2weight,
             use_fact_based_reports_in_mlm=use_fact_based_reports_in_mlm,
             use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
-            integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+            use_report_nli_paraphrases_dataset=use_report_nli_paraphrases_dataset,
+            integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
             mlm_min_token_count=mlm_min_token_count, mlm_masking_fraction=mlm_masking_fraction,
             only_validate_nli=only_validate_nli, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val,
             val_size=val_size, verbose=verbose)

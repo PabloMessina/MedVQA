@@ -100,9 +100,10 @@ def parse_args(args=None):
     parser.add_argument('--fact_to_comparison_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_obs_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_anatloc_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
-    parser.add_argument('--report_nli_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--report_nli_input_output_train_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--report_nli_input_output_val_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
-    parser.add_argument('--integrated_report_facts_metadata_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--integrated_report_facts_jsonl_filepath', type=str, default=None)
     parser.add_argument('--use_sentence2facts_for_nli', action='store_true')
     parser.add_argument('--use_anli', action='store_true')
     parser.add_argument('--use_multinli', action='store_true')
@@ -110,6 +111,7 @@ def parse_args(args=None):
     parser.add_argument('--use_report_nli', action='store_true')
     parser.add_argument('--use_fact_based_reports_in_mlm', action='store_true')
     parser.add_argument('--use_report_nli_entailment_dataset', action='store_true')
+    parser.add_argument('--use_report_nli_paraphrases_dataset', action='store_true')
     parser.add_argument('--only_validate_nli', action='store_true')
     parser.add_argument('--nli1_only_on_train', action='store_true')
     parser.add_argument('--nli1_only_on_val', action='store_true')
@@ -343,9 +345,10 @@ def train_from_scratch(
     fact_to_comparison_input_output_jsonl_filepaths,
     chest_imagenome_obs_input_output_jsonl_filepaths,
     chest_imagenome_anatloc_input_output_jsonl_filepaths,
-    report_nli_input_output_jsonl_filepaths,
+    report_nli_input_output_train_jsonl_filepaths,
+    report_nli_input_output_val_jsonl_filepaths,
     integrated_nli_jsonl_filepath,
-    integrated_report_facts_metadata_jsonl_filepath,
+    integrated_report_facts_jsonl_filepath,
     use_sentence2facts_for_nli,
     use_anli,
     use_multinli,
@@ -353,6 +356,7 @@ def train_from_scratch(
     use_report_nli,
     use_fact_based_reports_in_mlm,
     use_report_nli_entailment_dataset,
+    use_report_nli_paraphrases_dataset,
     task_name,
     experiment_name,
     multitask_name_list,
@@ -430,14 +434,16 @@ def train_from_scratch(
         use_sentence2facts_for_nli=use_sentence2facts_for_nli,
         use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
         use_report_nli=use_report_nli,
-        report_nli_input_output_jsonl_filepaths=report_nli_input_output_jsonl_filepaths,
+        report_nli_input_output_train_jsonl_filepaths=report_nli_input_output_train_jsonl_filepaths,
+        report_nli_input_output_val_jsonl_filepaths=report_nli_input_output_val_jsonl_filepaths,
         task_name=task_name,
         experiment_name=experiment_name,
         multitask_name_list=multitask_name_list,
         task2weight=task2weight,
         use_fact_based_reports_in_mlm=use_fact_based_reports_in_mlm,
         use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
-        integrated_report_facts_metadata_jsonl_filepath=integrated_report_facts_metadata_jsonl_filepath,
+        use_report_nli_paraphrases_dataset=use_report_nli_paraphrases_dataset,
+        integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
         mlm_min_token_count=mlm_min_token_count,
         mlm_masking_fraction=mlm_masking_fraction,
         only_validate_nli=only_validate_nli,

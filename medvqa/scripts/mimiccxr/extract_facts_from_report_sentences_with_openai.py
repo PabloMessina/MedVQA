@@ -1,15 +1,12 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import os
+import re
 import argparse
 import re
 import sys
 import json
 import numpy as np
-from tqdm import tqdm
-from nltk.tokenize import sent_tokenize
 
+from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.logging import get_console_logger
 from medvqa.utils.nlp import sort_sentences
@@ -19,6 +16,56 @@ from medvqa.datasets.mimiccxr import (
 )
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
 from medvqa.utils.files import load_json, load_jsonl
+
+# INSTRUCTIONS = """Relevant facts:
+
+# 1. observations of abnormalities
+# 2. observations of diseases
+# 3. observations of strange visual patterns
+# 4. observations of devices
+# 5. observations of foreign bodies
+# 6. observations of specific anatomical regions that look normal or healthy
+# 7. absences of abnormalities (usually expressed with a negation)
+# 8. comparisons with respect to a previous study (something changed or remained the same)
+
+# Task:
+
+# Given a sentence taken from a chest x-ray report, generate a JSON list of relevant facts.
+# Each fact should be about one observation. If a sentence mentions multiple observations,
+# each observation should be extracted as a separate fact.
+# Each fact should include the anatomical location where it was observed. If multiple facts
+# occur in the same location, repeat the location in each fact.
+
+# If no relevant facts are mentioned, return [] (an empty array).
+
+# Examples:
+
+# Opacity and density in the right lobe
+# [
+# "opacity in the right lobe",
+# "density in the right lobe"
+# ]
+
+# Lungs are well inflated without evidence of focal airspace consolidation to suggest pneumonia.
+# [
+# "well inflated lungs",
+# "lungs without evidence of focal airspace consolidation",
+# "lungs without evidence of pneumonia"
+# ]
+
+# Taken together, compared with less than 1 hr earlier, the findings are suggestive of worsening of CHF, with new or significantly increased left greater right pleural effusions and underlying bibasilar collapse and/or  consolidation, particularly on the left.
+# [
+# "worsening of CHF",
+# "new or significantly increased left pleural effusions",
+# "new or significantly increased right pleural effusions",
+# "underlying bibasilar collapse on the left",
+# "underlying consolidation on the left",
+# ]
+
+# No acute cardiopulmonary abnormality
+# [
+# "no acute cardiopulmonary abnormality"
+# ]"""
 
 INSTRUCTIONS = """Relevant facts:
 
@@ -30,14 +77,14 @@ INSTRUCTIONS = """Relevant facts:
 6. observations of specific anatomical regions that look normal or healthy
 7. absences of abnormalities (usually expressed with a negation)
 8. comparisons with respect to a previous study (something changed or remained the same)
+9. suggestions or recommendations based on the observations
 
 Task:
 
-Given a sentence taken from a chest x-ray report, generate a JSON list of relevant facts.
+Given a sentence from a chest x-ray report, output a JSON array of facts.
 Each fact should be about one observation. If a sentence mentions multiple observations,
 each observation should be extracted as a separate fact.
-Each fact should include the anatomical location where it was observed. If multiple facts
-occur in the same location, repeat the location in each fact.
+Each fact should include the anatomical location where it was observed. If multiple facts occur in the same location, repeat the location in each fact.
 
 If no relevant facts are mentioned, return [] (an empty array).
 
@@ -68,6 +115,12 @@ Taken together, compared with less than 1 hr earlier, the findings are suggestiv
 No acute cardiopulmonary abnormality
 [
 "no acute cardiopulmonary abnormality"
+]
+
+If clinical presentation is not convincing for pneumonia, pulmonary embolism should be considered
+[
+"clinical presentation may indicate pneumonia",
+"clinical presentation may indicate pulmonary embolism",
 ]"""
 
 _JSON_STRING_ARRAY_REGEX = re.compile(r"\[\s*(\".+?\",?\s*)*\]")
@@ -94,7 +147,7 @@ if __name__ == '__main__':
     parser.add_argument("--preprocessed_sentences_to_skip_filepaths", nargs="+", default=None)    
     parser.add_argument("--preprocessed_reports_filepath", type=str, required=True)
     
-    parser.add_argument("--cxr_bert_model_name", type=str, default="BiomedVLP-CXR-BERT-specialized")
+    parser.add_argument("--cxr_bert_model_name", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized")
     parser.add_argument("--cxr_bert_checkpoint_folder_path", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=200)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -107,6 +160,7 @@ if __name__ == '__main__':
     parser.add_argument("--sample_sentences_uniformly", action="store_true", default=False)
     parser.add_argument("--process_kth_of_every_n_sentences", type=int, nargs=2, default=None,
                         help="If specified, only process the kth of every n sentences.")
+    parser.add_argument("--only_conditional_sentences", action="store_true", default=False)
 
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--openai_request_url", type=str, default="https://api.openai.com/v1/chat/completions")
@@ -139,15 +193,18 @@ if __name__ == '__main__':
         assert os.path.exists(args.preprocessed_reports_filepath)
         logger.info(f"Loading preprocessed reports from {args.preprocessed_reports_filepath}")
         reports = load_json(args.preprocessed_reports_filepath)
-        for r in tqdm(reports, total=len(reports), mininterval=2):
+        texts = []
+        for r in reports:
             impression = r['impression']
             findings = r['findings']
             if len(impression) > 0:
-                for s in sent_tokenize(impression):
-                    unique_sentences.add(s)
+                texts.append(impression)
             if len(findings) > 0:
-                for s in sent_tokenize(findings):
-                    unique_sentences.add(s)
+                texts.append(findings)
+        sentences_list = sentence_tokenize_texts_in_parallel(texts)
+        for sentences in sentences_list:
+            for sentence in sentences:
+                unique_sentences.add(sentence)
         logger.info(f"Loaded {len(reports)} reports from {args.preprocessed_reports_filepath}")
         logger.info(f"Found {len(unique_sentences)} unique sentences in reports")
         assert len(unique_sentences) > 0
@@ -163,7 +220,7 @@ if __name__ == '__main__':
             batch_size=args.batch_size,
             num_workers=args.num_workers,
         )
-        kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, n_clusters=args.num_clusters, num_iterations=args.num_iterations)
+        kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, num_clusters=args.num_clusters, num_iterations=args.num_iterations)
         assert len(kmeans_labels) == len(unique_sentences)
         label2idxs = {}
         for i, label in enumerate(kmeans_labels):
@@ -182,6 +239,7 @@ if __name__ == '__main__':
                     break
         assert len(sorted_indices) == len(unique_sentences), f"len(sorted_indices)={len(sorted_indices)} != len(unique_sentences)={len(unique_sentences)}"
         unique_sentences = [unique_sentences[i] for i in sorted_indices]
+        
         # Print example sentences
         logger.info(f"Example sentences (immediately after clustering-based sorting):")
         for i in range(10):
@@ -202,6 +260,18 @@ if __name__ == '__main__':
         # Remove sentences to skip
         unique_sentences = [s for s in unique_sentences if s not in sentences_to_skip]
         logger.info(f"Removed {len(sentences_to_skip)} sentences to skip. {len(unique_sentences)} sentences remaining.")
+
+        # Filter sentences by conditional sentences if necessary
+        if args.only_conditional_sentences:
+            logger.info(f"Filtering sentences to only conditional sentences")
+            cond_regex = re.compile(r"\b(if|unless|when|whenever|wherever|whether|while|until|in case|as long as|provided that|given that|although|though|whereas|as soon as|as long as|as much as|as often as|as far as|as well as)\b", re.IGNORECASE)
+            unique_sentences = [s for s in unique_sentences if cond_regex.search(s)]
+            logger.info(f"Found {len(unique_sentences)} conditional sentences")
+
+            # Print example sentences
+            logger.info(f"Example sentences (after filtering to only conditional sentences):")
+            for i in range(10):
+                logger.info(f"{i+1}. {unique_sentences[i]}")
 
         # Adjust number of sentences to process if necessary
         assert 0 <= args.offset < len(unique_sentences)

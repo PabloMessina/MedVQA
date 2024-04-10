@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import math
 
 from medvqa.models.nlp.positional_encoding import PositionalEncoding
 

@@ -48,7 +48,7 @@ def apply_seq2seq_model_to_sentences(
     tokenizer_func = lambda x: tokenizer(x, padding="longest", return_tensors="pt")
     _, dataloader = create_text_dataset_and_dataloader(
         texts=sentences,
-        batch_size=batch_size,
+        batch_size=batch_size,  
         num_workers=num_workers,
         tokenizer_func=tokenizer_func,
     )

@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import AutoModel
 from medvqa.models.common import freeze_parameters
 from medvqa.models.huggingface_utils import SupportedHuggingfaceMedicalBERTModels
-
+from medvqa.models.mlp import MLP
 from medvqa.utils.logging import print_orange
 
 class BertBasedNLI(nn.Module):
@@ -81,3 +81,34 @@ class BertBasedNLI(nn.Module):
             return f'BerBasedNLI({self.huggingface_model_name},{self.embedding_size},merged)'
         else:
             return f'BerBasedNLI({self.huggingface_model_name},{self.embedding_size},{self.hidden_size})'
+        
+class EmbeddingBasedNLI(nn.Module):
+
+    def __init__(self, embedding_dim, mlp_hidden_dims, dropout):
+        super().__init__()
+        print('EmbeddingBasedNLI')
+        print(f'  embedding_dim: {embedding_dim}')
+        print(f'  mlp_hidden_dims: {mlp_hidden_dims}')
+        print(f'  dropout: {dropout}')
+        self.embedding_dim = embedding_dim
+        self.mlp_hidden_dims = mlp_hidden_dims
+        self.mlp = MLP(in_dim=embedding_dim * 6, out_dim=3, hidden_dims=mlp_hidden_dims, dropout=dropout)
+
+    def forward(self, h_emb, p_most_sim_emb, p_least_sim_emb, p_max_emb, p_avg_emb):
+        """
+        Args:
+            h_emb: [batch_size, embedding_size]
+            p_most_sim_emb: [batch_size, embedding_size]
+            p_least_sim_emb: [batch_size, embedding_size]
+            p_max_emb: [batch_size, embedding_size]
+            p_avg_emb: [batch_size, embedding_size]
+        """
+        # concatenate the vectors
+        h_p_most_sim = h_emb * p_most_sim_emb
+        concat_vectors = torch.cat([h_emb, p_most_sim_emb, h_p_most_sim, p_least_sim_emb, p_max_emb, p_avg_emb], dim=-1)
+        return self.mlp(concat_vectors)
+    
+    def get_name(self):
+        hid_str = '-'.join(map(str, self.mlp_hidden_dims))
+        return f'EmbeddingBasedNLI({self.embedding_dim},{hid_str})'
+        

@@ -18,9 +18,11 @@ from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
-from medvqa.utils.common import parsed_args_to_dict
+from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
+from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
 from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.metrics import best_threshold_and_f1_score
 
 _NLI_LABEL2ID = {'entailment': 1, 'neutral': 0, 'contradiction': -1}
 
@@ -37,22 +39,6 @@ def parse_args(args=None):
     parser.add_argument('--report_nli_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--average_token_embeddings', action='store_true')
     return parser.parse_args(args=args)
-
-def calibrate_threshold(scores, labels, verbose=True):
-    best_threshold = None
-    best_f1 = 0
-    min_score = np.min(scores)
-    max_score = np.max(scores)
-    for threshold in tqdm(np.linspace(min_score, max_score, 300)):
-        pred = scores >= threshold
-        f1 = f1_score(labels, pred)
-        if f1 > best_f1:
-            best_f1 = f1
-            best_threshold = threshold
-    if verbose:
-        print(f"best_threshold: {best_threshold}")
-        print(f"best_f1: {best_f1}")
-    return best_threshold
 
 _shared_premise_sentences = None
 _shared_hypotheses = None
@@ -104,6 +90,8 @@ def evaluate(
     gpt4_nli_examples_filepaths,
     report_nli_input_output_jsonl_filepaths,
     average_token_embeddings,
+    save_thresholds=False,
+    thresholds_save_path=None,
     f1_figsize=(10, 35),
 ):    
     assert (model_name != None) != (huggingface_model_name != None), 'Exactly one of model_name or huggingface_model_name must be provided'
@@ -199,10 +187,10 @@ def evaluate(
     print_bold('--- RadNLI dev ---')
     radnli_dev_scores = max_sims[offset:offset+size]
     radnli_dev_labels = labels[offset:offset+size]
-    ent_threshold = calibrate_threshold(radnli_dev_scores, radnli_dev_labels == 1)
-    print(f"ent_threshold: {ent_threshold}")
-    contr_threshold = calibrate_threshold(radnli_dev_scores, radnli_dev_labels != -1)
-    print(f"contr_threshold: {contr_threshold}")
+    ent_threshold, f1 = best_threshold_and_f1_score(radnli_dev_scores, radnli_dev_labels == 1)
+    print(f"ent_threshold: {ent_threshold}, F1: {f1}")
+    contr_threshold, f1 = best_threshold_and_f1_score(radnli_dev_scores, radnli_dev_labels != -1)
+    print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold > contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(radnli_dev_scores, radnli_dev_labels, ent_threshold, contr_threshold)
 
@@ -212,10 +200,10 @@ def evaluate(
     print_bold('--- RadNLI test ---')
     radnli_test_scores = max_sims[offset:offset+size]
     radnli_test_labels = labels[offset:offset+size]
-    ent_threshold = calibrate_threshold(radnli_test_scores, radnli_test_labels == 1)
-    print(f"ent_threshold: {ent_threshold}")
-    contr_threshold = calibrate_threshold(radnli_test_scores, radnli_test_labels != -1)
-    print(f"contr_threshold: {contr_threshold}")
+    ent_threshold, f1 = best_threshold_and_f1_score(radnli_test_scores, radnli_test_labels == 1)
+    print(f"ent_threshold: {ent_threshold}, F1: {f1}")
+    contr_threshold, f1 = best_threshold_and_f1_score(radnli_test_scores, radnli_test_labels != -1)
+    print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(radnli_test_scores, radnli_test_labels, ent_threshold, contr_threshold)
 
@@ -225,10 +213,10 @@ def evaluate(
     print_bold('--- MS-CXR-T ---')
     mscxrt_scores = max_sims[offset:offset+size]
     mscxrt_labels = labels[offset:offset+size]
-    ent_threshold = calibrate_threshold(mscxrt_scores, mscxrt_labels == 1)
-    print(f"ent_threshold: {ent_threshold}")
-    contr_threshold = calibrate_threshold(mscxrt_scores, mscxrt_labels != -1)
-    print(f"contr_threshold: {contr_threshold}")
+    ent_threshold, f1 = best_threshold_and_f1_score(mscxrt_scores, mscxrt_labels == 1)
+    print(f"ent_threshold: {ent_threshold}, F1: {f1}")
+    contr_threshold, f1 = best_threshold_and_f1_score(mscxrt_scores, mscxrt_labels != -1)
+    print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(mscxrt_scores, mscxrt_labels, ent_threshold, contr_threshold)
 
@@ -239,10 +227,10 @@ def evaluate(
         print_bold('--- GPT-4 NLI ---')
         gpt4_nli_scores = max_sims[offset:offset+size]
         gpt4_nli_labels = labels[offset:offset+size]
-        ent_threshold = calibrate_threshold(gpt4_nli_scores, gpt4_nli_labels == 1)
-        print(f"ent_threshold: {ent_threshold}")
-        contr_threshold = calibrate_threshold(gpt4_nli_scores, gpt4_nli_labels != -1)
-        print(f"contr_threshold: {contr_threshold}")
+        ent_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_scores, gpt4_nli_labels == 1)
+        print(f"ent_threshold: {ent_threshold}, F1: {f1}")
+        contr_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_scores, gpt4_nli_labels != -1)
+        print(f"contr_threshold: {contr_threshold}, F1: {f1}")
         assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
         _compute_confusion_matrix(gpt4_nli_scores, gpt4_nli_labels, ent_threshold, contr_threshold)
 
@@ -265,20 +253,50 @@ def evaluate(
                 fact2idxs[fact].append(i)
             except:
                 fact2idxs['#Other'].append(i)
-
-        for fact, idxs in fact2idxs.items():
-            if len(idxs) == 0:
-                continue
-            # print_bold(f'--- {fact} ---')
-            fact_scores = report_nli_scores[idxs]
-            fact_labels = report_nli_labels[idxs]
-            ent_threshold = calibrate_threshold(fact_scores, fact_labels == 1, verbose=False)
-            # print(f"ent_threshold: {ent_threshold}")
-            contr_threshold = calibrate_threshold(fact_scores, fact_labels != -1, verbose=False)
-            # print(f"contr_threshold: {contr_threshold}")
-            assert ent_threshold >= contr_threshold
-            ent_thresholds[idxs] = ent_threshold
-            contr_thresholds[idxs] = contr_threshold
+        
+        if thresholds_save_path is not None:
+            thresholds_dict = load_pickle(thresholds_save_path)
+            print(f"Thresholds loaded from {thresholds_save_path}")
+            for fact, idxs in fact2idxs.items():
+                if len(idxs) == 0:
+                    continue
+                fact_scores = report_nli_scores[idxs]
+                fact_labels = report_nli_labels[idxs]
+                ent_threshold = thresholds_dict[fact]['ent_threshold']
+                contr_threshold = thresholds_dict[fact]['contr_threshold']
+                assert ent_threshold >= contr_threshold
+                ent_thresholds[idxs] = ent_threshold
+                contr_thresholds[idxs] = contr_threshold
+        else:
+            if save_thresholds:
+                thresholds_dict = {}
+            for fact, idxs in fact2idxs.items():
+                if len(idxs) == 0:
+                    continue
+                fact_scores = report_nli_scores[idxs]
+                fact_labels = report_nli_labels[idxs]
+                ent_threshold, _ = best_threshold_and_f1_score(fact_scores, fact_labels == 1, verbose=False)
+                contr_threshold, _ = best_threshold_and_f1_score(fact_scores, fact_labels != -1, verbose=False)
+                if save_thresholds:
+                    thresholds_dict[fact] = {'ent_threshold': ent_threshold, 'contr_threshold': contr_threshold}
+                assert ent_threshold >= contr_threshold
+                ent_thresholds[idxs] = ent_threshold
+                contr_thresholds[idxs] = contr_threshold
+            if save_thresholds:
+                if thresholds_save_path is None:
+                    thresholds_save_path = get_file_path_with_hashing_if_too_long(
+                        folder_path=FAST_CACHE_DIR,
+                        prefix='report_nli_thresholds',
+                        strings=[
+                            model_name,
+                            huggingface_model_name,
+                            model_checkpoint_folder_path,
+                            *report_nli_input_output_jsonl_filepaths,
+                        ],
+                        force_hashing=True,
+                    )
+                save_pickle(thresholds_dict, thresholds_save_path)
+                print(f"Thresholds saved to {thresholds_save_path}")
         
         _compute_confusion_matrix(report_nli_scores, report_nli_labels, ent_thresholds, contr_thresholds)
 
@@ -318,6 +336,12 @@ def evaluate(
         recalls.append(other2stats["tp"] / max(other2stats["tp"] + other2stats["fn"], 1))
         plot_metrics(metric_names=metric_names, metric_values=recalls, title="Recall",
                 ylabel="Label", xlabel="Recall", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+        
+        accs = [(stats["tp"] + stats["tn"]) / max(stats["tp"] + stats["fp"] + stats["tn"] + stats["fn"], 1) for _, stats in fact2stats.items()]
+        accs.append((other2stats["tp"] + other2stats["tn"]) / max(other2stats["tp"] + other2stats["fp"] + other2stats["tn"] + other2stats["fn"], 1))
+        plot_metrics(metric_names=metric_names, metric_values=accs, title="Accuracy",
+                ylabel="Label", xlabel="Accuracy", append_average_to_title=True, horizontal=True, sort_metrics=True,
                 show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
 
 if __name__ == '__main__':
