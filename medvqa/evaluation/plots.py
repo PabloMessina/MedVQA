@@ -790,3 +790,63 @@ class SentenceClusteringVisualizer:
         # Plot rectangle
         self.plot_embeddings_and_clusters_around_point(x, y, r, figsize=figsize, plot_sentences=True,
                                                        other_sentences=[sentence], other_umap_embeddings=umap_sentence_embedding.reshape((1, 2)))
+
+
+def plot_nli_distribution(report_nli_input_output_jsonl_filepaths, figsize1=(10, 10), figsize2=(10, 10)):
+
+    from collections import Counter
+    from medvqa.datasets.seq2seq.seq2seq_dataset_management import load_report_nli_examples_filepaths
+    from medvqa.utils.constants import LABEL_BASED_FACTS
+    
+    report_nli_input_texts, report_nli_output_texts, _ = load_report_nli_examples_filepaths(
+        report_nli_input_output_jsonl_filepaths, nli1_only=True)
+    
+    print(Counter(report_nli_output_texts))
+
+    # Plot metrics for each fact
+    fact2stats = { fact: {'e': 0, 'n': 0, 'c': 0} for fact in LABEL_BASED_FACTS }
+    other2stats = {'e': 0, 'n': 0, 'c': 0}
+    for input_text, output_text in zip(report_nli_input_texts, report_nli_output_texts):
+        fact = input_text.split(' #H: ')[1]
+        if fact in LABEL_BASED_FACTS:
+            fact2stats[fact][output_text[0]] += 1
+        else:
+            other2stats[output_text[0]] += 1
+
+    # Plot:
+    # For each fact, generate 3 horizontal bars: one for each label
+    # Add some space between each fact
+    # Add a title and a legend
+    plt.figure(figsize=figsize1)
+    plt.title('NLI distribution for each fact')
+    yticks = []
+    yticklabels = []
+    facts = list(fact2stats.keys())
+    facts.sort(key=lambda f: sum(fact2stats[f].values()))
+    for i, fact in enumerate(facts):
+        yticks.append(i * 4)
+        yticklabels.append(f'{fact} (e={fact2stats[fact]["e"]}, n={fact2stats[fact]["n"]}, c={fact2stats[fact]["c"]})')
+        for j, label in enumerate(['e', 'n', 'c']):
+            if i == 0:
+                long_label = {'e': 'entailment', 'n': 'neutral', 'c': 'contradiction'}[label]
+                plt.barh(i * 4 + (2-j) - 1.0, fact2stats[fact][label], color=_COLORS[j], label=long_label)
+            else:
+                plt.barh(i * 4 + (2-j) - 1.0, fact2stats[fact][label], color=_COLORS[j])
+    plt.yticks(yticks, yticklabels)
+    plt.xlabel('Count')
+    plt.ylabel('Fact')
+    plt.legend()
+    plt.show()
+
+    # Plot:
+    # Generate 3 horizontal bars: one for each label for the other facts
+    plt.figure(figsize=figsize2)
+    plt.title('NLI distribution for other facts')
+    for j, label in enumerate(['e', 'n', 'c']):
+        long_label = {'e': 'entailment', 'n': 'neutral', 'c': 'contradiction'}[label]
+        plt.barh(2-j, other2stats[label], color=_COLORS[2-j], label=long_label)
+    plt.yticks(range(3), [f'entailment (e={other2stats["e"]})', f'neutral (n={other2stats["n"]})', f'contradiction (c={other2stats["c"]})'])
+    plt.xlabel('Count')
+    plt.ylabel('Label')
+    plt.legend()
+    plt.show()

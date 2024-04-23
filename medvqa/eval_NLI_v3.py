@@ -1,12 +1,10 @@
 import argparse
 import numpy as np
-from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 import multiprocessing
 from collections import Counter
-from sklearn.metrics import f1_score
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     load_gpt4_nli_examples_filepaths,
     load_ms_cxr_t_temporal_sentence_similarity_v1_data,
@@ -17,9 +15,9 @@ from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
-from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
 from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
+from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
 from medvqa.utils.logging import print_blue, print_bold
 from medvqa.utils.metrics import best_threshold_and_f1_score

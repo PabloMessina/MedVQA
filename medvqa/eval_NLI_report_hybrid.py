@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import os
 from sklearn.metrics import confusion_matrix
 import torch
 from torch.utils.data import DataLoader
@@ -20,7 +21,7 @@ from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
 from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, save_pickle
+from medvqa.utils.files import get_file_path_with_hashing_if_too_long, save_pickle, load_pickle
 from medvqa.utils.logging import get_console_logger, print_blue, print_bold
 from medvqa.utils.metrics import best_threshold_and_f1_score
 
@@ -47,6 +48,11 @@ def _compute_confusion_matrix(pred_labels, gt_labels, include_undecided=False, s
     # Compute accuracy
     acc = np.sum(pred_labels == gt_labels) / len(gt_labels)
     print_blue(f"Accuracy: {acc:.4f}", bold=True)
+    # Compute accuracy ignoring undecided
+    if include_undecided:
+        non_undecided = pred_labels != 3
+        acc = np.sum(pred_labels[non_undecided] == gt_labels[non_undecided]) / np.sum(non_undecided)
+        print_blue(f"Accuracy (ignoring undecided): {acc:.4f}", bold=True)
     # Plot a confusion matrix
     if include_undecided:
         cm = confusion_matrix(gt_labels, pred_labels, labels=[0, 1, 2, 3])
@@ -79,7 +85,26 @@ def compute_mlp_nli_softmaxes(
     input_texts,
     output_texts,
     nli_checkpoint_folder_path,
+    cache_output=False,
 ):
+    if cache_output:
+        save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=FAST_CACHE_DIR,
+            prefix='report_nli_mlp_softmaxes',
+            strings=[
+                fact_embedding_model_name,
+                fact_embedding_model_checkpoint_folder_path,
+                nli_checkpoint_folder_path,
+                f'len(input_texts)={len(input_texts)}',
+                f'len(unique_sentences)={len(unique_sentences)}',
+                f'len(whole_sentences)={len(whole_sentences)}',
+            ],
+            force_hashing=True,
+        )
+        if os.path.exists(save_path):
+            print(f"Loading cached MLP NLI softmaxes from {save_path}")
+            return load_pickle(save_path)
+
     embedding_extractor = CachedTextEmbeddingExtractor(
         model_name=fact_embedding_model_name,
         model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
@@ -149,7 +174,62 @@ def compute_mlp_nli_softmaxes(
             all_softmaxes[i:i+bsize] = softmaxes.cpu().numpy()
             i += bsize
         assert i == len(input_texts)
+
+    # Save output
+    if cache_output:
+        save_pickle(all_softmaxes, save_path)
+        print(f"Saved MLP NLI softmaxes to {save_path}")
+
+    # Return
     return all_softmaxes
+
+def compute_BART_nli_predictions(
+    seq2seq_checkpoint_folder_path,
+    input_texts,
+    logger,
+    device,
+    batch_size,
+    num_workers,
+    max_length,
+    num_beams,
+    cache_output=False,
+):
+    if cache_output:
+        save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=FAST_CACHE_DIR,
+            prefix='report_nli_BART_predictions',
+            strings=[
+                seq2seq_checkpoint_folder_path,
+                f'len(input_texts)={len(input_texts)}',
+            ],
+            force_hashing=True,
+        )
+        if os.path.exists(save_path):
+            print(f"Loading cached BART NLI predictions from {save_path}")
+            return load_pickle(save_path)
+    
+    # Compute Seq2Seq NLI predictions
+    seq2seq_nli_predictions, unprocessed_sentences = apply_seq2seq_model_to_sentences(
+        checkpoint_folder_path=seq2seq_checkpoint_folder_path,
+        sentences=input_texts,
+        logger=logger,
+        device=device,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        max_length=max_length,
+        num_beams=num_beams,
+        postprocess_input_output_func=lambda _, output: output,
+        save_outputs=False,
+    )
+    assert len(seq2seq_nli_predictions) == len(input_texts)
+    assert len(unprocessed_sentences) == 0
+
+    # Save output
+    if cache_output:
+        save_pickle(seq2seq_nli_predictions, save_path)
+        print(f"Saved BART NLI predictions to {save_path}")
+
+    return seq2seq_nli_predictions
 
 def evaluate(
     device,
@@ -167,8 +247,14 @@ def evaluate(
     seq2seq_num_beams,
     report_nli_input_output_jsonl_filepaths,
     save_hybrid_metadata=False,
+    cache_output=False,
     logging_level='INFO',
+    hybrid_threshold_1=0.2,
+    hybrid_threshold_2=0.4,
     f1_figsize=(10, 35),
+    only_show_plots_for_hybrid=False,
+    show_confusion_matrix=True,
+    show_bar_plots=True,
 ):
     global logger
     if logger is None:
@@ -211,23 +297,21 @@ def evaluate(
         input_texts=input_texts,
         output_texts=output_texts,
         nli_checkpoint_folder_path=nli_checkpoint_folder_path,
+        cache_output=cache_output,
     )
 
     # Compute Seq2Seq NLI predictions
-    seq2seq_nli_predictions, unprocessed_sentences = apply_seq2seq_model_to_sentences(
-        checkpoint_folder_path=seq2seq_checkpoint_folder_path,
-        sentences=input_texts,
+    seq2seq_nli_predictions = compute_BART_nli_predictions(
+        seq2seq_checkpoint_folder_path=seq2seq_checkpoint_folder_path,
+        input_texts=input_texts,
         logger=logger,
         device=device,
         batch_size=seq2seq_batch_size,
         num_workers=seq2seq_num_workers,
         max_length=seq2seq_max_length,
         num_beams=seq2seq_num_beams,
-        postprocess_input_output_func=lambda _, output: output,
-        save_outputs=False,
+        cache_output=cache_output,
     )
-    assert len(seq2seq_nli_predictions) == len(input_texts)
-    assert len(unprocessed_sentences) == 0
     
     output2label = {'entailment': 0, 'neutral': 1, 'contradiction': 2}
     report_nli_gt_labels = np.array([output2label[output_text] for output_text in output_texts])
@@ -252,14 +336,14 @@ def evaluate(
             gt=report_nli_gt_labels[idxs] == 0, # binarize (0 -> 1, 1 -> 0, 2 -> 0)
         )
         mlp_h2et[h] = best_et
-        print(f"{h}: Best ent. threshold: {best_et}, Best F1: {best_f1} (size: {len(idxs)})")
+        # print(f"{h}: Best ent. threshold: {best_et}, Best F1: {best_f1} (size: {len(idxs)})")
         # Contradiction
         best_ct, best_f1 = best_threshold_and_f1_score(
             probs=mlp_nli_softmaxes[idxs, 2],
             gt=report_nli_gt_labels[idxs] == 2, # binarize (0 -> 0, 1 -> 0, 2 -> 1)
         )
         mlp_h2ct[h] = best_ct
-        print(f"{h}: Best cont. threshold: {best_ct}, Best F1: {best_f1} (size: {len(idxs)})")
+        # print(f"{h}: Best cont. threshold: {best_ct}, Best F1: {best_f1} (size: {len(idxs)})")
 
     # Plot metrics for each fact
     mlp_fact2stats = { fact: {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0} for fact in LABEL_BASED_FACTS }
@@ -268,6 +352,8 @@ def evaluate(
     s2s_fact2stats['other'] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
     hyb_fact2stats = { fact: {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0} for fact in LABEL_BASED_FACTS }
     hyb_fact2stats['other'] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0}
+    hyb_fact2stats_with_undecided = { fact: {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'u': 0} for fact in LABEL_BASED_FACTS }
+    hyb_fact2stats_with_undecided['other'] = {'tp': 0, 'fp': 0, 'tn': 0, 'fn': 0, 'u': 0}
 
     mlp_pred_labels = np.empty(len(report_nli_hypotheses), dtype=int)
     s2s_pred_labels = np.empty(len(report_nli_hypotheses), dtype=int)
@@ -313,7 +399,10 @@ def evaluate(
 
     # Compute hybrid predictions
     calc_f1 = lambda h, m: 2 * m[h]['tp'] / max(2 * m[h]['tp'] + m[h]['fp'] + m[h]['fn'], 1)
-    hybrid_metadata = {}
+    hybrid_metadata = {
+        'hybrid_threshold_1': hybrid_threshold_1,
+        'hybrid_threshold_2': hybrid_threshold_2,
+    }
     for h, idxs in h2idxs.items():
         mlp_f1 = calc_f1(h, mlp_fact2stats)
         s2s_f1 = calc_f1(h, s2s_fact2stats)
@@ -322,15 +411,17 @@ def evaluate(
                 hybrid_pred_labels[i] = s2s_pred_labels[i] # use agreed label
             elif abs(s2s_pred_labels[i] - mlp_pred_labels[i]) == 1:
                 # if one is neutral and the other is not, use the label predicted by the model with higher F1
-                if s2s_f1 > mlp_f1:
+                if s2s_f1 > mlp_f1 + hybrid_threshold_1:
                     hybrid_pred_labels[i] = s2s_pred_labels[i]
-                else:
+                elif mlp_f1 > s2s_f1 + hybrid_threshold_1:
                     hybrid_pred_labels[i] = mlp_pred_labels[i]
+                else:
+                    hybrid_pred_labels[i] = 3 # undecided
             else:
                 assert abs(s2s_pred_labels[i] - mlp_pred_labels[i]) == 2 # one is entailment and the other is contradiction
                 # The models in large disagreement, use the label predicted by the model with higher F1
-                # only if the F1 difference is greater than 0.4
-                if abs(s2s_f1 - mlp_f1) > 0.4:
+                # only if the F1 difference is greater than a threshold
+                if abs(s2s_f1 - mlp_f1) > hybrid_threshold_2:
                     if s2s_f1 > mlp_f1:
                         hybrid_pred_labels[i] = s2s_pred_labels[i]
                     else:
@@ -338,6 +429,7 @@ def evaluate(
                 else:
                     hybrid_pred_labels[i] = 3 # undecided
         stats = hyb_fact2stats[h]
+        stats_u = hyb_fact2stats_with_undecided[h]
         for i in idxs:
             gt_label = report_nli_gt_labels[i] == 0
             pred_label = hybrid_pred_labels[i] == 0
@@ -347,6 +439,15 @@ def evaluate(
             else:
                 if gt_label: stats['fn'] += 1
                 else: stats['fp'] += 1
+            if hybrid_pred_labels[i] == 3:
+                stats_u['u'] += 1
+            else:
+                if gt_label == pred_label:
+                    if gt_label: stats_u['tp'] += 1
+                    else: stats_u['tn'] += 1
+                else:
+                    if gt_label: stats_u['fn'] += 1
+                    else: stats_u['fp'] += 1
         hybrid_metadata[h] = {
             'mlp_et': mlp_h2et[h] if h in mlp_h2et else mlp_h2et['other'],
             'mlp_ct': mlp_h2ct[h] if h in mlp_h2ct else mlp_h2ct['other'],
@@ -354,30 +455,67 @@ def evaluate(
             's2s_f1': s2s_f1,
         }
 
-    for name, labels in zip(('MLP', 'Seq2Seq', 'Hybrid'),
-                            (mlp_pred_labels, s2s_pred_labels, hybrid_pred_labels)):
-        print_bold(f'--- {name} NLI ---')
-        if name == 'Hybrid':
-            _compute_confusion_matrix(labels, report_nli_gt_labels, include_undecided=True)
-        else:
-            _compute_confusion_matrix(labels, report_nli_gt_labels)
+    if show_confusion_matrix:
+        for name, labels in zip(('MLP', 'Seq2Seq', 'Hybrid'),
+                                (mlp_pred_labels, s2s_pred_labels, hybrid_pred_labels)):
+            if only_show_plots_for_hybrid and name != 'Hybrid':
+                continue
+            print_bold(f'--- {name} NLI ---')
+            if name == 'Hybrid':
+                _compute_confusion_matrix(labels, report_nli_gt_labels, include_undecided=True)
+            else:
+                _compute_confusion_matrix(labels, report_nli_gt_labels)
 
-    for name, stats in zip(('MLP', 'Seq2Seq', 'Hybrid'),
-                           (mlp_fact2stats, s2s_fact2stats, hyb_fact2stats)):
-        print_bold(f'--- {name} NLI (by fact) ---')
-        metric_names = [f'{fact} (tp: {stats[fact]["tp"]}, fp: {stats[fact]["fp"]}, tn: {stats[fact]["tn"]}, fn: {stats[fact]["fn"]})' for fact in LABEL_BASED_FACTS]
-        metric_names.append(f'Other (tp: {stats["other"]["tp"]}, fp: {stats["other"]["fp"]}, tn: {stats["other"]["tn"]}, fn: {stats["other"]["fn"]})')
-        f1s = [calc_f1(fact, stats) for fact in LABEL_BASED_FACTS]
-        f1s.append(calc_f1('other', stats))
-        plot_metrics(metric_names=metric_names, metric_values=f1s, title="F1",
-                ylabel="Label", xlabel="F1", append_average_to_title=True, horizontal=True, sort_metrics=True,
-                show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
-        
-        accs = [(stats[fact]['tp'] + stats[fact]['tn']) / (stats[fact]['tp'] + stats[fact]['tn'] + stats[fact]['fp'] + stats[fact]['fn']) for fact in LABEL_BASED_FACTS]
-        accs.append((stats['other']['tp'] + stats['other']['tn']) / (stats['other']['tp'] + stats['other']['tn'] + stats['other']['fp'] + stats['other']['fn']))
-        plot_metrics(metric_names=metric_names, metric_values=accs, title="Accuracy",
-                ylabel="Label", xlabel="Accuracy", append_average_to_title=True, horizontal=True, sort_metrics=True,
-                show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+    if show_bar_plots:
+        for name, stats in zip(('MLP', 'Seq2Seq', 'Hybrid'),
+                            (mlp_fact2stats, s2s_fact2stats, hyb_fact2stats)):
+            if only_show_plots_for_hybrid and name != 'Hybrid':
+                continue
+            print_bold(f'--- {name} NLI (by fact) ---')
+            metric_names = [f'{fact} (tp: {stats[fact]["tp"]}, fp: {stats[fact]["fp"]}, tn: {stats[fact]["tn"]}, fn: {stats[fact]["fn"]})' for fact in LABEL_BASED_FACTS]
+            metric_names.append(f'Other (tp: {stats["other"]["tp"]}, fp: {stats["other"]["fp"]}, tn: {stats["other"]["tn"]}, fn: {stats["other"]["fn"]})')
+            print(f'len(metric_names): {len(metric_names)}')
+            
+            f1s = [calc_f1(fact, stats) for fact in LABEL_BASED_FACTS]
+            f1s.append(calc_f1('other', stats))
+            accs = [(stats[fact]['tp'] + stats[fact]['tn']) / (stats[fact]['tp'] + stats[fact]['tn'] + stats[fact]['fp'] + stats[fact]['fn']) for fact in LABEL_BASED_FACTS]
+            accs.append((stats['other']['tp'] + stats['other']['tn']) / (stats['other']['tp'] + stats['other']['tn'] + stats['other']['fp'] + stats['other']['fn']))            
+            
+            plot_metrics(metric_names=metric_names, metric_values=f1s, title="F1",
+                    ylabel="Label", xlabel="F1", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                    show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+            
+            plot_metrics(metric_names=metric_names, metric_values=accs, title="Accuracy",
+                    ylabel="Label", xlabel="Accuracy", append_average_to_title=True, horizontal=True, sort_metrics=True,
+                    show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+            
+            if name == 'Hybrid':
+                print_bold(f'--- {name} NLI (by fact, including undecided) ---')
+                stats = hyb_fact2stats_with_undecided
+                metric_names = [f'{fact} (tp: {stats[fact]["tp"]}, fp: {stats[fact]["fp"]}, tn: {stats[fact]["tn"]}, fn: {stats[fact]["fn"]}, u: {stats[fact]["u"]})' for fact in LABEL_BASED_FACTS]
+                metric_names.append(f'Other (tp: {stats["other"]["tp"]}, fp: {stats["other"]["fp"]}, tn: {stats["other"]["tn"]}, fn: {stats["other"]["fn"]}, u: {stats["other"]["u"]})')
+                print(f'len(metric_names): {len(metric_names)}')
+                
+                f1s = [calc_f1(fact, stats) for fact in LABEL_BASED_FACTS]
+                f1s.append(calc_f1('other', stats))
+                accs = [(stats[fact]['tp'] + stats[fact]['tn']) / (stats[fact]['tp'] + stats[fact]['tn'] + stats[fact]['fp'] + stats[fact]['fn']) for fact in LABEL_BASED_FACTS]
+                accs.append((stats['other']['tp'] + stats['other']['tn']) / (stats['other']['tp'] + stats['other']['tn'] + stats['other']['fp'] + stats['other']['fn']))
+
+                # sort based on fraction of undecided
+                frac_undecided = [stats[fact]['u'] / (stats[fact]['tp'] + stats[fact]['tn'] + stats[fact]['fp'] + stats[fact]['fn'] + stats[fact]['u']) for fact in LABEL_BASED_FACTS]
+                frac_undecided.append(stats['other']['u'] / (stats['other']['tp'] + stats['other']['tn'] + stats['other']['fp'] + stats['other']['fn'] + stats['other']['u']))
+                idxs = np.argsort(frac_undecided)
+                metric_names = [metric_names[i] for i in idxs]
+                f1s = [f1s[i] for i in idxs]
+                accs = [accs[i] for i in idxs]
+                
+                plot_metrics(metric_names=metric_names, metric_values=f1s, title="F1",
+                        ylabel="Label", xlabel="F1", append_average_to_title=True, horizontal=True,
+                        show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
+                
+                plot_metrics(metric_names=metric_names, metric_values=accs, title="Accuracy",
+                        ylabel="Label", xlabel="Accuracy", append_average_to_title=True, horizontal=True,
+                        show_metrics_above_bars=True, draw_grid=True, figsize=f1_figsize)
         
     if save_hybrid_metadata:
         hybrid_metadata_save_path = get_file_path_with_hashing_if_too_long(
@@ -390,6 +528,8 @@ def evaluate(
                 seq2seq_checkpoint_folder_path,
                 *report_nli_input_output_jsonl_filepaths,
                 f'len(input_texts)={len(input_texts)}',
+                f'threshold_1={hybrid_threshold_1}',
+                f'threshold_2={hybrid_threshold_2}',
             ],
             force_hashing=True,
         )

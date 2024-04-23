@@ -577,7 +577,14 @@ def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True,
             report_end_idx = query.index(" | #H ")
             p = query[report_start_idx:report_end_idx]
             h = query[report_end_idx+6:]
-            l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[input_output['parsed_response']]
+            response = input_output['parsed_response']
+            if type(response) is str:
+                l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[response]
+            else:
+                assert type(response) is dict
+                assert 'reason' in response
+                assert 'label' in response
+                l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[response['label']]
 
             if medical_sentences is not None:
                 medical_sentences.add(p)

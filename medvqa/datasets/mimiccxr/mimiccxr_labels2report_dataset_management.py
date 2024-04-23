@@ -20,7 +20,7 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import _create_dataset
-from medvqa.utils.files import get_cached_pickle_file, load_json_file, load_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_json, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_red
 
 class MIMICCXR_Labels2Report_Dataset(Dataset):
@@ -489,7 +489,7 @@ class MIMICCXR_Labels2ReportTrainer():
         for x in self.precomputed_sigmoid_paths:
             model_folder_path = x['model_folder_path']
             metadata_path = os.path.join(model_folder_path, 'metadata.json')
-            metadata = load_json_file(metadata_path)
+            metadata = load_json(metadata_path)
             chest_imagenome_label_names_filename = metadata['mimiccxr_trainer_kwargs'].get('chest_imagenome_label_names_filename', None)
             if chest_imagenome_label_names_filename is not None:
                 label_order = load_chest_imagenome_label_order(chest_imagenome_label_names_filename)

@@ -986,20 +986,28 @@ def get_bert_based_nli_collate_batch_fn(huggingface_model_name, merged_input=Fal
     
     return collate_batch_fn
 
-def embedding_based_nli_collate_batch_fn(batch):
-    h_embs = torch.tensor([x['h_emb'] for x in batch]) # hypothesis embeddings
-    p_most_sim_embs = torch.tensor([x['p_most_sim_emb'] for x in batch]) # premise most similar embeddings
-    p_least_sim_embs = torch.tensor([x['p_least_sim_emb'] for x in batch]) # premise least similar embeddings
-    p_max_embs = torch.tensor([x['p_max_emb'] for x in batch]) # premise max embeddings
-    p_avg_embs = torch.tensor([x['p_avg_emb'] for x in batch]) # premise average embeddings
-    labels = torch.tensor([x['l'] for x in batch]) # labels
+def embedding_based_nli_collate_batch_fn(batch, include_labels=True):
+    h_embs = torch.tensor(np.array([x['h_emb'] for x in batch])) # hypothesis embeddings
+    p_most_sim_embs = torch.tensor(np.array([x['p_most_sim_emb'] for x in batch])) # premise most similar embeddings
+    p_least_sim_embs = torch.tensor(np.array([x['p_least_sim_emb'] for x in batch])) # premise least similar embeddings
+    p_max_embs = torch.tensor(np.array([x['p_max_emb'] for x in batch])) # premise max embeddings
+    p_avg_embs = torch.tensor(np.array([x['p_avg_emb'] for x in batch])) # premise average embeddings
+    if include_labels:
+        labels = torch.tensor(np.array([x['l'] for x in batch])) # labels
+        return dict(
+            h_embs=h_embs,
+            p_most_sim_embs=p_most_sim_embs,
+            p_least_sim_embs=p_least_sim_embs,
+            p_max_embs=p_max_embs,
+            p_avg_embs=p_avg_embs,
+            labels=labels,
+        )
     return dict(
         h_embs=h_embs,
         p_most_sim_embs=p_most_sim_embs,
         p_least_sim_embs=p_least_sim_embs,
         p_max_embs=p_max_embs,
         p_avg_embs=p_avg_embs,
-        labels=labels,
     )
 
 def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visual_module_only=False,

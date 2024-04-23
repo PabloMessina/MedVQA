@@ -7,7 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.constants import MIMIC_CXR_LT_LABELS
+from medvqa.utils.constants import LABEL_BASED_FACTS, MIMIC_CXR_LT_LABELS
 from medvqa.utils.hashing import hash_string
 from medvqa.utils.logging import get_console_logger
 from medvqa.datasets.mimiccxr import (
@@ -42,35 +42,6 @@ LABEL_TO_BINARY = {
     "definitely false": 0,
 }
 
-LABEL_BASED_FACTS = [
-    'atelectasis seen', 'calcification of the aorta seen', 'cardiomegaly seen', 'consolidation seen',
-    'edema seen', 'emphysema seen', 'enlarged cardiomediastinum seen', 'fibrosis seen', 'fracture seen',
-    'hernia seen', 'infiltration seen', 'lung lesion seen', 'lung opacity seen', 'mass seen', 'no abnormalities seen',
-    'nodule seen', 'pleural effusion seen', 'pleural abnormalities seen', 'pleural thickening seen',
-    'pneumomediastinum seen', 'pneumonia seen', 'pneumoperitoneum seen', 'pneumothorax seen',
-    'subcutaneous emphysema seen', 'support devices seen', 'tortuous aorta seen', 'airspace opacity seen',
-    'atelectasis seen', 'bone lesion seen', 'bronchiectasis seen', 'calcified nodule seen', 'clavicle fracture seen',
-    'consolidation seen', 'costophrenic angle blunting seen', 'cyst/bullae seen',
-    'diaphragmatic eventration (benign) seen', 'elevated hemidiaphragm seen', 'enlarged cardiac silhouette seen',
-    'enlarged hilum seen', 'hernia seen', 'hydropneumothorax seen', 'hyperaeration seen',
-    'increased reticular markings/ild pattern seen', 'infiltration seen', 'linear/patchy atelectasis seen',
-    'lobar/segmental collapse seen', 'lung lesion seen', 'lung opacity seen', 'mass/nodule (not otherwise specified) seen',
-    'mediastinal displacement seen', 'mediastinal widening seen', 'multiple masses/nodules seen', 'pleural effusion seen',
-    'pleural/parenchymal scarring seen', 'pneumomediastinum seen', 'pneumothorax seen',
-    'pulmonary edema/hazy opacity seen', 'rib fracture seen', 'scoliosis seen', 'shoulder osteoarthritis seen',
-    'spinal degenerative changes seen', 'spinal fracture seen', 'sub-diaphragmatic air seen', 'subcutaneous air seen',
-    'superior mediastinal mass/enlargement seen', 'tortuous aorta seen', 'vascular calcification seen',
-    'vascular congestion seen', 'vascular redistribution seen', 'aortic graft/repair seen', 'cabg grafts seen',
-    'cardiac pacer and wires seen', 'prosthetic valve seen', 'alveolar hemorrhage seen', 'aspiration seen',
-    'copd/emphysema seen', 'fluid overload/heart failure seen', 'goiter seen', 'granulomatous disease seen',
-    'interstitial lung disease seen', 'lung cancer seen', 'pericardial effusion seen', 'pneumonia seen', 'artifact seen',
-    'breast/nipple shadows seen', 'low lung volumes seen', 'rotated seen', 'skin fold seen', 'alveolar texture seen',
-    'calcified texture seen', 'interstitial texture seen', 'opacity texture seen', 'chest port seen', 'chest tube seen',
-    'endotracheal tube seen', 'enteric tube seen', 'ij line seen', 'intra-aortic balloon pump seen',
-    'mediastinal drain seen', 'picc seen', 'pigtail catheter seen', 'subclavian line seen', 'swan-ganz catheter seen',
-    'tracheostomy tube seen'
-]
-
 def parse_openai_model_output(text):
     """
     Parse the output of the OpenAI API call.
@@ -80,9 +51,19 @@ def parse_openai_model_output(text):
         raise RuntimeError(f"GPT is protesting: {text}")
     text = text.lower()
     assert isinstance(text, str), f'Unexpected type: {type(text)} (text = {text})'
+    assert text.startswith("reason: "), f"No reason found in output: {text}"
     for label in POSSIBLE_LABELS:
-        if label in text:
-            return label[7:] # Remove "label: "
+        try:
+            idx = text.index(label)
+            assert idx > 8, f"idx: {idx}, label: {label}, text: {text}"
+            reason = text[8:idx].strip()
+            label = label[7:] # Remove "label: "
+            return {
+                "reason": reason,
+                "label": label,
+            }
+        except ValueError:
+            continue
     raise RuntimeError(f"Could not parse output: {text}")
 
 def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jsonl_filepath,
@@ -184,24 +165,42 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
         alias = f'{alias} seen'
         ci_label2alias[label] = alias
 
-    label_based_facts = list(mcxrlt_label2alias.values()) + list(ci_label2alias.values())
+    # Merge two sets of labels
+    logger.info("Merging two sets of labels...")
+
+    label_based_facts = set(mcxrlt_label2alias.values()).union(set(ci_label2alias.values()))
+    label_based_facts = list(label_based_facts)
+    label_based_facts.sort()
+    logger.info(f"len(label_based_facts): {len(label_based_facts)}")
     logger.info(f'Label based facts: {label_based_facts}')
-    assert set(label_based_facts) == set(LABEL_BASED_FACTS)
+    assert label_based_facts == LABEL_BASED_FACTS
     assert len(ci_label2alias) == len(ci_label_names)
 
     if allowed_label_based_facts is not None:
         logger.info(f'Allowed label based facts: {allowed_label_based_facts}')
         assert set(allowed_label_based_facts).issubset(set(label_based_facts))
-        mcxrlt_label_names = [label for label in mcxrlt_label2alias if mcxrlt_label2alias[label] in allowed_label_based_facts]
-        ci_label_names = [label for label in ci_label2alias if ci_label2alias[label] in allowed_label_based_facts]
-        logger.info(f'len(mcxrlt_label_names): {len(mcxrlt_label_names)}')
-        logger.info(f'mcxrlt_label_names: {mcxrlt_label_names}')
-        logger.info(f'len(ci_label_names): {len(ci_label_names)}')
-        logger.info(f'ci_label_names: {ci_label_names}')
+        label_based_facts = allowed_label_based_facts
+        logger.info(f'len(label_based_facts): {len(label_based_facts)}')
+    
+    fact2ridxs = { fact: set() for fact in label_based_facts }
+    for i, label in enumerate(mcxrlt_label_names):
+        fact = mcxrlt_label2alias[label]
+        ridxs = mcxrlt_label_id_to_report_idxs[i]
+        if fact in fact2ridxs:
+            fact2ridxs[fact].update(ridxs)
+    for i, label in enumerate(ci_label_names):
+        fact = ci_label2alias[label]
+        ridxs = ci_label_id_to_report_idxs[i]
+        if fact in fact2ridxs:
+            fact2ridxs[fact].update(ridxs)
+
+    # print the number of reports for each fact
+    for fact in label_based_facts:
+        logger.info(f"{fact}: {len(fact2ridxs[fact])}")
 
     # Sample queries
     queries = []
-    n_queries_per_label = math.ceil(num_samples // (len(mcxrlt_label_names) + len(ci_label_names)))
+    n_queries_per_label = math.ceil(num_samples / len(label_based_facts))
     n_pos_queries_per_label = math.ceil(n_queries_per_label * 0.7)
     n_neg_queries_per_label = n_queries_per_label - n_pos_queries_per_label
     logger.info(f"n_queries_per_label: {n_queries_per_label}")
@@ -214,41 +213,35 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
         all_report_idxs = list(range(n_reports))
     logger.info(f"len(all_report_idxs): {len(all_report_idxs)}")
 
-    for (label_names, label2alias, label_id_to_report_idxs) in [
-        (mcxrlt_label_names, mcxrlt_label2alias, mcxrlt_label_id_to_report_idxs),
-        (ci_label_names, ci_label2alias, ci_label_id_to_report_idxs)
-    ]:
-        for i, label in enumerate(label_names):
-            label_alias = label2alias[label]
-            report_idxs_set = label_id_to_report_idxs[i]
-            report_idxs_list = list(report_idxs_set)
-            random.shuffle(report_idxs_list)
-            cnt = 0
-            for j, report_idx in enumerate(report_idxs_list):
-                if use_mimiccxr_dev_test_sets_only:
-                    assert splits[report_idx] in ['validate', 'test']
-                fact_based_report = reports[report_idx]['fact_based_report']
-                query = f"#F {fact_based_report} | #H {label_alias}"
+    for fact, ridxs in fact2ridxs.items():
+        ridxs_list = list(ridxs)
+        random.shuffle(ridxs_list)
+        cnt = 0
+        for j, ridx in enumerate(ridxs_list):
+            if use_mimiccxr_dev_test_sets_only:
+                assert splits[ridx] in ['validate', 'test']
+            fact_based_report = reports[ridx]['fact_based_report']
+            query = f"#F {fact_based_report} | #H {fact}"
+            query_hash = hash_string(query)
+            if query_hash not in already_processed_queries:
+                queries.append(query)
+                already_processed_queries.add(query_hash)
+                cnt += 1
+            if cnt == n_pos_queries_per_label:
+                break
+        if cnt < n_pos_queries_per_label:
+            logger.info(f"Only {cnt}/{n_pos_queries_per_label} positive queries for label {fact}")
+        cnt -= n_pos_queries_per_label # transfer deficit to negative queries
+        while cnt < n_neg_queries_per_label:
+            ridx = random.choice(all_report_idxs)
+            if ridx not in ridxs:
+                fact_based_report = reports[ridx]['fact_based_report']
+                query = f"#F {fact_based_report} | #H {fact}"
                 query_hash = hash_string(query)
                 if query_hash not in already_processed_queries:
                     queries.append(query)
                     already_processed_queries.add(query_hash)
                     cnt += 1
-                if cnt == n_pos_queries_per_label:
-                    break
-            if cnt < n_pos_queries_per_label:
-                logger.info(f"Only {cnt}/{n_pos_queries_per_label} positive queries for label {label_alias}")
-            cnt -= n_pos_queries_per_label # transfer deficit to negative queries
-            while cnt < n_neg_queries_per_label:
-                report_idx = random.choice(all_report_idxs)
-                if report_idx not in report_idxs_set:
-                    fact_based_report = reports[report_idx]['fact_based_report']
-                    query = f"#F {fact_based_report} | #H {label_alias}"
-                    query_hash = hash_string(query)
-                    if query_hash not in already_processed_queries:
-                        queries.append(query)
-                        already_processed_queries.add(query_hash)
-                        cnt += 1
 
     return queries
 

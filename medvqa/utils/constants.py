@@ -476,3 +476,35 @@ def get_enum_class_attribute_values(enum_class):
     for name, value in vars(enum_class).items():
         if not name.startswith('__'):
             yield value
+
+LABEL_BASED_FACTS = [
+    'atelectasis seen', 'calcification of the aorta seen', 'cardiomegaly seen', 'consolidation seen',
+    'edema seen', 'emphysema seen', 'enlarged cardiomediastinum seen', 'fibrosis seen', 'fracture seen',
+    'hernia seen', 'infiltration seen', 'lung lesion seen', 'lung opacity seen', 'mass seen', 'no abnormalities seen',
+    'nodule seen', 'pleural effusion seen', 'pleural abnormalities seen', 'pleural thickening seen',
+    'pneumomediastinum seen', 'pneumonia seen', 'pneumoperitoneum seen', 'pneumothorax seen',
+    'subcutaneous emphysema seen', 'support devices seen', 'tortuous aorta seen', 'airspace opacity seen',
+    'atelectasis seen', 'bone lesion seen', 'bronchiectasis seen', 'calcified nodule seen', 'clavicle fracture seen',
+    'consolidation seen', 'costophrenic angle blunting seen', 'cyst/bullae seen',
+    'diaphragmatic eventration (benign) seen', 'elevated hemidiaphragm seen', 'enlarged cardiac silhouette seen',
+    'enlarged hilum seen', 'hernia seen', 'hydropneumothorax seen', 'hyperaeration seen',
+    'increased reticular markings/ild pattern seen', 'infiltration seen', 'linear/patchy atelectasis seen',
+    'lobar/segmental collapse seen', 'lung lesion seen', 'lung opacity seen', 'mass/nodule (not otherwise specified) seen',
+    'mediastinal displacement seen', 'mediastinal widening seen', 'multiple masses/nodules seen', 'pleural effusion seen',
+    'pleural/parenchymal scarring seen', 'pneumomediastinum seen', 'pneumothorax seen',
+    'pulmonary edema/hazy opacity seen', 'rib fracture seen', 'scoliosis seen', 'shoulder osteoarthritis seen',
+    'spinal degenerative changes seen', 'spinal fracture seen', 'sub-diaphragmatic air seen', 'subcutaneous air seen',
+    'superior mediastinal mass/enlargement seen', 'tortuous aorta seen', 'vascular calcification seen',
+    'vascular congestion seen', 'vascular redistribution seen', 'aortic graft/repair seen', 'cabg grafts seen',
+    'cardiac pacer and wires seen', 'prosthetic valve seen', 'alveolar hemorrhage seen', 'aspiration seen',
+    'copd/emphysema seen', 'fluid overload/heart failure seen', 'goiter seen', 'granulomatous disease seen',
+    'interstitial lung disease seen', 'lung cancer seen', 'pericardial effusion seen', 'pneumonia seen', 'artifact seen',
+    'breast/nipple shadows seen', 'low lung volumes seen', 'rotated seen', 'skin fold seen', 'alveolar texture seen',
+    'calcified texture seen', 'interstitial texture seen', 'opacity texture seen', 'chest port seen', 'chest tube seen',
+    'endotracheal tube seen', 'enteric tube seen', 'ij line seen', 'intra-aortic balloon pump seen',
+    'mediastinal drain seen', 'picc seen', 'pigtail catheter seen', 'subclavian line seen', 'swan-ganz catheter seen',
+    'tracheostomy tube seen'
+]
+# deduplication
+LABEL_BASED_FACTS = list(set(LABEL_BASED_FACTS))
+LABEL_BASED_FACTS.sort()
