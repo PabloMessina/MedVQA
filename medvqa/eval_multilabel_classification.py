@@ -63,7 +63,7 @@ from medvqa.utils.files import (
     get_checkpoint_folder_path,
     get_results_folder_path,
     load_pickle,
-    save_to_pickle,
+    save_pickle,
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
@@ -171,7 +171,7 @@ def _compute_and_save_metrics(
     
     save_path = os.path.join(results_folder_path,
         f'{dataset_name}_multilabel_classification_metrics{"(" + "-".join(strings) + ")" if strings else ""}.pkl')
-    save_to_pickle(metrics, save_path)
+    save_pickle(metrics, save_path)
     print (f'Multilabel classification metrics saved to {save_path}')
     return metrics
 
@@ -205,7 +205,7 @@ def _compute_and_save_metrics__ensemble__chest_imagenome(
     
     save_path = os.path.join(results_folder_path,
         f'{dataset_name}_multilabel_classification_metrics(ensemble-chest-imagenome{",cheating" if cheating else ""}).pkl')
-    save_to_pickle(metrics, save_path)
+    save_pickle(metrics, save_path)
     print (f'Multilabel classification metrics saved to {save_path}')
     return metrics
 
@@ -411,7 +411,7 @@ def _evaluate_model(
             )
             # Save ensemble probabilities
             if save_probs:
-                save_to_pickle(test_merged_probs, os.path.join(ensemble_results_folder_path,
+                save_pickle(test_merged_probs, os.path.join(ensemble_results_folder_path,
                                 f'dicom_id_to_pred_{label_name_for_ensemble}_probs__mimiccxr_test_set.pkl'))
             # Return results
             if return_results:
@@ -583,7 +583,7 @@ def _evaluate_model(
                     dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
                     dicom_id_to_pred_probs[dicom_id] = pred_probs[i].detach().cpu().numpy()
                 save_path = os.path.join(results_folder_path, save_name)
-                save_to_pickle(dicom_id_to_pred_probs, save_path)
+                save_pickle(dicom_id_to_pred_probs, save_path)
                 print('Probabilities saved to:', save_path)
 
         if calibrate_thresholds:

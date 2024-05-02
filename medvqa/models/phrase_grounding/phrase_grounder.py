@@ -105,7 +105,16 @@ class PhraseGrounder(MultiPurposeVisualModule):
         )
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
         if self.apply_positional_encoding:
+            # try:
             local_feat = local_feat + self.pe # apply positional encoding
+            # except RuntimeError as e:
+            #     print_orange(f'ERROR: {e}')
+            #     print_orange(f'local_feat.shape: {local_feat.shape}')
+            #     print_orange(f'self.pe.shape: {self.pe.shape}')
+            #     print_orange(f'raw_images.shape: {raw_images.shape}')
+            #     print_orange(f'num_regions: {self.num_regions}')
+            #     print_orange(f'image_local_feat_size: {self.image_local_feat_size}')
+            #     raise e
         assert local_feat.shape == (raw_images.shape[0], self.num_regions, self.image_local_feat_size)
         
         if pos_phrase_embeddings is not None and neg_phrase_embeddings is not None:

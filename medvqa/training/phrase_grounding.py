@@ -58,8 +58,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     
     def step_fn__fact_grounding(batch):
 
-        assert training
-
         # Extract elements from batch
         if using_yolov8:
             images = batch['img'].to(device)
@@ -91,47 +89,45 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 phrase_grounding_similarity_pos = model_output['phrase_grounding_similarity_pos'] # (batch_size, max_phrase_length)
                 phrase_grounding_similarity_neg = model_output['phrase_grounding_similarity_neg']
                 
+                # Compute losses
+
+                # 1. phrase classification loss
+                phrase_classifier_loss_pos = phrase_classifier_criterion(phrase_classifier_output_pos, torch.ones_like(phrase_classifier_output_pos))
+                phrase_classifier_loss_neg = phrase_classifier_criterion(phrase_classifier_output_neg, torch.zeros_like(phrase_classifier_output_neg))
+                phrase_classifier_loss = phrase_classifier_loss_pos + phrase_classifier_loss_neg
+                phrase_classifier_loss *= phrase_classifier_loss_weight # weight
+
+                # 2. contrastive phrase grounding loss
+                contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos.view(-1),
+                                                                                            phrase_grounding_similarity_neg.view(-1))
+
+                # 3. attention regularization loss
+                area_pos = sigmoid_attention_pos.mean(dim=-1)
+                area_neg = sigmoid_attention_neg.mean(dim=-1)
+                attention_regularization_loss_pos = (area_pos - pos_area_prior).abs().mean()
+                attention_regularization_loss_neg = (area_neg - neg_area_prior).abs().mean()
+                attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
+
                 if training:
-                    # Compute losses
                     losses = []
-
-                    # 1. phrase classification loss
-                    phrase_classifier_loss_pos = phrase_classifier_criterion(phrase_classifier_output_pos, torch.ones_like(phrase_classifier_output_pos))
-                    phrase_classifier_loss_neg = phrase_classifier_criterion(phrase_classifier_output_neg, torch.zeros_like(phrase_classifier_output_neg))
-                    phrase_classifier_loss = phrase_classifier_loss_pos + phrase_classifier_loss_neg
-                    phrase_classifier_loss *= phrase_classifier_loss_weight # weight
                     losses.append(phrase_classifier_loss)
-
-                    # 2. contrastive phrase grounding loss
-                    contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
-                                                                                               phrase_grounding_similarity_neg)
                     losses.append(contrastive_phrase_grounding_loss)
-
-                    # 3. attention regularization loss
-                    area_pos = sigmoid_attention_pos.mean(dim=-1)
-                    area_neg = sigmoid_attention_neg.mean(dim=-1)
-                    attention_regularization_loss_pos = (area_pos - pos_area_prior).abs().mean()
-                    attention_regularization_loss_neg = (area_neg - neg_area_prior).abs().mean()
-                    attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
                     losses.append(attention_regularization_loss)
-
-                    if len(losses) > 0:
-                        batch_loss = sum(losses)
-                    else:
-                        batch_loss = None
-
+                    batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
+                else:
+                    batch_loss = None
 
         # Prepare output
         output = {}
 
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-        if training:
-            output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
-            output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
-            output['attention_regularization_loss'] = attention_regularization_loss.detach()
+        
+        output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+        output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
         return output
     
@@ -471,7 +467,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     
     def step_fn(unused_engine, batch):
         flag = batch['flag']
-        print(f'step_fn(): flag={flag}')
+        # print(f'step_fn(): flag={flag}')
         if flag == 'fg': # fact grounding (facts extracted from radiology reports)
             output = step_fn__fact_grounding(batch)
         elif flag == 'pg': # phrase grounding (this assumes ground truth masks are available)
@@ -510,12 +506,9 @@ def get_engine(model, device, iters_to_accumulate=1,
             #    **unused_kwargs,
             ):
 
-    # Create criterion
-    if training:
-        phrase_classifier_criterion = nn.BCEWithLogitsLoss()
-        contrastive_phrase_grounding_criterion = NTXentLoss(temperature=0.1, device=device)
-    else:
-        phrase_classifier_criterion = contrastive_phrase_grounding_criterion = None
+    # Create criterions
+    phrase_classifier_criterion = nn.BCEWithLogitsLoss()
+    contrastive_phrase_grounding_criterion = NTXentLoss(temperature=0.1, device=device)
 
     if training and using_yolov8:
         assert model_for_yolov8 is not None

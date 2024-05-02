@@ -508,3 +508,135 @@ LABEL_BASED_FACTS = [
 # deduplication
 LABEL_BASED_FACTS = list(set(LABEL_BASED_FACTS))
 LABEL_BASED_FACTS.sort()
+
+LABEL_BASED_FACTS__CHEXPERT = [
+    'no abnormalities seen', # No Finding
+    'enlarged cardiomediastinum seen', # Enlarged Cardiomediastinum
+    'cardiomegaly seen', # Cardiomegaly
+    'lung lesion seen', # Lung Lesion
+    'lung opacity seen', # Lung Opacity
+    'edema seen', # Edema
+    'consolidation seen', # Consolidation
+    'pneumonia seen', # Pneumonia
+    'atelectasis seen', # Atelectasis
+    'pneumothorax seen', # Pneumothorax
+    'pleural effusion seen', # Pleural Effusion
+    'pleural abnormalities seen', # Pleural Other
+    'fracture seen', # Fracture
+    'support devices seen', # Support Devices
+]
+assert len(LABEL_BASED_FACTS__CHEXPERT) == len(CHEXPERT_LABELS)
+assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__CHEXPERT)
+
+LABEL_BASED_FACTS__MIMIC_CXR_LT = [
+    'atelectasis seen', # Atelectasis
+    'calcification of the aorta seen', # Calcification of the Aorta
+    'cardiomegaly seen', # Cardiomegaly
+    'consolidation seen', # Consolidation
+    'edema seen', # Edema
+    'emphysema seen', # Emphysema
+    'enlarged cardiomediastinum seen', # Enlarged Cardiomediastinum
+    'fibrosis seen', # Fibrosis
+    'fracture seen', # Fracture
+    'hernia seen', # Hernia
+    'infiltration seen', # Infiltration
+    'lung lesion seen', # Lung Lesion
+    'lung opacity seen', # Lung Opacity
+    'mass seen', # Mass
+    'no abnormalities seen', # No Finding
+    'nodule seen', # Nodule
+    'pleural effusion seen', # Pleural Effusion
+    'pleural abnormalities seen', # Pleural Other
+    'pleural thickening seen', # Pleural Thickening
+    'pneumomediastinum seen', # Pneumomediastinum
+    'pneumonia seen', # Pneumonia
+    'pneumoperitoneum seen', # Pneumoperitoneum
+    'pneumothorax seen', # Pneumothorax
+    'subcutaneous emphysema seen', # Subcutaneous Emphysema
+    'support devices seen', # Support Devices
+    'tortuous aorta seen', # Tortuous Aorta
+]
+assert len(LABEL_BASED_FACTS__MIMIC_CXR_LT) == len(MIMIC_CXR_LT_LABELS)
+assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__MIMIC_CXR_LT)
+
+LABEL_BASED_FACTS__CHEST_IMAGENOME = [
+    'airspace opacity seen', # Airspace Opacity
+    'atelectasis seen', # Atelectasis
+    'bone lesion seen', # Bone Lesion
+    'bronchiectasis seen', # Bronchiectasis
+    'calcified nodule seen', # Calcified Nodule
+    'clavicle fracture seen', # Clavicle Fracture
+    'consolidation seen', # Consolidation
+    'costophrenic angle blunting seen', # Costophrenic Angle Blunting
+    'cyst/bullae seen', # Cyst/Bullae
+    'diaphragmatic eventration (benign) seen', # Diaphragmatic Eventration (Benign)
+    'elevated hemidiaphragm seen', # Elevated Hemidiaphragm
+    'enlarged cardiac silhouette seen', # Enlarged Cardiac Silhouette
+    'enlarged hilum seen', # Enlarged Hilum
+    'hernia seen', # Hernia
+    'hydropneumothorax seen', # Hydropneumothorax
+    'hyperaeration seen', # Hyperaeration
+    'increased reticular markings/ild pattern seen', # Increased Reticular Markings/ILD Pattern 
+    'infiltration seen', # Infiltration
+    'linear/patchy atelectasis seen', # Linear/Patchy Atelectasis
+    'lobar/segmental collapse seen', # Lobar/Segmental Collapse
+    'lung lesion seen', # Lung Lesion
+    'lung opacity seen', # Lung Opacity
+    'mass/nodule (not otherwise specified) seen', # Mass/Nodule (Not Otherwise Specified)
+    'mediastinal displacement seen', # Mediastinal Displacement
+    'mediastinal widening seen', # Mediastinal Widening
+    'multiple masses/nodules seen', # Multiple Masses/Nodules
+    'pleural effusion seen', # Pleural Effusion
+    'pleural/parenchymal scarring seen', # Pleural/Parenchymal Scarring
+    'pneumomediastinum seen', # Pneumomediastinum
+    'pneumothorax seen', # Pneumothorax
+    'pulmonary edema/hazy opacity seen', # Pulmonary Edema/Hazy Opacity
+    'rib fracture seen', # Rib Fracture
+    'scoliosis seen', # Scoliosis
+    'shoulder osteoarthritis seen', # Shoulder Osteoarthritis
+    'spinal degenerative changes seen', # Spinal Degenerative Changes
+    'spinal fracture seen', # Spinal Fracture
+    'sub-diaphragmatic air seen', # Sub-Diaphragmatic Air
+    'subcutaneous air seen', # Subcutaneous Air
+    'superior mediastinal mass/enlargement seen', # Superior Mediastinal Mass/Enlargement
+    'tortuous aorta seen', # Tortuous Aorta
+    'vascular calcification seen', # Vascular Calcification
+    'vascular congestion seen', # Vascular Congestion
+    'vascular redistribution seen', # Vascular Redistribution
+    'aortic graft/repair seen', # Aortic Graft/Repair
+    'cabg grafts seen', # CABG Grafts
+    'cardiac pacer and wires seen', # Cardiac Pacer and Wires
+    'prosthetic valve seen', # Prosthetic Valve
+    'alveolar hemorrhage seen', # Alveolar Hemorrhage
+    'aspiration seen', # Aspiration
+    'copd/emphysema seen', # COPD/Emphysema
+    'fluid overload/heart failure seen', # Fluid Overload/Heart Failure
+    'goiter seen', # Goiter
+    'granulomatous disease seen', # Granulomatous Disease
+    'interstitial lung disease seen', # Interstitial Lung Disease
+    'lung cancer seen', # Lung Cancer
+    'pericardial effusion seen', # Pericardial Effusion
+    'pneumonia seen', # Pneumonia
+    'artifact seen', # Artifact
+    'breast/nipple shadows seen', # Breast/Nipple Shadows
+    'low lung volumes seen', # Low Lung Volumes
+    'rotated seen', # Rotated
+    'skin fold seen', # Skin Fold
+    'alveolar texture seen', # Alveolar Texture
+    'calcified texture seen', # Calcified Texture
+    'interstitial texture seen', # Interstitial Texture
+    'opacity texture seen', # Opacity Texture
+    'chest port seen', # Chest Port
+    'chest tube seen', # Chest Tube
+    'endotracheal tube seen', # Endotracheal Tube
+    'enteric tube seen', # Enteric Tube
+    'ij line seen', # IJ Line
+    'intra-aortic balloon pump seen', # Intra-Aortic Balloon Pump
+    'mediastinal drain seen', # Mediastinal Drain
+    'picc seen', # PICC
+    'pigtail catheter seen', # Pigtail Catheter
+    'subclavian line seen', # Subclavian Line
+    'swan-ganz catheter seen', # Swan-Ganz Catheter
+    'tracheostomy tube seen', # Tracheostomy Tube
+]
+assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__CHEST_IMAGENOME)

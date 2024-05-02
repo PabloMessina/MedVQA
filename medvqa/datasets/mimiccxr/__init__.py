@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 from pathlib import Path
-from medvqa.utils.constants import CHEXPERT_LABELS
+from medvqa.utils.constants import CHEXPERT_LABELS, MIMIC_CXR_LT_LABELS
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_pickle
 load_dotenv()
 
@@ -9,6 +9,7 @@ from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR,
 import os
 import re
 import glob
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -276,6 +277,18 @@ def get_imageId2PartPatientStudy():
         imageId2partpatstud[imageId] = (partId, patientId, studyId)
     save_pickle(imageId2partpatstud, cache_path)
     return imageId2partpatstud
+
+def get_split2imageIds():
+    cache_path = os.path.join(MIMICCXR_CACHE_DIR, 'split2imageIds.pkl')
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
+    split2imageIds = {split: [] for split in MIMICCXR_SPLIT_NAMES}
+    metadata = load_mimiccxr_reports_detailed_metadata()
+    for split, dicom_id_view_pos_pairs in zip(metadata['splits'], metadata['dicom_id_view_pos_pairs']):
+        for dicom_id, _ in dicom_id_view_pos_pairs:
+            split2imageIds[split].append(dicom_id)
+    save_pickle(split2imageIds, cache_path)
+    return split2imageIds
 
 def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
     metadata = get_detailed_metadata_for_dicom_id(dicom_id)
@@ -602,3 +615,34 @@ def get_train_val_test_summary_text_for_chexpert_label(label, labels_filename):
                     f'Val: {val_pos_count} ({val_fraction:.2%})\n'
                     f'Test: {test_pos_count} ({test_fraction:.2%})')
     return summary_text
+
+def get_mimic_cxr_lt_ridx2labels():
+    metadata = load_mimiccxr_reports_detailed_metadata()
+    study_id_to_report_idx = dict()
+    for i, study_id in enumerate(metadata['study_ids']):
+        assert study_id not in study_id_to_report_idx
+        study_id_to_report_idx[study_id] = i
+
+    # Load MIMIC-CXR-LT labels
+    df_train = pd.read_csv(MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH)
+    df_dev = pd.read_csv(MIMIC_CXR_LT_LABELS_DEV_CSV_PATH)
+    df_test = pd.read_csv(MIMIC_CXR_LT_LABELS_TEST_CSV_PATH)
+    print(f"len(df_train): {len(df_train)}")
+    print(f"len(df_dev): {len(df_dev)}")
+    print(f"len(df_test): {len(df_test)}")
+
+    n_reports = len(metadata['study_ids'])
+    report_labels = [None] * n_reports
+    for df in [df_train, df_dev, df_test]:
+        labels = df[MIMIC_CXR_LT_LABELS].values
+        for i, study_id in enumerate(df['study_id']):
+            report_idx = study_id_to_report_idx[study_id]
+            if report_labels[report_idx] is not None:
+                assert np.array_equal(report_labels[report_idx], labels[i])
+            else:
+                report_labels[report_idx] = labels[i]
+    
+    n_nones = sum(1 for x in report_labels if type(x) == type(None))
+    assert n_nones == 0, f'{n_nones}/{n_reports} reports have None labels'
+    report_labels = np.array(report_labels)
+    return report_labels

@@ -280,8 +280,9 @@ def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_L
 
     metric_name = 'bert_score'
     if metric_name in metric_names:
-        from bert_score import score as bert_score
-        P, R, F1 = bert_score(gen_texts, gt_texts, lang='en', verbose=True, use_fast_tokenizer=True)
+        from medvqa.metrics.nlp import BertScore
+        scorer = BertScore()
+        P, R, F1 = scorer(gen_texts, gt_texts)
         metrics['bert_score_p'] = P.mean().item()
         metrics['bert_score_r'] = R.mean().item()
         metrics['bert_score_f1'] = F1.mean().item()

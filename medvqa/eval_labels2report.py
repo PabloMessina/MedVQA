@@ -41,7 +41,7 @@ from medvqa.utils.handlers import (
 )
 from medvqa.utils.files import (
     get_results_folder_path,
-    save_to_pickle,
+    save_pickle,
 )
 from medvqa.training.labels2report import get_engine
 from medvqa.datasets.dataloading_utils import get_labels2report_collate_batch_fn
@@ -90,7 +90,7 @@ def _compute_and_save_report_level_metrics__mimiccxr(results_dict, eval_dataset_
         save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_report_level_metrics(num_beams={num_beams}).pkl')
     else:
         save_path = os.path.join(results_folder_path, f'{eval_dataset_name}_report_level_metrics.pkl')
-    save_to_pickle(report_metrics, save_path)
+    save_pickle(report_metrics, save_path)
     print(f'Report-level metrics successfully saved to ', end='')
     print_bold(save_path)
     if save_reports:
@@ -101,7 +101,7 @@ def _compute_and_save_report_level_metrics__mimiccxr(results_dict, eval_dataset_
         metadata = load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename)
         gt_report_paths = [metadata['filepaths'][dataset.report_ids[idx]] for idx in idxs]
         to_save = { 'gen_reports': gen_reports, 'gt_reports': gt_reports, 'gt_report_paths': gt_report_paths }
-        save_to_pickle(to_save, save_path)
+        save_pickle(to_save, save_path)
         print(f'Generated reports successfully saved to ', end='')
         print_bold(save_path)
     if save_input_labels:
@@ -112,7 +112,7 @@ def _compute_and_save_report_level_metrics__mimiccxr(results_dict, eval_dataset_
             print_bold(save_path)
         else:
             input_label_breakdown = get_input_label_breakdown(idxs)
-            save_to_pickle(input_label_breakdown, save_path)
+            save_pickle(input_label_breakdown, save_path)
             print(f'Input labels successfully saved to ', end='')
             print_bold(save_path)
     return report_metrics

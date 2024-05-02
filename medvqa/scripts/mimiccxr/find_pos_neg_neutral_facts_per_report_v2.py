@@ -8,6 +8,7 @@ from multiprocessing import Pool
 from sklearn.cluster import KMeans
 from sklearn_extra.cluster import KMedoids
 from medvqa.datasets.dataloading_utils import embedding_based_nli_collate_batch_fn
+from medvqa.datasets.mimiccxr import load_mimiccxr_reports_detailed_metadata
 from medvqa.datasets.text_data_utils import word_tokenize_texts_in_parallel
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
@@ -18,7 +19,7 @@ from medvqa.utils.data_structures import UnionFind
 from medvqa.utils.files import get_cached_jsonl_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
 from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_red
+from medvqa.utils.logging import print_blue, print_orange, print_red
 from medvqa.utils.math import rank_vectors_by_dot_product
 
 class _Task:
@@ -34,6 +35,7 @@ class _Task:
     FIND_K_MOST_SIMILAR_REPRESENTATIVE_FACTS_FOR_EACH_FACT = 'find_k_most_similar_representative_facts_for_each_fact'
     ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS = 'assign_representative_facts_to_reports'
     INTEGRATE_AND_EXPORT_ALL_DATA = 'integrate_and_export_all_data'
+    EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS = 'export_dicom_id_to_positive_negative_facts'
     
     @staticmethod
     def choices():
@@ -50,6 +52,7 @@ class _Task:
             _Task.FIND_K_MOST_SIMILAR_REPRESENTATIVE_FACTS_FOR_EACH_FACT,
             _Task.ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS,
             _Task.INTEGRATE_AND_EXPORT_ALL_DATA,
+            _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS,
         ]
     
 GPT4_OUTPUT_TO_NLI = {
@@ -61,15 +64,16 @@ GPT4_OUTPUT_TO_NLI = {
 }
 
 def _assign_gpt4_facts_to_reports(
-    gpt4_input_output_jsonl_filepaths,
+    gpt4_report_nli_input_output_jsonl_filepaths,
     integrated_report_facts_jsonl_filepaths,
     allowed_facts,
     save_path_prefix,
+    return_without_saving=False,
 ):
     report2labels = {}
     skipped = 0
     not_skipped = 0
-    for filepath in gpt4_input_output_jsonl_filepaths:
+    for filepath in gpt4_report_nli_input_output_jsonl_filepaths:
         print(f'Loading {filepath}...')
         input_output_jsonl = get_cached_jsonl_file(filepath)
         for input_output in input_output_jsonl:
@@ -77,7 +81,7 @@ def _assign_gpt4_facts_to_reports(
             report_start_idx = query.index("#F ") + 3
             report_end_idx = query.index(" | #H ")
             h = query[report_end_idx+6:]
-            if h not in allowed_facts:
+            if allowed_facts is not None and h not in allowed_facts:
                 skipped += 1
                 continue
             not_skipped += 1
@@ -115,12 +119,15 @@ def _assign_gpt4_facts_to_reports(
                 count += 1
         print(f'Number of reports with labels: {count}/{n}')
 
+    if return_without_saving:
+        return output
+
     output_filepath = get_file_path_with_hashing_if_too_long(
         folder_path=LARGE_FAST_CACHE_DIR,
         prefix=save_path_prefix,
         strings=[
             *integrated_report_facts_jsonl_filepaths,
-            *gpt4_input_output_jsonl_filepaths,
+            *gpt4_report_nli_input_output_jsonl_filepaths,
             f'skipped={skipped}',
             f'not_skipped={not_skipped}',
         ],
@@ -135,7 +142,7 @@ def assign_gpt4_label_based_facts_to_reports(
 ):
     print_blue(f'Running assign_gpt4_label_based_facts_to_reports()...', bold=True)
     _assign_gpt4_facts_to_reports(
-        gpt4_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+        gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
         integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
         allowed_facts=set(LABEL_BASED_FACTS),
         save_path_prefix='mimiccxr_gpt4_label_based_facts_assigned_to_reports',
@@ -151,7 +158,7 @@ def assign_gpt4_representative_facts_to_reports(
     representative_facts = [data['facts'][i] for i in data['dedup_representative_fact_idxs']]
     print(f'len(representative_facts): {len(representative_facts)}')
     _assign_gpt4_facts_to_reports(
-        gpt4_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+        gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
         integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
         allowed_facts=set(representative_facts),
         save_path_prefix='mimiccxr_gpt4_representative_facts_assigned_to_reports',
@@ -1359,7 +1366,7 @@ def integrate_and_export_all_data(
         'reports': list,
 
         'fact_based_nli_predictions': {
-            'assigned_representative_fact_idxs': np.ndarray,
+            'representative_fact_idxs_per_report': np.ndarray,
             'nli_predictions': np.ndarray,
             'nli_method_ids': np.ndarray,
             'nli_method_id_to_name': dict,
@@ -1481,7 +1488,7 @@ def integrate_and_export_all_data(
     # Save output
     output_filepath = get_file_path_with_hashing_if_too_long(
         folder_path=LARGE_FAST_CACHE_DIR,
-        prefix='mimiccxr_integrated_data',
+        prefix='mimiccxr_report_fact_nli_integrated_data',
         strings=[
             fact_based_integrated_nli_predictions_filepath,
             label_based_integrated_nli_predictions_filepath,
@@ -1495,6 +1502,271 @@ def integrate_and_export_all_data(
         ],
         force_hashing=True,
     )
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
+
+_shared_nli_predictions = None
+_shared_reports = None
+_shared_representative_fact_idxs_per_report = None
+_shared_representative_fact_idxs = None
+_shared_gpt4_nli_preds_per_report = None
+
+def _get_pos_neg_facts_per_report_label_based__task(ridx):
+    pos_facts = []
+    neg_facts = []
+    for lidx in range(len(LABEL_BASED_FACTS)):
+        pred = _shared_nli_predictions[ridx, lidx]
+        if pred == 0: # entailment
+            pos_facts.append(lidx)
+        elif pred == 1 or pred == 2: # neutral or contradiction
+            neg_facts.append(lidx)
+        elif pred == 3: # undecided
+            continue
+        else:
+            raise ValueError(f'Invalid prediction: {pred}')
+    return pos_facts, neg_facts
+
+def _get_pos_neg_facts_per_report_fact_based__task(ridx):
+    pos_facts = set()
+    neg_facts = set()
+    # Find all facts in the report
+    fact_idxs = _shared_reports[ridx]['findings_fact_idxs'] + _shared_reports[ridx]['impression_fact_idxs']
+    pos_facts.update(fact_idxs) # all facts in the report are true -> positive
+    # Find representative facts
+    for i, idx in enumerate(_shared_representative_fact_idxs_per_report[ridx]):
+        fidx = _shared_representative_fact_idxs[idx]
+        pred = _shared_nli_predictions[ridx, i]
+        if pred == 0: # entailment
+            pos_facts.add(fidx) # positive
+        elif pred == 1 or pred == 2: # neutral or contradiction
+            neg_facts.add(fidx) # negative
+        elif pred == 3: # undecided
+            continue
+        else:
+            raise ValueError(f'Invalid prediction: {pred}')
+    # Facts annotated by GPT-4
+    for f, l in _shared_gpt4_nli_preds_per_report[ridx].items():
+        fidx = _shared_fact2idx[f]
+        if l == 0:
+            pos_facts.add(fidx)
+        elif l == 1 or l == 2:
+            neg_facts.add(fidx)
+        else:
+            raise ValueError(f'Invalid label: {l}')
+        
+    return list(pos_facts), list(neg_facts)
+
+def _get_pos_neg_facts_per_report_label_based(data, num_processes=10):
+    label_based_nli_predictions = data['label_based_nli_predictions']
+    nli_predictions = label_based_nli_predictions['nli_predictions']
+    n_reports = len(data['reports'])
+    global _shared_nli_predictions
+    _shared_nli_predictions = nli_predictions
+    print_blue(f'Getting positive and negative facts per report with num_processes={num_processes}...')
+    with Pool(num_processes) as p:
+        pos_neg_facts_per_report = p.map(_get_pos_neg_facts_per_report_label_based__task, range(n_reports))
+    return pos_neg_facts_per_report
+
+def _get_pos_neg_facts_per_report_fact_based(data, gpt4_report_nli_input_output_jsonl_filepaths,
+                                                integrated_report_facts_jsonl_filepaths,
+                                                fact_embedding_model_name, fact_embedding_model_checkpoint_folder_path,
+                                                fact_embedding_batch_size, fact_embedding_num_workers,
+                                                num_processes=10):
+    assert gpt4_report_nli_input_output_jsonl_filepaths is not None
+    assert integrated_report_facts_jsonl_filepaths is not None
+    fact_based_nli_predictions = data['fact_based_nli_predictions']
+    reports = data['reports']
+    representative_fact_idxs = data['representative_fact_idxs']
+    nli_predictions = fact_based_nli_predictions['nli_predictions']
+    representative_fact_idxs_per_report = fact_based_nli_predictions['representative_fact_idxs_per_report']
+    facts = data['extracted_facts']
+    embeddings = data['extracted_fact_embeddings']
+    fact2idx = {f: i for i, f in enumerate(facts)}
+    n_reports = len(data['reports'])
+
+    gpt4_nli_preds_per_report = _assign_gpt4_facts_to_reports(
+        gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+        integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+        allowed_facts=None,
+        save_path_prefix=None,
+        return_without_saving=True,
+    )
+    assert len(gpt4_nli_preds_per_report) == n_reports
+    
+    gpt4_facts = set()
+    for d in gpt4_nli_preds_per_report:
+        gpt4_facts.update(d.keys())
+    facts_set = set(facts)
+    gpt4_extract_facts = list(gpt4_facts - facts_set)
+    
+    if len(gpt4_extract_facts):
+        print_orange(f'NOTE: {len(gpt4_extract_facts)} facts extracted by GPT-4 are not in the extracted facts.', bold=True)
+        print_orange('Adding them to the extracted facts...', bold=True)
+        assert fact_embedding_model_name is not None
+        assert fact_embedding_model_checkpoint_folder_path is not None
+        assert fact_embedding_batch_size is not None
+        assert fact_embedding_num_workers is not None
+        all_facts = facts + gpt4_extract_facts
+        fact_encoder = CachedTextEmbeddingExtractor(
+            model_name=fact_embedding_model_name,
+            model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            batch_size=fact_embedding_batch_size,
+            num_workers=fact_embedding_num_workers,
+            device='cuda',
+        )
+        all_fact_embeddings = fact_encoder.compute_text_embeddings(all_facts)
+        embeddings = all_fact_embeddings
+        facts = all_facts
+        fact2idx = {f: i for i, f in enumerate(facts)}
+        print(f'len(facts): {len(facts)}')
+        print(f'embeddings.shape: {embeddings.shape}')
+
+    global _shared_nli_predictions
+    global _shared_reports
+    global _shared_representative_fact_idxs_per_report
+    global _shared_representative_fact_idxs
+    global _shared_gpt4_nli_preds_per_report
+    global _shared_fact2idx
+    _shared_nli_predictions = nli_predictions
+    _shared_reports = reports
+    _shared_representative_fact_idxs_per_report = representative_fact_idxs_per_report
+    _shared_representative_fact_idxs = representative_fact_idxs
+    _shared_gpt4_nli_preds_per_report = gpt4_nli_preds_per_report
+    _shared_fact2idx = fact2idx
+
+    print_blue(f'Getting positive and negative facts per report with num_processes={num_processes}...')
+    with Pool(num_processes) as p:
+        pos_neg_facts_per_report = p.map(_get_pos_neg_facts_per_report_fact_based__task, range(n_reports))
+
+    return pos_neg_facts_per_report, facts, embeddings
+
+def export_dicom_id_to_positive_negative_facts(
+    mode,
+    mimiccxr_report_fact_nli_integrated_data_filepath,
+    gpt4_report_nli_input_output_jsonl_filepaths,
+    integrated_report_facts_jsonl_filepaths,
+    fact_embedding_model_name,
+    fact_embedding_model_checkpoint_folder_path,
+    fact_embedding_batch_size,
+    fact_embedding_num_workers,
+):
+    assert mode in ['label_based', 'fact_based', 'all']
+    assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+    print(f'Reading {mimiccxr_report_fact_nli_integrated_data_filepath}...')
+    data = load_pickle(mimiccxr_report_fact_nli_integrated_data_filepath)
+    n_reports = len(data['reports'])
+
+    if mode == 'label_based':
+        facts = data['label_based_facts']
+        embeddings = data['label_based_fact_embeddings']
+        pos_neg_facts_per_report = _get_pos_neg_facts_per_report_label_based(data)
+        prefix = 'mimiccxr_dicom_id_to_label_based_pos_neg_facts'
+        filepath_strings = [mimiccxr_report_fact_nli_integrated_data_filepath]
+    elif mode == 'fact_based':
+        pos_neg_facts_per_report, facts, embeddings = _get_pos_neg_facts_per_report_fact_based(
+            data=data, gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+            integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+        )
+        prefix = 'mimiccxr_dicom_id_to_fact_based_pos_neg_facts'
+        filepath_strings = [
+            mimiccxr_report_fact_nli_integrated_data_filepath,
+            *gpt4_report_nli_input_output_jsonl_filepaths,
+            *integrated_report_facts_jsonl_filepaths,
+        ]
+    elif mode == 'all':
+        facts1 = data['label_based_facts']
+        embeddings1 = data['label_based_fact_embeddings']
+        pos_neg_facts_per_report1 = _get_pos_neg_facts_per_report_label_based(data)
+        assert len(facts1) == len(embeddings1)
+        assert n_reports == len(pos_neg_facts_per_report1)
+
+        pos_neg_facts_per_report2, facts2, embeddings2 = _get_pos_neg_facts_per_report_fact_based(
+            data=data, gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+            integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+        )
+        assert len(facts2) == len(embeddings2)
+        assert n_reports == len(pos_neg_facts_per_report1)
+        
+        print_blue('Merging label-based and fact-based data...')
+
+        f2idx2 = {f: i for i, f in enumerate(facts2)}
+        facts1_set = set(facts1)
+        facts2_filtered = [f for f in facts2 if f not in facts1_set]
+        facts = facts1 + facts2_filtered
+        f2idx = {f: i for i, f in enumerate(facts)}
+        idx2_to_idx = [f2idx[f] for f in facts2]
+        embeddings = np.concatenate([embeddings1, embeddings2[[f2idx2[f] for f in facts2_filtered]]], axis=0)
+        pos_neg_facts_per_report = [None] * n_reports
+        for ridx in tqdm(range(n_reports), total=n_reports, mininterval=2):
+            pos_fact_idxs1 = pos_neg_facts_per_report1[ridx][0]
+            neg_fact_idxs1 = pos_neg_facts_per_report1[ridx][1]
+            pos_fact_idxs2 = pos_neg_facts_per_report2[ridx][0]
+            neg_fact_idxs2 = pos_neg_facts_per_report2[ridx][1]
+            pos_fact_idxs2 = [idx2_to_idx[i] for i in pos_fact_idxs2]
+            neg_fact_idxs2 = [idx2_to_idx[i] for i in neg_fact_idxs2]
+            pos_fact_idxs = set()
+            neg_fact_idxs = set()
+            pos_fact_idxs.update(pos_fact_idxs1)
+            pos_fact_idxs.update(pos_fact_idxs2)
+            neg_fact_idxs.update(neg_fact_idxs1)
+            neg_fact_idxs.update(neg_fact_idxs2)
+            pos_neg_facts_per_report[ridx] = (list(pos_fact_idxs), list(neg_fact_idxs))
+        prefix = 'mimiccxr_dicom_id_to_all_pos_neg_facts'
+        filepath_strings = [
+            mimiccxr_report_fact_nli_integrated_data_filepath,
+            *gpt4_report_nli_input_output_jsonl_filepaths,
+            *integrated_report_facts_jsonl_filepaths,
+        ]
+
+    # Detect conflicts
+    print_blue('Detecting conflicts...')
+    ridxs_with_conflict = []
+    for ridx in tqdm(range(n_reports), total=n_reports, mininterval=2):
+        pos_fidxs = set(pos_neg_facts_per_report[ridx][0])
+        neg_fidxs = set(pos_neg_facts_per_report[ridx][1])
+        conflicting_fidxs = pos_fidxs & neg_fidxs
+        if len(conflicting_fidxs) > 0:
+            # there are conflicting facts
+            conflicting_fidxs = list(conflicting_fidxs)
+            conflicting_fidxs.sort()
+            ridxs_with_conflict.append({
+                'ridx': ridx,
+                'conflicting_fidxs': conflicting_fidxs,
+            })
+            # remove negative facts that are also positive
+            neg_fidxs -= conflicting_fidxs
+            pos_neg_facts_per_report[ridx][1] = list(neg_fidxs)
+
+    if len(ridxs_with_conflict) > 0:
+        print_red(f'WARNING: {len(ridxs_with_conflict)} reports have conflicting positive and negative facts.', bold=True)
+
+    # Build dicom_id to pos/neg facts
+    detailed_metadata = load_mimiccxr_reports_detailed_metadata()
+    dicom_id_view_pos_pairs = detailed_metadata['dicom_id_view_pos_pairs']
+    assert len(dicom_id_view_pos_pairs) == n_reports
+    dicom_id_to_pos_neg_facts = {}
+    for ridx, pairs in enumerate(dicom_id_view_pos_pairs):
+        for dicom_id, _ in pairs:
+            dicom_id_to_pos_neg_facts[dicom_id] = pos_neg_facts_per_report[ridx]
+
+    # Save output
+    output = {
+        'facts': facts,
+        'embeddings': embeddings,
+        'dicom_id_to_pos_neg_facts': dicom_id_to_pos_neg_facts,
+        'ridxs_with_conflict': ridxs_with_conflict,
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        folder_path=LARGE_FAST_CACHE_DIR, prefix=prefix, strings=filepath_strings, force_hashing=True)
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
@@ -1545,6 +1817,8 @@ def main():
     parser.add_argument('--fact_based_integrated_nli_predictions_filepath', type=str)
     parser.add_argument('--label_based_integrated_nli_predictions_filepath', type=str)
     parser.add_argument('--integrated_sentence_facts_jsonl_filepath', type=str)
+    parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
+    parser.add_argument('--pos_neg_facts_mode', type=str, choices=['label_based', 'fact_based', 'all'])
     args = parser.parse_args()
 
     if args.task == _Task.ASSIGN_GPT4_LABEL_BASED_FACTS_TO_REPORTS:
@@ -1735,6 +2009,19 @@ def main():
             gpt4_report_nli_input_output_jsonl_filepaths=args.gpt4_report_nli_input_output_jsonl_filepaths,
             integrated_report_facts_jsonl_filepath=args.integrated_report_facts_jsonl_filepath,
             integrated_sentence_facts_jsonl_filepath=args.integrated_sentence_facts_jsonl_filepath,
+            fact_embedding_model_name=args.fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=args.fact_embedding_batch_size,
+            fact_embedding_num_workers=args.fact_embedding_num_workers,
+        )
+    elif args.task == _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS:
+        assert args.pos_neg_facts_mode is not None
+        assert args.mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        export_dicom_id_to_positive_negative_facts(
+            mode=args.pos_neg_facts_mode,
+            mimiccxr_report_fact_nli_integrated_data_filepath=args.mimiccxr_report_fact_nli_integrated_data_filepath,
+            gpt4_report_nli_input_output_jsonl_filepaths=args.gpt4_report_nli_input_output_jsonl_filepaths,
+            integrated_report_facts_jsonl_filepaths=args.integrated_report_facts_jsonl_filepaths,
             fact_embedding_model_name=args.fact_embedding_model_name,
             fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
             fact_embedding_batch_size=args.fact_embedding_batch_size,

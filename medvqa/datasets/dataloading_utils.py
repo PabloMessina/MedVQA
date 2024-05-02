@@ -1095,8 +1095,8 @@ def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
                 batch_dict['img'] = torch.stack([x['i'] for x in batch])
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
-            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
-            batch_dict['ne'] = torch.tensor([x['ne'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+            batch_dict['ne'] = torch.tensor(np.array([x['ne'] for x in batch]))
             return batch_dict
     elif flag == 'pg': # phrase grounding
         def collate_batch_fn(batch):
@@ -1110,13 +1110,13 @@ def get_phrase_grounding_collate_batch_fn(flag, use_yolov8=False):
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
             # try:
-            batch_dict['pe'] = torch.tensor([x['pe'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
             # except ValueError:
             #     print('Error in collate_batch_fn')
             #     for x in batch:
             #         print(f'x[\'pe\'].shape = {x["pe"].shape}')
             #     raise
-            batch_dict['pgm'] = torch.tensor([x['pgm'] for x in batch])
+            batch_dict['pgm'] = torch.tensor(np.array([x['pgm'] for x in batch]))
             return batch_dict
     elif flag == 'cibg': # chest imagenome bbox grounding
         assert use_yolov8

@@ -212,6 +212,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 test_batch_size_factor=1,
                 mask_width=None, mask_height=None,
                 use_facts_for_train=False,
+                use_facts_for_test=False,
                 dicom_id_to_pos_neg_facts_filepath=None,
                 use_mscxr_for_train=False,
                 use_mscxr_for_test=False,
@@ -261,15 +262,15 @@ class MIMICCXR_PhraseGroundingTrainer:
         print(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
 
         # Create train mimiccxr facts dataset
-        if use_facts_for_train:
-            print_bold('Preparing MIMIC-CXR-Facts datasets and dataloaders for training...')
+        if use_facts_for_train or use_facts_for_test:
+            print_bold('Preparing MIMIC-CXR-Facts datasets and dataloaders for training/testing...')
             assert dicom_id_to_pos_neg_facts_filepath is not None
             assert fact_grounding_collate_batch_fn is not None
             assert num_train_workers is not None
             assert train_image_transform is not None
 
             tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
-            fact_embeddings = tmp['fact_embeddings']
+            fact_embeddings = tmp['embeddings']
             dicom_id_to_pos_neg_facts = tmp['dicom_id_to_pos_neg_facts']
             print(f'fact_embeddings.shape = {fact_embeddings.shape}')
 
@@ -281,17 +282,37 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
+            if use_facts_for_train:
+                train_indices = []
+            if use_facts_for_test:
+                test_indices = []
+
             idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
+            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
                     mimiccxr_metadata['subject_ids'],
                     mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                    mimiccxr_metadata['dicom_id_view_pos_pairs'],
+                    mimiccxr_metadata['splits'])), mininterval=2):
                 for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id in forbidden_train_dicom_ids:
-                        continue
                     if dicom_id not in dicom_id_to_pos_neg_facts:
                         continue
+                    if split == 'validate' or split == 'test':
+                        if use_facts_for_test:
+                            test_indices.append(idx)
+                        else:
+                            if dicom_id in forbidden_train_dicom_ids:
+                                continue
+                            train_indices.append(idx)
+                    elif split == 'train':
+                        if use_facts_for_train:
+                            if dicom_id in forbidden_train_dicom_ids:
+                                continue
+                            train_indices.append(idx)
+                        else:
+                            continue
+                    else:
+                        raise ValueError(f'Invalid split: {split}')
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                     pos_neg_facts = dicom_id_to_pos_neg_facts[dicom_id]
                     assert len(pos_neg_facts) == 2
@@ -303,39 +324,90 @@ class MIMICCXR_PhraseGroundingTrainer:
             image_paths = image_paths[:idx]
             positive_facts = positive_facts[:idx]
             negative_facts = negative_facts[:idx]
+            aux = 0
+            if use_facts_for_train:
+                print(f'len(train_indices) = {len(train_indices)}')
+                aux += len(train_indices)
+            if use_facts_for_test:
+                print(f'len(test_indices) = {len(test_indices)}')
+                aux += len(test_indices)
+            assert aux == idx # sanity check
 
             # Create a mapping from number of facts to indices
-            num_facts_2_idxs = {}
-            for i, (pos_facts, neg_facts) in enumerate(zip(self.train_positive_facts, self.train_negative_facts)):
-                assert len(pos_facts) > 0
-                assert len(neg_facts) > 0
-                num_facts = min(len(pos_facts), len(neg_facts), max_phrases_per_image)
-                try:
-                    num_facts_2_idxs[num_facts].append(i)
-                except KeyError:
-                    num_facts_2_idxs[num_facts] = [i]
-            
+            if use_facts_for_train:
+                num_facts_2_train_idxs = {}
+                for i in train_indices:
+                    pos_facts = positive_facts[i]
+                    neg_facts = negative_facts[i]
+                    assert len(pos_facts) > 0
+                    assert len(neg_facts) > 0
+                    num_facts = min(len(pos_facts), len(neg_facts), max_phrases_per_image)
+                    try:
+                        num_facts_2_train_idxs[num_facts].append(i)
+                    except KeyError:
+                        num_facts_2_train_idxs[num_facts] = [i]
+            if use_facts_for_test:
+                num_facts_2_test_idxs = {}
+                for i in test_indices:
+                    pos_facts = positive_facts[i]
+                    neg_facts = negative_facts[i]
+                    assert len(pos_facts) > 0
+                    assert len(neg_facts) > 0
+                    num_facts = min(len(pos_facts), len(neg_facts), max_phrases_per_image)
+                    try:
+                        num_facts_2_test_idxs[num_facts].append(i)
+                    except KeyError:
+                        num_facts_2_test_idxs[num_facts] = [i]
+
             # Create dataset and dataloader for training
-            train_fact_datasets = []
-            train_fact_dataloaders = []
-            for num_facts, indices in num_facts_2_idxs.items():
-                print(f'Number of facts: {num_facts}, # images: {len(indices)}')
-                dataset = MIMICCXR_FactGroundingDataset(
-                    image_paths=image_paths, image_transform=train_image_transform,
-                    fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
-                    indices=indices, num_facts=num_facts)
-                batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_facts), 1) # at least 1 image per batch
-                dataloader = DataLoader(
-                    dataset,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=num_train_workers,
-                    collate_fn=fact_grounding_collate_batch_fn,
-                    pin_memory=True,
-                )
-                train_fact_datasets.append(dataset)
-                train_fact_dataloaders.append(dataloader)
-            self.train_fact_dataloader = SequentialDataLoader(train_fact_dataloaders)
+            if use_facts_for_train:
+                print_bold('Building train fact dataloaders...')
+                train_fact_datasets = []
+                train_fact_dataloaders = []
+                for num_facts, indices in num_facts_2_train_idxs.items():
+                    print(f'Number of facts: {num_facts}, # images: {len(indices)}')
+                    dataset = MIMICCXR_FactGroundingDataset(
+                        image_paths=image_paths, image_transform=train_image_transform,
+                        fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                        indices=indices, num_facts=num_facts)
+                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_facts), 1) # at least 1 image per batch
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=True,
+                        num_workers=num_train_workers,
+                        collate_fn=fact_grounding_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    train_fact_datasets.append(dataset)
+                    train_fact_dataloaders.append(dataloader)
+                self.train_fact_dataloader = SequentialDataLoader(train_fact_dataloaders)
+                print(f'len(self.train_fact_dataloader) = {len(self.train_fact_dataloader)}')
+
+            # Create dataset and dataloader for testing
+            if use_facts_for_test:
+                print_bold('Building test fact dataloaders...')
+                test_fact_datasets = []
+                test_fact_dataloaders = []
+                for num_facts, indices in num_facts_2_test_idxs.items():
+                    print(f'Number of facts: {num_facts}, # images: {len(indices)}')
+                    dataset = MIMICCXR_FactGroundingDataset(
+                        image_paths=image_paths, image_transform=test_image_transform,
+                        fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                        indices=indices, num_facts=num_facts)
+                    batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // num_facts), 1) * test_batch_size_factor)
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=fact_grounding_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    test_fact_datasets.append(dataset)
+                    test_fact_dataloaders.append(dataloader)
+                self.test_fact_dataloader = SequentialDataLoader(test_fact_dataloaders)
+                print(f'len(self.test_fact_dataloader) = {len(self.test_fact_dataloader)}')
 
         # Create mscxr train/test dataset and dataloader
         if use_mscxr_for_train or use_mscxr_for_test:

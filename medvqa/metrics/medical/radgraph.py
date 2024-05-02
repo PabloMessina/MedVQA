@@ -1,12 +1,12 @@
-from time import time
+# from time import time
 import os
-import subprocess
+# import subprocess
 from medvqa.datasets.text_data_utils import split_text_into_chunks
-from medvqa.utils.common import CACHE_DIR, SOURCE_DIR, TMP_DIR, get_timestamp
-from medvqa.utils.files import get_cached_pickle_file, load_json, save_pickle
+from medvqa.utils.common import CACHE_DIR
+from medvqa.utils.files import get_cached_pickle_file, save_pickle
 from medvqa.utils.hashing import hash_string
-from medvqa.datasets.radgraph import RADGRAPH_MODEL_CHECKPOINT_PATH, DYGIE_PACKAGE_PARENT_FOLDER
-
+# from medvqa.datasets.radgraph import RADGRAPH_MODEL_CHECKPOINT_PATH, DYGIE_PACKAGE_PARENT_FOLDER
+from radgraph import RadGraph
 
 def compute_label_dict(data, label2string):
     entities = data['entities']
@@ -96,51 +96,62 @@ class RadGraphLabeler:
             if self.verbose:
                 print(f'RadGraph: {len(unlabeled_texts)} texts not found in cache, invoking RadGraph labeler ...')
             
-            # Create a temporary folder with one file per text
-            timestamp = get_timestamp()
-            temp_dir = os.path.join(TMP_DIR, 'radgraph', timestamp)
-            os.makedirs(temp_dir, exist_ok=True)
-            temp_files = []
-            for i, text in enumerate(unlabeled_texts):
-                temp_file = os.path.join(temp_dir, f'{i}.txt')
-                with open(temp_file, 'w') as f:
-                    f.write(text.lower()) # by lowercasing, we reduce noise in the labeling process
-                temp_files.append(temp_file)
+            # # Create a temporary folder with one file per text
+            # timestamp = get_timestamp()
+            # temp_dir = os.path.join(TMP_DIR, 'radgraph', timestamp)
+            # os.makedirs(temp_dir, exist_ok=True)
+            # temp_files = []
+            # for i, text in enumerate(unlabeled_texts):
+            #     temp_file = os.path.join(temp_dir, f'{i}.txt')
+            #     with open(temp_file, 'w') as f:
+            #         f.write(text.lower()) # by lowercasing, we reduce noise in the labeling process
+            #     temp_files.append(temp_file)
             
-            # Invoke RadGraph labeler
-            out_path = os.path.join(TMP_DIR, 'radgraph', 'results', f'{timestamp}.jsonl')
-            temp_folder = os.path.join(TMP_DIR, 'radgraph', 'temp')
-            command = (
-                f'conda run -n dygiepp python3 {SOURCE_DIR}/medvqa/scripts/radgraph/radgraph_allennlp_inference.py '
-                f'--model_path {RADGRAPH_MODEL_CHECKPOINT_PATH} '
-                f'--dygie_package_parent_folder {DYGIE_PACKAGE_PARENT_FOLDER} '
-                f'--data_path {temp_dir} '
-                f'--out_path {out_path} '
-                f'--temp_folder {temp_folder} '
-                f'--cuda_device {cuda_device}'
-            )
-            if self.verbose:
-                print(f'RadGraph: invoking command {command} ...')
-            time_before = time()
-            ret = subprocess.call(command, shell=True)
-            time_after = time()
-            if self.verbose:
-                print(f'RadGraph labeler took {time_after-time_before} seconds')
-            if ret != 0:
-                raise Exception('RadGraph labeler failed')
-            assert os.path.exists(out_path), f'RadGraph labeler failed to generate output file {out_path}'
+            # # Invoke RadGraph labeler
+            # out_path = os.path.join(TMP_DIR, 'radgraph', 'results', f'{timestamp}.jsonl')
+            # temp_folder = os.path.join(TMP_DIR, 'radgraph', 'temp')
+            # command = (
+            #     f'conda run -n dygiepp python3 {SOURCE_DIR}/medvqa/scripts/radgraph/radgraph_allennlp_inference.py '
+            #     f'--model_path {RADGRAPH_MODEL_CHECKPOINT_PATH} '
+            #     f'--dygie_package_parent_folder {DYGIE_PACKAGE_PARENT_FOLDER} '
+            #     f'--data_path {temp_dir} '
+            #     f'--out_path {out_path} '
+            #     f'--temp_folder {temp_folder} '
+            #     f'--cuda_device {cuda_device}'
+            # )
+            # if self.verbose:
+            #     print(f'RadGraph: invoking command {command} ...')
+            # time_before = time()
+            # ret = subprocess.call(command, shell=True)
+            # time_after = time()
+            # if self.verbose:
+            #     print(f'RadGraph labeler took {time_after-time_before} seconds')
+            # if ret != 0:
+            #     raise Exception('RadGraph labeler failed')
+            # assert os.path.exists(out_path), f'RadGraph labeler failed to generate output file {out_path}'
 
-            # Read output file
-            output = load_json(out_path)
-            assert len(output) == len(unlabeled_texts)
+            # # Read output file
+            # output = load_json(out_path)
+            # assert len(output) == len(unlabeled_texts)
+
+            # # Parse output file
+            # labels = [None] * len(unlabeled_texts)
+            # for input_path, data in output.items():
+            #     filename = os.path.basename(input_path)
+            #     idx = int(filename.split('.')[0])
+            #     labels[idx] = compute_label_dict(data, self.label2string)
+            # assert None not in labels
+                
+            # Create instance of RadGraph
+            radgraph = RadGraph()
+    
+            # Compute RadGraph annotations
+            annotations = radgraph(unlabeled_texts)
 
             # Parse output file
             labels = [None] * len(unlabeled_texts)
-            for input_path, data in output.items():
-                filename = os.path.basename(input_path)
-                idx = int(filename.split('.')[0])
-                labels[idx] = compute_label_dict(data, self.label2string)
-            assert None not in labels
+            for i in range(len(unlabeled_texts)):
+                labels[i] = compute_label_dict(annotations[str(i)], self.label2string)
 
             # Update cache
             for hash, (s, e) in zip(unlabeled_hashes, unlabeled_ranges):
@@ -163,17 +174,17 @@ class RadGraphLabeler:
             for i, hash in unlabeled_pairs:
                 labels_list[i] = self.hash2labels[hash]
 
-            # Delete temporary folder
-            if self.verbose:
-                print(f'RadGraph: deleting temporary folder {temp_dir} ...')
-            subprocess.call(f'rm -rf {temp_dir}', shell=True)
-            assert not os.path.exists(temp_dir)
+            # # Delete temporary folder
+            # if self.verbose:
+            #     print(f'RadGraph: deleting temporary folder {temp_dir} ...')
+            # subprocess.call(f'rm -rf {temp_dir}', shell=True)
+            # assert not os.path.exists(temp_dir)
 
-            # Delete output file
-            if self.verbose:
-                print(f'RadGraph: deleting output file {out_path} ...')
-            subprocess.call(f'rm {out_path}', shell=True)
-            assert not os.path.exists(out_path)
+            # # Delete output file
+            # if self.verbose:
+            #     print(f'RadGraph: deleting output file {out_path} ...')
+            # subprocess.call(f'rm {out_path}', shell=True)
+            # assert not os.path.exists(out_path)
 
         elif self.verbose:
             print('All labels found in cache, no need to invoke RadGraph labeler')

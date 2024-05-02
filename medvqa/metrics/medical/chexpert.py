@@ -197,10 +197,28 @@ class ChexpertLabeler:
 
     def get_labels(self, texts, fill_empty=0, fill_uncertain=1,
                     n_chunks=10, max_processes=10, tmp_suffix='',
-                    update_cache_on_disk=False, remove_tmp_files=False):
+                    update_cache_on_disk=False, remove_tmp_files=False,
+                    sentokenize=True):
 
         if self.verbose:
             print(f'(*) Chexpert: labeling {len(texts)} texts ...')
+
+        if sentokenize:
+            from nltk.tokenize import sent_tokenize
+            text_sentences = [sent_tokenize(text) for text in texts]
+            unique_sentences = set()
+            for i in range(len(text_sentences)):
+                sentences = text_sentences[i]
+                clean_sentences = []
+                for s in sentences:
+                    s = s.strip()
+                    if len(s) > 0:
+                        unique_sentences.add(s)
+                        clean_sentences.append(s)
+                text_sentences[i] = clean_sentences
+            print(f'Chexpert: found {len(unique_sentences)} unique sentences from {len(texts)} texts')
+            texts = list(unique_sentences)
+            text2idx = {text: i for i, text in enumerate(texts)}
 
         labels_list = [None] * len(texts)
         unlabeled_pairs = []
@@ -240,6 +258,13 @@ class ChexpertLabeler:
         out = np.array(labels_list)
         out = np.where(out == -2, fill_empty, out)
         out = np.where(out == -1, fill_uncertain, out)
+
+        if sentokenize:
+            labels_per_text = [[out[text2idx[s]] for s in sentences] for sentences in text_sentences]
+            out = np.array([merge_raw_labels(labels) for labels in labels_per_text])
+            print(f'Chexpert: merged {len(texts)} texts into {len(out)} texts')
+            print(f'out.shape = {out.shape}')
+        
         return out
 
 

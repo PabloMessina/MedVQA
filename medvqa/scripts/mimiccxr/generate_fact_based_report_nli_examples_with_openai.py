@@ -532,7 +532,7 @@ def evaluate_queries_chest_imagenome(integrated_report_facts_metadata_jsonl_file
     report2labels = {}
     image_id_to_report_idx = get_imageId2reportId()
     valid_label_idxs = [i for i, label in enumerate(ci_label_names) if len(label) == 2\
-                         and label[0] not in ["laterality", "severity", "nlp", "temporal", ]]
+                         and label[0] not in ["laterality", "severity", "nlp", "temporal"]]
     ci_label_names = [ci_label_names[i] for i in valid_label_idxs]
     for i, (image_id, labels) in enumerate(ci_image_id_to_labels.items()):
         if image_id in image_id_to_report_idx:

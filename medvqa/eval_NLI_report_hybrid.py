@@ -53,6 +53,8 @@ def _compute_confusion_matrix(pred_labels, gt_labels, include_undecided=False, s
         non_undecided = pred_labels != 3
         acc = np.sum(pred_labels[non_undecided] == gt_labels[non_undecided]) / np.sum(non_undecided)
         print_blue(f"Accuracy (ignoring undecided): {acc:.4f}", bold=True)
+        # Print percentage of undecided
+        print_blue(f"Percentage of undecided: {np.sum(pred_labels == 3) / len(gt_labels):.4f}", bold=True)
     # Plot a confusion matrix
     if include_undecided:
         cm = confusion_matrix(gt_labels, pred_labels, labels=[0, 1, 2, 3])
