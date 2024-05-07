@@ -1,26 +1,68 @@
 import os
+import math
 import numpy as np
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
-from medvqa.datasets.chexpert import CHEXPERT_DATASET_DIR, CHEXPERT_TRAIN_VAL_CSV_PATH
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
+from medvqa.datasets.chexlocalize import CHEXLOCALIZE_IMAGE_DIR_512X512
+from medvqa.datasets.chexpert import (
+    CHEXPERT_DATASET_DIR,
+    CHEXPERT_TRAIN_VAL_CSV_PATH,
+    CHEXPERT_TEST_LABELS_CSV_PATH,
+    CHEXPERT_TRAIN_VISUALCHEXBERT_CSV_PATH,
+    CHEXPERT_VALID_CSV_PATH,
+)
+from medvqa.datasets.dataloading_utils import (
+    INFINITE_DATASET_LENGTH,
+    CompositeInfiniteDataset,
+    group_indices_for_balanced_sampling,
+)
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
-from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_GENDER2ID, CHEXPERT_LABELS, CHEXPERT_ORIENTATION2ID
+from medvqa.utils.constants import (
+    CHEXPERT_DATASET_ID,
+    CHEXPERT_GENDER2ID,
+    CHEXPERT_LABEL2PHRASE,
+    CHEXPERT_LABELS,
+    CHEXPERT_ORIENTATION2ID,
+)
+from medvqa.utils.files import get_cached_pickle_file
 
+class CheXpertTrainingMode:
+    TRAIN_VAL = 'train_val'
+    ALL = 'all'
 
-class ChexpertTrainerBase(LabelBasedVQAClass):
+    @staticmethod
+    def get_choices():
+        return [CheXpertTrainingMode.TRAIN_VAL, CheXpertTrainingMode.ALL]
 
-    def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None):
+class CheXpertTrainerBase(LabelBasedVQAClass):
 
-        print('Loading dataframe from', CHEXPERT_TRAIN_VAL_CSV_PATH)
-        df = pd.read_csv(CHEXPERT_TRAIN_VAL_CSV_PATH)
+    def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None, load_test_set=False,
+                 use_visualchexbert=True):
+        
+        if use_visualchexbert:
+            print(f'Loading dataframe from {CHEXPERT_TRAIN_VISUALCHEXBERT_CSV_PATH}')
+            df_train_visualchexbert = pd.read_csv(CHEXPERT_TRAIN_VISUALCHEXBERT_CSV_PATH)
+            print(f'len(df_train_visualchexbert) = {len(df_train_visualchexbert)}')
+            df_train_visualchexbert['Path'] = df_train_visualchexbert['Path'].\
+                apply(lambda x: x.replace('CheXpert-v1.0', 'CheXpert-v1.0-small')) # use small images
+            print(f'Loading dataframe from {CHEXPERT_VALID_CSV_PATH}')
+            df_valid = pd.read_csv(CHEXPERT_VALID_CSV_PATH)
+            print(f'len(df_valid) = {len(df_valid)}')
+            # verify that the same columns are present in both dataframes
+            assert set(df_train_visualchexbert.columns) == set(df_valid.columns)
+            df = pd.concat([df_train_visualchexbert, df_valid], ignore_index=True)
+            print(f'len(df) = {len(df)}')
+        else:        
+            print(f'Loading dataframe from {CHEXPERT_TRAIN_VAL_CSV_PATH}')
+            df = pd.read_csv(CHEXPERT_TRAIN_VAL_CSV_PATH)
+        
         df_orien = df['Frontal/Lateral'] + df['AP/PA'].fillna('')
         df_gender = df['Sex']
-        df_labels = df[CHEXPERT_LABELS]        
+        df_labels = df[CHEXPERT_LABELS]
         valid_rows = (df_orien != 'FrontalLL') & (df_orien != 'FrontalRL') & (df_gender != 'Unknown')
 
         df_orien = df_orien[valid_rows]
@@ -57,14 +99,25 @@ class ChexpertTrainerBase(LabelBasedVQAClass):
         super().__init__(
             label_names=CHEXPERT_LABELS,
             templates=TEMPLATES_CHEXPERT_v1,
-            labels_offset=0,
             use_merged_findings=use_merged_findings,
             labels2mergedfindings=findings_remapper[CHEXPERT_DATASET_ID] if use_merged_findings else None,
             n_findings=n_findings,
             labels=self.labels,
         )
 
-class Chexpert_VisualModuleTrainer(ChexpertTrainerBase):
+        if load_test_set:
+            print('Loading test set')
+            df_test_labels = pd.read_csv(CHEXPERT_TEST_LABELS_CSV_PATH)
+            labels = df_test_labels[CHEXPERT_LABELS].to_numpy().astype(np.int8)
+            assert labels.min() == 0 and labels.max() == 1 # binary labels
+            self.test_labels = labels
+            self.test_image_paths = [os.path.join(CHEXLOCALIZE_IMAGE_DIR_512X512, 'test', path[5:]) for path in df_test_labels['Path']]
+            assert all(os.path.exists(path) for path in self.test_image_paths)
+            assert len(self.test_image_paths) == len(self.test_labels)
+            print(f'len(self.test_image_paths) = {len(self.test_image_paths)}')
+            print(f'self.test_labels.shape = {self.test_labels.shape}')
+
+class CheXpert_VisualModuleTrainer(CheXpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers):        
         super().__init__()
         self.transform = transform
@@ -79,12 +132,12 @@ class Chexpert_VisualModuleTrainer(ChexpertTrainerBase):
         )
 
     def _create_visual_dataset(self, indices, infinite=True):
-        return ChexpertImageDataset(
+        return CheXpertImageDataset(
             self.image_paths, self.transform, self.orientations, self.genders, self.labels,
             indices=indices, infinite=infinite
         )
 
-class Chexpert_VQA_Trainer(ChexpertTrainerBase):
+class CheXpert_VQA_Trainer(CheXpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers, tokenizer,
                 include_image=True,
                 use_precomputed_visual_features=False,
@@ -125,7 +178,7 @@ class Chexpert_VQA_Trainer(ChexpertTrainerBase):
 
     def _create_vqa_dataset(self, q, a, indices, infinite=True):
         labels = self.finding_labels if self.use_merged_findings else self.labels
-        return ChexpertVQADataset(
+        return CheXpertVQADataset(
             self.image_paths, self.transform, self.orientations, self.genders, labels,
             question=q, answer=a, indices=indices,
             include_image=self.include_image,
@@ -135,7 +188,7 @@ class Chexpert_VQA_Trainer(ChexpertTrainerBase):
             infinite=infinite
         )
 
-class ChexpertImageDataset(Dataset):
+class CheXpertImageDataset(Dataset):
     
     def __init__(self, image_paths, transform, orientations, genders, chexpert_labels, indices,
                 suffle_indices = True,
@@ -168,7 +221,7 @@ class ChexpertImageDataset(Dataset):
             l=self.labels[idx],
         )
 
-class ChexpertVQADataset(Dataset):
+class CheXpertVQADataset(Dataset):
     
     def __init__(self, image_paths, transform, orientations, genders, chexpert_labels,
                 question, answer, indices,
@@ -227,7 +280,7 @@ class ChexpertVQADataset(Dataset):
             output['vf'] = self.precomputed_visual_features[self.idx2visfeatidx[idx]]
         return output
 
-class Chexpert_MAE_Trainer(MAETrainerBase):
+class CheXpert_MAE_Trainer(MAETrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers):
 
         self.transform = transform
@@ -255,3 +308,129 @@ class Chexpert_MAE_Trainer(MAETrainerBase):
     
     def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
         return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
+    
+class CheXpertPhraseGroundingDataset(Dataset):
+
+    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_classification_labels,
+                 indices, infinite=False, shuffle_indices=False):
+        self.image_paths = image_paths
+        self.image_transform = image_transform
+        self.phrase_embeddings = phrase_embeddings
+        self.phrase_classification_labels = phrase_classification_labels
+        self.indices = indices
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(indices)
+        if shuffle_indices:
+            np.random.shuffle(self.indices)
+
+    def __len__(self):
+        return self._len
+    
+    def __getitem__(self, i):
+        if self.infinite:
+            i %= len(self.indices)
+        i = self.indices[i]
+        image_path = self.image_paths[i]
+        phrase_embeddings = self.phrase_embeddings
+        phrase_classification_labels = self.phrase_classification_labels[i]
+        image = self.image_transform(image_path)
+        return {
+            'i': image,
+            'pe': phrase_embeddings,
+            'pcl': phrase_classification_labels,
+        }
+
+class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
+    def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
+                 phrase_embeddings_filepath, max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
+                 training_data_mode=CheXpertTrainingMode.ALL, use_training_set=True, use_validation_set=True):
+        super().__init__(
+            load_test_set=True,
+            use_visualchexbert=True,
+        )
+
+        assert use_training_set or use_validation_set
+        
+        self.train_image_transform = train_image_transform
+        self.val_image_transform = val_image_transform
+        self.training_data_mode = training_data_mode
+        self.use_validation_set = use_validation_set
+
+        # phrase embeddings
+        print(f'Loding phrase_embeddings and phrases from {phrase_embeddings_filepath}...')
+        tmp = get_cached_pickle_file(phrase_embeddings_filepath)
+        phrase_embeddings = tmp['class_phrase_embeddings']
+        phrases = tmp['class_phrases']
+        assert phrase_embeddings.shape[0] == len(phrases)
+        assert phrases == [CHEXPERT_LABEL2PHRASE[label] for label in CHEXPERT_LABELS]
+        print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+        print(f'len(phrases) = {len(phrases)}')
+        for phrase in phrases:
+            print('\t', phrase)
+
+        # phrase classification labels
+        all_image_paths = np.concatenate([self.image_paths, self.test_image_paths])
+        all_labels = np.concatenate([self.labels, self.test_labels])
+        print(f'len(all_image_paths) = {len(all_image_paths)}')
+        print(f'all_labels.shape = {all_labels.shape}')
+
+        if use_training_set:
+            print('Generating train dataset and dataloader')
+            if training_data_mode == CheXpertTrainingMode.TRAIN_VAL:
+                train_indices = list(range(len(self.labels)))
+            elif training_data_mode == CheXpertTrainingMode.ALL:
+                train_indices = list(range(len(all_labels)))
+            else: assert False, f'Unknown training_data_mode = {training_data_mode}'
+            print(f'len(train_indices) = {len(train_indices)}')
+
+            grouped_indices = group_indices_for_balanced_sampling(label_matrix=all_labels,
+                                                                 indices=train_indices,
+                                                                 label_names=CHEXPERT_LABELS,
+                                                                 min_group_size=50)
+            train_datasets = []
+            train_weights = []
+            for indices in grouped_indices:
+                dataset = CheXpertPhraseGroundingDataset(
+                    image_paths=all_image_paths,
+                    image_transform=self.train_image_transform,
+                    phrase_embeddings=phrase_embeddings,
+                    phrase_classification_labels=all_labels,
+                    indices=indices,
+                    infinite=True,
+                    shuffle_indices=True,
+                )
+                weight = math.log2(len(indices)) ** 3
+                train_datasets.append(dataset)
+                train_weights.append(weight)
+                print(f'  len(indices) = {len(indices)}, weight = {weight}')
+            self.train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+            batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) # at least 1 image per batch
+            self.train_dataloader = DataLoader(self.train_dataset,
+                                            batch_size=batch_size,
+                                            shuffle=False,
+                                            num_workers=num_train_workers,
+                                            collate_fn=collate_batch_fn,
+                                            pin_memory=True)
+        
+        if use_validation_set:
+            test_indices = [i for i in range(len(self.labels), len(all_labels))]
+            assert len(test_indices) == len(self.test_labels)
+            print('Generating val dataset and dataloader')
+            print(f'len(test_indices) = {len(test_indices)}')
+            self.val_dataset = CheXpertPhraseGroundingDataset(
+                image_paths=all_image_paths,
+                image_transform=self.val_image_transform,
+                phrase_embeddings=phrase_embeddings,
+                phrase_classification_labels=all_labels,
+                indices=test_indices,
+            )
+            batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) * test_batch_size_factor)
+            self.val_dataloader = DataLoader(self.val_dataset,
+                                             batch_size=batch_size,
+                                             shuffle=False,
+                                             num_workers=num_val_workers,
+                                             collate_fn=collate_batch_fn,
+                                             pin_memory=True)

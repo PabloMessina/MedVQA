@@ -32,7 +32,7 @@ class ConditionAwareSegmaskIOU(ConditionAwareMetric):
         if self._count == 0:
             print('WARNING: Bbox IOU defaulting to 0 since self._count is 0')
             return 0
-        print(f'ConditionAwareSegmaskIOU:compute(): self._acc_score: {self._acc_score}, self._count: {self._count}')
+        # print(f'ConditionAwareSegmaskIOU:compute(): self._acc_score: {self._acc_score}, self._count: {self._count}')
         return self._acc_score / self._count
     
 class ConditionAwareSegmaskIOUperClass(ConditionAwareMetric):

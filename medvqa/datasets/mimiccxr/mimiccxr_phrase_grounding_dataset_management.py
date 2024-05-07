@@ -13,7 +13,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_gold_bbox_dicom_ids,
     load_nondecent_chest_imagenome_dicom_ids,
 )
-from medvqa.datasets.dataloading_utils import SequentialDataLoader
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset, SequentialDataLoader
 from medvqa.datasets.ms_cxr import get_ms_cxr_dicom_id_2_phrases_and_masks, get_ms_cxr_dicom_ids
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.datasets.mimiccxr import (
@@ -24,12 +24,14 @@ from medvqa.datasets.mimiccxr import (
     get_image_path_getter,
     load_mimiccxr_reports_detailed_metadata,
 )
+from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
 from medvqa.utils.logging import print_bold
 
 class MIMICCXR_FactGroundingDataset(Dataset):
 
-    def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, negative_facts, indices, num_facts):
+    def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, negative_facts, indices, num_facts,
+                 infinite=False, shuffle=False, use_weights=False, weights_filepath=None):
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.fact_embeddings = fact_embeddings
@@ -37,27 +39,100 @@ class MIMICCXR_FactGroundingDataset(Dataset):
         self.negative_facts = negative_facts
         self.indices = indices
         self.num_facts = num_facts
+        self.infinite = infinite
+        if shuffle:
+            random.shuffle(self.indices)
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+
+        if use_weights:
+            assert weights_filepath is not None
+            self.use_weights = True
+            data = get_cached_pickle_file(weights_filepath)
+            self.cluster_assignments = data['cluster_assignments']
+            self.cluster_weights = data['cluster_weights']
+            self.label_weights = data['label_weights']
+            self.num_labels = len(self.label_weights)
+            assert self.num_labels == len(LABEL_BASED_FACTS) # sanity check
+        else:
+            self.use_weights = False
 
     def __len__(self):
-        return len(self.indices)
+        return self._len
+
+    @staticmethod
+    def _adapt_fact_indices(fact_indices, target_num_facts):
+        assert len(fact_indices) > 0
+        if len(fact_indices) > target_num_facts: # sample a subset of facts
+            fact_indices = random.sample(fact_indices, target_num_facts)
+        elif len(fact_indices) < target_num_facts: # duplicate facts
+            fact_indices_ = []
+            x = target_num_facts // len(fact_indices)
+            y = target_num_facts % len(fact_indices)
+            for _ in range(x):
+                fact_indices_.extend(fact_indices)
+            if y > 0:
+                fact_indices_.extend(random.sample(fact_indices, y))
+            fact_indices = fact_indices_
+        assert len(fact_indices) == target_num_facts
+        return fact_indices
     
     def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
         idx = self.indices[i]
         image_path = self.image_paths[idx]
         image = self.image_transform(image_path)
+        
         positive_facts = self.positive_facts[idx]
-        if len(positive_facts) > self.num_facts: # sample a subset of positive facts
-            positive_facts = random.sample(positive_facts, self.num_facts)
         negative_facts = self.negative_facts[idx]
-        if len(negative_facts) > self.num_facts: # sample a subset of negative facts
-            negative_facts = random.sample(negative_facts, self.num_facts)
-        pos_embeddings = self.fact_embeddings[positive_facts]
-        neg_embeddings = self.fact_embeddings[negative_facts]
-        return {
-            'i': image,
-            'pe': pos_embeddings,
-            'ne': neg_embeddings,
-        }
+        if len(positive_facts) > 0 and len(negative_facts) > 0:
+            if len(positive_facts) < self.num_facts and len(negative_facts) < self.num_facts:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+            elif len(positive_facts) < self.num_facts:
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - len(positive_facts))
+            elif len(negative_facts) < self.num_facts:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - len(negative_facts))
+            else:
+                assert len(positive_facts) >= self.num_facts and len(negative_facts) >= self.num_facts
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+        elif len(positive_facts) > 0:
+            positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+        elif len(negative_facts) > 0:
+            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+        else:
+            raise ValueError('No positive or negative facts found!')
+
+        fact_indices = positive_facts + negative_facts
+        assert len(fact_indices) == 2 * self.num_facts
+        embeddings = self.fact_embeddings[fact_indices]
+        labels = np.zeros(len(fact_indices), dtype=np.int64)
+        labels[:len(positive_facts)] = 1
+        
+        if self.use_weights:
+            weights = np.empty(len(labels), dtype=np.float32)
+            for i, label in enumerate(labels):
+                fidx = fact_indices[i]
+                if fidx < self.num_labels: # use label-specific weight
+                    weights[i] = self.label_weights[fidx, 1 - label] # 0 -> positive fact, 1 -> negative fact
+                else: # use cluster-specific weight
+                    weights[i] = self.cluster_weights[self.cluster_assignments[fidx], 1 - label] # 0 -> positive fact, 1 -> negative fact
+            return {
+                'i': image,
+                'pe': embeddings, # phrase embeddings
+                'pw': weights, # phrase weights
+                'l': labels, # labels
+            }
+        else:
+            return {
+                'i': image,
+                'pe': embeddings, # phrase embeddings
+                'l': labels, # labels
+            }
     
 class MIMICCXR_PhraseGroundingDataset(Dataset):
 
@@ -200,6 +275,57 @@ def visualize_mask(mask, mask_height, mask_width): # for debugging
     plt.imshow(mask.reshape(mask_height, mask_width), cmap='gray', vmin=0, vmax=1)
     plt.show()
 
+_LONG_TAIL = 0
+_MIDDLE_TAIL = 1
+_SHORT_TAIL = 2
+
+def _assign_distribution_classes_to_reports(report_fact_nli_integrated_data_filepath,
+                                            distribution_thresholds=(0.02, 0.05)):
+    assert len(distribution_thresholds) == 2
+    assert 0 < distribution_thresholds[0] < distribution_thresholds[1] < 1
+    print_bold(f'Assigning distribution classes to reports...')
+    # Load the data
+    print(f'Loading mimiccxr_report_fact_nli_integrated_data from {report_fact_nli_integrated_data_filepath}...')
+    data = load_pickle(report_fact_nli_integrated_data_filepath)
+    labels = data['label_based_nli_predictions']['nli_predictions']
+    print(f'labels.shape = {labels.shape}')
+    n_reports = labels.shape[0]
+    binary_labels = labels == 0
+    count_per_class = binary_labels.sum(0)
+    count_no_positives = (binary_labels.sum(1) == 0).sum() # number of reports with no positive class
+    distribution_classes = np.zeros(n_reports, dtype=np.int8)    
+    t0, t1 = distribution_thresholds
+    if count_no_positives < t0 * n_reports:
+        no_positive_class = _LONG_TAIL
+    elif count_no_positives < t1 * n_reports:
+        no_positive_class = _MIDDLE_TAIL
+    else:
+        no_positive_class = _SHORT_TAIL
+    is_long_tail = count_per_class < t0 * n_reports
+    is_middle_tail = (t0 * n_reports <= count_per_class) & (count_per_class < t1 * n_reports)
+    is_short_tail = count_per_class >= t1 * n_reports
+    
+    for i in range(n_reports):
+        if binary_labels[i].sum() == 0: # no positive class
+            distribution_classes[i] = no_positive_class
+        elif is_long_tail[binary_labels[i]].any(): # at least one long tail class
+            distribution_classes[i] = _LONG_TAIL
+        elif is_middle_tail[binary_labels[i]].any(): # at least one middle tail class
+            distribution_classes[i] = _MIDDLE_TAIL
+        else: # all short tail classes
+            assert is_short_tail[binary_labels[i]].all()
+            distribution_classes[i] = _SHORT_TAIL
+
+    print(f'count_no_positives = {count_no_positives}')
+    print(f'number of long tail classes = {(is_long_tail).sum()}')
+    print(f'number of middle tail classes = {(is_middle_tail).sum()}')
+    print(f'number of short tail classes = {(is_short_tail).sum()}')
+    print(f'number of long tail reports = {(distribution_classes == _LONG_TAIL).sum()}')
+    print(f'number of middle tail reports = {(distribution_classes == _MIDDLE_TAIL).sum()}')
+    print(f'number of short tail reports = {(distribution_classes == _SHORT_TAIL).sum()}')
+
+    return distribution_classes
+
 class MIMICCXR_PhraseGroundingTrainer:
 
     def __init__(self, 
@@ -224,6 +350,11 @@ class MIMICCXR_PhraseGroundingTrainer:
                 exclude_noisy_images=False,
                 use_yolov8=False,
                 mask_exponent=1,
+                balance_long_middle_short_tail=False,
+                long_middle_short_tail_thresholds=(0.02, 0.05),
+                report_fact_nli_integrated_data_filepath=None,
+                use_weighted_phrase_classifier_loss=False,
+                cluster_and_label_weights_for_facts_filepath=None,
                 **unused_kwargs,
             ):
 
@@ -274,10 +405,17 @@ class MIMICCXR_PhraseGroundingTrainer:
             dicom_id_to_pos_neg_facts = tmp['dicom_id_to_pos_neg_facts']
             print(f'fact_embeddings.shape = {fact_embeddings.shape}')
 
+            if balance_long_middle_short_tail and use_facts_for_train: # only for training
+                assert report_fact_nli_integrated_data_filepath is not None
+                distribution_classes = _assign_distribution_classes_to_reports(
+                    report_fact_nli_integrated_data_filepath=report_fact_nli_integrated_data_filepath,
+                    distribution_thresholds=long_middle_short_tail_thresholds)
+
             BIG_ENOGUGH = 1000000
             image_paths = [None] * BIG_ENOGUGH
             positive_facts = [None] * BIG_ENOGUGH
             negative_facts = [None] * BIG_ENOGUGH
+            report_idxs = [None] * BIG_ENOGUGH
             image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
@@ -288,7 +426,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 test_indices = []
 
             idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
+            for ridx, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
                     mimiccxr_metadata['subject_ids'],
                     mimiccxr_metadata['study_ids'],
@@ -318,12 +456,14 @@ class MIMICCXR_PhraseGroundingTrainer:
                     assert len(pos_neg_facts) == 2
                     positive_facts[idx] = pos_neg_facts[0]
                     negative_facts[idx] = pos_neg_facts[1]
+                    report_idxs[idx] = ridx
                     idx += 1
 
             print(f'Total number of images: {idx}')
             image_paths = image_paths[:idx]
             positive_facts = positive_facts[:idx]
             negative_facts = negative_facts[:idx]
+            report_idxs = report_idxs[:idx]
             aux = 0
             if use_facts_for_train:
                 print(f'len(train_indices) = {len(train_indices)}')
@@ -333,80 +473,113 @@ class MIMICCXR_PhraseGroundingTrainer:
                 aux += len(test_indices)
             assert aux == idx # sanity check
 
-            # Create a mapping from number of facts to indices
+            # Calculate the average number of facts per image
             if use_facts_for_train:
-                num_facts_2_train_idxs = {}
+                aux = 0
                 for i in train_indices:
                     pos_facts = positive_facts[i]
                     neg_facts = negative_facts[i]
-                    assert len(pos_facts) > 0
-                    assert len(neg_facts) > 0
-                    num_facts = min(len(pos_facts), len(neg_facts), max_phrases_per_image)
-                    try:
-                        num_facts_2_train_idxs[num_facts].append(i)
-                    except KeyError:
-                        num_facts_2_train_idxs[num_facts] = [i]
+                    assert len(pos_facts) + len(neg_facts) > 0 # at least one fact
+                    aux += max(len(pos_facts), len(neg_facts))
+                avg_facts_per_image = aux / len(train_indices)
+                train_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
+                print(f'avg_facts_per_image = {avg_facts_per_image}')
+                print(f'train_num_facts_per_image = {train_num_facts_per_image}')
             if use_facts_for_test:
-                num_facts_2_test_idxs = {}
+                aux = 0
                 for i in test_indices:
                     pos_facts = positive_facts[i]
                     neg_facts = negative_facts[i]
-                    assert len(pos_facts) > 0
-                    assert len(neg_facts) > 0
-                    num_facts = min(len(pos_facts), len(neg_facts), max_phrases_per_image)
-                    try:
-                        num_facts_2_test_idxs[num_facts].append(i)
-                    except KeyError:
-                        num_facts_2_test_idxs[num_facts] = [i]
+                    assert len(pos_facts) + len(neg_facts) > 0 # at least one fact
+                    aux += max(len(pos_facts), len(neg_facts))
+                avg_facts_per_image = aux / len(test_indices)
+                test_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
+                print(f'avg_facts_per_image = {avg_facts_per_image}')
+                print(f'test_num_facts_per_image = {test_num_facts_per_image}')
 
             # Create dataset and dataloader for training
             if use_facts_for_train:
-                print_bold('Building train fact dataloaders...')
-                train_fact_datasets = []
-                train_fact_dataloaders = []
-                for num_facts, indices in num_facts_2_train_idxs.items():
-                    print(f'Number of facts: {num_facts}, # images: {len(indices)}')
-                    dataset = MIMICCXR_FactGroundingDataset(
+                print_bold('Building train fact dataloader...')
+                batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
+
+                if balance_long_middle_short_tail:
+                    print('Balancing long, middle, and short tail classes...')
+                    long_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _LONG_TAIL]
+                    middle_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _MIDDLE_TAIL]
+                    short_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _SHORT_TAIL]
+                    assert len(long_tail_indices) > 0
+                    assert len(middle_tail_indices) > 0
+                    assert len(short_tail_indices) > 0
+                    assert len(long_tail_indices) + len(middle_tail_indices) + len(short_tail_indices) == len(train_indices)
+                    indices_list = [long_tail_indices, middle_tail_indices, short_tail_indices]
+                    indices_list.sort(key=lambda x: len(x), reverse=True)
+                    while len(indices_list) >= 2 and len(indices_list[-1]) < 100:
+                        indices_list[-2].extend(indices_list[-1])
+                        indices_list.pop()
+                    assert len(indices_list) >= 1
+                    assert len(indices_list[0]) > 0
+                    datasets = []
+                    for indices_ in indices_list:
+                        dataset = MIMICCXR_FactGroundingDataset(
+                            image_paths=image_paths, image_transform=train_image_transform,
+                            fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                            indices=indices_, num_facts=train_num_facts_per_image, shuffle=True, infinite=True,
+                            use_weights=use_weighted_phrase_classifier_loss,
+                            weights_filepath=cluster_and_label_weights_for_facts_filepath)
+                        datasets.append(dataset)
+                    if len(datasets) == 1:
+                        train_fact_dataset = datasets[0]
+                    else:
+                        weights = [1] * len(datasets) # equal weights
+                        train_fact_dataset = CompositeInfiniteDataset(datasets, weights)
+                    train_fact_dataloader = DataLoader(
+                        train_fact_dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_train_workers,
+                        collate_fn=fact_grounding_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                else:
+                    print('Normal (unbalanced) training...')
+                    train_fact_dataset = MIMICCXR_FactGroundingDataset(
                         image_paths=image_paths, image_transform=train_image_transform,
                         fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
-                        indices=indices, num_facts=num_facts)
-                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_facts), 1) # at least 1 image per batch
-                    dataloader = DataLoader(
-                        dataset,
+                        indices=indices, num_facts=train_num_facts_per_image,
+                        use_weights=use_weighted_phrase_classifier_loss,
+                        weights_filepath=cluster_and_label_weights_for_facts_filepath)
+                    train_fact_dataloader = DataLoader(
+                        train_fact_dataset,
                         batch_size=batch_size,
                         shuffle=True,
                         num_workers=num_train_workers,
                         collate_fn=fact_grounding_collate_batch_fn,
                         pin_memory=True,
                     )
-                    train_fact_datasets.append(dataset)
-                    train_fact_dataloaders.append(dataloader)
-                self.train_fact_dataloader = SequentialDataLoader(train_fact_dataloaders)
+                self.train_fact_dataset = train_fact_dataset
+                self.train_fact_dataloader = train_fact_dataloader
                 print(f'len(self.train_fact_dataloader) = {len(self.train_fact_dataloader)}')
 
             # Create dataset and dataloader for testing
             if use_facts_for_test:
                 print_bold('Building test fact dataloaders...')
-                test_fact_datasets = []
-                test_fact_dataloaders = []
-                for num_facts, indices in num_facts_2_test_idxs.items():
-                    print(f'Number of facts: {num_facts}, # images: {len(indices)}')
-                    dataset = MIMICCXR_FactGroundingDataset(
-                        image_paths=image_paths, image_transform=test_image_transform,
-                        fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
-                        indices=indices, num_facts=num_facts)
-                    batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // num_facts), 1) * test_batch_size_factor)
-                    dataloader = DataLoader(
-                        dataset,
-                        batch_size=batch_size,
-                        shuffle=False,
-                        num_workers=num_test_workers,
-                        collate_fn=fact_grounding_collate_batch_fn,
-                        pin_memory=True,
-                    )
-                    test_fact_datasets.append(dataset)
-                    test_fact_dataloaders.append(dataloader)
-                self.test_fact_dataloader = SequentialDataLoader(test_fact_dataloaders)
+                test_fact_dataset = MIMICCXR_FactGroundingDataset(
+                    image_paths=image_paths, image_transform=test_image_transform,
+                    fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                    indices=test_indices, num_facts=test_num_facts_per_image,
+                    use_weights=use_weighted_phrase_classifier_loss,
+                    weights_filepath=cluster_and_label_weights_for_facts_filepath)
+                batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // test_num_facts_per_image), 1) * test_batch_size_factor)
+                test_fact_dataloader = DataLoader(
+                    test_fact_dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=num_test_workers,
+                    collate_fn=fact_grounding_collate_batch_fn,
+                    pin_memory=True,
+                )
+                self.test_fact_dataset = test_fact_dataset
+                self.test_fact_dataloader = test_fact_dataloader
                 print(f'len(self.test_fact_dataloader) = {len(self.test_fact_dataloader)}')
 
         # Create mscxr train/test dataset and dataloader

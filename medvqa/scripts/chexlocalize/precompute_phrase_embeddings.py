@@ -7,7 +7,11 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
     save_pickle,
 )
-from medvqa.datasets.chexlocalize import CHEXLOCALIZE_CLASS_NAMES, CHEXLOCALIZE_LARGE_FAST_CACHE_DIR
+from medvqa.datasets.chexlocalize import (
+    CHEXLOCALIZE_CLASS_NAMES,
+    CHEXLOCALIZE_CLASS_NAME2PHRASE,
+    CHEXLOCALIZE_LARGE_FAST_CACHE_DIR,
+)
 from medvqa.utils.logging import print_blue, print_bold
 
 def main():
@@ -19,7 +23,7 @@ def main():
     args = parser.parse_args()
 
     # Define phrases
-    phrases = CHEXLOCALIZE_CLASS_NAMES
+    phrases = [CHEXLOCALIZE_CLASS_NAME2PHRASE[class_name] for class_name in CHEXLOCALIZE_CLASS_NAMES]
     
     # Obtain embeddings for each sentence
     print_bold('Obtaining embeddings for each sentence...')
@@ -37,7 +41,11 @@ def main():
     save_path = get_file_path_with_hashing_if_too_long(
         folder_path=CHEXLOCALIZE_LARGE_FAST_CACHE_DIR,
         prefix='class_phrase_embeddings',
-        strings=[args.model_name, args.model_checkpoint_folder_path],
+        strings=[
+            args.model_name,
+            args.model_checkpoint_folder_path,
+            *phrases,
+        ],
         force_hashing=True,
     )
     print_blue('Saving output to:', save_path, bold=True)

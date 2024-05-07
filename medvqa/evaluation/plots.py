@@ -850,3 +850,35 @@ def plot_nli_distribution(report_nli_input_output_jsonl_filepaths, figsize1=(10,
     plt.ylabel('Label')
     plt.legend()
     plt.show()
+
+
+def plot_barchart(data, title, xlabel, ylabel, figsize=(10, 10), color='blue', horizontal=False, bar_names=None, sort_data=False,
+                    write_values_on_bars=False, values_fontsize=10, values_color='black', values_rotation=0):
+    n = len(data)
+    if sort_data:
+        indices = list(range(n))
+        indices.sort(key=lambda i: data[i], reverse=not horizontal)
+        data = [data[i] for i in indices]
+        if bar_names is not None:
+            bar_names = [bar_names[i] for i in indices]
+    if bar_names is None:
+        bar_names = range(1, n+1)
+    plt.figure(figsize=figsize)
+    if horizontal:
+        plt.barh(range(1, n+1), data, color=color)
+        plt.yticks(range(1, n+1), bar_names)
+        plt.ylabel(ylabel)
+        plt.xlabel(xlabel)
+        if write_values_on_bars:
+            for i in range(n):
+                plt.text(data[i], i+1, f'{data[i]:.1f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+    else:
+        plt.bar(range(1, n+1), data, color=color)
+        plt.xticks(range(1, n+1), bar_names)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        if write_values_on_bars:
+            for i in range(n):
+                plt.text(i+1, data[i], f'{data[i]:.1f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+    plt.title(title)
+    plt.show()

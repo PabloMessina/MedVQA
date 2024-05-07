@@ -7,7 +7,8 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
     save_pickle,
 )
-from medvqa.datasets.vinbig import VINBIG_LARGE_FAST_CACHE_DIR, VINBIG_BBOX_NAMES
+from medvqa.datasets.vinbig import VINBIG_LARGE_FAST_CACHE_DIR
+from medvqa.utils.constants import VINBIG_LABELS, VINBIG_LABEL2PHRASE
 from medvqa.utils.logging import print_blue, print_bold
 
 def main():
@@ -18,8 +19,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Define bbox phrases
-    bbox_phrases = VINBIG_BBOX_NAMES
+    # Define  phrases
+    phrases = [VINBIG_LABEL2PHRASE[label] for label in VINBIG_LABELS]
     
     # Obtain embeddings for each sentence
     print_bold('Obtaining embeddings for each sentence...')
@@ -27,16 +28,21 @@ def main():
         model_name=args.model_name, device=args.device,
         model_checkpoint_folder_path=args.model_checkpoint_folder_path,
     )
-    bbox_phrase_embeddings = embedding_extractor.compute_text_embeddings(bbox_phrases)
+    phrase_embeddings = embedding_extractor.compute_text_embeddings(phrases)
     
     # Save embeddings
     output = {
-        'bbox_phrases': bbox_phrases,
-        'bbox_phrase_embeddings': bbox_phrase_embeddings,
+        'phrases': phrases,
+        'phrase_embeddings': phrase_embeddings,
     }
     save_path = get_file_path_with_hashing_if_too_long(
         folder_path=VINBIG_LARGE_FAST_CACHE_DIR,
-        prefix='bbox_phrase_embeddings',
+        prefix='label_phrase_embeddings',
+        strings=[
+            args.model_name,
+            args.model_checkpoint_folder_path,
+        ],
+        force_hashing=True,
     )
     print_blue('Saving output to:', save_path, bold=True)
     save_pickle(output, save_path)

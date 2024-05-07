@@ -36,6 +36,23 @@ CHEXPERT_LABEL2SHORT = {
     'Fracture': 'F',
 }
 
+CHEXPERT_LABEL2PHRASE = {
+    'No Finding': 'no findings',
+    'Cardiomegaly': 'cardiomegaly seen',
+    'Enlarged Cardiomediastinum': 'enlarged cardiomediastinum seen',
+    'Consolidation': 'consolidation seen',
+    'Lung Opacity': 'lung opacity seen',
+    'Atelectasis': 'atelectasis seen',
+    'Support Devices': 'support devices seen',
+    'Pleural Effusion': 'pleural effusion seen',
+    'Pleural Other': 'other pleural abnormality seen',
+    'Pneumonia': 'pneumonia seen',
+    'Pneumothorax': 'pneumothorax seen',
+    'Edema': 'edema seen',
+    'Lung Lesion': 'lung lesion seen',
+    'Fracture': 'fracture seen',
+}
+
 CHEXBERT_LABELS = [
     "Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Opacity", "Lung Lesion", "Edema",
     "Consolidation", "Pneumonia", "Atelectasis", "Pneumothorax", "Pleural Effusion", "Pleural Other",
@@ -96,13 +113,33 @@ CXR14_LABEL2SHORT = {
 }
 
 VINBIG_LABELS = [
-    'Aortic enlargement', 'Atelectasis', 'Calcification',
-    'Cardiomegaly', 'Clavicle fracture', 'Consolidation', 'Edema',
-    'Emphysema', 'Enlarged PA', 'ILD', 'Infiltration', 'Lung Opacity',
-    'Lung cavity', 'Lung cyst', 'Mediastinal shift', 'Nodule/Mass',
-    'Pleural effusion', 'Pleural thickening', 'Pneumothorax',
-    'Pulmonary fibrosis', 'Rib fracture', 'Other lesion', 'COPD',
-    'Lung tumor', 'Pneumonia', 'Tuberculosis', 'Other disease',
+    'Aortic enlargement',
+    'Atelectasis',
+    'Calcification',
+    'Cardiomegaly',
+    'Clavicle fracture',
+    'Consolidation',
+    'Edema',
+    'Emphysema',
+    'Enlarged PA',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Lung cavity',
+    'Lung cyst',
+    'Mediastinal shift',
+    'Nodule/Mass',
+    'Pleural effusion',
+    'Pleural thickening',
+    'Pneumothorax',
+    'Pulmonary fibrosis',
+    'Rib fracture',
+    'Other lesion',
+    'COPD',
+    'Lung tumor',
+    'Pneumonia',
+    'Tuberculosis',
+    'Other disease',
     'No finding',
 ]
 
@@ -131,6 +168,42 @@ VINBIG_BBOX_NAMES = [
     'Rib fracture',
 ]
 assert all([l in VINBIG_LABELS for l in VINBIG_BBOX_NAMES])
+
+VINBIG_LABEL2PHRASE = {
+    'Aortic enlargement': 'aortic enlargement seen',
+    'Atelectasis': 'atelectasis seen',
+    'Calcification': 'calcification seen',
+    'Cardiomegaly': 'cardiomegaly seen',
+    'Clavicle fracture': 'clavicle fracture seen',
+    'Consolidation': 'consolidation seen',
+    'Edema': 'edema seen',
+    'Emphysema': 'emphysema seen',
+    'Enlarged PA': 'enlarged pulmonary artery seen',
+    'ILD': 'interstitial lung disease seen',
+    'Infiltration': 'infiltration seen',
+    'Lung Opacity': 'lung opacity seen',
+    'Lung cavity': 'lung cavity seen',
+    'Lung cyst': 'lung cyst seen',
+    'Mediastinal shift': 'mediastinal shift seen',
+    'Nodule/Mass': 'nodule/mass seen',
+    'Other lesion': 'other lesion seen',
+    'Pleural effusion': 'pleural effusion seen',
+    'Pleural thickening': 'pleural thickening seen',
+    'Pneumothorax': 'pneumothorax seen',
+    'Pulmonary fibrosis': 'pulmonary fibrosis seen',
+    'Rib fracture': 'rib fracture seen',
+    'Other disease': 'other disease seen',
+    'COPD': 'copd seen',
+    'Lung tumor': 'lung tumor seen',
+    'Pneumonia': 'pneumonia seen',
+    'Tuberculosis': 'tuberculosis seen',
+    'Other disease': 'other disease seen',
+    'No finding': 'no abnormalities seen',
+}
+assert all([l in VINBIG_LABEL2PHRASE for l in VINBIG_LABELS])
+assert all([l in VINBIG_LABELS for l in VINBIG_LABEL2PHRASE])
+
+
 
 CHEXPERT_CXR14_SYNONYMS = [
     ('No Finding', 'No Finding'),

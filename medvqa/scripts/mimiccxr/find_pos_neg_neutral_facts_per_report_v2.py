@@ -36,6 +36,7 @@ class _Task:
     ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS = 'assign_representative_facts_to_reports'
     INTEGRATE_AND_EXPORT_ALL_DATA = 'integrate_and_export_all_data'
     EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS = 'export_dicom_id_to_positive_negative_facts'
+    COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS = 'compute_clusters_and_cluster_weights_for_facts'
     
     @staticmethod
     def choices():
@@ -53,6 +54,7 @@ class _Task:
             _Task.ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS,
             _Task.INTEGRATE_AND_EXPORT_ALL_DATA,
             _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS,
+            _Task.COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS,
         ]
     
 GPT4_OUTPUT_TO_NLI = {
@@ -1770,6 +1772,66 @@ def export_dicom_id_to_positive_negative_facts(
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
+def compute_clusters_and_cluster_weights_for_facts(
+    dicom_id_to_pos_neg_facts_filepath,
+    num_clusters,
+):
+    print(f'Reading {dicom_id_to_pos_neg_facts_filepath}...')
+    data = load_pickle(dicom_id_to_pos_neg_facts_filepath)
+    facts = data['facts']
+    embeddings = data['embeddings']
+    dicom_id_to_pos_neg_facts = data['dicom_id_to_pos_neg_facts']
+
+    num_label_based_facts = len(LABEL_BASED_FACTS)
+    assert facts[:num_label_based_facts] == LABEL_BASED_FACTS # ensure label-based facts are at the beginning
+
+    # Compute cluster assignments
+    print_blue(f'Computing {num_clusters} clusters...')
+    kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init='auto', max_iter=300)
+    cluster_assignments = kmeans.fit_predict(embeddings)
+    cluster_centers = kmeans.cluster_centers_
+    
+    # Compute cluster and label weights
+    cluster_counts = np.zeros((num_clusters, 2), dtype=np.int32) # pos, neg
+    label_counts = np.zeros((num_label_based_facts, 2), dtype=np.int32) # pos, neg
+    for (pos_fidxs, neg_fidxs) in tqdm(dicom_id_to_pos_neg_facts.values(), total=len(dicom_id_to_pos_neg_facts), mininterval=2):
+        for fidx in pos_fidxs:
+            cluster_counts[cluster_assignments[fidx], 0] += 1
+            if fidx < num_label_based_facts:
+                label_counts[fidx, 0] += 1
+        for fidx in neg_fidxs:
+            cluster_counts[cluster_assignments[fidx], 1] += 1
+            if fidx < num_label_based_facts:
+                label_counts[fidx, 1] += 1
+    # Make weights inversely proportional to counts
+    cluster_weights = np.zeros((num_clusters, 2), dtype=np.float32)
+    label_weights = np.zeros((num_label_based_facts, 2), dtype=np.float32)
+    for c in range(num_clusters):
+        cluster_weights[c, 0] = 1 / (cluster_counts[c, 0] + 1)
+        cluster_weights[c, 1] = 1 / (cluster_counts[c, 1] + 1)
+    for f in range(num_label_based_facts):
+        label_weights[f, 0] = 1 / (label_counts[f, 0] + 1)
+        label_weights[f, 1] = 1 / (label_counts[f, 1] + 1)
+
+    # Save output
+    output = {
+        'dicom_id_to_pos_neg_facts_filepath': dicom_id_to_pos_neg_facts_filepath, # for reference
+        'cluster_assignments': cluster_assignments,
+        'cluster_centers': cluster_centers,
+        'cluster_counts': cluster_counts,
+        'cluster_weights': cluster_weights,
+        'label_counts': label_counts,
+        'label_weights': label_weights,
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        folder_path=LARGE_FAST_CACHE_DIR,
+        prefix='mimiccxr_cluster_and_label_weights_for_facts',
+        strings=[dicom_id_to_pos_neg_facts_filepath, str(num_clusters)],
+        force_hashing=True,
+    )
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', type=str, required=True, choices=_Task.choices())
@@ -1819,6 +1881,7 @@ def main():
     parser.add_argument('--integrated_sentence_facts_jsonl_filepath', type=str)
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
     parser.add_argument('--pos_neg_facts_mode', type=str, choices=['label_based', 'fact_based', 'all'])
+    parser.add_argument('--dicom_id_to_pos_neg_facts_filepath', type=str)
     args = parser.parse_args()
 
     if args.task == _Task.ASSIGN_GPT4_LABEL_BASED_FACTS_TO_REPORTS:
@@ -2026,6 +2089,13 @@ def main():
             fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
             fact_embedding_batch_size=args.fact_embedding_batch_size,
             fact_embedding_num_workers=args.fact_embedding_num_workers,
+        )
+    elif args.task == _Task.COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS:
+        assert args.num_kmeans_clusters is not None
+        assert args.dicom_id_to_pos_neg_facts_filepath is not None
+        compute_clusters_and_cluster_weights_for_facts(
+            dicom_id_to_pos_neg_facts_filepath=args.dicom_id_to_pos_neg_facts_filepath,
+            num_clusters=args.num_kmeans_clusters,
         )
     else:
         raise ValueError(f'Invalid task: {args.task}')

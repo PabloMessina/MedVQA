@@ -26,3 +26,13 @@ class WeigthedByClassBCELoss(nn.Module):
         else:
             loss = loss.mean()
         return loss
+    
+class WeigthedBCELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.bce = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, output, target, weights):
+        loss = self.bce(output, target)
+        weighted_loss = loss * weights
+        return weighted_loss.sum() / weights.sum() # mean weighted loss

@@ -1,8 +1,8 @@
 import torch
-import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
+from medvqa.losses import BinaryMultiLabelClassificationLossNames, get_binary_multilabel_loss
 from medvqa.losses.nt_xent_loss import NTXentLoss
 from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.segmentation_loss import compute_balanced_segmentation_loss
@@ -10,10 +10,11 @@ from medvqa.utils.constants import MetricNames
 from medvqa.utils.logging import print_magenta
 
 def get_step_fn(model, optimizer, training, validating, testing, device,
-                phrase_classifier_criterion,
+                mimiccxr_phrase_classifier_criterion,
+                binary_multilabel_classification_criterion,
                 contrastive_phrase_grounding_criterion,
                 pos_area_prior, neg_area_prior,
-                iters_to_accumulate=1, # for gradient accumulation
+                gradient_accumulation_steps=1, # for gradient accumulation
                 max_grad_norm=None,
                 # automatic mixed precision
                 use_amp=False,
@@ -33,6 +34,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 phrase_classifier_loss_weight=1.0,
                 foreground_loss_weight=1.0,
                 background_loss_weight=1.0,
+                # other loss args
+                use_weighted_phrase_classifier_loss=False,
+                use_attention_regularization_loss=False,
+                use_contrastive_phrase_grounding_loss=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -54,7 +59,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             mimiccxr_yolov8_criterion = vinbig_yolov8_criterion = yolov8_criterion
 
     if training:
-        gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate, max_grad_norm)
+        gradient_accumulator = GradientAccumulator(optimizer, scaler, gradient_accumulation_steps, max_grad_norm)
     
     def step_fn__fact_grounding(batch):
 
@@ -63,8 +68,13 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             images = batch['img'].to(device)
         else:
             images = batch['i'].to(device)
-        pos_phrase_embeddings = batch['pe'].to(device)
-        neg_phrase_embeddings = batch['ne'].to(device)
+        phrase_embeddings = batch['pe'].to(device)
+        gt_labels = batch['l'].to(device)
+        if use_weighted_phrase_classifier_loss:
+            phrase_weights = batch['pw'].to(device)
+
+        pos_indices = gt_labels == 1
+        neg_indices = gt_labels == 0
 
         with torch.set_grad_enabled(training):
 
@@ -73,8 +83,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             # Prepare args for model forward
             model_kwargs = {
                 'raw_images': images,
-                'pos_phrase_embeddings': pos_phrase_embeddings,
-                'neg_phrase_embeddings': neg_phrase_embeddings,
+                'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
                 'mimiccxr_forward': True,
             }
@@ -82,37 +91,53 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
-                sigmoid_attention_pos = model_output['sigmoid_attention_pos']
-                sigmoid_attention_neg = model_output['sigmoid_attention_neg']
-                phrase_classifier_output_pos = model_output['phrase_classifier_output_pos']
-                phrase_classifier_output_neg = model_output['phrase_classifier_output_neg']
-                phrase_grounding_similarity_pos = model_output['phrase_grounding_similarity_pos'] # (batch_size, max_phrase_length)
-                phrase_grounding_similarity_neg = model_output['phrase_grounding_similarity_neg']
+                sigmoid_attention = model_output['sigmoid_attention']
+                phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
+                phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
                 
                 # Compute losses
 
                 # 1. phrase classification loss
-                phrase_classifier_loss_pos = phrase_classifier_criterion(phrase_classifier_output_pos, torch.ones_like(phrase_classifier_output_pos))
-                phrase_classifier_loss_neg = phrase_classifier_criterion(phrase_classifier_output_neg, torch.zeros_like(phrase_classifier_output_neg))
-                phrase_classifier_loss = phrase_classifier_loss_pos + phrase_classifier_loss_neg
-                phrase_classifier_loss *= phrase_classifier_loss_weight # weight
+                if use_weighted_phrase_classifier_loss:
+                    phrase_classifier_loss = mimiccxr_phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float(), phrase_weights)
+                else:
+                    phrase_classifier_loss = mimiccxr_phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float())
+                phrase_classifier_loss *= phrase_classifier_loss_weight # apply weight
 
                 # 2. contrastive phrase grounding loss
-                contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos.view(-1),
-                                                                                            phrase_grounding_similarity_neg.view(-1))
+                if use_contrastive_phrase_grounding_loss:
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity[pos_indices] # (num_positives)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity[neg_indices] # (num_negatives)
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity_pos.view(-1)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity_neg.view(-1)
+                    if len(phrase_grounding_similarity_pos) == 0 or len(phrase_grounding_similarity_neg) == 0:
+                        contrastive_phrase_grounding_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
+                                                                                                phrase_grounding_similarity_neg)
 
                 # 3. attention regularization loss
-                area_pos = sigmoid_attention_pos.mean(dim=-1)
-                area_neg = sigmoid_attention_neg.mean(dim=-1)
-                attention_regularization_loss_pos = (area_pos - pos_area_prior).abs().mean()
-                attention_regularization_loss_neg = (area_neg - neg_area_prior).abs().mean()
-                attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
+                if use_attention_regularization_loss:
+                    areas = sigmoid_attention.mean(dim=-1)
+                    areas_pos = areas[pos_indices]
+                    areas_neg = areas[neg_indices]
+                    if len(areas_pos) == 0:
+                        attention_regularization_loss_pos = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_pos = (areas_pos - pos_area_prior).abs().mean()
+                    if len(areas_neg) == 0:
+                        attention_regularization_loss_neg = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_neg = (areas_neg - neg_area_prior).abs().mean()
+                    attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
 
                 if training:
                     losses = []
                     losses.append(phrase_classifier_loss)
-                    losses.append(contrastive_phrase_grounding_loss)
-                    losses.append(attention_regularization_loss)
+                    if use_contrastive_phrase_grounding_loss:
+                        losses.append(contrastive_phrase_grounding_loss)
+                    if use_attention_regularization_loss:
+                        losses.append(attention_regularization_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
@@ -126,8 +151,12 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['loss'] = batch_loss.detach()
         
         output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
-        output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
-        output['attention_regularization_loss'] = attention_regularization_loss.detach()
+        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['gt_labels'] = gt_labels.detach().view(-1)
+        if use_contrastive_phrase_grounding_loss:
+            output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_attention_regularization_loss:
+            output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
         return output
     
@@ -291,20 +320,18 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         return output
     
     def step_fn__vinbig_bbox_grounding(batch):
-        
-        assert using_yolov8
 
         # Extract elements from batch
-        if using_yolov8:
-            images = batch['img'].to(device)
-        else:
-            images = batch['i'].to(device)
         phrase_embeddings = batch['pe'].to(device)
         phrase_classification_labels = batch['pcl'].to(device)
         phrase_grounding_masks = batch['pgm'].to(device)
-        if not training:
-            vinbig_bbox_coords = batch['bboxes']
-            vinbig_bbox_classes = batch['classes']
+        if using_yolov8:
+            images = batch['img'].to(device)
+            if not training:
+                vinbig_bbox_coords = batch['bboxes']
+                vinbig_bbox_classes = batch['classes']
+        else:
+            images = batch['i'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -322,29 +349,55 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
-                sigmoid_attention = model_output['sigmoid_attention']
-                phrase_classifier_output = model_output['phrase_classifier_output']
-                yolov8_features = model_output['yolov8_features']
-                if not training:
-                    yolov8_predictions = model_output['yolov8_predictions']
+                sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
+                assert sigmoid_attention.dim() == 3
+                n = phrase_grounding_masks.shape[1]
+                assert sigmoid_attention.shape[1] > n # NOTE: some facts don't have masks
+                sigmoid_attention_with_mask = sigmoid_attention[:, :n] # this will be supervised with ground truth masks
+                if use_attention_regularization_loss:                    
+                    sigmoid_attention_without_mask = sigmoid_attention[:, n:] # this will be supervised with attention regularization loss
+                phrase_classifier_logits = model_output['phrase_classifier_logits']
+                if using_yolov8:
+                    yolov8_features = model_output['yolov8_features']
+                    if not training:
+                        yolov8_predictions = model_output['yolov8_predictions']
                 
                 if training:
                     # Compute losses
                     losses = []
                     
                     # 1. phrase classification loss
-                    phrase_classifier_loss = phrase_classifier_criterion(phrase_classifier_output.view(-1), phrase_classification_labels.view(-1))
+                    phrase_classifier_loss = binary_multilabel_classification_criterion(phrase_classifier_logits, phrase_classification_labels)
                     phrase_classifier_loss *= phrase_classifier_loss_weight # weight
                     losses.append(phrase_classifier_loss)
 
-                    # 2. attention supervision loss
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                    # 2.1 attention supervision loss
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
                                                                                     foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
+                    
+                    # 2.2 attention regularization loss
+                    if use_attention_regularization_loss:
+                        areas = sigmoid_attention_without_mask.mean(dim=-1)
+                        labels_without_mask = phrase_classification_labels[:, n:]
+                        pos_indices = labels_without_mask == 1
+                        neg_indices = labels_without_mask == 0
+                        areas_pos = areas[pos_indices]
+                        areas_neg = areas[neg_indices]
+                        if len(areas_pos) == 0:
+                            attention_regularization_loss_pos = torch.tensor(0.0, device=device)
+                        else:
+                            attention_regularization_loss_pos = (areas_pos - pos_area_prior).abs().mean()
+                        if len(areas_neg) == 0:
+                            attention_regularization_loss_neg = torch.tensor(0.0, device=device)
+                        else:
+                            attention_regularization_loss_neg = (areas_neg - neg_area_prior).abs().mean()
+                        attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
+                        losses.append(attention_regularization_loss)
 
                     # 3. yolov8 loss
-                    if predict_bboxes_vinbig:
+                    if using_yolov8 and predict_bboxes_vinbig:
                         batch_size = images.shape[0]
                         assert batch_size == yolov8_features[0].shape[0]
                         vinbig_yolov8_loss, yolov8_loss_items = vinbig_yolov8_criterion(yolov8_features, batch)
@@ -362,7 +415,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 else:
                     
                     # Compute attention supervision loss for validation/testing
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
                                                                                     foreground_loss_weight, background_loss_weight)
 
 
@@ -373,27 +426,31 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['loss'] = batch_loss.detach()
         if training:
             output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
-            output[MetricNames.YOLOV8_LOSS] = vinbig_yolov8_loss.detach()
-            output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-            output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-            output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+            if use_attention_regularization_loss:
+                output['attention_regularization_loss'] = attention_regularization_loss.detach()
+            if using_yolov8:
+                output[MetricNames.YOLOV8_LOSS] = vinbig_yolov8_loss.detach()
+                output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
+                output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
+                output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
         else:
-            # normalize yolov8 predictions
-            resized_shapes = batch['resized_shape']
-            assert len(resized_shapes) == len(yolov8_predictions)
-            for i in range(len(resized_shapes)):
-                resized_shape = resized_shapes[i]
-                pred = yolov8_predictions[i].detach().cpu()
-                pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                yolov8_predictions[i] = pred
-            output['yolov8_predictions'] = yolov8_predictions
-            output['vinbig_bbox_coords'] = vinbig_bbox_coords
-            output['vinbig_bbox_classes'] = vinbig_bbox_classes
+            if using_yolov8:
+                # normalize yolov8 predictions
+                resized_shapes = batch['resized_shape']
+                assert len(resized_shapes) == len(yolov8_predictions)
+                for i in range(len(resized_shapes)):
+                    resized_shape = resized_shapes[i]
+                    pred = yolov8_predictions[i].detach().cpu()
+                    pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                    yolov8_predictions[i] = pred
+                output['yolov8_predictions'] = yolov8_predictions
+                output['vinbig_bbox_coords'] = vinbig_bbox_coords
+                output['vinbig_bbox_classes'] = vinbig_bbox_classes
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
-        output['pred_mask'] = sigmoid_attention.detach()
+        output['pred_mask'] = sigmoid_attention_with_mask.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
-        output['pred_phrase_labels'] = (phrase_classifier_output.detach() > 0).view(-1)
-        output['gt_phrase_labels'] = phrase_classification_labels.detach().view(-1)
+        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['gt_labels'] = phrase_classification_labels.detach().view(-1)
 
         return output
     
@@ -420,14 +477,14 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
-                phrase_classifier_output = model_output['phrase_classifier_output']
+                phrase_classifier_logits = model_output['phrase_classifier_logits']
                 
                 if training:
                     # Compute losses
                     losses = []
                     
                     # 1. phrase classification loss
-                    phrase_classifier_loss = phrase_classifier_criterion(phrase_classifier_output.view(-1), phrase_classification_labels.view(-1))
+                    phrase_classifier_loss = binary_multilabel_classification_criterion(phrase_classifier_logits, phrase_classification_labels)
                     phrase_classifier_loss *= phrase_classifier_loss_weight # weight
                     losses.append(phrase_classifier_loss)
 
@@ -460,35 +517,122 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
         output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
-        output['pred_phrase_labels'] = (phrase_classifier_output.detach() > 0).view(-1)
+        output['pred_phrase_labels'] = (phrase_classifier_logits.detach() > 0).view(-1)
         output['gt_phrase_labels'] = phrase_classification_labels.detach().view(-1)
 
         return output
     
+    def step_fn__chexpert_phrase_grounding(batch):
+
+        # Extract elements from batch
+        phrase_embeddings = batch['pe'].to(device)
+        phrase_classification_labels = batch['pcl'].to(device)
+        images = batch['i'].to(device)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'raw_images': images,
+                'phrase_embeddings': phrase_embeddings,
+                'only_compute_features': True,
+            }
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                model_output = model(**model_kwargs)
+                sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
+                phrase_classifier_logits = model_output['phrase_classifier_logits']
+                phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
+
+                if use_contrastive_phrase_grounding_loss or use_attention_regularization_loss:
+                    pos_indices = phrase_classification_labels == 1
+                    neg_indices = phrase_classification_labels == 0
+
+                # Compute losses
+                    
+                # 1. phrase classification loss
+                phrase_classifier_loss = binary_multilabel_classification_criterion(phrase_classifier_logits, phrase_classification_labels.float())
+                phrase_classifier_loss *= phrase_classifier_loss_weight # weight
+
+                # 2. contrastive phrase grounding loss
+                if use_contrastive_phrase_grounding_loss:
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity[pos_indices] # (num_positives)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity[neg_indices] # (num_negatives)
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity_pos.view(-1)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity_neg.view(-1)
+                    if len(phrase_grounding_similarity_pos) == 0 or len(phrase_grounding_similarity_neg) == 0:
+                        contrastive_phrase_grounding_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
+                                                                                                phrase_grounding_similarity_neg)
+                
+                # 3. attention regularization loss
+                if use_attention_regularization_loss:
+                    areas = sigmoid_attention.mean(dim=-1)
+                    areas_pos = areas[pos_indices]
+                    areas_neg = areas[neg_indices]
+                    if len(areas_pos) == 0:
+                        attention_regularization_loss_pos = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_pos = (areas_pos - pos_area_prior).abs().mean()
+                    if len(areas_neg) == 0:
+                        attention_regularization_loss_neg = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_neg = (areas_neg - neg_area_prior).abs().mean()
+                    attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
+                
+                if training:
+                    losses = []
+                    losses.append(phrase_classifier_loss)
+                    if use_contrastive_phrase_grounding_loss:
+                        losses.append(contrastive_phrase_grounding_loss)
+                    if use_attention_regularization_loss:
+                        losses.append(attention_regularization_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+                else:
+                    batch_loss = None
+
+        # Prepare output
+        output = {}
+
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+        
+        output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['gt_labels'] = phrase_classification_labels.detach().view(-1)
+        if use_contrastive_phrase_grounding_loss:
+            output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_attention_regularization_loss:
+            output['attention_regularization_loss'] = attention_regularization_loss.detach()
+
+        return output
+    
+    flag_to_step_fn = {
+        'fg': step_fn__fact_grounding, # fact grounding (facts extracted from radiology reports)
+        'pg': step_fn__phrase_grounding, # phrase grounding (this assumes ground truth masks are available)
+        'cibg': step_fn__chest_imagenome_bbox_grounding, # chest imagenome bbox grounding
+        'vbg': step_fn__vinbig_bbox_grounding, # vinbig bbox grounding
+        'cl': step_fn__chexlocalize, # chexlocalize
+        'chxp': step_fn__chexpert_phrase_grounding, # chexpert phrase grounding
+    }
+    
     def step_fn(unused_engine, batch):
         flag = batch['flag']
-        # print(f'step_fn(): flag={flag}')
-        if flag == 'fg': # fact grounding (facts extracted from radiology reports)
-            output = step_fn__fact_grounding(batch)
-        elif flag == 'pg': # phrase grounding (this assumes ground truth masks are available)
-            output = step_fn__phrase_grounding(batch)
-        elif flag == 'cibg': # chest imagenome bbox grounding
-            output = step_fn__chest_imagenome_bbox_grounding(batch)
-        elif flag == 'vbg': # vinbig bbox grounding
-            output = step_fn__vinbig_bbox_grounding(batch)
-        elif flag == 'cl': # chexlocalize
-            output = step_fn__chexlocalize(batch)
-        else:
-            raise ValueError(f'Invalid flag: {flag}')
+        output = flag_to_step_fn[flag](batch)
         output['flag'] = flag # propagate flag
-        # update learning rate batchwise
-        if update_lr_batchwise:
+        if update_lr_batchwise: # update learning rate batchwise
             lr_scheduler.step()
         return output
     
     return step_fn
 
-def get_engine(model, device, iters_to_accumulate=1,
+def get_engine(model, device, gradient_accumulation_steps=1,
                use_amp=False, training=False, validating=False,
                testing=False, optimizer=None,
                predict_bboxes_chest_imagenome=False,
@@ -503,11 +647,49 @@ def get_engine(model, device, iters_to_accumulate=1,
                phrase_classifier_loss_weight=1.0,
                foreground_loss_weight=1.0,
                background_loss_weight=1.0,
+               binary_multilabel_classif_loss_name='bce',
+               focal_loss_weight=None,
+               bce_loss_weight=None,
+               wbce_loss_weight=None,
+               use_attention_regularization_loss=False,
+               use_contrastive_phrase_grounding_loss=False,
             #    **unused_kwargs,
             ):
 
     # Create criterions
-    phrase_classifier_criterion = nn.BCEWithLogitsLoss()
+
+    # Binary multi-label loss for mimic-cxr phrase classifier
+    assert binary_multilabel_classif_loss_name in [
+        BinaryMultiLabelClassificationLossNames.BCE,
+        BinaryMultiLabelClassificationLossNames.WBCE,
+        BinaryMultiLabelClassificationLossNames.FOCAL,
+        BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
+    ]
+    if binary_multilabel_classif_loss_name == BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE:
+        assert focal_loss_weight is not None
+        assert bce_loss_weight is not None
+        assert wbce_loss_weight is not None
+        binary_loss_kwargs = {
+            'focal_weight': focal_loss_weight,
+            'bce_weight': bce_loss_weight,
+            'wbce_weight': wbce_loss_weight,
+        }
+        print('binary_loss_kwargs:', binary_loss_kwargs)
+    else:
+        binary_loss_kwargs = {}
+    if binary_multilabel_classif_loss_name in [
+        BinaryMultiLabelClassificationLossNames.WBCE,
+        BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
+    ]:
+        use_weighted_phrase_classifier_loss = True
+    else:
+        use_weighted_phrase_classifier_loss = False
+    mimiccxr_phrase_classifier_criterion = get_binary_multilabel_loss(binary_multilabel_classif_loss_name, **binary_loss_kwargs)
+
+    # Standard binary multi-label classification loss
+    binary_multilabel_classification_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCBCE)
+
+    # Contrastive phrase grounding loss
     contrastive_phrase_grounding_criterion = NTXentLoss(temperature=0.1, device=device)
 
     if training and using_yolov8:
@@ -528,10 +710,11 @@ def get_engine(model, device, iters_to_accumulate=1,
 
     # Create engine
     step_fn = get_step_fn(model, optimizer, training, validating, testing, device,
-                            phrase_classifier_criterion=phrase_classifier_criterion,
+                            mimiccxr_phrase_classifier_criterion=mimiccxr_phrase_classifier_criterion,
+                            binary_multilabel_classification_criterion=binary_multilabel_classification_criterion,
                             contrastive_phrase_grounding_criterion=contrastive_phrase_grounding_criterion,
                             pos_area_prior=pos_area_prior, neg_area_prior=neg_area_prior,
-                            iters_to_accumulate=iters_to_accumulate,
+                            gradient_accumulation_steps=gradient_accumulation_steps,
                             max_grad_norm=max_grad_norm, use_amp=use_amp,
                             # chest imagenome dataset
                             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
@@ -549,6 +732,10 @@ def get_engine(model, device, iters_to_accumulate=1,
                             phrase_classifier_loss_weight=phrase_classifier_loss_weight,
                             foreground_loss_weight=foreground_loss_weight,
                             background_loss_weight=background_loss_weight,
+                            # other loss args
+                            use_weighted_phrase_classifier_loss=use_weighted_phrase_classifier_loss,
+                            use_attention_regularization_loss=use_attention_regularization_loss,
+                            use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
                         )
     engine = Engine(step_fn)
     return engine

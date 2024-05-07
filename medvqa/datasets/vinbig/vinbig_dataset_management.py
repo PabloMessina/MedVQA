@@ -17,7 +17,7 @@ from medvqa.datasets.vinbig import (
     load_train_image_id_2_bboxes,
 )
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
-from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_DATASET_ID, VINBIG_LABELS
+from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_DATASET_ID, VINBIG_LABEL2PHRASE, VINBIG_LABELS
 
 from medvqa.datasets.dataloading_utils import (
     INFINITE_DATASET_LENGTH,
@@ -34,7 +34,7 @@ class VinBigTrainingMode:
     ALL = 'all'
 
     @staticmethod
-    def get_all():
+    def get_choices():
         return [
             VinBigTrainingMode.TRAIN_ONLY,
             VinBigTrainingMode.TEST_ONLY,
@@ -78,7 +78,7 @@ class VinBigTrainerBase(LabelBasedVQAClass):
                     image_id_2_bboxes[img_id] = ([], [])
             self.image_id_2_bboxes = image_id_2_bboxes
             self.bboxes = [image_id_2_bboxes[img_id] for img_id in image_ids]
-            for x in self.bboxes:
+            for x in self.bboxes: # sanity check
                 assert len(x) == 2
                 assert len(x[0]) == len(x[1])
                 for y in x[0]:
@@ -478,7 +478,6 @@ class VinBigBboxGroundingDataset(Dataset):
 
     def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels,
                  bboxes, indices, use_yolov8=False, infinite=False, shuffle_indices=False):
-        assert use_yolov8 # TODO: add support for non-YOLOv8
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
@@ -503,28 +502,37 @@ class VinBigBboxGroundingDataset(Dataset):
             i %= len(self.indices)
         i = self.indices[i]
         image_path = self.image_paths[i]
-        tmp = self.image_transform(image_path, return_image_size=True)
-        image, image_size_before, image_size_after = tmp
         phrase_embeddings = self.phrase_embeddings
         phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
-        bboxes, classes = self.bboxes[i]
-        return {
-            'i': image,
-            'pe': phrase_embeddings,
-            'pgm': phrase_grounding_masks,
-            'pcl': phrase_classification_labels,
-            'bboxes': bboxes,
-            'classes': classes,
-            # for YOLOv8
-            'im_file': image_path,
-            'ori_shape': image_size_before,
-            'resized_shape': image_size_after,
-        }
+        if self.use_yolov8:
+            tmp = self.image_transform(image_path, return_image_size=True)
+            image, image_size_before, image_size_after = tmp
+            bboxes, classes = self.bboxes[i]
+            return {
+                'i': image,
+                'pe': phrase_embeddings,
+                'pgm': phrase_grounding_masks,
+                'pcl': phrase_classification_labels,
+                # for YOLOv8
+                'bboxes': bboxes,
+                'classes': classes,
+                'im_file': image_path,
+                'ori_shape': image_size_before,
+                'resized_shape': image_size_after,
+            }
+        else:
+            image = self.image_transform(image_path)
+            return {
+                'i': image,
+                'pe': phrase_embeddings,
+                'pgm': phrase_grounding_masks,
+                'pcl': phrase_classification_labels,
+            }
 
 class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
     def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
-                 mask_height, mask_width, bbox_phrase_embeddings_filepath,
+                 mask_height, mask_width, phrase_embeddings_filepath,
                  max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
                  training_data_mode=VinBigTrainingMode.ALL,
                  use_training_set=True, use_validation_set=True,
@@ -542,14 +550,14 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         self.use_validation_set = use_validation_set
         self.use_yolov8 = use_yolov8
 
-        print(f'Loding bbox_phrase_embeddings and bbox_phrases from {bbox_phrase_embeddings_filepath}...')
-        tmp = get_cached_pickle_file(bbox_phrase_embeddings_filepath)
-        bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
-        bbox_phrases = tmp['bbox_phrases']
-        assert bbox_phrase_embeddings.shape[0] == len(bbox_phrases)
-        print(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
-        print(f'len(bbox_phrases) = {len(bbox_phrases)}')
-        for phrase in bbox_phrases:
+        print(f'Loding phrase_embeddings and phrases from {phrase_embeddings_filepath}...')
+        tmp = get_cached_pickle_file(phrase_embeddings_filepath)
+        phrase_embeddings = tmp['phrase_embeddings']
+        phrases = tmp['phrases']
+        assert phrase_embeddings.shape[0] == len(phrases)
+        print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+        print(f'len(phrases) = {len(phrases)}')
+        for phrase in phrases:
             print('\t', phrase)
 
         print('Compute phrase grounding masks and labels')
@@ -561,6 +569,32 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
             )
         self.phrase_grounding_masks = np.array(self.phrase_grounding_masks)
         self.phrase_classification_labels = np.array(self.phrase_classification_labels)
+        print(f'self.phrase_grounding_masks.shape = {self.phrase_grounding_masks.shape}')
+        print(f'self.phrase_classification_labels.shape = {self.phrase_classification_labels.shape}')
+
+        print('Append additional labels to phrase_classification_labels')
+        # NOTE: only 22 of 28 classes have bounding boxes
+        non_bbox_labels = [i for i, name in enumerate(VINBIG_LABELS) if name not in VINBIG_BBOX_NAMES]
+        print(f'len(non_bbox_labels) = {len(non_bbox_labels)}')
+        print(f'non_bbox_labels = {[VINBIG_LABELS[i] for i in non_bbox_labels]}')
+        assert len(self.labels) == len(self.phrase_classification_labels)
+        self.phrase_classification_labels = np.concatenate([
+            self.phrase_classification_labels,
+            self.labels[:, non_bbox_labels],
+        ], axis=1)
+        print(f'self.phrase_classification_labels.shape = {self.phrase_classification_labels.shape}')
+        assert self.phrase_classification_labels.shape == self.labels.shape
+        # Reorder phrases and phrase_embeddings
+        print('Reorder phrases and phrase_embeddings')
+        actual_label_names = VINBIG_BBOX_NAMES + [VINBIG_LABELS[i] for i in non_bbox_labels]
+        actual_phrases = [VINBIG_LABEL2PHRASE[name] for name in actual_label_names]
+        phrase2idx = {phrase: i for i, phrase in enumerate(phrases)}
+        phrase_idxs = [phrase2idx[phrase] for phrase in actual_phrases]
+        phrases = [phrases[i] for i in phrase_idxs]
+        phrase_embeddings = phrase_embeddings[phrase_idxs]
+        print(f'len(phrases) = {len(phrases)}')
+        print(f'len(actual_phrases) = {len(actual_phrases)}')
+        print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
 
         if use_training_set:
             print('Generating train dataset and dataloader')
@@ -575,7 +609,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
 
             grouped_indices = group_indices_for_balanced_sampling(label_matrix=self.phrase_classification_labels,
                                                                  indices=train_indices,
-                                                                 label_names=VINBIG_BBOX_NAMES,
+                                                                 label_names=actual_label_names,
                                                                  min_group_size=50)
             train_datasets = []
             train_weights = []
@@ -583,7 +617,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                 dataset = VinBigBboxGroundingDataset(
                     image_paths=self.image_paths,
                     image_transform=self.train_image_transform,
-                    phrase_embeddings=bbox_phrase_embeddings,
+                    phrase_embeddings=phrase_embeddings,
                     phrase_grounding_masks=self.phrase_grounding_masks,
                     phrase_classification_labels=self.phrase_classification_labels,
                     bboxes=self.bboxes,
@@ -597,7 +631,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                 train_weights.append(weight)
                 print(f'  len(indices) = {len(indices)}, weight = {weight}')
             self.train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
-            batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) # at least 1 image per batch
+            batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) # at least 1 image per batch
             self.train_dataloader = DataLoader(self.train_dataset,
                                             batch_size=batch_size,
                                             shuffle=False,
@@ -611,14 +645,14 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
             self.val_dataset = VinBigBboxGroundingDataset(
                 image_paths=self.image_paths,
                 image_transform=self.val_image_transform,
-                phrase_embeddings=bbox_phrase_embeddings,
+                phrase_embeddings=phrase_embeddings,
                 phrase_grounding_masks=self.phrase_grounding_masks,
                 phrase_classification_labels=self.phrase_classification_labels,
                 bboxes=self.bboxes,
                 use_yolov8=self.use_yolov8,
                 indices=self.test_indices,
             )
-            batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) * test_batch_size_factor)
+            batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) * test_batch_size_factor)
             self.val_dataloader = DataLoader(self.val_dataset,
                                              batch_size=batch_size,
                                              shuffle=False,

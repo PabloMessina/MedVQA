@@ -82,17 +82,13 @@ class PhraseGrounder(MultiPurposeVisualModule):
     def forward(
         self,
         raw_images, # (batch_size, 3, H, W)
+        phrase_embeddings, # (batch_size, K, phrase_embedding_size)
         only_compute_features=False,
-        pos_phrase_embeddings=None, # (batch_size, K_pos, phrase_embedding_size)
-        neg_phrase_embeddings=None, # (batch_size, K_neg, phrase_embedding_size)
-        phrase_embeddings=None, # (batch_size, K, phrase_embedding_size)
         skip_phrase_classifier=False,
         yolov8_detection_layer_index=None,
         mimiccxr_forward=False,
         vinbig_forward=False,
     ):  
-        assert (pos_phrase_embeddings is not None and neg_phrase_embeddings is not None) or \
-            phrase_embeddings is not None, 'Either (pos_phrase_embeddings and neg_phrase_embeddings) or phrase_embeddings must be provided'
         assert mimiccxr_forward or vinbig_forward or only_compute_features
         # Visual Component
         output = super().forward(
@@ -116,80 +112,33 @@ class PhraseGrounder(MultiPurposeVisualModule):
             #     print_orange(f'image_local_feat_size: {self.image_local_feat_size}')
             #     raise e
         assert local_feat.shape == (raw_images.shape[0], self.num_regions, self.image_local_feat_size)
-        
-        if pos_phrase_embeddings is not None and neg_phrase_embeddings is not None:
-            # Queries
-            q_pos = self.q_proj(pos_phrase_embeddings) # (batch_size, K_pos, qkv_size)
-            q_neg = self.q_proj(neg_phrase_embeddings) # (batch_size, K_neg, qkv_size)
-            # Keys and Values
-            k = self.k_proj(local_feat) # (batch_size, num_regions, qkv_size)
-            v = self.v_proj(local_feat) # (batch_size, num_regions, qkv_size)
-            # Attention
-            # attention_pos = torch.matmul(q_pos, k.transpose(1,2)) # (batch_size, K_pos, num_regions)
-            attention_pos = self.att_proj(q_pos.unsqueeze(2) * k.unsqueeze(1)).squeeze(3) # (batch_size, K_pos, num_regions)
-            sigmoid_attention_pos = torch.sigmoid(attention_pos) # (batch_size, K_pos, num_regions)
-            # attention_neg = torch.matmul(q_neg, k.transpose(1,2)) # (batch_size, K_neg, num_regions)
-            attention_neg = self.att_proj(q_neg.unsqueeze(2) * k.unsqueeze(1)).squeeze(3) # (batch_size, K_neg, num_regions)
-            sigmoid_attention_neg = torch.sigmoid(attention_neg) # (batch_size, K_neg, num_regions)
-            # Weighted average
-            weighted_sum_pos = torch.matmul(sigmoid_attention_pos, v) # (batch_size, K_pos, qkv_size)
-            weighted_avg_pos = weighted_sum_pos / (sigmoid_attention_pos.sum(dim=-1, keepdim=True) + 1e-8) # (batch_size, K_pos, qkv_size)
-            weighted_sum_neg = torch.matmul(sigmoid_attention_neg, v) # (batch_size, K_neg, qkv_size)
-            weighted_avg_neg = weighted_sum_neg / (sigmoid_attention_neg.sum(dim=-1, keepdim=True) + 1e-8) # (batch_size, K_neg, qkv_size)
-            # Grounding vector
-            grounding_vector_pos = self.W(weighted_avg_pos) # (batch_size, K_pos, phrase_embedding_size)
-            grounding_vector_pos = torch.nn.functional.normalize(grounding_vector_pos, p=2, dim=-1) # (batch_size, K_pos, phrase_embedding_size)
-            grounding_vector_neg = self.W(weighted_avg_neg) # (batch_size, K_neg, phrase_embedding_size)
-            grounding_vector_neg = torch.nn.functional.normalize(grounding_vector_neg, p=2, dim=-1) # (batch_size, K_neg, phrase_embedding_size)
-            # Phrase classifier
-            element_wise_mult_pos = pos_phrase_embeddings * grounding_vector_pos # (batch_size, K_pos, phrase_embedding_size)
-            phrase_classifier_input_pos = torch.cat([pos_phrase_embeddings, grounding_vector_pos,
-                                                     element_wise_mult_pos, sigmoid_attention_pos], dim=-1)
-            phrase_classifier_output_pos = self.phrase_classifier_1(phrase_classifier_input_pos)
-            phrase_classifier_output_pos = torch.relu(phrase_classifier_output_pos)
-            phrase_classifier_output_pos = self.phrase_classifier_2(phrase_classifier_output_pos)
-
-            element_wise_mult_neg = neg_phrase_embeddings * grounding_vector_neg
-            phrase_classifier_input_neg = torch.cat([neg_phrase_embeddings, grounding_vector_neg,
-                                                     element_wise_mult_neg, sigmoid_attention_neg], dim=-1)
-            phrase_classifier_output_neg = self.phrase_classifier_1(phrase_classifier_input_neg)
-            phrase_classifier_output_neg = torch.relu(phrase_classifier_output_neg)
-            phrase_classifier_output_neg = self.phrase_classifier_2(phrase_classifier_output_neg)
-            # Phrase-grounding similarity
-            phrase_grounding_similarity_pos = element_wise_mult_pos.sum(dim=-1) # (batch_size, K_pos)
-            phrase_grounding_similarity_neg = element_wise_mult_neg.sum(dim=-1) # (batch_size, K_neg)
-            # Output
-            output['sigmoid_attention_pos'] = sigmoid_attention_pos
-            output['sigmoid_attention_neg'] = sigmoid_attention_neg
-            output['phrase_classifier_output_pos'] = phrase_classifier_output_pos
-            output['phrase_classifier_output_neg'] = phrase_classifier_output_neg
-            output['phrase_grounding_similarity_pos'] = phrase_grounding_similarity_pos
-            output['phrase_grounding_similarity_neg'] = phrase_grounding_similarity_neg
-        elif phrase_embeddings is not None:
-            # Queries
-            q = self.q_proj(phrase_embeddings) # (batch_size, K, qkv_size)
-            # Keys and Values
-            k = self.k_proj(local_feat) # (batch_size, num_regions, qkv_size)
-            v = self.v_proj(local_feat) # (batch_size, num_regions, qkv_size)
-            # Attention
-            # attention = torch.matmul(q, k.transpose(1,2)) # (batch_size, K, num_regions)
-            attention = self.att_proj(q.unsqueeze(2) * k.unsqueeze(1)).squeeze(3) # (batch_size, K, num_regions)
-            sigmoid_attention = torch.sigmoid(attention) # (batch_size, K, num_regions)
-            # Weighted average
-            weighted_sum = torch.matmul(sigmoid_attention, v) # (batch_size, K, qkv_size)
-            weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-1, keepdim=True) + 1e-8) # (batch_size, K, qkv_size)
-            # Grounding vector
-            grounding_vector = self.W(weighted_avg) # (batch_size, K, phrase_embedding_size)
-            grounding_vector = torch.nn.functional.normalize(grounding_vector, p=2, dim=-1) # (batch_size, K, phrase_embedding_size)
-            # Phrase classifier
-            if not skip_phrase_classifier:
-                element_wise_mult = phrase_embeddings * grounding_vector # (batch_size, K, phrase_embedding_size)
-                phrase_classifier_input = torch.cat([phrase_embeddings, grounding_vector, element_wise_mult, sigmoid_attention], dim=-1)
-                phrase_classifier_output = self.phrase_classifier_1(phrase_classifier_input)
-                phrase_classifier_output = torch.relu(phrase_classifier_output)
-                phrase_classifier_output = self.phrase_classifier_2(phrase_classifier_output)
-            # Output
-            output['sigmoid_attention'] = sigmoid_attention
-            if not skip_phrase_classifier:
-                output['phrase_classifier_output'] = phrase_classifier_output
+        # Queries
+        q = self.q_proj(phrase_embeddings) # (batch_size, K, qkv_size)
+        # Keys and Values
+        k = self.k_proj(local_feat) # (batch_size, num_regions, qkv_size)
+        v = self.v_proj(local_feat) # (batch_size, num_regions, qkv_size)
+        # Attention
+        # attention = torch.matmul(q, k.transpose(1,2)) # (batch_size, K, num_regions)
+        attention = self.att_proj(q.unsqueeze(2) * k.unsqueeze(1)).squeeze(3) # (batch_size, K, num_regions)
+        sigmoid_attention = torch.sigmoid(attention) # (batch_size, K, num_regions)
+        # Weighted average
+        weighted_sum = torch.matmul(sigmoid_attention, v) # (batch_size, K, qkv_size)
+        weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-1, keepdim=True) + 1e-8) # (batch_size, K, qkv_size)
+        # Grounding vector
+        grounding_vector = self.W(weighted_avg) # (batch_size, K, phrase_embedding_size)
+        grounding_vector = torch.nn.functional.normalize(grounding_vector, p=2, dim=-1) # (batch_size, K, phrase_embedding_size)
+        # Phrase classifier
+        element_wise_mult = phrase_embeddings * grounding_vector # (batch_size, K, phrase_embedding_size)
+        if not skip_phrase_classifier:
+            phrase_classifier_input = torch.cat([phrase_embeddings, grounding_vector, element_wise_mult, sigmoid_attention], dim=-1)
+            phrase_classifier_logits = self.phrase_classifier_1(phrase_classifier_input)
+            phrase_classifier_logits = torch.relu(phrase_classifier_logits)
+            phrase_classifier_logits = self.phrase_classifier_2(phrase_classifier_logits)
+        # Phrase-grounding similarity
+        phrase_grounding_similarity = element_wise_mult.sum(dim=-1)
+        # Output
+        output['sigmoid_attention'] = sigmoid_attention
+        output['phrase_grounding_similarity'] = phrase_grounding_similarity
+        if not skip_phrase_classifier:
+            output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
         return output

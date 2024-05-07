@@ -20,6 +20,19 @@ CHEXLOCALIZE_IMAGE_DIR_512X512 = os.path.join(CHEXLOCALIZE_WORKSPACE_DIR, 'CheXp
 CHEXLOCALIZE_CLASS_NAMES = ["Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Lesion", "Airspace Opacity",
                             "Edema", "Consolidation", "Atelectasis", "Pneumothorax", "Pleural Effusion", "Support Devices"]
 
+CHEXLOCALIZE_CLASS_NAME2PHRASE = {
+    "Enlarged Cardiomediastinum": "enlarged cardiomediastinum seen",
+    "Cardiomegaly": "cardiomegaly seen",
+    "Lung Lesion": "lung lesion seen",
+    "Airspace Opacity": "airspace opacity seen",
+    "Edema": "edema seen",
+    "Consolidation": "consolidation seen",
+    "Atelectasis": "atelectasis seen",
+    "Pneumothorax": "pneumothorax seen",
+    "Pleural Effusion": "pleural effusion seen",
+    "Support Devices": "support devices seen"
+}
+
 def extract_images_segmentation_masks_and_binary_labels(mask_height, mask_width, image_dir=CHEXLOCALIZE_IMAGE_DIR_512X512,
                                                         target_image_size=(512, 512), flatten_masks=False, return_polygons=False):
     """

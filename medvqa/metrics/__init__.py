@@ -9,8 +9,9 @@ from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMacroAvgF1,
     DatasetAwareMultiLabelMicroAvgF1,
 )
-from medvqa.metrics.classification.prc_auc import prc_auc_fn
+from medvqa.metrics.classification.prc_auc import _prc_auc, prc_auc_fn
 from medvqa.metrics.classification.singlelabel_accuracy import ConditionAwareLogitsAboveThresholdAccuracy, InstanceConditionedTripletAccuracy
+from medvqa.metrics.condition_aware_metric import ConditionAwareEpochMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
 from medvqa.metrics.logging.condition_aware_t5_report_logger import ConditionAwareSeq2SeqOutputLogger
 from medvqa.metrics.medical.med_completeness import ConditionAwareWeightedMedicalCompleteness
@@ -571,6 +572,16 @@ def attach_condition_aware_segmask_iou_per_class(engine, pred_field_name, gt_fie
         nc=nc,
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose prc-auc (micro-average)
+def attach_condition_aware_prc_auc(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
+    met = ConditionAwareEpochMetric(
+        compute_fn=_prc_auc,
+        output_transform=_get_output_transform(pred_field_name, gt_field_name),
+        condition_function=condition_function,
+        check_compute_fn=False,
     )
     met.attach(engine, metric_name)
 
