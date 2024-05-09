@@ -35,12 +35,22 @@ from medvqa.utils.constants import (
 from medvqa.models.checkpoint import (
     load_metadata,
 )
-from medvqa.utils.common import INTERPRET_CXR_TEST_PUBLIC_CSV_PATH, INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH, parsed_args_to_dict
+from medvqa.utils.common import (
+    INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
+    INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
+    parsed_args_to_dict,
+)
 from medvqa.datasets.dataloading_utils import (
     SequentialDataLoader,
 )
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, get_file_path_with_hashing_if_too_long, get_results_folder_path, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.files import (
+    get_cached_json_file,
+    get_cached_pickle_file,
+    get_file_path_with_hashing_if_too_long,
+    get_results_folder_path,
+    load_jsonl, load_pickle, save_pickle,
+)
 from medvqa.utils.logging import CountPrinter, print_blue, print_bold
 from medvqa.utils.metrics import best_threshold_and_f1_score
 

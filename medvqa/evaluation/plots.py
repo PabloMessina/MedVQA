@@ -301,9 +301,9 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
     plt.grid(axis='y')
     plt.show()
 
-def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric_names, metric_aliases, dataset_name,
-                                          figsize=(10, 8), scores_fontsize=7, ytick_fontsize=10,
-                                          plot_vertical_size=1.0, sort_metrics=True, sort_methods=True):
+def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, metric_aliases, title,
+                                figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
+                                sort_metrics=True, sort_methods=True, vertical=False):
     n = len(dataframe_rows)
     assert n == len(method_aliases)
     assert n > 0
@@ -327,24 +327,42 @@ def plot_per_class_classification_metrics(dataframe_rows, method_aliases, metric
     # The height of the bar is the metric score
     # Each method is a different color    
     plt.figure(figsize=figsize)
-    bar_height = 0.9 * plot_vertical_size / (n * m)
-    for i in range(n):
-        label = method_aliases[method_idxs[n-1-i]]
-        label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
-        positions = [j * (plot_vertical_size / m) + (n-1-i)*bar_height for j in range(1, m+1)]
-        scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-        plt.barh(positions, scores, height=bar_height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
-        # plot the scores as text on top of the bars
-        for j in range(m):
-            plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
-    plt.yticks([(j+0.5) * (plot_vertical_size / m) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs], fontsize=ytick_fontsize)
-    plt.ylabel('Metric')
-    plt.xlabel('Score')
-    plt.title(f'Metrics on {dataset_name}')
+    if vertical:
+        bar_width = 0.9 * metrics_axis_size / (n * m)
+        for i in range(n):
+            label = method_aliases[method_idxs[i]]
+            label = f'({mean_score_per_method[method_idxs[i]]:.3f}) {label}'
+            positions = [j * (metrics_axis_size / m) + i*bar_width for j in range(1, m+1)]
+            scores = [scores_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+            plt.bar(positions, scores, width=bar_width, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
+            # plot the scores as text on top of the bars
+            for j in range(m):
+                plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01 , f'{scores[j]:.3f}', ha='center',
+                         va='bottom', fontsize=scores_fontsize, rotation=45)
+        plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
+                   fontsize=metrics_tick_fontsize, rotation=45, ha='right')
+        print([(j+0.5) * (metrics_axis_size / m) for j in range(0, m)])
+        plt.xlabel('Metric')
+        plt.ylabel('Score')
+        plt.grid(axis='y')
+    else:
+        bar_height = 0.9 * metrics_axis_size / (n * m)
+        for i in range(n):
+            label = method_aliases[method_idxs[n-1-i]]
+            label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
+            positions = [j * (metrics_axis_size / m) + (n-1-i)*bar_height for j in range(1, m+1)]
+            scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+            plt.barh(positions, scores, height=bar_height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
+            # plot the scores as text on top of the bars
+            for j in range(m):
+                plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+        plt.yticks([j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs], fontsize=metrics_tick_fontsize)
+        plt.ylabel('Metric')
+        plt.xlabel('Score')
+        plt.grid(axis='x')
+    plt.title(title)
     # Plot legend outside the plot
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
-    # Plot horizontal lines of grid
-    plt.grid(axis='x')
     plt.show()
 
 def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_aliases, metric_names, label_frequencies,

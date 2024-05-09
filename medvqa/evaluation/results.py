@@ -5,7 +5,7 @@ from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_training
 from medvqa.utils.common import RESULTS_DIR, WORKSPACE_DIR
 from medvqa.utils.constants import DATASET_NAME_TO_SHORT
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file
-from medvqa.evaluation import report_generation, visual_module
+from medvqa.evaluation import report_generation, visual_module, phrase_grounding
 
 def collect_report_level_results(dataset_name):
     vqa_dirs = os.listdir(os.path.join(RESULTS_DIR,'vqa'))
@@ -98,6 +98,20 @@ def collect_multimodal_question_probs(dataset_name):
                                     if 'question_probs' in x and dataset_name in x]
             for filename in exp_result_filenames:
                 results.append(os.path.join(RESULTS_DIR, 'multimodal', exp_name, filename))
+        except NotADirectoryError:
+            continue
+    return results
+
+def collect_phrase_grounding_classification_results(dataset_name, filename_fn=None):
+    dirs = os.listdir(os.path.join(RESULTS_DIR,'phrase_grounding'))
+    results = []
+    for exp_name in dirs:
+        try:
+            exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, 'phrase_grounding', exp_name))\
+                                    if 'classification_metrics' in x and dataset_name in x and\
+                                        (filename_fn is None or filename_fn(x))]
+            for filename in exp_result_filenames:
+                results.append(('phrase_grounding', exp_name, filename))
         except NotADirectoryError:
             continue
     return results
@@ -285,6 +299,18 @@ def _append_ensemble_cheating_column(df, results):
     column = ['cheat' in r[2] for r in results]
     df['escheat'] = column
 
+def _append_string_inside_parentheses_from_filename_column(df, results):
+    column = []
+    for _, _, filename in results:
+        try:
+            s = filename.index('(')
+            e = filename.index(')')
+            assert s < e
+            column.append(filename[s+1:e])
+        except (ValueError, AssertionError):
+            column.append(None)
+    df['parenthesis'] = column
+
 def _append_num_ensembled_models_column(df, metrics_paths):
     column = []
     for mp in metrics_paths:
@@ -467,6 +493,67 @@ def _append_input_labels_colum(df, results):
         column.append(input_labels)
     df['input_labels'] = column
 
+def _append_phrase_grounding_trainer_engine_losses(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            kwargs = metadata['trainer_engine_kwargs']
+            strings = []
+            aslw = kwargs.get('attention_supervision_loss_weight', 0)
+            pclw = kwargs.get('phrase_classifier_loss_weight', 0)
+            forlw = kwargs.get('foreground_loss_weight', 0)
+            blw = kwargs.get('background_loss_weight', 0)
+            bmcln = kwargs.get('binary_multilabel_classif_loss_name', None)
+            foclw = kwargs.get('focal_loss_weight', 0)
+            bcelw = kwargs.get('bce_loss_weight', 0)
+            wbcelw = kwargs.get('wbce_loss_weight', 0)
+            attregl = kwargs.get('use_attention_regularization_loss', True)
+            acpgl = kwargs.get('use_contrastive_phrase_grounding_loss', True)            
+
+            if aslw > 0: strings.append(f'aslw={aslw}')
+            if pclw > 0: strings.append(f'pclw={pclw}')
+            if forlw > 0: strings.append(f'forlw={forlw}')
+            if blw > 0: strings.append(f'blw={blw}')
+            if bmcln is not None: strings.append(f'bmcln={bmcln}')
+            if foclw > 0: strings.append(f'foclw={foclw}')
+            if bcelw > 0: strings.append(f'bcelw={bcelw}')
+            if wbcelw > 0: strings.append(f'wbcelw={wbcelw}')
+            if attregl: strings.append('attregl')
+            if acpgl: strings.append('acpgl')
+            losses = ','.join(strings)
+            
+        except KeyError:
+            losses = None
+        column.append(losses)
+    df['losses'] = column
+
+def _append_phrase_grounding_mimiccxr_trainer_kwargs(df, results):
+    column = []
+    for metadata in _get_metadata_generator(results):
+        try:
+            kwargs = metadata['mimiccxr_trainer_kwargs']
+            strings = []
+            blmst = kwargs.get('balance_long_middle_short_tail', False)
+            uwpcl = kwargs.get('use_weighted_phrase_classifier_loss', False)
+            ditpnffp = kwargs.get('dicom_id_to_pos_neg_facts_filepath', None)
+            if blmst: strings.append('blmst')
+            if uwpcl: strings.append('uwpcl')
+            if ditpnffp is not None:
+                filename = os.path.basename(ditpnffp)
+                if '_label_based_' in filename:
+                    strings.append('ditpnffp=label_based')
+                elif '_fact_based_' in filename:
+                    strings.append('ditpnffp=fact_based')
+                elif '_all_' in filename:
+                    strings.append('ditpnffp=all')
+                else:
+                    raise ValueError(f'Unknown ditpnffp: {filename}')
+            text = ','.join(strings)
+        except KeyError:
+            text = None
+        column.append(text)
+    df['mimiccxr_trainer_kwargs'] = column
+
 def _append_method_columns__report_level(df, results):
     df['folder'] = ['vm' if x[0] == 'visual_module' else x[0] for x in results]
     _append_experiment_timestamp_column(df, results)
@@ -545,6 +632,18 @@ def _append_method_columns__chest_imagenome_bbox(df, results):
     _append_image_size_column(df, results)
     _append_decent_images_column(df, results)
 
+def _append_method_columns__phrase_grounding_classification(df, results):
+    df['folder'] = [x[0] for x in results]
+    _append_experiment_timestamp_column(df, results)
+    _append_filesystem_modified_time_column(df, results)
+    _append_datasets_column(df, results)
+    _append_model_column(df, results)
+    _append_data_augmentation_column(df, results)
+    _append_image_size_column(df, results)
+    _append_string_inside_parentheses_from_filename_column(df, results)
+    _append_phrase_grounding_trainer_engine_losses(df, results)
+    _append_phrase_grounding_mimiccxr_trainer_kwargs(df, results)
+
 def get_report_level_metrics_dataframe(dataset_name):
     results = collect_report_level_results(dataset_name)
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]    
@@ -585,6 +684,21 @@ def get_chest_imagenome_bbox_metrics_dataframe(dataset_name):
     metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
     df = visual_module.get_chest_imagenome_bbox_metrics_dataframe(metrics_paths)
     _append_method_columns__chest_imagenome_bbox(df, results)
+    return df
+
+def get_phrase_grounding_classification_metrics_dataframe(dataset_name, metric_prefix, class_names, class_name2short, verbose=False):
+    filename_regex = re.compile(r'\b{}\b'.format(metric_prefix))
+    filename_fn = lambda x: filename_regex.search(x) is not None
+    results = collect_phrase_grounding_classification_results(dataset_name, filename_fn)
+    if verbose:
+        print(f'Found {len(results)} results')
+        print(results)
+    metrics_paths = [os.path.join(RESULTS_DIR, *result) for result in results]
+    for mp in metrics_paths:
+        assert os.path.exists(mp), f'{mp} does not exist'
+    df = phrase_grounding.get_phrase_grounding_classification_metrics_dataframe(
+        metrics_paths, metric_prefix, class_names, class_name2short)
+    _append_method_columns__phrase_grounding_classification(df, results)
     return df
 
 def get_validation_metrics_dataframe(metrics_logs_paths,

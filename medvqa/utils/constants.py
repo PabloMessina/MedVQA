@@ -601,6 +601,26 @@ LABEL_BASED_FACTS__CHEXPERT = [
 assert len(LABEL_BASED_FACTS__CHEXPERT) == len(CHEXPERT_LABELS)
 assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__CHEXPERT)
 
+LABEL_BASED_FACTS__CHEXPERT_2_SHORT = {
+    'no abnormalities seen': 'NoAb',
+    'enlarged cardiomediastinum seen': 'ECM',
+    'cardiomegaly seen': 'Card',
+    'lung lesion seen': 'LL',
+    'lung opacity seen': 'LO',
+    'edema seen': 'Ed',
+    'consolidation seen': 'Cons',
+    'pneumonia seen': 'Pn',
+    'atelectasis seen': 'A',
+    'pneumothorax seen': 'Ptho',
+    'pleural effusion seen': 'Ef',
+    'pleural abnormalities seen': 'PleAb',
+    'fracture seen': 'Frac',
+    'support devices seen': 'SD',
+}
+assert all(l in LABEL_BASED_FACTS__CHEXPERT_2_SHORT for l in LABEL_BASED_FACTS__CHEXPERT)
+assert all(l in LABEL_BASED_FACTS__CHEXPERT for l in LABEL_BASED_FACTS__CHEXPERT_2_SHORT)
+    
+
 LABEL_BASED_FACTS__MIMIC_CXR_LT = [
     'atelectasis seen', # Atelectasis
     'calcification of the aorta seen', # Calcification of the Aorta
@@ -631,6 +651,37 @@ LABEL_BASED_FACTS__MIMIC_CXR_LT = [
 ]
 assert len(LABEL_BASED_FACTS__MIMIC_CXR_LT) == len(MIMIC_CXR_LT_LABELS)
 assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__MIMIC_CXR_LT)
+
+LABEL_BASED_FACTS__MIMIC_CXR_LT_2_SHORT = {
+    'atelectasis seen': 'A',
+    'calcification of the aorta seen': 'CoA',
+    'cardiomegaly seen': 'Card',
+    'consolidation seen': 'Cons',
+    'edema seen': 'Ed',
+    'emphysema seen': 'Emp',
+    'enlarged cardiomediastinum seen': 'ECM',
+    'fibrosis seen': 'Fib',
+    'fracture seen': 'Frac',
+    'hernia seen': 'Hern',
+    'infiltration seen': 'Inf',
+    'lung lesion seen': 'LL',
+    'lung opacity seen': 'LO',
+    'mass seen': 'Mass',
+    'no abnormalities seen': 'NoAb',
+    'nodule seen': 'Nod',
+    'pleural effusion seen': 'Ef',
+    'pleural abnormalities seen': 'PleAb',
+    'pleural thickening seen': 'PleTh',
+    'pneumomediastinum seen': 'PnMd',
+    'pneumonia seen': 'Pn',
+    'pneumoperitoneum seen': 'PnPt',
+    'pneumothorax seen': 'Ptho',
+    'subcutaneous emphysema seen': 'SEmp',
+    'support devices seen': 'SD',
+    'tortuous aorta seen': 'TA',
+}
+assert all(l in LABEL_BASED_FACTS__MIMIC_CXR_LT_2_SHORT for l in LABEL_BASED_FACTS__MIMIC_CXR_LT)
+assert all(l in LABEL_BASED_FACTS__MIMIC_CXR_LT for l in LABEL_BASED_FACTS__MIMIC_CXR_LT_2_SHORT)
 
 LABEL_BASED_FACTS__CHEST_IMAGENOME = [
     'airspace opacity seen', # Airspace Opacity
@@ -713,3 +764,92 @@ LABEL_BASED_FACTS__CHEST_IMAGENOME = [
     'tracheostomy tube seen', # Tracheostomy Tube
 ]
 assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__CHEST_IMAGENOME)
+
+LABEL_BASED_FACTS__CHEST_IMAGENOME_2_SHORT = {
+    'airspace opacity seen': 'AO',
+    'atelectasis seen': 'A',
+    'bone lesion seen': 'BL',
+    'bronchiectasis seen': 'B',
+    'calcified nodule seen': 'CN',
+    'clavicle fracture seen': 'CF',
+    'consolidation seen': 'Cons',
+    'costophrenic angle blunting seen': 'CAB',
+    'cyst/bullae seen': 'CB',
+    'diaphragmatic eventration (benign) seen': 'DE',
+    'elevated hemidiaphragm seen': 'EHemi',
+    'enlarged cardiac silhouette seen': 'ECS',
+    'enlarged hilum seen': 'Ehil',
+    'hernia seen': 'Her',
+    'hydropneumothorax seen': 'HPtho',
+    'hyperaeration seen': 'HA',
+    'increased reticular markings/ild pattern seen': 'IRM',
+    'infiltration seen': 'Inf',
+    'linear/patchy atelectasis seen': 'LPA',
+    'lobar/segmental collapse seen': 'LSC',
+    'lung lesion seen': 'LL',
+    'lung opacity seen': 'LO',
+    'mass/nodule (not otherwise specified) seen': 'MN',
+    'mediastinal displacement seen': 'MDis',
+    'mediastinal widening seen': 'MW',
+    'multiple masses/nodules seen': 'MM',
+    'pleural effusion seen': 'Ef',
+    'pleural/parenchymal scarring seen': 'PPS',
+    'pneumomediastinum seen': 'PM',
+    'pneumothorax seen': 'Ptho',
+    'pulmonary edema/hazy opacity seen': 'PEHO',
+    'rib fracture seen': 'RF',
+    'scoliosis seen': 'S',
+    'shoulder osteoarthritis seen': 'SO',
+    'spinal degenerative changes seen': 'SDC',
+    'spinal fracture seen': 'SFrac',
+    'sub-diaphragmatic air seen': 'SDA',
+    'subcutaneous air seen': 'SA',
+    'superior mediastinal mass/enlargement seen': 'SMM',
+    'tortuous aorta seen': 'TA',
+    'vascular calcification seen': 'VCal',
+    'vascular congestion seen': 'VCon',
+    'vascular redistribution seen': 'VR',
+    'aortic graft/repair seen': 'AGR',
+    'cabg grafts seen': 'CG',
+    'cardiac pacer and wires seen': 'CPW',
+    'prosthetic valve seen': 'PV',
+    'alveolar hemorrhage seen': 'AH',
+    'aspiration seen': 'Asp',
+    'copd/emphysema seen': 'CE',
+    'fluid overload/heart failure seen': 'FO',
+    'goiter seen': 'G',
+    'granulomatous disease seen': 'GD',
+    'interstitial lung disease seen': 'ILD',
+    'lung cancer seen': 'LC',
+    'pericardial effusion seen': 'PE',
+    'pneumonia seen': 'Pn',
+    'artifact seen': 'Art',
+    'breast/nipple shadows seen': 'BNS',
+    'low lung volumes seen': 'LLV',
+    'rotated seen': 'Rot',
+    'skin fold seen': 'SFo',
+    'alveolar texture seen': 'AT',
+    'calcified texture seen': 'CaT',
+    'interstitial texture seen': 'IntT',
+    'opacity texture seen': 'OT',
+    'chest port seen': 'CP',
+    'chest tube seen': 'CT',
+    'endotracheal tube seen': 'EndT',
+    'enteric tube seen': 'EntT',
+    'ij line seen': 'IJ',
+    'intra-aortic balloon pump seen': 'IABP',
+    'mediastinal drain seen': 'MDr',
+    'picc seen': 'P',
+    'pigtail catheter seen': 'PC',
+    'subclavian line seen': 'SL',
+    'swan-ganz catheter seen': 'SG',
+    'tracheostomy tube seen': 'TT',
+}
+for x in LABEL_BASED_FACTS__CHEST_IMAGENOME:
+    assert x in LABEL_BASED_FACTS__CHEST_IMAGENOME_2_SHORT, x
+for x in LABEL_BASED_FACTS__CHEST_IMAGENOME_2_SHORT:
+    assert x in LABEL_BASED_FACTS__CHEST_IMAGENOME, x
+_unique = set()
+for x in LABEL_BASED_FACTS__CHEST_IMAGENOME_2_SHORT.values():
+    assert x not in _unique, x
+    _unique.add(x)
