@@ -549,12 +549,12 @@ def _get_mimiccxr_split_dicom_ids(split_name):
     output = [x[0][2] for x in get_split_dict().items() if x[1] == split_name]
     _cache[key] = output
     return output
-def get_mimiccxr_test_dicom_ids():
-    return _get_mimiccxr_split_dicom_ids('test')
 def get_mimiccxr_train_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('train')
 def get_mimiccxr_val_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('validate')
+def get_mimiccxr_test_dicom_ids():
+    return _get_mimiccxr_split_dicom_ids('test')
 
 def get_train_val_test_stats_per_chexpert_label(chexpert_labels_filename):
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, f'train_val_test_chexpert_stats_per_label({chexpert_labels_filename}).pkl')

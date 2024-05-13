@@ -403,9 +403,6 @@ def load_and_run_seq2seq_model_in_inference_mode(
     torch.cuda.empty_cache()
     
     # Return predicted text
-    assert type(output_text) == list
-    if len(output_text) == 1:
-        return output_text[0]
     return output_text
 
 def load_and_run_fact_encoder_in_inference_mode(

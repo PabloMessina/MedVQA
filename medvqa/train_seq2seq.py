@@ -104,6 +104,12 @@ def parse_args(args=None):
     parser.add_argument('--report_nli_input_output_val_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
     parser.add_argument('--integrated_report_facts_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--interpret_cxr__label_based_predictions_filepath', type=str, default=None)
+    parser.add_argument('--interpret_cxr_challenge_data_dir', type=str, default=None)
+    parser.add_argument('--mimiccxr_integrated_report_nli_data_filepath', type=str, default=None)
+    parser.add_argument('--report_section_to_generate', type=str, default=None, choices=['impression', 'findings'])
+    parser.add_argument('--include_public_test_in_train', action='store_true')
+    parser.add_argument('--best_k_classes', type=int, default=None)
     parser.add_argument('--use_sentence2facts_for_nli', action='store_true')
     parser.add_argument('--use_anli', action='store_true')
     parser.add_argument('--use_multinli', action='store_true')
@@ -367,6 +373,12 @@ def train_from_scratch(
     only_validate_nli,
     nli1_only_on_train,
     nli1_only_on_val,
+    interpret_cxr__label_based_predictions_filepath,
+    interpret_cxr_challenge_data_dir,
+    mimiccxr_integrated_report_nli_data_filepath,
+    report_section_to_generate,
+    include_public_test_in_train,
+    best_k_classes,
     # Dataloading args
     batch_size,
     num_workers,
@@ -450,6 +462,12 @@ def train_from_scratch(
         nli1_only_on_train=nli1_only_on_train,
         nli1_only_on_val=nli1_only_on_val,
         val_size=val_size,
+        interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
+        interpret_cxr_challenge_data_dir=interpret_cxr_challenge_data_dir,
+        mimiccxr_integrated_report_nli_data_filepath=mimiccxr_integrated_report_nli_data_filepath,
+        report_section_to_generate=report_section_to_generate,
+        include_public_test_in_train=include_public_test_in_train,
+        best_k_classes=best_k_classes,
     )
 
     collate_batch_fn_kwargs = dict(

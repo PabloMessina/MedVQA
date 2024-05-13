@@ -1,7 +1,7 @@
 import os
-from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import get_iuxray_image_path
+from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase, VM_Trainer
-from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR, IUXRAY_IMAGE_INFO_JSON_PATH, IUXRAY_REPORTS_MIN_JSON_PATH, get_invalid_images
+from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR, IUXRAY_REPORTS_MIN_JSON_PATH, get_invalid_images
 from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.files import get_cached_json_file, load_pickle
 

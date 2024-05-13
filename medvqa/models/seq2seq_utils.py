@@ -11,8 +11,9 @@ from medvqa.utils.common import get_timestamp
 from medvqa.utils.files import save_jsonl
 
 def apply_seq2seq_model_to_sentences(
-        checkpoint_folder_path, sentences, logger, device, batch_size, num_workers, max_length, num_beams,
-        postprocess_input_output_func, save_outputs=True, save_dir=None, save_filename_prefix=None):
+        checkpoint_folder_path, sentences, device, batch_size, num_workers, max_length, num_beams,
+        postprocess_input_output_func, save_outputs=True, save_dir=None, save_filename_prefix=None,
+        return_checkpoint_path=False, logger=None):
 
     if logger is None:
         logger_info = print
@@ -125,5 +126,8 @@ def apply_seq2seq_model_to_sentences(
             save_jsonl(unprocessed_sentences, save_filepath)
 
     logger_info(f"DONE")
+
+    if return_checkpoint_path:
+        return outputs, unprocessed_sentences, checkpoint_path
 
     return outputs, unprocessed_sentences

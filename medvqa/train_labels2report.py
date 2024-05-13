@@ -34,7 +34,7 @@ from medvqa.metrics import (
     attach_condition_aware_ciderd,
     attach_condition_aware_weighted_medical_completeness,
     attach_condition_aware_loss,
-    attach_condition_aware_t5_report_logger,
+    attach_condition_aware_seq2seq_output_logger,
     attach_dataset_aware_ciderd,
     attach_dataset_aware_weighted_medical_completeness,
     attach_dataset_aware_chest_imagenome_labels_auc,
@@ -836,8 +836,8 @@ def train_model(
                 attach_condition_aware_loss(trainer_engine, 'report_loss', condition_function=src_cond_fn_2, metric_name='report_loss_gt')
                 attach_condition_aware_loss(validator_engine, 'report_loss', condition_function=src_cond_fn_1)
                 attach_condition_aware_loss(validator_engine, 'report_loss', condition_function=src_cond_fn_2, metric_name='report_loss_gt')
-                attach_condition_aware_t5_report_logger(trainer_engine, t5_tokenizer, condition_function=src_cond_fn_2)
-                attach_condition_aware_t5_report_logger(validator_engine, t5_tokenizer, condition_function=src_cond_fn_1)
+                attach_condition_aware_seq2seq_output_logger(trainer_engine, t5_tokenizer, condition_function=src_cond_fn_2)
+                attach_condition_aware_seq2seq_output_logger(validator_engine, t5_tokenizer, condition_function=src_cond_fn_1)
             # for logging
             if support_two_label_sources:
                 if not use_t5:

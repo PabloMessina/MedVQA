@@ -1,10 +1,12 @@
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chexlocalize import extract_images_segmentation_masks_and_binary_labels
-from medvqa.utils.files import get_cached_pickle_file
+from medvqa.utils.files import get_cached_pickle_file, load_pickle
+from medvqa.utils.logging import print_bold
     
 class CheXLocalizePhraseGroundingDataset(Dataset):
 
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels):
+    def __init__(self, indices, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels):
+        self.indices = indices
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
@@ -12,9 +14,10 @@ class CheXLocalizePhraseGroundingDataset(Dataset):
         self.phrase_classification_labels = phrase_classification_labels
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.indices)
     
     def __getitem__(self, i):
+        i = self.indices[i]
         image_path = self.image_paths[i]
         image = self.image_transform(image_path)
         phrase_embeddings = self.phrase_embeddings
@@ -31,7 +34,8 @@ class CheXlocalizePhraseGroundingTrainer:
     def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
                  mask_height, mask_width, class_phrase_embeddings_filepath,
                  max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
-                 use_training_set=True, use_validation_set=True):
+                 use_training_set=True, use_validation_set=True,
+                 use_interpret_cxr_challenge_split=False, interpret_cxr_challenge_split_filepath=None):
         
         assert use_training_set or use_validation_set
         
@@ -52,10 +56,38 @@ class CheXlocalizePhraseGroundingTrainer:
         self.image_paths, self.phrase_grounding_masks, self.phrase_classification_labels = \
             extract_images_segmentation_masks_and_binary_labels(mask_height=mask_height, mask_width=mask_width,
                                                                 flatten_masks=True)
+        
+        if use_interpret_cxr_challenge_split:
+            assert interpret_cxr_challenge_split_filepath is not None
+            print_bold(f'Using split from {interpret_cxr_challenge_split_filepath}')
+            challenge_split = load_pickle(interpret_cxr_challenge_split_filepath)
+            all_image_partial_paths = []
+            for ip in self.image_paths:
+                if 'train/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('train/'):])
+                elif 'val/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('val/'):])
+                elif 'test/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('test/'):])
+                else:
+                    raise ValueError(f'Unknown image path: {ip}')
+            image_partial_path_2_idx = {p: i for i, p in enumerate(all_image_partial_paths)}
 
         if use_training_set:
-            print('Generating train dataset and dataloader')        
+            print('Generating train dataset and dataloader')
+            if use_interpret_cxr_challenge_split:
+                # # DEBUG:
+                # print('challenge_split[\'train\'][:10]')
+                # print(challenge_split['train'][:10])
+                # print('all_image_partial_paths[:10]')
+                # print(all_image_partial_paths[:10])
+                train_indices = [image_partial_path_2_idx[p] for p in challenge_split['train'] if p in image_partial_path_2_idx]
+                assert len(train_indices) > 0, 'No training images found in the split'
+            else:
+                train_indices = list(range(len(self.image_paths)))
+            print(f'len(train_indices) = {len(train_indices)}')
             self.train_dataset = CheXLocalizePhraseGroundingDataset(
+                indices=train_indices,
                 image_paths=self.image_paths,
                 image_transform=self.train_image_transform,
                 phrase_embeddings=class_phrase_embeddings,
@@ -75,7 +107,19 @@ class CheXlocalizePhraseGroundingTrainer:
         
         if use_validation_set:
             print('Generating val dataset and dataloader')
+            if use_interpret_cxr_challenge_split:
+                # # DEBUG:
+                # print('challenge_split[\'val\'][:10]')
+                # print(challenge_split['val'][:10])
+                # print('all_image_partial_paths[:10]')
+                # print(all_image_partial_paths[:10])
+                val_indices = [image_partial_path_2_idx[p] for p in challenge_split['val'] if p in image_partial_path_2_idx]
+                assert len(val_indices) > 0, 'No validation images found in the split'
+            else:
+                val_indices = list(range(len(self.image_paths)))
+            print(f'len(val_indices) = {len(val_indices)}')
             self.val_dataset = CheXLocalizePhraseGroundingDataset(
+                indices=val_indices,
                 image_paths=self.image_paths,
                 image_transform=self.val_image_transform,
                 phrase_embeddings=class_phrase_embeddings,

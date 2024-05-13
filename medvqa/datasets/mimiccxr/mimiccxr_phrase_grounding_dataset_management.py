@@ -14,6 +14,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_nondecent_chest_imagenome_dicom_ids,
 )
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset, SequentialDataLoader
+from medvqa.datasets.image_processing import FactVisualGroundingDataset
 from medvqa.datasets.ms_cxr import get_ms_cxr_dicom_id_2_phrases_and_masks, get_ms_cxr_dicom_ids
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.datasets.mimiccxr import (
@@ -28,25 +29,21 @@ from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
 from medvqa.utils.logging import print_bold
 
-class MIMICCXR_FactGroundingDataset(Dataset):
+class MIMICCXR_FactGroundingDataset(FactVisualGroundingDataset):
 
     def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, negative_facts, indices, num_facts,
                  infinite=False, shuffle=False, use_weights=False, weights_filepath=None):
-        self.image_paths = image_paths
-        self.image_transform = image_transform
-        self.fact_embeddings = fact_embeddings
-        self.positive_facts = positive_facts
-        self.negative_facts = negative_facts
-        self.indices = indices
-        self.num_facts = num_facts
-        self.infinite = infinite
-        if shuffle:
-            random.shuffle(self.indices)
-        if infinite:
-            self._len = INFINITE_DATASET_LENGTH
-        else:
-            self._len = len(self.indices)
-
+        super().__init__(
+            image_paths=image_paths,
+            image_transform=image_transform,
+            fact_embeddings=fact_embeddings,
+            positive_facts=positive_facts,
+            negative_facts=negative_facts,
+            indices=indices,
+            num_facts=num_facts,
+            infinite=infinite,
+            shuffle=shuffle,
+        )
         if use_weights:
             assert weights_filepath is not None
             self.use_weights = True
@@ -58,62 +55,12 @@ class MIMICCXR_FactGroundingDataset(Dataset):
             assert self.num_labels == len(LABEL_BASED_FACTS) # sanity check
         else:
             self.use_weights = False
-
-    def __len__(self):
-        return self._len
-
-    @staticmethod
-    def _adapt_fact_indices(fact_indices, target_num_facts):
-        assert len(fact_indices) > 0
-        if len(fact_indices) > target_num_facts: # sample a subset of facts
-            fact_indices = random.sample(fact_indices, target_num_facts)
-        elif len(fact_indices) < target_num_facts: # duplicate facts
-            fact_indices_ = []
-            x = target_num_facts // len(fact_indices)
-            y = target_num_facts % len(fact_indices)
-            for _ in range(x):
-                fact_indices_.extend(fact_indices)
-            if y > 0:
-                fact_indices_.extend(random.sample(fact_indices, y))
-            fact_indices = fact_indices_
-        assert len(fact_indices) == target_num_facts
-        return fact_indices
     
     def __getitem__(self, i):
-        if self.infinite:
-            i = i % len(self.indices)
-        idx = self.indices[i]
-        image_path = self.image_paths[idx]
-        image = self.image_transform(image_path)
-        
-        positive_facts = self.positive_facts[idx]
-        negative_facts = self.negative_facts[idx]
-        if len(positive_facts) > 0 and len(negative_facts) > 0:
-            if len(positive_facts) < self.num_facts and len(negative_facts) < self.num_facts:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-            elif len(positive_facts) < self.num_facts:
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - len(positive_facts))
-            elif len(negative_facts) < self.num_facts:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - len(negative_facts))
-            else:
-                assert len(positive_facts) >= self.num_facts and len(negative_facts) >= self.num_facts
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-        elif len(positive_facts) > 0:
-            positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
-        elif len(negative_facts) > 0:
-            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
-        else:
-            raise ValueError('No positive or negative facts found!')
-
-        fact_indices = positive_facts + negative_facts
-        assert len(fact_indices) == 2 * self.num_facts
-        embeddings = self.fact_embeddings[fact_indices]
-        labels = np.zeros(len(fact_indices), dtype=np.int64)
-        labels[:len(positive_facts)] = 1
-        
-        if self.use_weights:
+        output = super().__getitem__(i)
+        if self.use_weights: # add phrase weights
+            fact_indices = output['fidxs']
+            labels = output['l']
             weights = np.empty(len(labels), dtype=np.float32)
             for i, label in enumerate(labels):
                 fidx = fact_indices[i]
@@ -121,18 +68,8 @@ class MIMICCXR_FactGroundingDataset(Dataset):
                     weights[i] = self.label_weights[fidx, 1 - label] # 0 -> positive fact, 1 -> negative fact
                 else: # use cluster-specific weight
                     weights[i] = self.cluster_weights[self.cluster_assignments[fidx], 1 - label] # 0 -> positive fact, 1 -> negative fact
-            return {
-                'i': image,
-                'pe': embeddings, # phrase embeddings
-                'pw': weights, # phrase weights
-                'l': labels, # labels
-            }
-        else:
-            return {
-                'i': image,
-                'pe': embeddings, # phrase embeddings
-                'l': labels, # labels
-            }
+            output['pw'] = weights # phrase weights
+        return output
     
 class MIMICCXR_PhraseGroundingDataset(Dataset):
 
@@ -355,6 +292,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 report_fact_nli_integrated_data_filepath=None,
                 use_weighted_phrase_classifier_loss=False,
                 cluster_and_label_weights_for_facts_filepath=None,
+                use_interpret_cxr_challenge_split=False,
+                interpret_cxr_challenge_split_filepath=None,
                 **unused_kwargs,
             ):
 
@@ -425,6 +364,14 @@ class MIMICCXR_PhraseGroundingTrainer:
             if use_facts_for_test:
                 test_indices = []
 
+            if use_interpret_cxr_challenge_split:
+                assert interpret_cxr_challenge_split_filepath is not None
+                print_bold(f'Using split from {interpret_cxr_challenge_split_filepath}')
+                challenge_split = load_pickle(interpret_cxr_challenge_split_filepath)
+                challenge_train_dicom_ids = set(challenge_split['train'])
+                challenge_val_dicom_ids = set(challenge_split['val'])
+                # ignore test set because it is kept hidden in the challenge
+
             idx = 0
             for ridx, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
@@ -435,6 +382,15 @@ class MIMICCXR_PhraseGroundingTrainer:
                 for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                     if dicom_id not in dicom_id_to_pos_neg_facts:
                         continue
+                    
+                    if use_interpret_cxr_challenge_split:
+                        if dicom_id in challenge_train_dicom_ids and use_facts_for_train:
+                            split = 'train'
+                        elif dicom_id in challenge_val_dicom_ids and use_facts_for_test:
+                            split = 'validate'
+                        else:
+                            continue # ignore test set
+
                     if split == 'validate' or split == 'test':
                         if use_facts_for_test:
                             test_indices.append(idx)

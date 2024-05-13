@@ -6,10 +6,14 @@ import json
 import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset, group_indices_into_bins_by_scores
+from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset, group_indices_for_balanced_sampling, group_indices_into_bins_by_scores
+from medvqa.datasets.iuxray import get_iuxray_image_path
+from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
 from medvqa.datasets.nli import ANLI_V1_DATASET_DIR, MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, MULTI_NLI_DATASET_DIR, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH, SNLI_DATASET_DIR
 from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
-from medvqa.utils.files import get_cached_jsonl_file, load_jsonl, load_pickle
+from medvqa.utils.common import INTERPRET_CXR_TEST_PUBLIC_CSV_PATH, INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH
+from medvqa.utils.files import get_cached_jsonl_file, load_json, load_jsonl, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
 
@@ -41,6 +45,7 @@ class Seq2SeqTaskNames:
     SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS = 'sentence2chestimagenome_anatomical_locations'
     NLI = 'nli'
     MLM = 'mlm' # masked language modeling
+    FACT_CLASSIFIER_PREDICTIONS_TO_REPORT_SECTION = 'fact_classifier_predictions2report_section'
     MULTITASK = 'multitask'
     @staticmethod
     def get_all():
@@ -54,6 +59,7 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS,
             Seq2SeqTaskNames.NLI,
             Seq2SeqTaskNames.MLM,
+            Seq2SeqTaskNames.FACT_CLASSIFIER_PREDICTIONS_TO_REPORT_SECTION,
             Seq2SeqTaskNames.MULTITASK,
         ]
 
@@ -1514,6 +1520,464 @@ def _get_sentence_to_chest_imagenome_labels_datasets(input_texts, output_texts, 
 
     return train_dataset, val_dataset
 
+def _probs_and_preds_to_input_text(class_names, probs, preds):
+    assert probs.shape == preds.shape
+    assert len(class_names) == probs.shape[1]
+    n_views = probs.shape[0]
+    assert n_views > 0
+    pred = preds.max(axis=0)
+    lines = []
+    lines.append(f'views: {n_views}')
+    for i, cn in enumerate(class_names):
+        if pred[i]:
+            strings = []
+            for j in range(n_views):
+                if preds[j, i]:
+                    strings.append(f'yes {int(probs[j, i] * 10)}')
+                else:
+                    strings.append(f'no {int(probs[j, i] * 10)}')
+            lines.append(f'{cn}:{",".join(strings)}')
+    return '\n'.join(lines)
+
+def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_challenge(
+    interpret_cxr__label_based_predictions_filepath,
+    interpret_cxr_challenge_data_dir,
+    mimiccxr_integrated_report_nli_data_filepath,
+    section,
+    lowercase_output_texts=True,
+    include_public_test_in_train=False,
+    verbose=True,
+    best_k_classes=None
+):
+    assert section in ['findings', 'impression']
+    if verbose:
+        print(f'Loading {interpret_cxr__label_based_predictions_filepath}...')
+    tmp = load_pickle(interpret_cxr__label_based_predictions_filepath)
+    probs_filepath = tmp['probs_filepath']
+    thresholds = tmp['thresholds']
+    f1s = tmp['f1s']
+    accs = tmp['accs']
+    class_names = tmp['class_names']
+    if verbose:
+        print(f'Loading {probs_filepath}...')
+    tmp2 = load_pickle(probs_filepath)
+    probs = tmp2['probs']
+    image_paths = tmp2['image_paths']
+    image_path_2_idx = { image_path: i for i, image_path in enumerate(image_paths) }
+    assert len(image_paths) == len(image_path_2_idx) # unique
+    if verbose:
+        print(f'thresholds.shape: {thresholds.shape}')
+        print(f'f1s.shape: {f1s.shape}')
+        print(f'accs.shape: {accs.shape}')
+        print(f'probs.shape: {probs.shape}')
+        print(f'len(image_paths): {len(image_paths)}')
+        print(f'len(class_names): {len(class_names)}')
+
+    # Sort by hybrid score
+    hybrid_score = f1s + accs
+    sorted_class_idxs = np.argsort(hybrid_score)[::-1]
+    class_names = [class_names[i] for i in sorted_class_idxs]
+    f1s = f1s[sorted_class_idxs]
+    accs = accs[sorted_class_idxs]
+    probs = probs[:, sorted_class_idxs]
+    binary_predictions = (probs > thresholds).astype(int)
+
+    # Select the first k classes
+    if best_k_classes is not None:
+        class_names = class_names[:best_k_classes]
+        f1s = f1s[:best_k_classes]
+        accs = accs[:best_k_classes]
+        probs = probs[:, :best_k_classes]
+        binary_predictions = binary_predictions[:, :best_k_classes]
+
+    if verbose:
+        print('Class names:')
+        for i, class_name in enumerate(class_names):
+            print(f'{i + 1}: {class_name}, f1: {f1s[i]:.3f}, acc: {accs[i]:.3f}')
+
+    train_mimic_filepath = os.path.join(interpret_cxr_challenge_data_dir, 'train_mimic.json')
+    val_mimic_filepath = os.path.join(interpret_cxr_challenge_data_dir, 'val_mimic.json')
+    train_filepath = os.path.join(interpret_cxr_challenge_data_dir, 'train.csv')
+    val_filepath = os.path.join(interpret_cxr_challenge_data_dir, 'val.csv')
+
+    # 1. MIMIC-CXR inputs/outputs
+
+    if verbose:
+        print('-' * 100)
+        print('Preparing MIMIC-CXR inputs/outputs...')
+
+    train_mimic = load_json(train_mimic_filepath)
+    val_mimic = load_json(val_mimic_filepath)
+    mimiccxr_integrated_report_nli_data = load_pickle(mimiccxr_integrated_report_nli_data_filepath)
+    extracted_facts = mimiccxr_integrated_report_nli_data['extracted_facts']
+    reports = mimiccxr_integrated_report_nli_data['reports']
+    imageId2reportId = get_imageId2reportId()
+    imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+    
+    def _collect_mimiccxr_input_output_texts(mimic_data):
+        input_texts = []
+        output_texts = []
+        image_idxs_list = []
+        skip_count = 0
+        for item in tqdm(mimic_data, total=len(mimic_data), mininterval=2):
+            image_idxs = []
+            dicom_ids = []
+            for image_path in item['images_path']:
+                dicom_id = os.path.basename(image_path).split('.')[0] # remove extension
+                part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+                actual_image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
+                image_idx = image_path_2_idx[actual_image_path]
+                image_idxs.append(image_idx)
+                dicom_ids.append(dicom_id)
+            # Build output text
+            ridx = imageId2reportId[dicom_ids[0]]
+            assert all(imageId2reportId[dicom_id] == ridx for dicom_id in dicom_ids) # same report
+            report = reports[ridx]
+            if section == 'findings':
+                fact_idxs = report['findings_fact_idxs']
+            elif section == 'impression':
+                fact_idxs = report['impression_fact_idxs']
+            else: assert False
+            if len(fact_idxs) == 0:
+                skip_count += 1
+                continue # skip reports without facts
+            facts = [extracted_facts[i] if extracted_facts[i][-1] == '.' else extracted_facts[i] + '.' for i in fact_idxs]
+            output_text = ' '.join(facts) # a fact-based report
+            output_texts.append(output_text)
+            # Build input text
+            image_probs = probs[image_idxs]
+            image_preds = binary_predictions[image_idxs]
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_texts.append(input_text)
+            # Save image_idxs
+            image_idxs_list.append(image_idxs)
+        if skip_count > 0:
+            if verbose:
+                print_orange(f'WARNING: Skipped {skip_count}/{len(mimic_data)} reports without facts', bold=True)
+        return input_texts, output_texts, image_idxs_list
+        
+    mimiccxr_train_input_texts, mimiccxr_train_output_texts, mimiccxr_train_image_idxs_list =\
+        _collect_mimiccxr_input_output_texts(train_mimic)
+    if verbose:
+        print(f'len(mimiccxr_train_input_texts): {len(mimiccxr_train_input_texts)}')
+    
+    mimiccxr_val_input_texts, mimiccxr_val_output_texts, mimiccxr_val_image_idxs_list =\
+        _collect_mimiccxr_input_output_texts(val_mimic)
+    if verbose:
+        print(f'len(mimiccxr_val_input_texts): {len(mimiccxr_val_input_texts)}')
+
+    if verbose:
+        print('Examples:')
+        i = random.randint(0, len(mimiccxr_train_input_texts) - 1)
+        print_bold('Train example:')
+        print_bold('Input:')
+        print_magenta(mimiccxr_train_input_texts[i])
+        print_bold('Output:')
+        print_magenta(mimiccxr_train_output_texts[i])
+        print()
+        
+        i = random.randint(0, len(mimiccxr_val_input_texts) - 1)
+        print_bold('Val example:')
+        print_bold('Input:')
+        print_magenta(mimiccxr_val_input_texts[i])
+        print_bold('Output:')
+        print_magenta(mimiccxr_val_output_texts[i])
+        print()
+
+    # 2. CheXpert inputs/outputs
+
+    if verbose:
+        print('-' * 100)
+        print('Preparing CheXpert inputs/outputs...')
+    
+    train_df = pd.read_csv(train_filepath)
+    val_df = pd.read_csv(val_filepath)
+    
+    # Replace NaN with empty string
+    train_df.fillna('', inplace=True)
+    val_df.fillna('', inplace=True)
+
+    train_chexpert_df = train_df.loc[train_df.source == 'CheXpert']
+    val_chexpert_df = val_df.loc[val_df.source == 'CheXpert']
+
+    def _collect_chexpert_input_output_texts(chexpert_df):
+        input_texts = []
+        output_texts = []
+        image_idxs_list = []
+        skip_image_count = 0
+        skip_text_count = 0
+        for images_path, findings, impression in chexpert_df[['images_path_old', 'findings', 'impression']].values:
+            # Convert images_path to image_idxs
+            images_path_ = eval(images_path) # convert string to list
+            image_idxs = []
+            for image_path in images_path_:
+                for x in image_path.split('.jpg'):
+                    if x:
+                        x = x[21:] + '.jpg'
+                        actual_image_path = os.path.join(CHEXPERT_V1_0_SMALL_DATASET_DIR, x)
+                        image_idx = image_path_2_idx[actual_image_path]
+                        image_idxs.append(image_idx)
+            if len(image_idxs) == 0:
+                skip_image_count += 1
+                continue
+            # Build output text
+            if section == 'findings':
+                output_text = findings
+            elif section == 'impression':
+                output_text = impression
+            else: assert False
+            output_text = ' '.join([x for x in output_text.split() if x]) # remove whitespace
+            if len(output_text) == 0:
+                skip_text_count += 1
+                continue
+            output_texts.append(output_text)
+            # Build input text
+            image_probs = probs[image_idxs]
+            image_preds = binary_predictions[image_idxs]
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_texts.append(input_text)
+            # Save image_idxs
+            image_idxs_list.append(image_idxs)
+        if verbose:
+            if skip_image_count > 0:
+                print_orange(f'WARNING: Skipped {skip_image_count}/{len(chexpert_df)} reports without images', bold=True)
+            if skip_text_count > 0:
+                print_orange(f'WARNING: Skipped {skip_text_count}/{len(chexpert_df)} reports with empty output', bold=True)
+
+        return input_texts, output_texts, image_idxs_list
+
+    chexpert_train_input_texts, chexpert_train_output_texts, chexpert_train_image_idxs_list =\
+        _collect_chexpert_input_output_texts(train_chexpert_df)
+    if verbose:
+        print(f'len(chexpert_train_input_texts): {len(chexpert_train_input_texts)}')
+
+    chexpert_val_input_texts, chexpert_val_output_texts, chexpert_val_image_idxs_list =\
+        _collect_chexpert_input_output_texts(val_chexpert_df)
+    if verbose:
+        print(f'len(chexpert_val_input_texts): {len(chexpert_val_input_texts)}')
+
+    if verbose:
+        print('Examples:')
+        i = random.randint(0, len(chexpert_train_input_texts) - 1)
+        print_bold('Train example:')
+        print_bold('Input:')
+        print_magenta(chexpert_train_input_texts[i])
+        print_bold('Output:')
+        print_magenta(chexpert_train_output_texts[i])
+        print()
+
+        i = random.randint(0, len(chexpert_val_input_texts) - 1)
+        print_bold('Val example:')
+        print_bold('Input:')
+        print_magenta(chexpert_val_input_texts[i])
+        print_bold('Output:')
+        print_magenta(chexpert_val_output_texts[i])
+        print()
+
+    # 3. OpenI inputs/outputs
+
+    if verbose:
+        print('-' * 100)
+        print('Preparing OpenI inputs/outputs...')
+
+    train_openi_df = train_df.loc[train_df.source == 'OpenI']
+    val_openi_df = val_df.loc[val_df.source == 'OpenI']
+    
+    def _collect_openi_input_output_texts(openi_df):
+        input_texts = []
+        output_texts = []
+        image_idxs_list = []
+        skip_image_count = 0
+        skip_text_count = 0
+        for images_path, findings, impression in openi_df[['images_path_old', 'findings', 'impression']].values:
+            # Convert images_path to image_idxs
+            images_path_ = eval(images_path)
+            image_idxs = []
+            for image_path in images_path_:
+                for x in image_path.split('.png'):
+                    if x:
+                        image_id = os.path.basename(x)
+                        actual_image_path = get_iuxray_image_path(image_id)
+                        image_idx = image_path_2_idx[actual_image_path]
+                        image_idxs.append(image_idx)
+            if len(image_idxs) == 0:
+                skip_image_count += 1
+                continue
+            # Build output text
+            if section == 'findings':
+                output_text = findings
+            elif section == 'impression':
+                output_text = impression
+            else: assert False
+            output_text = ' '.join([x for x in output_text.split() if x]) # remove whitespace
+            if len(output_text) == 0:
+                skip_text_count += 1
+                continue
+            output_texts.append(output_text)
+            # Build input text
+            image_probs = probs[image_idxs]
+            image_preds = binary_predictions[image_idxs]
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_texts.append(input_text)
+            # Save image_idxs
+            image_idxs_list.append(image_idxs)
+        if verbose:
+            if skip_image_count > 0:
+                print_orange(f'WARNING: Skipped {skip_image_count}/{len(openi_df)} reports without images', bold=True)
+            if skip_text_count > 0:
+                print_orange(f'WARNING: Skipped {skip_text_count}/{len(openi_df)} reports with empty output', bold=True)
+        return input_texts, output_texts, image_idxs_list
+
+    openi_train_input_texts, openi_train_output_texts, openi_train_image_idxs_list =\
+        _collect_openi_input_output_texts(train_openi_df)
+    if verbose:
+        print(f'len(openi_train_input_texts): {len(openi_train_input_texts)}')
+
+    openi_val_input_texts, openi_val_output_texts, openi_val_image_idxs_list =\
+        _collect_openi_input_output_texts(val_openi_df)
+    if verbose:
+        print(f'len(openi_val_input_texts): {len(openi_val_input_texts)}')
+
+    if verbose:
+        print('Examples:')
+        i = random.randint(0, len(openi_train_input_texts) - 1)
+        print_bold('Train example:')
+        print_bold('Input:')
+        print_magenta(openi_train_input_texts[i])
+        print_bold('Output:')
+        print_magenta(openi_train_output_texts[i])
+        print()
+
+        i = random.randint(0, len(openi_val_input_texts) - 1)
+        print_bold('Val example:')
+        print_bold('Input:')
+        print_magenta(openi_val_input_texts[i])
+        print_bold('Output:')
+        print_magenta(openi_val_output_texts[i])
+        print()
+
+    # 4. Interpret-CXR public test set inputs/outputs
+
+    if verbose:
+        print('-' * 100)
+        print('Preparing Interpret-CXR public test set inputs/outputs...')
+
+    df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
+    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
+    public_test_input_texts = []
+    public_test_output_texts = []
+    public_test_image_idxs_list = []
+    skip_count = 0
+    for images_path, findings, impression in df[['images_path', 'findings', 'impression']].values:
+        images_path = eval(images_path) # convert string to list
+        image_idxs = []
+        for image_path in images_path:
+            actual_image_path = os.path.join(INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+            image_idx = image_path_2_idx[actual_image_path]
+            image_idxs.append(image_idx)
+        if len(image_idxs) == 0:
+            skip_count += 1
+            continue
+        # Build output text
+        if section == 'findings':
+            output_text = findings
+        elif section == 'impression':
+            output_text = impression
+        else: assert False
+        output_text = ' '.join([x for x in output_text.split() if x]) # remove whitespace
+        if len(output_text) == 0:
+            skip_count += 1
+            continue
+        public_test_output_texts.append(output_text)
+        # Build input text
+        image_probs = probs[image_idxs]
+        image_preds = binary_predictions[image_idxs]
+        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+        public_test_input_texts.append(input_text)
+        # Save image_idxs
+        public_test_image_idxs_list.append(image_idxs)
+    if skip_count > 0:
+        if verbose:
+            print_orange(f'WARNING: Skipped {skip_count}/{len(df)} reports without images or empty output', bold=True)
+
+    if verbose:
+        print(f'len(public_test_input_texts): {len(public_test_input_texts)}')
+
+    if verbose:
+        print('Examples:')
+        i = random.randint(0, len(public_test_input_texts) - 1)
+        print_bold('Public test example:')
+        print_bold('Input:')
+        print_magenta(public_test_input_texts[i])
+        print_bold('Output:')
+        print_magenta(public_test_output_texts[i])
+        print()
+
+    # Create training dataset
+    
+    if include_public_test_in_train:
+        print('Including public test set in training dataset...')
+        train_input_texts = (mimiccxr_train_input_texts + mimiccxr_val_input_texts +
+                             chexpert_train_input_texts + chexpert_val_input_texts +
+                             openi_train_input_texts + openi_val_input_texts +
+                             public_test_input_texts)
+        train_output_texts = (mimiccxr_train_output_texts + mimiccxr_val_output_texts +
+                              chexpert_train_output_texts + chexpert_val_output_texts +
+                              openi_train_output_texts + openi_val_output_texts +
+                              public_test_output_texts)
+        train_image_idxs_list = (mimiccxr_train_image_idxs_list + mimiccxr_val_image_idxs_list +
+                                 chexpert_train_image_idxs_list + chexpert_val_image_idxs_list +
+                                 openi_train_image_idxs_list + openi_val_image_idxs_list +
+                                 public_test_image_idxs_list)
+    else:
+        train_input_texts = (mimiccxr_train_input_texts + mimiccxr_val_input_texts +
+                             chexpert_train_input_texts + chexpert_val_input_texts +
+                             openi_train_input_texts + openi_val_input_texts)
+        train_output_texts = (mimiccxr_train_output_texts + mimiccxr_val_output_texts +
+                              chexpert_train_output_texts + chexpert_val_output_texts +
+                              openi_train_output_texts + openi_val_output_texts)
+        train_image_idxs_list = (mimiccxr_train_image_idxs_list + mimiccxr_val_image_idxs_list +
+                                 chexpert_train_image_idxs_list + chexpert_val_image_idxs_list +
+                                 openi_train_image_idxs_list + openi_val_image_idxs_list)
+
+    if lowercase_output_texts:
+        train_output_texts = [x.lower() for x in train_output_texts]
+    
+    # Aggregate labels for each training example
+    aggregated_train_labels = np.zeros((len(train_output_texts), len(class_names)), dtype=int)
+    for i, image_idxs in enumerate(train_image_idxs_list):
+        aggregated_train_labels[i] = binary_predictions[image_idxs].max(axis=0) # max pooling
+
+    # Use agregated_train_labels to create a balanced dataset
+    train_indices = list(range(len(train_output_texts)))
+    grouped_indices = group_indices_for_balanced_sampling(label_matrix=aggregated_train_labels,
+                                                          indices=train_indices,
+                                                          label_names=class_names,
+                                                          min_group_size=100, verbose=verbose)
+    train_datasets = []
+    train_weights = []
+    for indices in grouped_indices:
+        dataset = Seq2SeqDataset(indices, train_input_texts, train_output_texts, shuffle=True, infinite=True)
+        weight = math.log2(len(indices)) ** 3
+        train_datasets.append(dataset)
+        train_weights.append(weight)
+        if verbose:
+            print(f'  len(indices) = {len(indices)}, weight = {weight}')
+    train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+
+    # Create validation dataset
+
+    val_input_texts = public_test_input_texts
+    val_output_texts = public_test_output_texts
+
+    if lowercase_output_texts:
+        val_output_texts = [x.lower() for x in val_output_texts]
+
+    val_dataset = Seq2SeqDataset(list(range(len(val_output_texts))), val_input_texts, val_output_texts, shuffle=False)
+    
+    return train_dataset, val_dataset
+
+
 def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True):
     indices = list(range(len(input_texts)))
     if include_val:
@@ -1568,7 +2032,14 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         integrated_report_facts_jsonl_filepath=None,
                                         mlm_min_token_count=20, mlm_masking_fraction=0.2,
                                         only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
+                                        interpret_cxr__label_based_predictions_filepath=None,
+                                        interpret_cxr_challenge_data_dir=None,
+                                        mimiccxr_integrated_report_nli_data_filepath=None,
+                                        report_section_to_generate=None,
+                                        include_public_test_in_train=False,
+                                        best_k_classes=None,
                                         val_size=200, verbose=True):
+
     assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
 
     if use_sentence2facts_for_nli:
@@ -1627,7 +2098,21 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                           integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
                           input_to_paraphrases=input2paraphrases,
                           verbose=verbose, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val)
-
+        
+    elif task_name == Seq2SeqTaskNames.FACT_CLASSIFIER_PREDICTIONS_TO_REPORT_SECTION:
+        assert interpret_cxr__label_based_predictions_filepath is not None
+        assert interpret_cxr_challenge_data_dir is not None
+        assert mimiccxr_integrated_report_nli_data_filepath is not None
+        assert report_section_to_generate in ['findings', 'impression']
+        train_dataset, val_dataset = _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_challenge(
+            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
+            interpret_cxr_challenge_data_dir=interpret_cxr_challenge_data_dir,
+            mimiccxr_integrated_report_nli_data_filepath=mimiccxr_integrated_report_nli_data_filepath,
+            section=report_section_to_generate,
+            lowercase_output_texts=True,
+            include_public_test_in_train=include_public_test_in_train,
+            verbose=verbose, best_k_classes=best_k_classes)
+        
     elif task_name == Seq2SeqTaskNames.MULTITASK:
         assert multitask_name_list is not None, 'multitask_name_list must be provided'
         assert type(multitask_name_list) == list
@@ -1845,6 +2330,12 @@ class Seq2SeqTrainer():
                  integrated_report_facts_jsonl_filepath=None,
                  mlm_min_token_count=20, mlm_masking_fraction=0.2,
                  only_validate_nli=False, nli1_only_on_train=False, nli1_only_on_val=False,
+                 interpret_cxr__label_based_predictions_filepath=None,
+                 interpret_cxr_challenge_data_dir=None,
+                 mimiccxr_integrated_report_nli_data_filepath=None,
+                 report_section_to_generate=None,
+                 include_public_test_in_train=False,
+                 best_k_classes=None,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -1879,7 +2370,13 @@ class Seq2SeqTrainer():
             integrated_report_facts_jsonl_filepath=integrated_report_facts_jsonl_filepath,
             mlm_min_token_count=mlm_min_token_count, mlm_masking_fraction=mlm_masking_fraction,
             only_validate_nli=only_validate_nli, nli1_only_on_train=nli1_only_on_train, nli1_only_on_val=nli1_only_on_val,
-            val_size=val_size, verbose=verbose)
+            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
+            interpret_cxr_challenge_data_dir=interpret_cxr_challenge_data_dir,
+            mimiccxr_integrated_report_nli_data_filepath=mimiccxr_integrated_report_nli_data_filepath,
+            report_section_to_generate=report_section_to_generate,
+            include_public_test_in_train=include_public_test_in_train,
+            val_size=val_size, verbose=verbose, best_k_classes=best_k_classes)
+        
         self.train_dataset = tmp['train_dataset']
         self.val_dataset = tmp['val_dataset']
         self.train_dataloader = tmp['train_dataloader']

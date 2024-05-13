@@ -6,6 +6,7 @@ import torch
 from medvqa.datasets.chest_imagenome import get_chest_imagenome_gold_class_mask
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpertPhraseGroundingTrainer, CheXpertTrainingMode
+from medvqa.datasets.iuxray.iuxray_phrase_grounding_dataset_management import IUXRayPhraseGroundingTrainer
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.mimiccxr.mimiccxr_phrase_grounding_dataset_management import MIMICCXR_PhraseGroundingTrainer
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer, VinBigTrainingMode
@@ -112,6 +113,7 @@ def parse_args(args=None):
     parser.add_argument('--use_amp', action='store_true', default=False)
     parser.add_argument('--image_size', nargs='+', type=int, default=(416, 416))
     parser.add_argument('--dicom_id_to_pos_neg_facts_filepath', type=str, default=None)
+    parser.add_argument('--iuxray_image_id_to_pos_neg_facts_filepath', type=str, default=None)
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None)
     parser.add_argument('--chest_imagenome_bbox_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--vinbig_phrase_embeddings_filepath', type=str, default=None)
@@ -124,6 +126,7 @@ def parse_args(args=None):
     parser.add_argument('--vinbig_weight', type=float, default=1.0)
     parser.add_argument('--chexlocalize_weight', type=float, default=1.0)
     parser.add_argument('--chexpert_weight', type=float, default=1.0)
+    parser.add_argument('--iuxray_weight', type=float, default=1.0)
     parser.add_argument('--img_aug_mode', type=str, default=None, help='Image augmentation mode')
     parser.add_argument('--pos_area_prior', type=float, default=0.4, help='Prior for positive area')
     parser.add_argument('--neg_area_prior', type=float, default=0.0, help='Prior for negative area')
@@ -139,12 +142,22 @@ def parse_args(args=None):
     parser.add_argument('--use_chexlocalize_for_test', action='store_true', default=False)
     parser.add_argument('--use_chexpert_for_train', action='store_true', default=False)
     parser.add_argument('--use_chexpert_for_test', action='store_true', default=False)
+    parser.add_argument('--use_iuxray_for_train', action='store_true', default=False)
+    parser.add_argument('--use_iuxray_for_test', action='store_true', default=False)
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_choices())
     parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_choices())
     parser.add_argument('--mask_exponent', type=float, default=1.0)
     parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true', default=False)
     parser.add_argument('--mimiccxr_long_middle_short_tail_thresholds', nargs=2, type=float, default=(0.02, 0.05))
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str, default=None)
+    parser.add_argument('--mimiccxr_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--mimiccxr_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--iuxray_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--iuxray_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--chexpert_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--chexpert_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--chexlocalize_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--chexlocalize_interpret_cxr_challenge_split_filepath', type=str, default=None)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -168,6 +181,7 @@ def train_model(
     vinbig_trainer_kwargs,
     chexlocalize_trainer_kwargs,
     chexpert_trainer_kwargs,
+    iuxray_trainer_kwargs,
     dataloading_kwargs,
     collate_batch_fn_kwargs,
     train_image_transform_kwargs,
@@ -204,6 +218,8 @@ def train_model(
     use_chexlocalize_for_test = chexlocalize_trainer_kwargs is not None and chexlocalize_trainer_kwargs.get('use_validation_set', False)
     use_chexpert_for_train = chexpert_trainer_kwargs is not None and chexpert_trainer_kwargs.get('use_training_set', False)
     use_chexpert_for_test = chexpert_trainer_kwargs is not None and chexpert_trainer_kwargs.get('use_validation_set', False)
+    use_iuxray_for_train = iuxray_trainer_kwargs is not None and iuxray_trainer_kwargs.get('do_train', False)
+    use_iuxray_for_test = iuxray_trainer_kwargs is not None and iuxray_trainer_kwargs.get('do_test', False)
     use_attention_regularization_loss = trainer_engine_kwargs['use_attention_regularization_loss']
     use_contrastive_phrase_grounding_loss = trainer_engine_kwargs['use_contrastive_phrase_grounding_loss']
 
@@ -214,6 +230,10 @@ def train_model(
         assert use_mimiccxr_facts_for_train or use_mscxr_for_train
     if use_chexpert_for_test:
         assert use_chexpert_for_train
+    if use_vinbig_for_test:
+        assert use_vinbig_for_train
+    if use_iuxray_for_test:
+        assert use_iuxray_for_train
 
     if use_mimiccxr_facts_for_train:
         if dataloading_kwargs['mimiccxr_facts_weight'] == 0:
@@ -235,6 +255,14 @@ def train_model(
         if dataloading_kwargs['chexlocalize_weight'] == 0:
             print_orange('WARNING: use_chexlocalize_for_train is True but chexlocalize_weight is 0', bold=True)
             use_chexlocalize_for_train = False
+    if use_chexpert_for_train:
+        if dataloading_kwargs['chexpert_weight'] == 0:
+            print_orange('WARNING: use_chexpert_for_train is True but chexpert_weight is 0', bold=True)
+            use_chexpert_for_train = False
+    if use_iuxray_for_train:
+        if dataloading_kwargs['iuxray_weight'] == 0:
+            print_orange('WARNING: use_iuxray_for_train is True but iuxray_weight is 0', bold=True)
+            use_iuxray_for_train = False
 
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_test or use_mscxr_for_train or\
                         use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test
@@ -245,8 +273,10 @@ def train_model(
 
     use_chexpert = use_chexpert_for_train or use_chexpert_for_test
 
+    use_iuxray = use_iuxray_for_train or use_iuxray_for_test
+
     assert sum([use_mimiccxr_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
-                use_vinbig_for_train, use_chexlocalize_for_train, use_chexpert_for_train]) > 0
+                use_vinbig_for_train, use_chexlocalize_for_train, use_chexpert_for_train, use_iuxray_for_train]) > 0
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -325,7 +355,7 @@ def train_model(
     if use_mimiccxr:
         count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
         if use_mimiccxr_facts_for_train or use_mimiccxr_facts_for_test:
-            fact_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['fg'])
+            fact_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mimfg'])
         else:
             fact_grounding_collate_batch_fn = None
         if use_mscxr_for_train or use_mscxr_for_test:
@@ -351,6 +381,22 @@ def train_model(
             **mimiccxr_trainer_kwargs,
         )
 
+    # Create IU X-Ray trainer
+    if use_iuxray:
+        count_print('Creating IU X-Ray Phrase Grounding Trainer ...')
+        iuxray_trainer = IUXRayPhraseGroundingTrainer(
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            test_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['iufg']),
+            max_images_per_batch=max_images_per_batch,
+            max_phrases_per_batch=max_phrases_per_batch,
+            max_phrases_per_image=max_phrases_per_image,
+            test_batch_size_factor=val_batch_size_factor,
+            num_train_workers=num_train_workers,
+            num_test_workers=num_val_workers,
+            **iuxray_trainer_kwargs,
+        )
+
     if debug: # if debugging
         output = {}
         if use_mimiccxr:
@@ -361,6 +407,8 @@ def train_model(
             output['chexlocalize_trainer'] = chexlocalize_trainer
         if use_chexpert:
             output['chexpert_trainer'] = chexpert_trainer
+        if use_iuxray:
+            output['iuxray_trainer'] = iuxray_trainer
         return output
 
     # Create complex dataloaders
@@ -432,6 +480,16 @@ def train_model(
     if use_chexpert_for_test:
         _val_dataloaders.append(chexpert_trainer.val_dataloader)
         print(f'len(chexpert_trainer.val_dataloader) = {len(chexpert_trainer.val_dataloader)}')
+
+    if use_iuxray_for_train:
+        _dataset_names.append('iuxray')
+        _train_weights.append(dataloading_kwargs['iuxray_weight'])
+        _train_dataloaders.append(iuxray_trainer.train_dataloader)
+        print(f'len(iuxray_trainer.train_dataloader) = {len(iuxray_trainer.train_dataloader)}')
+
+    if use_iuxray_for_test:
+        _val_dataloaders.append(iuxray_trainer.test_dataloader)
+        print(f'len(iuxray_trainer.test_dataloader) = {len(iuxray_trainer.test_dataloader)}')
     
     assert len(_train_dataloaders) > 0
     assert len(_val_dataloaders) > 0
@@ -464,30 +522,30 @@ def train_model(
     metrics_to_print.append('loss')
 
     if use_mimiccxr_facts_for_train or use_mimiccxr_facts_for_test:
-        _cond_func = lambda x: x['flag'] == 'fg'
+        _cond_func = lambda x: x['flag'] == 'mimfg'
         in_train = use_mimiccxr_facts_for_train
         in_val = use_mimiccxr_facts_for_test
         if in_train:
             if use_attention_regularization_loss:
-                attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'fg_att_reg_loss')
+                attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'mimfg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
-                attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'fg_cpg_loss')
-            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'fg_phrcls_loss')
+                attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'mimfg_cpg_loss')
+            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mimfg_phrcls_loss')
         if in_val:
             if use_attention_regularization_loss:
-                attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'fg_att_reg_loss')
+                attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'mimfg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
-                attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'fg_cpg_loss')
-            attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'fg_phrcls_loss')
-            attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'fg_prc_auc', _cond_func)
+                attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'mimfg_cpg_loss')
+            attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'mimfg_phrcls_loss')
+            attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'mimfg_prc_auc', _cond_func)
         # for logging
         if use_attention_regularization_loss:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'fg_att_reg_loss', train=in_train, val=in_val)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_att_reg_loss', train=in_train, val=in_val)
         if use_contrastive_phrase_grounding_loss:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'fg_cpg_loss', train=in_train, val=in_val)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'fg_phrcls_loss', train=in_train, val=in_val)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_cpg_loss', train=in_train, val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_phrcls_loss', train=in_train, val=in_val)
         if in_val:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'fg_prc_auc', train=False, val=True)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=False, val=True)
     
     if use_chest_imagenome_for_train:
         assert use_yolov8 # TODO: eventually support other bbox predictors
@@ -626,6 +684,32 @@ def train_model(
         if in_val:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_prc_auc', train=False, val=True)
 
+    if use_iuxray:
+        _cond_func = lambda x: x['flag'] == 'iufg'
+        in_train = use_iuxray_for_train
+        in_val = use_iuxray_for_test
+        if in_train:
+            if use_attention_regularization_loss:
+                attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'iufg_att_reg_loss')
+            if use_contrastive_phrase_grounding_loss:                
+                attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'iufg_cpg_loss')
+            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'iufg_phrcls_loss')
+        if in_val:
+            if use_attention_regularization_loss:
+                attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'iufg_att_reg_loss')
+            if use_contrastive_phrase_grounding_loss:                
+                attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'iufg_cpg_loss')
+            attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'iufg_phrcls_loss')
+            attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'iufg_prc_auc', _cond_func)
+        # for logging
+        if use_attention_regularization_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_att_reg_loss', train=in_train, val=in_val)
+        if use_contrastive_phrase_grounding_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_cpg_loss', train=in_train, val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_phrcls_loss', train=in_train, val=in_val)
+        if in_val:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_prc_auc', train=False, val=True)
+
     # Score function
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
@@ -653,6 +737,8 @@ def train_model(
             mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
             vinbig_trainer_kwargs=vinbig_trainer_kwargs,
             chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
+            chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+            iuxray_trainer_kwargs=iuxray_trainer_kwargs,
             dataloading_kwargs=dataloading_kwargs,
             collate_batch_fn_kwargs=collate_batch_fn_kwargs,
             train_image_transform_kwargs=train_image_transform_kwargs,
@@ -716,6 +802,15 @@ def train_from_scratch(
     mimiccxr_balance_long_middle_short_tail,
     mimiccxr_long_middle_short_tail_thresholds,
     mimiccxr_report_fact_nli_integrated_data_filepath,
+    iuxray_image_id_to_pos_neg_facts_filepath,
+    mimiccxr_use_interpret_cxr_challenge_split,
+    mimiccxr_interpret_cxr_challenge_split_filepath,
+    iuxray_use_interpret_cxr_challenge_split,
+    iuxray_interpret_cxr_challenge_split_filepath,
+    chexpert_use_interpret_cxr_challenge_split,
+    chexpert_interpret_cxr_challenge_split_filepath,
+    chexlocalize_use_interpret_cxr_challenge_split,
+    chexlocalize_interpret_cxr_challenge_split_filepath,
     # Dataloading args
     mimiccxr_facts_weight,
     chest_imagenome_anatlocs_weight,
@@ -723,6 +818,7 @@ def train_from_scratch(
     vinbig_weight,
     chexlocalize_weight,
     chexpert_weight,
+    iuxray_weight,
     img_aug_mode,
     max_images_per_batch,
     max_phrases_per_batch,
@@ -743,6 +839,8 @@ def train_from_scratch(
     use_chexlocalize_for_test,
     use_chexpert_for_train,
     use_chexpert_for_test,
+    use_iuxray_for_train,
+    use_iuxray_for_test,
     vinbig_training_data_mode,
     chexpert_training_data_mode,
     use_amp,
@@ -783,22 +881,27 @@ def train_from_scratch(
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
     use_chexpert = use_chexpert_for_train or use_chexpert_for_test
+    use_iuxray = use_iuxray_for_train or use_iuxray_for_test
     predict_bboxes_vinbig = (use_vinbig_for_train or use_vinbig_for_test) and use_yolov8
     yolov8_use_multiple_detection_layers = predict_bboxes_chest_imagenome and predict_bboxes_vinbig
 
-    assert use_mimiccxr or use_vinbig or use_chexlocalize
+    assert use_mimiccxr or use_vinbig or use_chexlocalize or use_chexpert or use_iuxray
     assert use_chest_imagenome_gold_for_test or use_mscxr_for_test or use_vinbig_for_test or use_chexlocalize_for_test or\
-           use_mimiccxr_facts_for_test
+           use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test
     if use_chest_imagenome_gold_for_test:
         assert use_chest_imagenome_for_train
     if use_mscxr_for_test:
         assert use_mimiccxr_facts_for_train or use_mscxr_for_train
     if use_vinbig_for_test:
         assert use_vinbig_for_train
-    if use_chexlocalize_for_test:
-        assert use_chexlocalize_for_train
+    # if use_chexlocalize_for_test:
+    #     assert use_chexlocalize_for_train
     if use_mimiccxr_facts_for_test:
         assert use_mimiccxr_facts_for_train
+    if use_chexpert_for_test:
+        assert use_chexpert_for_train
+    if use_iuxray_for_test:
+        assert use_iuxray_for_train
     
     model_kwargs = dict(
         pretrained_checkpoint_folder_path=pretrained_checkpoint_folder_path,
@@ -846,6 +949,7 @@ def train_from_scratch(
         vinbig_weight=vinbig_weight,
         chexlocalize_weight=chexlocalize_weight,
         chexpert_weight=chexpert_weight,
+        iuxray_weight=iuxray_weight,
     )
 
     # Image transforms
@@ -874,6 +978,10 @@ def train_from_scratch(
         train_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = _kwargs.copy()
         val_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = train_image_transform_kwargs[DATASET_NAMES.CHEXPERT].copy()
         val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]['augmentation_mode'] = None # no augmentation for validation
+    if use_iuxray:
+        train_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.IUXRAY] = train_image_transform_kwargs[DATASET_NAMES.IUXRAY].copy()
+        val_image_transform_kwargs[DATASET_NAMES.IUXRAY]['augmentation_mode'] = None # no augmentation for validation
     
     # Collate batch functions
     _kwargs = dict(
@@ -887,7 +995,7 @@ def train_from_scratch(
         ]
         print(f'include_loss_weights = {include_loss_weights}')
         # fact grounding
-        collate_batch_fn_kwargs['fg'] = { 'flag': 'fg', 'include_loss_weights': include_loss_weights, **_kwargs }
+        collate_batch_fn_kwargs['mimfg'] = { 'flag': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
         # phrase grounding
         collate_batch_fn_kwargs['pg'] = { 'flag': 'pg', **_kwargs }
         # chest imagenome bbox grounding
@@ -898,6 +1006,8 @@ def train_from_scratch(
         collate_batch_fn_kwargs['cl'] = { 'flag': 'cl', **_kwargs }
     if use_chexpert:
         collate_batch_fn_kwargs['chxp'] = { 'flag': 'chxp', **_kwargs }
+    if use_iuxray:
+        collate_batch_fn_kwargs['iufg'] = { 'flag': 'iufg', **_kwargs }
     
     if use_mimiccxr:
         x = image_size if type(image_size) is int else image_size[0]
@@ -927,6 +1037,8 @@ def train_from_scratch(
             report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
             use_weighted_phrase_classifier_loss=use_weighted_phrase_classifier_loss,
             cluster_and_label_weights_for_facts_filepath=cluster_and_label_weights_for_facts_filepath,
+            use_interpret_cxr_challenge_split=mimiccxr_use_interpret_cxr_challenge_split,
+            interpret_cxr_challenge_split_filepath=mimiccxr_interpret_cxr_challenge_split_filepath,
         )
     else:
         mimiccxr_trainer_kwargs = None
@@ -952,6 +1064,8 @@ def train_from_scratch(
             mask_height=regions_height,
             mask_width=regions_width,
             class_phrase_embeddings_filepath=chexlocalize_class_phrase_embeddings_filepath,
+            use_interpret_cxr_challenge_split=chexlocalize_use_interpret_cxr_challenge_split,
+            interpret_cxr_challenge_split_filepath=chexlocalize_interpret_cxr_challenge_split_filepath,
         )
     else:
         chexlocalize_trainer_kwargs = None
@@ -962,9 +1076,22 @@ def train_from_scratch(
             use_training_set=use_chexpert_for_train,
             use_validation_set=use_chexpert_for_test,
             phrase_embeddings_filepath=chexpert_class_phrase_embeddings_filepath,
+            use_interpret_cxr_challenge_split=chexpert_use_interpret_cxr_challenge_split,
+            interpret_cxr_challenge_split_filepath=chexpert_interpret_cxr_challenge_split_filepath,
         )
     else:
         chexpert_trainer_kwargs = None
+
+    if use_iuxray:
+        iuxray_trainer_kwargs = dict(
+            do_train=use_iuxray_for_train,
+            do_test=use_iuxray_for_test,
+            image_id_to_pos_neg_facts_filepath=iuxray_image_id_to_pos_neg_facts_filepath,
+            use_interpret_cxr_challenge_split=iuxray_use_interpret_cxr_challenge_split,
+            interpret_cxr_challenge_split_filepath=iuxray_interpret_cxr_challenge_split_filepath,
+        )
+    else:
+        iuxray_trainer_kwargs = None
 
     trainer_engine_kwargs = dict(
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
@@ -1000,6 +1127,9 @@ def train_from_scratch(
         focal_loss_weight=focal_loss_weight,
         bce_loss_weight=bce_loss_weight,
         wbce_loss_weight=wbce_loss_weight,
+        # other loss args
+        use_attention_regularization_loss=use_attention_regularization_loss,
+        use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
     )
 
     return train_model(
@@ -1010,6 +1140,7 @@ def train_from_scratch(
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
                 chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
                 chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+                iuxray_trainer_kwargs=iuxray_trainer_kwargs,
                 dataloading_kwargs=dataloading_kwargs,
                 collate_batch_fn_kwargs=collate_batch_fn_kwargs,
                 train_image_transform_kwargs=train_image_transform_kwargs,
@@ -1062,8 +1193,9 @@ def resume_training(
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']
     mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
     vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
-    chexlocalize_trainer_kwargs = metadata.get('chexlocalize_trainer_kwargs', None) # backward compatibility
-    chexpert_trainer_kwargs = metadata.get('chexpert_trainer_kwargs', None) # backward compatibility
+    chexlocalize_trainer_kwargs = metadata['chexlocalize_trainer_kwargs']
+    chexpert_trainer_kwargs = metadata['chexpert_trainer_kwargs']
+    iuxray_trainer_kwargs = metadata['iuxray_trainer_kwargs']
     dataloading_kwargs = metadata['dataloading_kwargs']
     collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
     train_image_transform_kwargs = metadata['train_image_transform_kwargs']
@@ -1094,6 +1226,7 @@ def resume_training(
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
                 chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
                 chexpert_trainer_kwargs=chexpert_trainer_kwargs,
+                iuxray_trainer_kwargs=iuxray_trainer_kwargs,
                 dataloading_kwargs=dataloading_kwargs,
                 collate_batch_fn_kwargs=collate_batch_fn_kwargs,
                 train_image_transform_kwargs=train_image_transform_kwargs,

@@ -233,7 +233,8 @@ class SequentialDataLoader:
     def __len__(self):
         return self.total_len
     
-def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=None, min_group_size=100):
+def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=None, min_group_size=100,
+                                        verbose=True):
     assert len(label_matrix.shape) == 2
     n_labels = label_matrix.shape[1]
     grouped_indices = [[] for _ in range(n_labels+1)]
@@ -258,7 +259,7 @@ def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=
                 grouped_indices[-1].append(i)
     group_indices = list(range(len(grouped_indices)))
     group_indices.sort(key = lambda i : len(grouped_indices[i]))
-    if label_names is not None:
+    if verbose and label_names is not None:
         for gi in group_indices:
             if gi < n_labels:
                 print(f'{label_names[gi]}: {len(grouped_indices[gi])}')
@@ -275,7 +276,8 @@ def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=
     while len(dedup_indices) > 1 and len(dedup_indices[-1]) < min_group_size:
         dedup_indices[-2].extend(dedup_indices[-1])
         dedup_indices.pop()
-    print(f'Group sizes: {[len(x) for x in dedup_indices]}')
+    if verbose:
+        print(f'Group sizes: {[len(x) for x in dedup_indices]}')
     return dedup_indices
 
 def group_indices_into_bins_by_scores(scores, num_bins, min_bin_size=100):
@@ -1084,7 +1086,7 @@ def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visua
     return collate_batch_fn
 
 def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_yolov8=False):
-    if flag == 'fg': # fact grounding
+    if flag == 'mimfg': # mimiccxr fact grounding
         def collate_batch_fn(batch):
             # We expect:
             # - 'i': images
@@ -1099,6 +1101,20 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
             if include_loss_weights:
                 batch_dict['pw'] = torch.tensor(np.array([x['pw'] for x in batch]))
+            batch_dict['l'] = torch.tensor(np.array([x['l'] for x in batch]))
+            return batch_dict
+    elif flag == 'iufg': # iuxray fact grounding
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'l': labels
+            batch_dict = dict(flag=flag)
+            if use_yolov8:
+                batch_dict['img'] = torch.stack([x['i'] for x in batch])
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
             batch_dict['l'] = torch.tensor(np.array([x['l'] for x in batch]))
             return batch_dict
     elif flag == 'pg': # phrase grounding

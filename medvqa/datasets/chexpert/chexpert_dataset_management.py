@@ -28,20 +28,28 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CHEXPERT_ORIENTATION2ID,
 )
-from medvqa.utils.files import get_cached_pickle_file
+from medvqa.utils.files import get_cached_pickle_file, load_pickle
+from medvqa.utils.logging import print_bold
 
 class CheXpertTrainingMode:
     TRAIN_VAL = 'train_val'
+    VAL_TEST = 'val_test'
+    TEST = 'test'
     ALL = 'all'
 
     @staticmethod
     def get_choices():
-        return [CheXpertTrainingMode.TRAIN_VAL, CheXpertTrainingMode.ALL]
+        return [
+            CheXpertTrainingMode.TRAIN_VAL,
+            CheXpertTrainingMode.VAL_TEST,
+            CheXpertTrainingMode.TEST,
+            CheXpertTrainingMode.ALL,
+        ]
 
 class CheXpertTrainerBase(LabelBasedVQAClass):
 
     def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None, load_test_set=False,
-                 use_visualchexbert=True):
+                 use_visualchexbert=True, apply_filtering=True, load_orientation=True, load_gender=True):
         
         if use_visualchexbert:
             print(f'Loading dataframe from {CHEXPERT_TRAIN_VISUALCHEXBERT_CSV_PATH}')
@@ -62,13 +70,17 @@ class CheXpertTrainerBase(LabelBasedVQAClass):
         
         df_orien = df['Frontal/Lateral'] + df['AP/PA'].fillna('')
         df_gender = df['Sex']
+        df_paths = df['Path']
         df_labels = df[CHEXPERT_LABELS]
-        valid_rows = (df_orien != 'FrontalLL') & (df_orien != 'FrontalRL') & (df_gender != 'Unknown')
 
-        df_orien = df_orien[valid_rows]
-        df_gender = df_gender[valid_rows]
-        df_labels = df_labels[valid_rows]
-        df_paths = df['Path'][valid_rows]
+        if apply_filtering:
+            valid_rows = (df_orien != 'FrontalLL') & (df_orien != 'FrontalRL') & (df_gender != 'Unknown')
+            df_orien = df_orien[valid_rows]
+            df_gender = df_gender[valid_rows]
+            df_labels = df_labels[valid_rows]
+            df_paths = df_paths[valid_rows]
+            print(f'num invalid rows removes = {len(df) - len(df_paths)}')
+        
         n = len(df_paths)
 
         # images
@@ -77,24 +89,31 @@ class CheXpertTrainerBase(LabelBasedVQAClass):
         self.image_paths = image_paths
         
         # orientations
-        print('Loading orientations')
-        orientations = np.empty((n,), dtype=int)
-        for i, x in enumerate(df_orien):
-            orientations[i] = CHEXPERT_ORIENTATION2ID[x]
-        self.orientations = orientations
+        if load_orientation:
+            print('Loading orientations')
+            orientations = np.empty((n,), dtype=int)
+            for i, x in enumerate(df_orien):
+                orientations[i] = CHEXPERT_ORIENTATION2ID[x]
+            self.orientations = orientations
         
         # gender
-        print('Loading genders')
-        genders = np.empty((n,), dtype=int)
-        for i, x in enumerate(df_gender):
-            genders[i] = CHEXPERT_GENDER2ID[x]
-        self.genders = genders
+        if load_gender:
+            print('Loading genders')
+            genders = np.empty((n,), dtype=int)
+            for i, x in enumerate(df_gender):
+                genders[i] = CHEXPERT_GENDER2ID[x]
+            self.genders = genders
 
         # chexpert labels
         print('Loading chexpert labels')
         labels = df_labels.fillna(0).to_numpy().astype(np.int8)
         labels = np.where(labels == -1, 1, labels)
         self.labels = labels
+
+        # train & valid indices
+        self.train_indices = [i for i, x in enumerate(image_paths) if '/train/' in x]
+        self.valid_indices = [i for i, x in enumerate(image_paths) if '/valid/' in x]
+        assert len(self.train_indices) + len(self.valid_indices) == len(image_paths)
 
         super().__init__(
             label_names=CHEXPERT_LABELS,
@@ -346,10 +365,14 @@ class CheXpertPhraseGroundingDataset(Dataset):
 class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
     def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
                  phrase_embeddings_filepath, max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
-                 training_data_mode=CheXpertTrainingMode.ALL, use_training_set=True, use_validation_set=True):
+                 training_data_mode=CheXpertTrainingMode.ALL, use_training_set=True, use_validation_set=True,
+                 use_interpret_cxr_challenge_split=False, interpret_cxr_challenge_split_filepath=None):
         super().__init__(
             load_test_set=True,
             use_visualchexbert=True,
+            apply_filtering=False,
+            load_orientation=False,
+            load_gender=False,
         )
 
         assert use_training_set or use_validation_set
@@ -377,13 +400,39 @@ class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
         print(f'len(all_image_paths) = {len(all_image_paths)}')
         print(f'all_labels.shape = {all_labels.shape}')
 
+        if use_interpret_cxr_challenge_split:
+            assert interpret_cxr_challenge_split_filepath is not None
+            print_bold(f'Using split from {interpret_cxr_challenge_split_filepath}')
+            challenge_split = load_pickle(interpret_cxr_challenge_split_filepath)
+            all_image_partial_paths = []
+            for ip in all_image_paths:
+                if 'train/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('train/'):])
+                elif 'valid/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('valid/'):])
+                elif 'test/' in ip:
+                    all_image_partial_paths.append(ip[ip.index('test/'):])
+                else:
+                    raise ValueError(f'Unknown image path: {ip}')
+            image_partial_path_2_idx = {p: i for i, p in enumerate(all_image_partial_paths)}
+
         if use_training_set:
             print('Generating train dataset and dataloader')
-            if training_data_mode == CheXpertTrainingMode.TRAIN_VAL:
-                train_indices = list(range(len(self.labels)))
-            elif training_data_mode == CheXpertTrainingMode.ALL:
-                train_indices = list(range(len(all_labels)))
-            else: assert False, f'Unknown training_data_mode = {training_data_mode}'
+            if use_interpret_cxr_challenge_split:
+                # print('DEBUG: all_image_partial_paths[:10]')
+                # print(all_image_partial_paths[:10])
+                train_indices = [image_partial_path_2_idx[ip] for ip in challenge_split['train']]
+            else:
+                if training_data_mode == CheXpertTrainingMode.TRAIN_VAL:
+                    train_indices = self.train_indices + self.valid_indices # train + val set
+                elif training_data_mode == CheXpertTrainingMode.VAL_TEST:
+                    train_indices = self.valid_indices + list(range(len(self.labels), len(all_labels))) # val + test set
+                elif training_data_mode == CheXpertTrainingMode.TEST:
+                    train_indices = list(range(len(self.labels), len(all_labels))) # only test set
+                elif training_data_mode == CheXpertTrainingMode.ALL:
+                    train_indices = list(range(len(all_labels)))
+                else: assert False, f'Unknown training_data_mode = {training_data_mode}'
+            assert len(train_indices) == len(set(train_indices)) # no duplicates
             print(f'len(train_indices) = {len(train_indices)}')
 
             grouped_indices = group_indices_for_balanced_sampling(label_matrix=all_labels,
@@ -416,8 +465,12 @@ class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
                                             pin_memory=True)
         
         if use_validation_set:
-            test_indices = [i for i in range(len(self.labels), len(all_labels))]
-            assert len(test_indices) == len(self.test_labels)
+            if use_interpret_cxr_challenge_split:
+                test_indices = [image_partial_path_2_idx[ip] for ip in challenge_split['val']]
+            else:
+                test_indices = [i for i in range(len(self.labels), len(all_labels))]
+            if not use_interpret_cxr_challenge_split:
+                assert len(test_indices) == len(self.test_labels)
             print('Generating val dataset and dataloader')
             print(f'len(test_indices) = {len(test_indices)}')
             self.val_dataset = CheXpertPhraseGroundingDataset(

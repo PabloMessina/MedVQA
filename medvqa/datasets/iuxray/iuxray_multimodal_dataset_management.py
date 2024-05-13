@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import get_iuxray_image_path
+from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.multimodal import MultiModal_Trainer
 from medvqa.datasets.iuxray import (
     IUXRAY_IMAGE_INFO_JSON_PATH,

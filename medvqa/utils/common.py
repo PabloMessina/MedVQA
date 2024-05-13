@@ -18,6 +18,8 @@ RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
 
 INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH = os.environ['INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH']
 INTERPRET_CXR_TEST_PUBLIC_CSV_PATH = os.environ['INTERPRET_CXR_TEST_PUBLIC_CSV_PATH']
+INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH = os.environ['INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH']
+INTERPRET_CXR_TEST_HIDDEN_CSV_PATH = os.environ['INTERPRET_CXR_TEST_HIDDEN_CSV_PATH']
 
 # NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem
 # and have set the YOLOv5_PYTHON_PATH environment variable to an appropriate python executable.

@@ -12,6 +12,7 @@ from medvqa.utils.logging import print_magenta
 def get_step_fn(model, optimizer, training, validating, testing, device,
                 mimiccxr_phrase_classifier_criterion,
                 binary_multilabel_classification_criterion,
+                generic_phrase_classifier_criterion,
                 contrastive_phrase_grounding_criterion,
                 pos_area_prior, neg_area_prior,
                 gradient_accumulation_steps=1, # for gradient accumulation
@@ -61,7 +62,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, gradient_accumulation_steps, max_grad_norm)
     
-    def step_fn__fact_grounding(batch):
+    def _step_fn__fact_grounding(batch, phrase_classifier_criterion, use_weighted_phrase_classifier_loss):
 
         # Extract elements from batch
         if using_yolov8:
@@ -85,7 +86,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
-                'mimiccxr_forward': True,
             }
 
             # Forward pass
@@ -99,9 +99,9 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
                 # 1. phrase classification loss
                 if use_weighted_phrase_classifier_loss:
-                    phrase_classifier_loss = mimiccxr_phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float(), phrase_weights)
+                    phrase_classifier_loss = phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float(), phrase_weights)
                 else:
-                    phrase_classifier_loss = mimiccxr_phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float())
+                    phrase_classifier_loss = phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float())
                 phrase_classifier_loss *= phrase_classifier_loss_weight # apply weight
 
                 # 2. contrastive phrase grounding loss
@@ -159,6 +159,12 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
         return output
+    
+    def step_fn__mimiccxr_fact_grounding(batch):
+        return _step_fn__fact_grounding(batch, mimiccxr_phrase_classifier_criterion, use_weighted_phrase_classifier_loss)
+    
+    def step_fn__iuxray_fact_grounding(batch):
+        return _step_fn__fact_grounding(batch, generic_phrase_classifier_criterion, False)
     
     def step_fn__phrase_grounding(batch):
 
@@ -613,8 +619,100 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
+
+    def step_fn__iuxray_fact_grounding(batch):
+
+        # Extract elements from batch
+        images = batch['i'].to(device)
+        phrase_embeddings = batch['pe'].to(device)
+        gt_labels = batch['l'].to(device)
+
+        pos_indices = gt_labels == 1
+        neg_indices = gt_labels == 0
+
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'raw_images': images,
+                'phrase_embeddings': phrase_embeddings,
+                'only_compute_features': True,
+            }
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                model_output = model(**model_kwargs)
+                sigmoid_attention = model_output['sigmoid_attention']
+                phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
+                phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
+                
+                # Compute losses
+
+                # 1. phrase classification loss
+                phrase_classifier_loss = generic_phrase_classifier_criterion(phrase_classifier_logits, gt_labels.float())
+                phrase_classifier_loss *= phrase_classifier_loss_weight # apply weight
+
+                # 2. contrastive phrase grounding loss
+                if use_contrastive_phrase_grounding_loss:
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity[pos_indices] # (num_positives)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity[neg_indices] # (num_negatives)
+                    phrase_grounding_similarity_pos = phrase_grounding_similarity_pos.view(-1)
+                    phrase_grounding_similarity_neg = phrase_grounding_similarity_neg.view(-1)
+                    if len(phrase_grounding_similarity_pos) == 0 or len(phrase_grounding_similarity_neg) == 0:
+                        contrastive_phrase_grounding_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
+                                                                                                phrase_grounding_similarity_neg)
+
+                # 3. attention regularization loss
+                if use_attention_regularization_loss:
+                    areas = sigmoid_attention.mean(dim=-1)
+                    areas_pos = areas[pos_indices]
+                    areas_neg = areas[neg_indices]
+                    if len(areas_pos) == 0:
+                        attention_regularization_loss_pos = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_pos = (areas_pos - pos_area_prior).abs().mean()
+                    if len(areas_neg) == 0:
+                        attention_regularization_loss_neg = torch.tensor(0.0, device=device)
+                    else:
+                        attention_regularization_loss_neg = (areas_neg - neg_area_prior).abs().mean()
+                    attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
+
+                if training:
+                    losses = []
+                    losses.append(phrase_classifier_loss)
+                    if use_contrastive_phrase_grounding_loss:
+                        losses.append(contrastive_phrase_grounding_loss)
+                    if use_attention_regularization_loss:
+                        losses.append(attention_regularization_loss)
+                    batch_loss = sum(losses)
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+                else:
+                    batch_loss = None
+
+        # Prepare output
+        output = {}
+
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+        
+        output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['gt_labels'] = gt_labels.detach().view(-1)
+        if use_contrastive_phrase_grounding_loss:
+            output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_attention_regularization_loss:
+            output['attention_regularization_loss'] = attention_regularization_loss.detach()
+
+        return output
+    
     flag_to_step_fn = {
-        'fg': step_fn__fact_grounding, # fact grounding (facts extracted from radiology reports)
+        'mimfg': step_fn__mimiccxr_fact_grounding, # mimiccxr fact grounding (facts extracted from radiology reports)
+        'iufg': step_fn__iuxray_fact_grounding, # iuxray fact grounding (facts extracted from radiology reports)
         'pg': step_fn__phrase_grounding, # phrase grounding (this assumes ground truth masks are available)
         'cibg': step_fn__chest_imagenome_bbox_grounding, # chest imagenome bbox grounding
         'vbg': step_fn__vinbig_bbox_grounding, # vinbig bbox grounding
@@ -656,7 +754,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
             #    **unused_kwargs,
             ):
 
-    # Create criterions
+    # Create multiple criterion objects
 
     # Binary multi-label loss for mimic-cxr phrase classifier
     assert binary_multilabel_classif_loss_name in [
@@ -686,6 +784,9 @@ def get_engine(model, device, gradient_accumulation_steps=1,
         use_weighted_phrase_classifier_loss = False
     mimiccxr_phrase_classifier_criterion = get_binary_multilabel_loss(binary_multilabel_classif_loss_name, **binary_loss_kwargs)
 
+    # Generic phrase classifier loss
+    generic_phrase_classifier_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE)
+
     # Standard binary multi-label classification loss
     binary_multilabel_classification_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCBCE)
 
@@ -712,6 +813,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
     step_fn = get_step_fn(model, optimizer, training, validating, testing, device,
                             mimiccxr_phrase_classifier_criterion=mimiccxr_phrase_classifier_criterion,
                             binary_multilabel_classification_criterion=binary_multilabel_classification_criterion,
+                            generic_phrase_classifier_criterion=generic_phrase_classifier_criterion,
                             contrastive_phrase_grounding_criterion=contrastive_phrase_grounding_criterion,
                             pos_area_prior=pos_area_prior, neg_area_prior=neg_area_prior,
                             gradient_accumulation_steps=gradient_accumulation_steps,

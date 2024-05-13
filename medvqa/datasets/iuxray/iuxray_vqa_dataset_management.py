@@ -2,29 +2,24 @@ import os
 import numpy as np
 from medvqa.datasets.vqa import VQA_Trainer
 from medvqa.datasets.iuxray import (
-    IUXRAY_DATASET_DIR,
     IUXRAY_CACHE_DIR,
     IUXRAY_REPORTS_MIN_JSON_PATH,
     IUXRAY_IMAGE_INFO_JSON_PATH,
     IUXRAY_IMAGE_ORIENTATIONS,
     get_invalid_images,
+    get_iuxray_image_path,
 )
 from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
     get_cached_json_file,
 )
 
-_IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')
-
-def get_iuxray_image_path(image_name):
-    return _IUXRAY_IMAGE_PATH_TEMPLATE.format(image_name)
-
 def get_iuxray_image_paths(report):
     filename = report['filename']
     iuxray_metadata = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
     metadata = iuxray_metadata[filename]
     images = metadata['images']
-    image_paths = [get_iuxray_image_path(f'{img["id"]}.png') for img in images]
+    image_paths = [get_iuxray_image_path(img["id"]) for img in images]
     return image_paths
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer,

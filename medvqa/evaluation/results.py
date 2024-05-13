@@ -151,7 +151,7 @@ def _append_experiment_timestamp_column(df, results):
     df['exp_timestamp'] = [x[1][:15] for x in results]
 
 def _append_filesystem_modified_time_column(df, results):
-    from datetime import datetime 
+    from datetime import datetime
     df['modif_time'] = [os.path.getmtime(mp) for mp in df['metrics_path']]
     # make human readable
     df['modif_time'] = [datetime.fromtimestamp(x).strftime('%Y-%m-%d %H:%M:%S') for x in df['modif_time']]

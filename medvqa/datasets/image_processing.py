@@ -12,6 +12,7 @@ import imagesize
 
 from transformers import ViTFeatureExtractor
 
+from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH
 from medvqa.models.vision import (
     ImageQuestionClassifier,
     ImageFeatureExtractor,
@@ -505,6 +506,85 @@ class ImageDataset(Dataset):
             return {'i': image, 'resized_shape': size_after}
         else:
             return {'i': self.image_transform(self.image_paths[i]) }
+        
+class FactVisualGroundingDataset(Dataset):
+    def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts,
+                 negative_facts, indices, num_facts, infinite=False, shuffle=False):
+        self.image_paths = image_paths
+        self.image_transform = image_transform
+        self.fact_embeddings = fact_embeddings
+        self.positive_facts = positive_facts
+        self.negative_facts = negative_facts
+        self.indices = indices
+        self.num_facts = num_facts
+        self.infinite = infinite
+        if shuffle:
+            random.shuffle(self.indices)
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(self.indices)
+
+    def __len__(self):
+        return self._len
+
+    @staticmethod
+    def _adapt_fact_indices(fact_indices, target_num_facts):
+        assert len(fact_indices) > 0
+        if len(fact_indices) > target_num_facts: # sample a subset of facts
+            fact_indices = random.sample(fact_indices, target_num_facts)
+        elif len(fact_indices) < target_num_facts: # duplicate facts
+            fact_indices_ = []
+            x = target_num_facts // len(fact_indices)
+            y = target_num_facts % len(fact_indices)
+            for _ in range(x):
+                fact_indices_.extend(fact_indices)
+            if y > 0:
+                fact_indices_.extend(random.sample(fact_indices, y))
+            fact_indices = fact_indices_
+        assert len(fact_indices) == target_num_facts
+        return fact_indices
+    
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % len(self.indices)
+        idx = self.indices[i]
+        image_path = self.image_paths[idx]
+        image = self.image_transform(image_path)
+        
+        positive_facts = self.positive_facts[idx]
+        negative_facts = self.negative_facts[idx]
+        if len(positive_facts) > 0 and len(negative_facts) > 0:
+            if len(positive_facts) < self.num_facts and len(negative_facts) < self.num_facts:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+            elif len(positive_facts) < self.num_facts:
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - len(positive_facts))
+            elif len(negative_facts) < self.num_facts:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - len(negative_facts))
+            else:
+                assert len(positive_facts) >= self.num_facts and len(negative_facts) >= self.num_facts
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+        elif len(positive_facts) > 0:
+            positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+        elif len(negative_facts) > 0:
+            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+        else:
+            raise ValueError('No positive or negative facts found!')
+
+        fact_indices = positive_facts + negative_facts
+        assert len(fact_indices) == 2 * self.num_facts
+        embeddings = self.fact_embeddings[fact_indices]
+        labels = np.zeros(len(fact_indices), dtype=np.int64)
+        labels[:len(positive_facts)] = 1
+        
+        return {
+            'fidxs': fact_indices,
+            'i': image,
+            'pe': embeddings, # phrase embeddings
+            'l': labels, # labels
+        }
 
 def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,
         top_k, threshold, min_num_q_per_report=5):

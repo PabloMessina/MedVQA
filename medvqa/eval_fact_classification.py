@@ -5,8 +5,12 @@ import torch
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score
 from torch.utils.data import Dataset, DataLoader
+from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
+from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import (
+    get_imageId2PartPatientStudy,
     get_imageId2reportId,
     get_mimic_cxr_lt_ridx2labels,
     get_mimiccxr_medium_image_path,
@@ -36,6 +40,8 @@ from medvqa.models.checkpoint import (
     load_metadata,
 )
 from medvqa.utils.common import (
+    INTERPRET_CXR_TEST_HIDDEN_CSV_PATH,
+    INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH,
     INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
     INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
     parsed_args_to_dict,
@@ -51,7 +57,7 @@ from medvqa.utils.files import (
     get_results_folder_path,
     load_jsonl, load_pickle, save_pickle,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta
 from medvqa.utils.metrics import best_threshold_and_f1_score
 
 class _EvalModes:
@@ -60,6 +66,7 @@ class _EvalModes:
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'interpret_cxr_test_public_label_based__template_based_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN = 'interpret_cxr_test_public_label_based__generate_jsons_for_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN = 'interpret_cxr_test_public_label_based__json_to_gpt_report_gen'
+    INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS = 'interpret_cxr_compute_and_save_label_based_predictions'
 
     @staticmethod
     def choices():
@@ -69,6 +76,7 @@ class _EvalModes:
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN,
+            _EvalModes.INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS,
         ]
 
 def parse_args(args=None):
@@ -98,6 +106,10 @@ def parse_args(args=None):
     parser.add_argument('--f1_threshold', type=float, default=0.2)
     parser.add_argument('--label_based_json_reports_filepath', type=str, default=None)
     parser.add_argument('--json_to_gpt_reports_jsonl_filepath', type=str, default=None)
+    parser.add_argument('--mimiccxr_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--iuxray_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--chexpert_interpret_cxr_challenge_split_filepath', type=str, default=None)
+
     return parser.parse_args(args=args)
 
 class FactClassificationDataset(Dataset):
@@ -574,7 +586,7 @@ def _run_inference_for_label_based_fact_classification_on_images(
 
     fact_embeddings = fact_encoder.compute_text_embeddings(facts)
     
-    fact_idxs = [list(range(len(facts))) for _ in range(len(image_paths))]
+    fact_idxs = [list(range(len(facts))) for _ in range(len(image_paths))]    
 
     eval_dataloader, fact_idxs, image_paths = _create_dataloader(
         max_images_per_batch=max_images_per_batch,
@@ -588,10 +600,10 @@ def _run_inference_for_label_based_fact_classification_on_images(
 
     # Run inference
     model.eval()
-    offset = 0
-    image_path_list = []
-    fact_idx_list = []
-    probs_list = []
+    image_path_list = [None] * len(image_paths) * len(facts) # make sure to have enough space
+    fact_idx_list = [None] * len(image_paths) * len(facts)
+    probs_list = [None] * len(image_paths) * len(facts)
+    k = 0
     print_blue('Running inference ...', bold=True)
     
     with torch.no_grad():
@@ -612,14 +624,21 @@ def _run_inference_for_label_based_fact_classification_on_images(
                 image_path = image_paths[idx]
                 assert len(fact_idxs[idx]) == probs.shape[1]
                 for j, fact_idx in enumerate(fact_idxs[idx]):
-                    image_path_list.append(image_path)
-                    fact_idx_list.append(fact_idx)
-                    probs_list.append(probs[i, j].item())
-            offset += len(images)
+                    # image_path_list.append(image_path)
+                    # fact_idx_list.append(fact_idx)
+                    # probs_list.append(probs[i, j].item())
+                    image_path_list[k] = image_path
+                    fact_idx_list[k] = fact_idx
+                    probs_list[k] = probs[i, j].item()
+                    k += 1
+    image_path_list = image_path_list[:k] # trim
+    fact_idx_list = fact_idx_list[:k]
+    probs_list = probs_list[:k]
 
     print('len(image_path_list) =', len(image_path_list))
     print('len(fact_idx_list) =', len(fact_idx_list))
     print('len(probs_list) =', len(probs_list))
+    
     unique_image_paths = set(image_path_list)
     unique_image_paths = list(unique_image_paths)
     image_path_to_idx = {image_path: i for i, image_path in enumerate(unique_image_paths)}
@@ -691,13 +710,15 @@ def _tune_thresholds_for_label_based_fact_classification(
 
     best_thresholds = np.empty(probs.shape[1])
     best_f1s = np.empty(probs.shape[1])
+    best_accs = np.empty(probs.shape[1])
     for i in range(probs.shape[1]):
         best_t, best_f1 = best_threshold_and_f1_score(probs[:, i], gt_labels[:, i])
         best_thresholds[i] = best_t
         best_f1s[i] = best_f1
+        best_accs[i] = accuracy_score(gt_labels[:, i], probs[:, i] > best_t)
     print(f'best_f1s.mean() = {best_f1s.mean()}')
-
-    return best_thresholds, best_f1s
+    print(f'best_accs.mean() = {best_accs.mean()}')
+    return best_thresholds, best_f1s, best_accs
 
 def _load_interpret_cxr_test_public_data(section):
     df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
@@ -742,6 +763,32 @@ def _load_interpret_cxr_test_public_data(section):
 
     return image_paths_list_, gt_reports_
 
+def _load_interpret_cxr_test_public_image_paths():
+    df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
+    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
+    image_paths_list = df['images_path'].tolist()
+    image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
+    image_path_list = []
+    for image_paths in image_paths_list:
+        for image_path in image_paths:
+            image_path = os.path.join(INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+            assert os.path.exists(image_path)
+            image_path_list.append(image_path)
+    return image_path_list
+
+def _load_interpret_cxr_test_hidden_image_paths():
+    df = pd.read_csv(INTERPRET_CXR_TEST_HIDDEN_CSV_PATH)
+    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
+    image_paths_list = df['images_path'].tolist()
+    image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
+    image_path_list = []
+    for image_paths in image_paths_list:
+        for image_path in image_paths:
+            image_path = os.path.join(INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+            assert os.path.exists(image_path)
+            image_path_list.append(image_path)
+    return image_path_list
+
 def _compute_thresholds(mimiccxr_report_fact_nli_integrated_data_filepath, results_folder_path,
     checkpoint_folder_path, model_kwargs, val_image_transform_kwargs, max_images_per_batch,
     max_facts_per_image, num_workers, device, fact_embedding_model_name,
@@ -780,13 +827,13 @@ def _compute_thresholds(mimiccxr_report_fact_nli_integrated_data_filepath, resul
             fact_embedding_device=fact_embedding_device,
         )
         assert len(probs) == len(dicom_ids)
-        thresholds, f1s = _tune_thresholds_for_label_based_fact_classification(
+        thresholds, f1s, accs = _tune_thresholds_for_label_based_fact_classification(
             probs=probs,
             dicom_ids=dicom_ids,
             mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
         )
         print('Saving thresholds to', thresholds_save_path)
-        output = { 'thresholds': thresholds, 'f1s': f1s }
+        output = { 'thresholds': thresholds, 'f1s': f1s , 'accs': accs }
         save_pickle(output, thresholds_save_path)
     assert len(output['thresholds']) == len(LABEL_BASED_FACTS)
     return output
@@ -819,6 +866,9 @@ def _evaluate_model(
     f1_threshold,
     label_based_json_reports_filepath,
     json_to_gpt_reports_jsonl_filepath,
+    mimiccxr_interpret_cxr_challenge_split_filepath,
+    iuxray_interpret_cxr_challenge_split_filepath,
+    chexpert_interpret_cxr_challenge_split_filepath,
 ):
     count_print = CountPrinter()
 
@@ -849,7 +899,7 @@ def _evaluate_model(
                 fact_embedding_device=fact_embedding_device,
             )
             assert len(val_probs) == len(val_dicom_ids)
-            thresholds = _tune_thresholds_for_label_based_fact_classification(
+            thresholds, f1s, accs = _tune_thresholds_for_label_based_fact_classification(
                 probs=val_probs,
                 dicom_ids=val_dicom_ids,
                 mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
@@ -1265,7 +1315,6 @@ def _evaluate_model(
             f1s = tmp['f1s']
         else:
             raise ValueError('tune_thresholds must be True')
-        
 
         # Count the number of positive labels for each fact
         tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
@@ -1370,7 +1419,7 @@ def _evaluate_model(
         save_pickle(output, save_path)
         print_blue(f'Saved jsons to {save_path}', bold=True)
 
-    elif _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN:
+    elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN:
                 
         assert section_mode is not None
         assert label_based_json_reports_filepath is not None
@@ -1419,6 +1468,171 @@ def _evaluate_model(
             strings=strings,
             max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
         )
+
+    elif eval_mode == _EvalModes.INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS:
+        # What we will do (using interpret cxr challenge's official splits):
+        # 1. Collect image paths for MIMIC-CXR (train, validate)
+        # 2. Collect image paths for CheXpert (train, validate)
+        # 3. Collect image paths for IU X-Ray (train, validate)
+        # 4. Collect image paths for the public test set
+        # 5. Collect image paths for the hidden test set
+        # 6. Run inference on all images
+        # 7. Tune thresholds on MIMIC-CXR (validate)
+        # 8. Save predictions for all images and thresholds in a pickle file
+
+        assert checkpoint_folder_path is not None
+        assert mimiccxr_interpret_cxr_challenge_split_filepath is not None
+        assert chexpert_interpret_cxr_challenge_split_filepath is not None
+        assert iuxray_interpret_cxr_challenge_split_filepath is not None
+        assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        assert fact_embedding_model_name is not None
+        assert fact_embedding_model_checkpoint_folder_path is not None
+
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+        probs_savepath = get_file_path_with_hashing_if_too_long(
+            folder_path=results_folder_path,
+            prefix='interpret_cxr__label_based_probs',
+            strings=['mimiccxr', 'chexpert', 'iuxray', 'public_test', 'hidden_test'],
+            force_hashing=True,
+        )
+
+        if os.path.exists(probs_savepath):
+            print_magenta(f'Found existing label-based probs at {probs_savepath}', bold=True)
+            print_magenta('Skipping inference', bold=True)
+            tmp = load_pickle(probs_savepath)
+            image_paths = tmp['image_paths']
+            probs = tmp['probs']
+            
+            # Load only MIMIC-CXR validation set
+            assert mimiccxr_interpret_cxr_challenge_split_filepath is not None
+            mimiccxr_splits = load_pickle(mimiccxr_interpret_cxr_challenge_split_filepath)
+            imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+            mimiccxr_val_dicom_ids = mimiccxr_splits['val']
+            mimiccxr_val_image_paths = []
+            for dicom_id in mimiccxr_val_dicom_ids:
+                part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+                mimiccxr_val_image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
+                assert os.path.exists(mimiccxr_val_image_paths[-1])
+            print(f'len(mimiccxr_val_image_paths) = {len(mimiccxr_val_image_paths)}')
+        else:
+            # 1. Collect image paths for MIMIC-CXR (train, validate)
+            mimiccxr_splits = load_pickle(mimiccxr_interpret_cxr_challenge_split_filepath)
+            imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+            mimiccxr_train_dicom_ids = mimiccxr_splits['train']
+            mimiccxr_val_dicom_ids = mimiccxr_splits['val']
+            mimiccxr_train_image_paths = []
+            mimiccxr_val_image_paths = []
+            for dicom_id in mimiccxr_train_dicom_ids:
+                part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+                mimiccxr_train_image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
+                assert os.path.exists(mimiccxr_train_image_paths[-1])
+            for dicom_id in mimiccxr_val_dicom_ids:
+                part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+                mimiccxr_val_image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
+                assert os.path.exists(mimiccxr_val_image_paths[-1])
+            print(f'len(mimiccxr_train_image_paths) = {len(mimiccxr_train_image_paths)}')
+            print(f'len(mimiccxr_val_image_paths) = {len(mimiccxr_val_image_paths)}')
+
+            # 2. Collect image paths for CheXpert (train, validate)
+            chexpert_splits = load_pickle(chexpert_interpret_cxr_challenge_split_filepath)
+            chexpert_train_image_paths = []
+            chexpert_val_image_paths = []
+            for image_path in chexpert_splits['train']:
+                image_path = os.path.join(CHEXPERT_V1_0_SMALL_DATASET_DIR, image_path)
+                assert os.path.exists(image_path)
+                chexpert_train_image_paths.append(image_path)
+            for image_path in chexpert_splits['val']:
+                image_path = os.path.join(CHEXPERT_V1_0_SMALL_DATASET_DIR, image_path)
+                assert os.path.exists(image_path)
+                chexpert_val_image_paths.append(image_path)
+            print(f'len(chexpert_train_image_paths) = {len(chexpert_train_image_paths)}')
+            print(f'len(chexpert_val_image_paths) = {len(chexpert_val_image_paths)}')
+
+            # 3. Collect image paths for IU X-Ray (train, validate)
+            iuxray_splits = load_pickle(iuxray_interpret_cxr_challenge_split_filepath)
+            iuxray_train_image_paths = []
+            iuxray_val_image_paths = []
+            for image_id in iuxray_splits['train']:
+                image_path = get_iuxray_image_path(image_id)
+                assert os.path.exists(image_path)
+                iuxray_train_image_paths.append(image_path)
+            for image_id in iuxray_splits['val']:
+                image_path = get_iuxray_image_path(image_id)
+                assert os.path.exists(image_path)
+                iuxray_val_image_paths.append(image_path)
+            print(f'len(iuxray_train_image_paths) = {len(iuxray_train_image_paths)}')
+            print(f'len(iuxray_val_image_paths) = {len(iuxray_val_image_paths)}')
+
+            # 4. Collect image paths for the public test set
+            interpret_cxr_public_test_image_paths = _load_interpret_cxr_test_public_image_paths()
+            print(f'len(interpret_cxr_public_test_image_paths) = {len(interpret_cxr_public_test_image_paths)}')
+
+            # 5. Collect image paths for the hidden test set
+            interpret_cxr_hidden_test_image_paths = _load_interpret_cxr_test_hidden_image_paths()
+            print(f'len(interpret_cxr_hidden_test_image_paths) = {len(interpret_cxr_hidden_test_image_paths)}')
+
+            # 6. Run inference on all images
+            image_paths = (
+                mimiccxr_train_image_paths + mimiccxr_val_image_paths +
+                chexpert_train_image_paths + chexpert_val_image_paths +
+                iuxray_train_image_paths + iuxray_val_image_paths +
+                interpret_cxr_public_test_image_paths + interpret_cxr_hidden_test_image_paths
+            )
+            print(f'len(image_paths) = {len(image_paths)}')
+            probs, image_paths = _run_inference_for_label_based_fact_classification_on_images(
+                image_paths=image_paths,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                max_images_per_batch=max_images_per_batch,
+                max_facts_per_image=max_facts_per_image,
+                num_workers=num_workers,
+                device=device,
+                fact_embedding_model_name=fact_embedding_model_name,
+                fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+                fact_embedding_batch_size=fact_embedding_batch_size,
+                fact_embedding_num_workers=fact_embedding_num_workers,
+                fact_embedding_device=fact_embedding_device,
+            )
+            save_pickle({
+                'image_paths': image_paths,
+                'probs': probs,
+            }, probs_savepath)
+            print_blue(f'Saved label-based probs to {probs_savepath}', bold=True)
+
+        # 7. Tune thresholds on MIMIC-CXR (validate)
+        image_path_to_idx = {image_path: i for i, image_path in enumerate(image_paths)}
+        mimiccxr_val_image_idxs = [image_path_to_idx[image_path] for image_path in mimiccxr_val_image_paths]
+        mimiccxr_val_probs = probs[mimiccxr_val_image_idxs]
+        thresholds, f1s, accs = _tune_thresholds_for_label_based_fact_classification(
+            probs=mimiccxr_val_probs,
+            dicom_ids=mimiccxr_val_dicom_ids,
+            mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+        )
+
+        # 8. Save predictions for all images and thresholds in a pickle file
+        save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=results_folder_path,
+            prefix='interpret_cxr__label_based_predictions',
+            strings=[
+                'mimiccxr', 'chexpert', 'iuxray', 'public_test', 'hidden_test',
+                'thresholds', 'f1s', 'accs',
+                mimiccxr_report_fact_nli_integrated_data_filepath,
+            ],
+            force_hashing=True,
+        )
+        save_pickle({
+            'probs_filepath': probs_savepath, # path to probs instead of probs itself
+            'thresholds': thresholds,
+            'f1s': f1s,
+            'accs': accs,
+            'class_names': [x[:-5] for x in LABEL_BASED_FACTS], # remove ' seen'
+        }, save_path)
+        print_blue(f'Saved label-based predictions to {save_path}', bold=True)
+
+    else:
+        raise ValueError(f'Invalid eval_mode: {eval_mode}')
 
 def plot_label_based_metrics(metrics_path, label_based_facts, dicom_id_to_pos_neg_facts_filepath, metric_prefix, figsize):
     metrics = load_pickle(metrics_path)
@@ -1518,6 +1732,9 @@ def evaluate(
     f1_threshold,
     label_based_json_reports_filepath,
     json_to_gpt_reports_jsonl_filepath,
+    mimiccxr_interpret_cxr_challenge_split_filepath,
+    chexpert_interpret_cxr_challenge_split_filepath,
+    iuxray_interpret_cxr_challenge_split_filepath,
 ):
     print_blue('----- Evaluating model -----', bold=True)
 
@@ -1557,6 +1774,9 @@ def evaluate(
         f1_threshold=f1_threshold,
         label_based_json_reports_filepath=label_based_json_reports_filepath,
         json_to_gpt_reports_jsonl_filepath=json_to_gpt_reports_jsonl_filepath,
+        mimiccxr_interpret_cxr_challenge_split_filepath=mimiccxr_interpret_cxr_challenge_split_filepath,
+        chexpert_interpret_cxr_challenge_split_filepath=chexpert_interpret_cxr_challenge_split_filepath,
+        iuxray_interpret_cxr_challenge_split_filepath=iuxray_interpret_cxr_challenge_split_filepath,
     )
 
 if __name__ == '__main__':
