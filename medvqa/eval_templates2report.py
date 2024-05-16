@@ -13,15 +13,16 @@ import pandas as pd
 #     get_split2imageIds,
 # )
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import _probs_and_preds_to_input_text
-from medvqa.evaluation.report_generation import compute_report_level_metrics
-from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
-from medvqa.utils.common import (
+from medvqa.datasets.interpret_cxr_challenge import (
     INTERPRET_CXR_TEST_HIDDEN_CSV_PATH,
     INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH,
     INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
     INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
-    parsed_args_to_dict,
 )
+from medvqa.evaluation.report_generation import compute_report_level_metrics
+from medvqa.models.checkpoint import load_metadata
+from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
+from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.constants import CHEXBERT_LABELS, CHEXPERT_LABELS
 from medvqa.utils.files import  get_results_folder_path, load_pickle, save_pickle, save_txt
 from medvqa.utils.logging import print_blue, print_bold, print_magenta, print_orange
@@ -55,14 +56,12 @@ def parse_args(args=None):
     parser.add_argument('--findings_max_length', type=int, default=200)
     parser.add_argument('--impression_max_length', type=int, default=200)
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str)
-    parser.add_argument('--interpret_cxr__label_based_predictions_filepath', type=str)
-    parser.add_argument('--first_k_classes', type=int, default=None)
     return parser.parse_args(args=args)
 
 def _load_label_based_predictions(filepath, first_k_classes):
     print(f'Loading {filepath}...')
     tmp = load_pickle(filepath)
-    probs_filepath = tmp['probs_filepath']
+    probs_filepath = tmp['probs_and_features_filepath']
     thresholds = tmp['thresholds']
     f1s = tmp['f1s']
     accs = tmp['accs']
@@ -166,15 +165,28 @@ def _save_gen_reports(input_texts, gen_reports, image_paths_per_report, dataset_
         print_orange(f'Input texts in txt format for challenge submission successfully saved to {txt_path}', bold=True)
 
 
-def _run_test_public_evaluation(checkpoint_folder_path, interpret_cxr__label_based_predictions_filepath, first_k_classes,
-                                report_section, device, batch_size, num_workers, max_length, num_beams,
-                                max_processes_for_chexpert_labeler):
+def _run_test_public_evaluation(checkpoint_folder_path, report_section, device, batch_size, num_workers, max_length,
+                                num_beams, max_processes_for_chexpert_labeler):
     assert report_section in ['findings', 'impression']
     assert checkpoint_folder_path is not None
-    assert interpret_cxr__label_based_predictions_filepath is not None
+
+    # Fetch model's metadata for key information
+    metadata = load_metadata(checkpoint_folder_path)
+    kwargs = metadata['seq2seq_trainer_kwargs']
+    best_k_classes = kwargs['best_k_classes']
+    interpret_cxr__label_based_predictions_filepath = kwargs['interpret_cxr__label_based_predictions_filepath']
+    use_numeric_templates = kwargs.get('use_numeric_templates', False)
+    if use_numeric_templates:
+        print_magenta('Using numeric templates', bold=True)
 
     probs, binary, class_names, image_path_2_idx =\
-        _load_label_based_predictions(interpret_cxr__label_based_predictions_filepath, first_k_classes)
+        _load_label_based_predictions(interpret_cxr__label_based_predictions_filepath, best_k_classes)
+    
+    # Check if numeric templates are used
+    metadata = load_metadata(checkpoint_folder_path)
+    use_numeric_templates = metadata['seq2seq_trainer_kwargs'].get('use_numeric_templates', False)
+    if use_numeric_templates:
+        print_magenta('Using numeric templates', bold=True)
     
     df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
     df = df.replace(np.nan, '', regex=True) # replace nan with empty string
@@ -199,7 +211,7 @@ def _run_test_public_evaluation(checkpoint_folder_path, interpret_cxr__label_bas
         # Build input text
         image_probs = probs[image_idxs]
         image_preds = binary[image_idxs]
-        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
         public_test_input_texts.append(input_text)
         # Save image paths
         public_test_image_paths.append(actual_image_paths)
@@ -247,8 +259,8 @@ def _run_test_public_evaluation(checkpoint_folder_path, interpret_cxr__label_bas
         report_section,
         modification_time,
     ]
-    if first_k_classes is not None:
-        strings.append(f'first{first_k_classes}')
+    if best_k_classes is not None:
+        strings.append(f'first{best_k_classes}')
     _compute_and_save_report_gen_metrics(
         gt_reports=public_test_gt_texts,
         gen_reports=public_test_gen_texts,
@@ -272,14 +284,21 @@ def _run_test_public_evaluation(checkpoint_folder_path, interpret_cxr__label_bas
         save_txt_for_challenge_submission=True,
     )
 
-def _run_test_hidden_evaluation(checkpoint_folder_path, interpret_cxr__label_based_predictions_filepath, first_k_classes,
-                                report_section, device, batch_size, num_workers, max_length, num_beams):
+def _run_test_hidden_evaluation(checkpoint_folder_path, report_section, device, batch_size, num_workers, max_length, num_beams):
     assert checkpoint_folder_path is not None
-    assert interpret_cxr__label_based_predictions_filepath is not None
     assert report_section in ['findings', 'impression']
+    
+    # Fetch model's metadata for key information
+    metadata = load_metadata(checkpoint_folder_path)
+    kwargs = metadata['seq2seq_trainer_kwargs']
+    best_k_classes = kwargs['best_k_classes']
+    interpret_cxr__label_based_predictions_filepath = kwargs['interpret_cxr__label_based_predictions_filepath']
+    use_numeric_templates = kwargs.get('use_numeric_templates', False)
+    if use_numeric_templates:
+        print_magenta('Using numeric templates', bold=True)
 
     probs, binary, class_names, image_path_2_idx =\
-        _load_label_based_predictions(interpret_cxr__label_based_predictions_filepath, first_k_classes)
+        _load_label_based_predictions(interpret_cxr__label_based_predictions_filepath, best_k_classes)
     
     df = pd.read_csv(INTERPRET_CXR_TEST_HIDDEN_CSV_PATH)
     df = df.replace(np.nan, '', regex=True) # replace nan with empty string
@@ -300,7 +319,7 @@ def _run_test_hidden_evaluation(checkpoint_folder_path, interpret_cxr__label_bas
         # Build input text
         image_probs = probs[image_idxs]
         image_preds = binary[image_idxs]
-        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
         test_hidden_input_texts.append(input_text)
         # Save image paths
         test_hidden_image_paths.append(actual_image_paths)
@@ -345,8 +364,8 @@ def _run_test_hidden_evaluation(checkpoint_folder_path, interpret_cxr__label_bas
         report_section,
         modification_time,
     ]
-    if first_k_classes is not None:
-        strings.append(f'first{first_k_classes}')
+    if best_k_classes is not None:
+        strings.append(f'first{best_k_classes}')
 
     # Save generated reports
     _save_gen_reports(
@@ -366,8 +385,6 @@ def evaluate(
         checkpoint_folder_path_findings,
         checkpoint_folder_path_impression,
         background_findings_and_impression_per_report_filepath,
-        interpret_cxr__label_based_predictions_filepath,
-        first_k_classes,
         batch_size,
         num_workers,
         device,
@@ -519,8 +536,6 @@ def evaluate(
 
         _run_test_public_evaluation(
             checkpoint_folder_path=checkpoint_folder_path_findings,
-            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
-            first_k_classes=first_k_classes,
             report_section='findings',
             device=device,
             batch_size=batch_size,
@@ -534,8 +549,6 @@ def evaluate(
 
         _run_test_public_evaluation(
             checkpoint_folder_path=checkpoint_folder_path_impression,
-            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
-            first_k_classes=first_k_classes,
             report_section='impression',
             device=device,
             batch_size=batch_size,
@@ -549,8 +562,6 @@ def evaluate(
 
         _run_test_hidden_evaluation(
             checkpoint_folder_path=checkpoint_folder_path_findings,
-            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
-            first_k_classes=first_k_classes,
             report_section='findings',
             device=device,
             batch_size=batch_size,
@@ -563,8 +574,6 @@ def evaluate(
 
         _run_test_hidden_evaluation(
             checkpoint_folder_path=checkpoint_folder_path_impression,
-            interpret_cxr__label_based_predictions_filepath=interpret_cxr__label_based_predictions_filepath,
-            first_k_classes=first_k_classes,
             report_section='impression',
             device=device,
             batch_size=batch_size,

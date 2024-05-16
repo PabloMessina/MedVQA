@@ -88,6 +88,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         yolov8_detection_layer_index=None,
         mimiccxr_forward=False,
         vinbig_forward=False,
+        return_normalized_average_v=False,
     ):  
         assert mimiccxr_forward or vinbig_forward or only_compute_features
         # Visual Component
@@ -141,4 +142,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
         output['phrase_grounding_similarity'] = phrase_grounding_similarity
         if not skip_phrase_classifier:
             output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
+        if return_normalized_average_v:
+            average_v = v.mean(dim=1) # (batch_size, qkv_size)
+            average_v = self.W(average_v) # (batch_size, phrase_embedding_size)
+            normalized_average_v = torch.nn.functional.normalize(average_v, p=2, dim=-1) # (batch_size, phrase_embedding_size)
+            output['normalized_average_v'] = normalized_average_v
+            
         return output

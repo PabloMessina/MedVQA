@@ -7,12 +7,28 @@ import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeDataset, CompositeInfiniteDataset, group_indices_for_balanced_sampling, group_indices_into_bins_by_scores
+from medvqa.datasets.dataloading_utils import (
+    INFINITE_DATASET_LENGTH,
+    CompositeDataset,
+    CompositeInfiniteDataset,
+    group_indices_for_balanced_sampling,
+    group_indices_into_bins_by_scores,
+)
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
-from medvqa.datasets.nli import ANLI_V1_DATASET_DIR, MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, MULTI_NLI_DATASET_DIR, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH, SNLI_DATASET_DIR
+from medvqa.datasets.nli import (
+    ANLI_V1_DATASET_DIR,
+    MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH,
+    MULTI_NLI_DATASET_DIR,
+    RADNLI_DEV_JSONL_PATH,
+    RADNLI_TEST_JSONL_PATH,
+    SNLI_DATASET_DIR,
+)
+from medvqa.datasets.interpret_cxr_challenge import (
+    INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
+    INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
+)
 from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
-from medvqa.utils.common import INTERPRET_CXR_TEST_PUBLIC_CSV_PATH, INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH
 from medvqa.utils.files import get_cached_jsonl_file, load_json, load_jsonl, load_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
@@ -1520,24 +1536,32 @@ def _get_sentence_to_chest_imagenome_labels_datasets(input_texts, output_texts, 
 
     return train_dataset, val_dataset
 
-def _probs_and_preds_to_input_text(class_names, probs, preds):
+def _probs_and_preds_to_input_text(class_names, probs, preds, use_numeric_templates=False):
     assert probs.shape == preds.shape
     assert len(class_names) == probs.shape[1]
     n_views = probs.shape[0]
     assert n_views > 0
-    pred = preds.max(axis=0)
-    lines = []
-    lines.append(f'views: {n_views}')
-    for i, cn in enumerate(class_names):
-        if pred[i]:
-            strings = []
-            for j in range(n_views):
-                if preds[j, i]:
-                    strings.append(f'yes {int(probs[j, i] * 10)}')
-                else:
-                    strings.append(f'no {int(probs[j, i] * 10)}')
-            lines.append(f'{cn}:{",".join(strings)}')
-    return '\n'.join(lines)
+    if use_numeric_templates:
+        lines = []
+        lines.append(f'{n_views}')
+        for i, cn in enumerate(class_names):
+            strings = [f'{int(probs[j, i] * 10)}' for j in range(n_views)]
+            lines.append(" ".join(strings))
+        return ','.join(lines)
+    else:    
+        pred = preds.max(axis=0)
+        lines = []
+        lines.append(f'views: {n_views}')
+        for i, cn in enumerate(class_names):
+            if pred[i]:
+                strings = []
+                for j in range(n_views):
+                    if preds[j, i]:
+                        strings.append(f'yes {int(probs[j, i] * 10)}')
+                    else:
+                        strings.append(f'no {int(probs[j, i] * 10)}')
+                lines.append(f'{cn}:{",".join(strings)}')
+        return '\n'.join(lines)
 
 def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_challenge(
     interpret_cxr__label_based_predictions_filepath,
@@ -1547,7 +1571,8 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
     lowercase_output_texts=True,
     include_public_test_in_train=False,
     verbose=True,
-    best_k_classes=None
+    best_k_classes=None,
+    use_numeric_templates=False,
 ):
     assert section in ['findings', 'impression']
     if verbose:
@@ -1647,7 +1672,7 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
             # Build input text
             image_probs = probs[image_idxs]
             image_preds = binary_predictions[image_idxs]
-            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
             input_texts.append(input_text)
             # Save image_idxs
             image_idxs_list.append(image_idxs)
@@ -1734,7 +1759,7 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
             # Build input text
             image_probs = probs[image_idxs]
             image_preds = binary_predictions[image_idxs]
-            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
             input_texts.append(input_text)
             # Save image_idxs
             image_idxs_list.append(image_idxs)
@@ -1817,7 +1842,7 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
             # Build input text
             image_probs = probs[image_idxs]
             image_preds = binary_predictions[image_idxs]
-            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+            input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
             input_texts.append(input_text)
             # Save image_idxs
             image_idxs_list.append(image_idxs)
@@ -1892,7 +1917,7 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
         # Build input text
         image_probs = probs[image_idxs]
         image_preds = binary_predictions[image_idxs]
-        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds)
+        input_text = _probs_and_preds_to_input_text(class_names, image_probs, image_preds, use_numeric_templates)
         public_test_input_texts.append(input_text)
         # Save image_idxs
         public_test_image_idxs_list.append(image_idxs)
@@ -2038,6 +2063,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         report_section_to_generate=None,
                                         include_public_test_in_train=False,
                                         best_k_classes=None,
+                                        use_numeric_templates=False,
                                         val_size=200, verbose=True):
 
     assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -2111,7 +2137,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
             section=report_section_to_generate,
             lowercase_output_texts=True,
             include_public_test_in_train=include_public_test_in_train,
-            verbose=verbose, best_k_classes=best_k_classes)
+            verbose=verbose, best_k_classes=best_k_classes, use_numeric_templates=use_numeric_templates)
         
     elif task_name == Seq2SeqTaskNames.MULTITASK:
         assert multitask_name_list is not None, 'multitask_name_list must be provided'
@@ -2336,6 +2362,7 @@ class Seq2SeqTrainer():
                  report_section_to_generate=None,
                  include_public_test_in_train=False,
                  best_k_classes=None,
+                 use_numeric_templates=False,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -2375,7 +2402,7 @@ class Seq2SeqTrainer():
             mimiccxr_integrated_report_nli_data_filepath=mimiccxr_integrated_report_nli_data_filepath,
             report_section_to_generate=report_section_to_generate,
             include_public_test_in_train=include_public_test_in_train,
-            val_size=val_size, verbose=verbose, best_k_classes=best_k_classes)
+            val_size=val_size, verbose=verbose, best_k_classes=best_k_classes, use_numeric_templates=use_numeric_templates)
         
         self.train_dataset = tmp['train_dataset']
         self.val_dataset = tmp['val_dataset']

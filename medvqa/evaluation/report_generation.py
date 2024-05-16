@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from nltk.tokenize import word_tokenize
@@ -215,24 +216,28 @@ def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_L
         for k in range(0, 4):
             blue_k = f'bleu-{k+1}'
             metrics[blue_k] = (scores[0][k], scores[1][k])
+        print_bold(f'BLEU scores: {[scores[0][k] for k in range(4)]}')
     
     metric_name = 'rougeL'
     if metric_name in metric_names:
         metric = RougeL(device='cpu', record_scores=True, using_ids=False)
         metric.update((gen_texts, gt_texts))
         metrics[metric_name] = metric.compute()
+        print_bold(f'ROUGE-L score: {np.mean(metrics[metric_name])}')
 
     metric_name = 'meteor'
     if metric_name in metric_names:
         metric = Meteor(device='cpu', record_scores=True)
         metric.update((gen_texts_tokenized, gt_texts_tokenized))
         metrics[metric_name] = metric.compute()
+        print_bold(f'METEOR score: {np.mean(metrics[metric_name])}')
     
     metric_name = 'ciderD'
     if metric_name in metric_names:
         metric = CiderD(device='cpu', record_scores=True, using_ids=False)
         metric.update((gen_texts, gt_texts))
         metrics[metric_name] = metric.compute()
+        print_bold(f'CIDEr-D score: {metrics[metric_name][0]}')
 
     # metric_name = 'medcomp'
     # if metric_name in metric_names:
@@ -256,36 +261,48 @@ def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_L
         metrics['chexpert_labels_gen'] = labeler.get_labels(gen_texts, tmp_suffix=tmp_anticolission_code,
                                             update_cache_on_disk=True, remove_tmp_files=True,
                                             n_chunks=max_processes, max_processes=max_processes)
+        print_bold(f'CheXpert F1 micro: {f1_score(metrics["chexpert_labels_gt"], metrics["chexpert_labels_gen"], average="micro")}')
+        print_bold(f'CheXpert F1 macro: {f1_score(metrics["chexpert_labels_gt"], metrics["chexpert_labels_gen"], average="macro")}')
         
     metric_name = 'chexbert_labels'
     if metric_name in metric_names:
         labeler = CheXbertLabeler(verbose=True)
         metrics['chexbert_labels_gt'] = labeler.get_labels(gt_texts, update_cache_on_disk=True)
         metrics['chexbert_labels_gen'] = labeler.get_labels(gen_texts, update_cache_on_disk=True)
+        print_bold(f'CheXbert F1 micro: {f1_score(metrics["chexbert_labels_gt"], metrics["chexbert_labels_gen"], average="micro")}')
+        print_bold(f'CheXbert F1 macro: {f1_score(metrics["chexbert_labels_gt"], metrics["chexbert_labels_gen"], average="macro")}')
 
     metric_name = 'radgraph_labels'
     if metric_name in metric_names:
         labeler = RadGraphLabeler(verbose=True)
         metrics['radgraph_labels_gt'] = labeler.get_labels(gt_texts, update_cache_on_disk=True)
         metrics['radgraph_labels_gen'] = labeler.get_labels(gen_texts, update_cache_on_disk=True)
+        print_bold(f'RadGraph F1: {np.mean([f1_between_dicts(x,y) for x,y in zip(metrics["radgraph_labels_gt"], metrics["radgraph_labels_gen"])])}')
 
     metric_name = 'fact_embedding_score'
     if metric_name in metric_names:
         scorer = FactEmbeddingScorer(verbose=True)
-        soft_score, P, R, F1 = scorer(gen_texts, gt_texts, update_cache_on_disk=True)
+        soft_score, P, R, F1 = scorer(gen_texts, gt_texts, update_cache_on_disk=True, return_avg_score=False)
         metrics['fact_embedding_soft'] = soft_score
         metrics['fact_embedding_p'] = P
         metrics['fact_embedding_r'] = R
         metrics['fact_embedding_f1'] = F1
+        print_bold(f'Fact embedding soft score: {soft_score.mean()}')
+        print_bold(f'Fact embedding P: {P.mean()}')
+        print_bold(f'Fact embedding R: {R.mean()}')
+        print_bold(f'Fact embedding F1: {F1.mean()}')
 
     metric_name = 'bert_score'
     if metric_name in metric_names:
         from medvqa.metrics.nlp import BertScore
         scorer = BertScore()
         P, R, F1 = scorer(gen_texts, gt_texts)
-        metrics['bert_score_p'] = P.mean().item()
-        metrics['bert_score_r'] = R.mean().item()
-        metrics['bert_score_f1'] = F1.mean().item()
+        metrics['bert_score_p'] = P.detach().cpu().numpy()
+        metrics['bert_score_r'] = R.detach().cpu().numpy()
+        metrics['bert_score_f1'] = F1.detach().cpu().numpy()
+        print_bold(f'BERT score P: {metrics["bert_score_p"].mean()}')
+        print_bold(f'BERT score R: {metrics["bert_score_r"].mean()}')
+        print_bold(f'BERT score F1: {metrics["bert_score_f1"].mean()}')
     
     print('Done computing report-level metrics.')
     return metrics

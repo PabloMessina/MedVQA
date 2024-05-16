@@ -130,13 +130,13 @@ class FactEmbeddingScorer:
             else:
                 return scores
         else:
-            scores = np.zeros((len(gen_reports), 4), dtype=np.float32) # soft_score, precision, recall, f1
+            scores = np.zeros((4, len(gen_reports)), dtype=np.float32) # soft_score, precision, recall, f1
             for i in range(len(gen_reports)):
                 gen_embeddings = embeddings[gen_fact_idxs_list[i]]
                 gt_embeddings = embeddings[gt_fact_idxs_list[i]]
-                scores[i] = _compute_metrics(gen_embeddings, gt_embeddings, threshold=self.threshold)
+                scores[:, i] = _compute_metrics(gen_embeddings, gt_embeddings, threshold=self.threshold)
             if return_avg_score:
-                return np.mean(scores, axis=0) # soft_score, precision, recall, f1
+                return np.mean(scores, axis=1) # soft_score, precision, recall, f1
             else:
                 return scores
         

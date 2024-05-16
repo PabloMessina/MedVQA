@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import torch
+import time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -17,7 +18,8 @@ from medvqa.datasets.mimiccxr import (
     get_split2imageIds,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.evaluation.plots import plot_metrics
+from medvqa.datasets.padchest import PADCHEST_BROKEN_IMAGES_TXT_PATH, PADCHEST_IMAGES_SMALL_DIR
+from medvqa.evaluation.plots import plot_images, plot_metrics
 from medvqa.evaluation.report_generation import compute_report_level_metrics
 from medvqa.metrics.classification.multilabel_accuracy import MultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
@@ -29,6 +31,7 @@ from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
 from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
 from medvqa.utils.constants import (
+    CHEXBERT_LABELS,
     CHEXPERT_LABELS,
     DATASET_NAMES,
     LABEL_BASED_FACTS,
@@ -40,11 +43,20 @@ from medvqa.models.checkpoint import (
     load_metadata,
 )
 from medvqa.utils.common import (
-    INTERPRET_CXR_TEST_HIDDEN_CSV_PATH,
-    INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH,
-    INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
-    INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
     parsed_args_to_dict,
+)
+from medvqa.datasets.interpret_cxr_challenge import (
+    BIMCV_COVID19_IMAGES_DIR,
+    INTERPRET_CXR_TRAIN_CSV_PATH,
+    INTERPRET_CXR_VAL_CSV_PATH,
+    BIMCV_COVID19_ImageToReportMapper,
+    CheXpert_ImageToReportMapper,
+    MIMICCXR_ImageToReportMapper,
+    OpenI_ImageToReportMapper,
+    PadChest_ImageToReportMapper,
+    load_interpret_cxr_test_hidden_image_paths,
+    load_interpret_cxr_test_public_data,
+    load_interpret_cxr_test_public_image_paths,
 )
 from medvqa.datasets.dataloading_utils import (
     SequentialDataLoader,
@@ -55,10 +67,11 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
     get_file_path_with_hashing_if_too_long,
     get_results_folder_path,
-    load_jsonl, load_pickle, save_pickle,
+    load_jsonl, load_pickle,
+    read_lines_from_txt, save_pickle,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta
-from medvqa.utils.metrics import best_threshold_and_f1_score
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_red
+from medvqa.utils.metrics import best_threshold_and_f1_score, f1_between_dicts
 
 class _EvalModes:
     MIMICCXR_TEST_SET_LABEL_BASED = 'mimiccxr_test_set_label_based'
@@ -67,6 +80,7 @@ class _EvalModes:
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN = 'interpret_cxr_test_public_label_based__generate_jsons_for_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN = 'interpret_cxr_test_public_label_based__json_to_gpt_report_gen'
     INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS = 'interpret_cxr_compute_and_save_label_based_predictions'
+    INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL = 'interpret_cxr_test_public__similarity_based_report_retrieval'
 
     @staticmethod
     def choices():
@@ -77,6 +91,7 @@ class _EvalModes:
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS,
+            _EvalModes.INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL,            
         ]
 
 def parse_args(args=None):
@@ -97,7 +112,7 @@ def parse_args(args=None):
     parser.add_argument('--chest_imagenome_image_id_to_labels_filepath', type=str)
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
     parser.add_argument('--tune_thresholds', action='store_true')
-    parser.add_argument('--max_processes_for_chexpert_labeler', type=int, default=10)
+    parser.add_argument('--max_processes_for_chexpert_labeler', type=int, default=14)
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str)
     parser.add_argument('--use_alternative_chexpert_template', action='store_true')
     parser.add_argument('--eval_chexpert_only', action='store_true')
@@ -109,6 +124,9 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr_interpret_cxr_challenge_split_filepath', type=str, default=None)
     parser.add_argument('--iuxray_interpret_cxr_challenge_split_filepath', type=str, default=None)
     parser.add_argument('--chexpert_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--interpret_cxr_public_test_set_source_predictions_filepath', type=str, default=None)
+    parser.add_argument('--interpret_cxr_label_based_predictions_filepath', type=str, default=None)
+    parser.add_argument('--max_processes_for_similarity_based_report_retrieval', type=str, default=None)
 
     return parser.parse_args(args=args)
 
@@ -399,16 +417,23 @@ def _save_gen_reports(gen_reports, dicom_ids, report_idxs, dataset_name, results
     }, save_path)
     print_bold(f'Generated reports successfully saved to {save_path}')
 
-def _save_gen_reports_v2(gen_reports, gt_reports, image_paths_list, dataset_name, results_folder_path, strings):
+def _save_gen_reports_v2(gen_reports, gt_reports, gt_image_paths_list, dataset_name, results_folder_path, strings,
+                         to_save_kwargs=None):
     assert len(gen_reports) == len(gt_reports)
-    assert len(gen_reports) == len(image_paths_list)
+    assert len(gen_reports) == len(gt_image_paths_list)
     save_path = os.path.join(results_folder_path,
         f'{dataset_name}_gen_reports({",".join(strings)}).pkl')
-    save_pickle({
+    output = {
         'gen_reports': gen_reports,
         'gt_reports': gt_reports,
-        'image_paths_list': image_paths_list,
-    }, save_path)
+        'gt_image_paths_list': gt_image_paths_list,
+    }
+    if to_save_kwargs is not None:
+        assert type(to_save_kwargs) == dict
+        for key in to_save_kwargs:
+            assert key not in output
+        output.update(to_save_kwargs)
+    save_pickle(output, save_path)
     print_bold(f'Generated reports successfully saved to {save_path}')
 
 def _evaluate_mimiccxr_test_set__nli_based_labels__template_based_report_gen(
@@ -518,18 +543,18 @@ def _evaluate_interpret_cxr_test_public__nli_based_labels__template_based_report
     _save_gen_reports_v2(
         gen_reports=gen_reports,
         gt_reports=gt_reports,
-        image_paths_list=image_paths_list,
+        gt_image_paths_list=image_paths_list,
         dataset_name='interpret_cxr_test_public',
         results_folder_path=results_folder_path,
         strings=strings,
     )
 
 def _evaluate_interpret_cxr_test_public__generic_report_gen(
-        gen_reports, gt_reports, image_paths_list, results_folder_path, strings,
-        max_processes_for_chexpert_labeler):
+        gen_reports, gt_reports, gt_image_paths_list, results_folder_path, strings,
+        max_processes_for_chexpert_labeler, to_save_kwargs=None):
     
     assert len(gen_reports) == len(gt_reports)
-    assert len(gen_reports) == len(image_paths_list)
+    assert len(gen_reports) == len(gt_image_paths_list)
     print('len(gen_reports) =', len(gen_reports))
 
     _compute_and_save_report_gen_metrics(
@@ -543,17 +568,29 @@ def _evaluate_interpret_cxr_test_public__generic_report_gen(
     _save_gen_reports_v2(
         gen_reports=gen_reports,
         gt_reports=gt_reports,
-        image_paths_list=image_paths_list,
+        gt_image_paths_list=gt_image_paths_list,
         dataset_name='interpret_cxr_test_public',
         results_folder_path=results_folder_path,
         strings=strings,
+        to_save_kwargs=to_save_kwargs,
     )
 
 def _run_inference_for_label_based_fact_classification_on_images(
         image_paths, checkpoint_folder_path, model_kwargs, val_image_transform_kwargs,
         max_images_per_batch, max_facts_per_image, num_workers, device,
         fact_embedding_model_name, fact_embedding_model_checkpoint_folder_path,
-        fact_embedding_batch_size, fact_embedding_num_workers, fact_embedding_device):
+        fact_embedding_batch_size, fact_embedding_num_workers, fact_embedding_device,
+        compute_image_features=False):
+    
+    # remove duplicate images
+    len_before = len(image_paths)
+    unique_image_paths = list(set(image_paths))
+    len_after = len(unique_image_paths)
+    if len_before != len_after:
+        print_red(f'Warning: {len_before - len_after} duplicate images found and removed', bold=True)
+    image_path_to_idx = {image_path: i for i, image_path in enumerate(unique_image_paths)}
+    n_images = len(unique_image_paths)
+
     # device
     device = torch.device(device)
 
@@ -586,13 +623,13 @@ def _run_inference_for_label_based_fact_classification_on_images(
 
     fact_embeddings = fact_encoder.compute_text_embeddings(facts)
     
-    fact_idxs = [list(range(len(facts))) for _ in range(len(image_paths))]    
+    fact_idxs = [list(range(len(facts))) for _ in range(n_images)]
 
     eval_dataloader, fact_idxs, image_paths = _create_dataloader(
         max_images_per_batch=max_images_per_batch,
         max_facts_per_image=max_facts_per_image,
         num_workers=num_workers,
-        image_paths=image_paths,
+        image_paths=unique_image_paths,
         image_transform=test_image_transform,
         fact_embeddings=fact_embeddings,
         fact_idxs=fact_idxs,
@@ -600,11 +637,13 @@ def _run_inference_for_label_based_fact_classification_on_images(
 
     # Run inference
     model.eval()
-    image_path_list = [None] * len(image_paths) * len(facts) # make sure to have enough space
-    fact_idx_list = [None] * len(image_paths) * len(facts)
-    probs_list = [None] * len(image_paths) * len(facts)
+    image_path_list = [None] * (len(image_paths) * len(facts)) # make sure to have enough space
+    fact_idx_list = [None] * (len(image_paths) * len(facts))
+    probs_list = [None] * (len(image_paths) * len(facts))
     k = 0
     print_blue('Running inference ...', bold=True)
+
+    image_features = None
     
     with torch.no_grad():
         for batch in tqdm(eval_dataloader, total=len(eval_dataloader), mininterval=2):
@@ -614,10 +653,18 @@ def _run_inference_for_label_based_fact_classification_on_images(
             model_output = model(
                 raw_images=images,
                 phrase_embeddings=fact_embeddings,
-                mimiccxr_forward=True,
+                only_compute_features=True,
+                return_normalized_average_v=True,
             )
             logits = model_output['phrase_classifier_logits']
             probs = torch.sigmoid(logits)
+            features = model_output['normalized_average_v']
+            features = features.cpu().numpy()
+
+            if compute_image_features and image_features is None:
+                image_features = np.empty((n_images, features.shape[1]), dtype=np.float32)
+                print('image_features.shape =', image_features.shape)
+
             assert probs.shape == (len(images), len(fact_idxs[idxs[0]]))
             assert len(fact_idxs[idxs[0]]) == len(fact_idxs[idxs[-1]])
             for i, idx in enumerate(idxs):
@@ -631,6 +678,9 @@ def _run_inference_for_label_based_fact_classification_on_images(
                     fact_idx_list[k] = fact_idx
                     probs_list[k] = probs[i, j].item()
                     k += 1
+                if compute_image_features:
+                    image_idx = image_path_to_idx[image_path]
+                    image_features[image_idx] = features[i]
     image_path_list = image_path_list[:k] # trim
     fact_idx_list = fact_idx_list[:k]
     probs_list = probs_list[:k]
@@ -639,10 +689,6 @@ def _run_inference_for_label_based_fact_classification_on_images(
     print('len(fact_idx_list) =', len(fact_idx_list))
     print('len(probs_list) =', len(probs_list))
     
-    unique_image_paths = set(image_path_list)
-    unique_image_paths = list(unique_image_paths)
-    image_path_to_idx = {image_path: i for i, image_path in enumerate(unique_image_paths)}
-    n_images = len(unique_image_paths)
     probs = np.zeros((n_images, len(facts)))
     seen = np.zeros((n_images, len(facts)), dtype=bool)
     for image_path, fact_idx, prob in zip(image_path_list, fact_idx_list, probs_list):
@@ -658,6 +704,8 @@ def _run_inference_for_label_based_fact_classification_on_images(
     gc.collect()
 
     # Return
+    if compute_image_features:
+        return probs, image_features, unique_image_paths
     return probs, unique_image_paths
 
 def _run_inference_for_label_based_fact_classification_on_mimiccxr_split(
@@ -719,75 +767,6 @@ def _tune_thresholds_for_label_based_fact_classification(
     print(f'best_f1s.mean() = {best_f1s.mean()}')
     print(f'best_accs.mean() = {best_accs.mean()}')
     return best_thresholds, best_f1s, best_accs
-
-def _load_interpret_cxr_test_public_data(section):
-    df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
-    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
-    image_paths_list = df['images_path'].tolist()
-    findings_list = df['findings'].tolist()
-    impression_list = df['impression'].tolist()
-    image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
-    image_paths_list_ = []
-    gt_reports_ = []
-
-    for i, image_paths in enumerate(image_paths_list):
-        
-        if section == 'findings':
-            gt_report = findings_list[i]
-        elif section == 'impression':
-            gt_report = impression_list[i]
-        elif section == 'both':
-            gt_report = ''
-            if findings_list[i]:
-                gt_report += findings_list[i]
-            if impression_list[i]:
-                if gt_report:
-                    if gt_report[-1] == '.':
-                        gt_report += ' '
-                    else:
-                        gt_report += '. '
-                gt_report += impression_list[i]
-        else:
-            raise ValueError(f'Invalid section: {section}')
-        
-        if gt_report:
-            # report
-            gt_reports_.append(gt_report)
-            # image paths
-            image_paths_ = []
-            for image_path in image_paths:
-                image_path = os.path.join(INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH, os.path.basename(image_path))
-                assert os.path.exists(image_path)
-                image_paths_.append(image_path)
-            image_paths_list_.append(image_paths_)
-
-    return image_paths_list_, gt_reports_
-
-def _load_interpret_cxr_test_public_image_paths():
-    df = pd.read_csv(INTERPRET_CXR_TEST_PUBLIC_CSV_PATH)
-    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
-    image_paths_list = df['images_path'].tolist()
-    image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
-    image_path_list = []
-    for image_paths in image_paths_list:
-        for image_path in image_paths:
-            image_path = os.path.join(INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH, os.path.basename(image_path))
-            assert os.path.exists(image_path)
-            image_path_list.append(image_path)
-    return image_path_list
-
-def _load_interpret_cxr_test_hidden_image_paths():
-    df = pd.read_csv(INTERPRET_CXR_TEST_HIDDEN_CSV_PATH)
-    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
-    image_paths_list = df['images_path'].tolist()
-    image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
-    image_path_list = []
-    for image_paths in image_paths_list:
-        for image_path in image_paths:
-            image_path = os.path.join(INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH, os.path.basename(image_path))
-            assert os.path.exists(image_path)
-            image_path_list.append(image_path)
-    return image_path_list
 
 def _compute_thresholds(mimiccxr_report_fact_nli_integrated_data_filepath, results_folder_path,
     checkpoint_folder_path, model_kwargs, val_image_transform_kwargs, max_images_per_batch,
@@ -869,6 +848,9 @@ def _evaluate_model(
     mimiccxr_interpret_cxr_challenge_split_filepath,
     iuxray_interpret_cxr_challenge_split_filepath,
     chexpert_interpret_cxr_challenge_split_filepath,
+    interpret_cxr_label_based_predictions_filepath,
+    interpret_cxr_public_test_set_source_predictions_filepath,
+    max_processes_for_similarity_based_report_retrieval,
 ):
     count_print = CountPrinter()
 
@@ -1167,7 +1149,7 @@ def _evaluate_model(
         else:
             thresholds = 0.5 # simple thresholding
 
-        images_path_list, gt_reports_list = _load_interpret_cxr_test_public_data(section=section_mode)
+        images_path_list, gt_reports_list = load_interpret_cxr_test_public_data(section=section_mode)
         print('len(images_path_list) =', len(images_path_list))
         print('len(gt_reports_list) =', len(gt_reports_list))
 
@@ -1335,7 +1317,7 @@ def _evaluate_model(
         total_count = len(split2imageIds['validate']) + len(split2imageIds['test'])
         label_based_fact_fractions = [counts[fact2idx[fact]] / total_count for fact in LABEL_BASED_FACTS]
         
-        images_path_list, gt_reports_list = _load_interpret_cxr_test_public_data(section=section_mode)
+        images_path_list, gt_reports_list = load_interpret_cxr_test_public_data(section=section_mode)
         print('len(images_path_list) =', len(images_path_list))
         print('len(gt_reports_list) =', len(gt_reports_list))
 
@@ -1433,7 +1415,7 @@ def _evaluate_model(
 
         label_based_json_reports = load_pickle(label_based_json_reports_filepath)
         
-        images_path_list, gt_reports_list = _load_interpret_cxr_test_public_data(section=section_mode)
+        images_path_list, gt_reports_list = load_interpret_cxr_test_public_data(section=section_mode)
         print('len(images_path_list) =', len(images_path_list))
         print('len(gt_reports_list) =', len(gt_reports_list))
 
@@ -1463,7 +1445,7 @@ def _evaluate_model(
         _evaluate_interpret_cxr_test_public__generic_report_gen(
             gen_reports=gen_reports,
             gt_reports=gt_reports_list,
-            image_paths_list=images_path_list,
+            gt_image_paths_list=images_path_list,
             results_folder_path=results_folder_path,
             strings=strings,
             max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
@@ -1474,11 +1456,13 @@ def _evaluate_model(
         # 1. Collect image paths for MIMIC-CXR (train, validate)
         # 2. Collect image paths for CheXpert (train, validate)
         # 3. Collect image paths for IU X-Ray (train, validate)
-        # 4. Collect image paths for the public test set
-        # 5. Collect image paths for the hidden test set
-        # 6. Run inference on all images
-        # 7. Tune thresholds on MIMIC-CXR (validate)
-        # 8. Save predictions for all images and thresholds in a pickle file
+        # 4. Collect image paths for PadChest (train, validate)
+        # 5. Collect image paths for BIMCV-COVID19 (train, validate)
+        # 6. Collect image paths for the public test set
+        # 7. Collect image paths for the hidden test set
+        # 8. Run inference on all images
+        # 9. Tune thresholds on MIMIC-CXR (validate)
+        # 10. Save predictions for all images and thresholds in a pickle file
 
         assert checkpoint_folder_path is not None
         assert mimiccxr_interpret_cxr_challenge_split_filepath is not None
@@ -1490,17 +1474,17 @@ def _evaluate_model(
 
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
 
-        probs_savepath = get_file_path_with_hashing_if_too_long(
+        probs_and_features_savepath = get_file_path_with_hashing_if_too_long(
             folder_path=results_folder_path,
-            prefix='interpret_cxr__label_based_probs',
-            strings=['mimiccxr', 'chexpert', 'iuxray', 'public_test', 'hidden_test'],
+            prefix='interpret_cxr__label_based_probs_and_features',
+            strings=['mimiccxr', 'chexpert', 'iuxray', 'padchest', 'bimcv-covid19', 'public_test', 'hidden_test'],
             force_hashing=True,
         )
 
-        if os.path.exists(probs_savepath):
-            print_magenta(f'Found existing label-based probs at {probs_savepath}', bold=True)
+        if os.path.exists(probs_and_features_savepath):
+            print_magenta(f'Found existing label-based probs and features at {probs_and_features_savepath}', bold=True)
             print_magenta('Skipping inference', bold=True)
-            tmp = load_pickle(probs_savepath)
+            tmp = load_pickle(probs_and_features_savepath)
             image_paths = tmp['image_paths']
             probs = tmp['probs']
             
@@ -1564,23 +1548,90 @@ def _evaluate_model(
             print(f'len(iuxray_train_image_paths) = {len(iuxray_train_image_paths)}')
             print(f'len(iuxray_val_image_paths) = {len(iuxray_val_image_paths)}')
 
-            # 4. Collect image paths for the public test set
-            interpret_cxr_public_test_image_paths = _load_interpret_cxr_test_public_image_paths()
+            # 4. Collect image paths for PadChest (train, validate)
+
+            # NOTE: some images in PadChest are broken, so we need to exclude them
+            broken_padchest_images_set = set(read_lines_from_txt(PADCHEST_BROKEN_IMAGES_TXT_PATH))
+            print(f'len(broken_padchest_images_set) = {len(broken_padchest_images_set)}')
+            removed_count = 0
+
+            challenge_train_df = pd.read_csv(INTERPRET_CXR_TRAIN_CSV_PATH)
+            challenge_val_df = pd.read_csv(INTERPRET_CXR_VAL_CSV_PATH)
+            padchest_train_df = challenge_train_df[challenge_train_df['source'] == 'PadChest']
+            padchest_val_df = challenge_val_df[challenge_val_df['source'] == 'PadChest']
+            assert len(padchest_train_df) > 0
+            assert len(padchest_val_df) > 0
+            padchest_train_image_paths = []
+            for images_path, images_path_old in padchest_train_df[['images_path', 'images_path_old']].values:
+                images_path = eval(images_path)
+                images_path_old = [eval(x) for x in images_path_old[1:-1].split()]
+                assert len(images_path) == len(images_path_old)
+                for image_path in images_path_old:
+                    actual_image_path = os.path.join(PADCHEST_IMAGES_SMALL_DIR, os.path.basename(image_path))
+                    assert os.path.exists(actual_image_path)
+                    if actual_image_path in broken_padchest_images_set:
+                        removed_count += 1
+                        continue # skip broken images
+                    padchest_train_image_paths.append(actual_image_path)
+            padchest_val_image_paths = []
+            for images_path, images_path_old in padchest_val_df[['images_path', 'images_path_old']].values:
+                images_path = eval(images_path)
+                images_path_old = [eval(x) for x in images_path_old[1:-1].split()]
+                assert len(images_path) == len(images_path_old)
+                for image_path in images_path_old:
+                    actual_image_path = os.path.join(PADCHEST_IMAGES_SMALL_DIR, os.path.basename(image_path))
+                    assert os.path.exists(actual_image_path)
+                    if actual_image_path in broken_padchest_images_set:
+                        removed_count += 1
+                        continue # skip broken images
+                    padchest_val_image_paths.append(actual_image_path)
+            print(f'len(padchest_train_image_paths) = {len(padchest_train_image_paths)}')
+            print(f'len(padchest_val_image_paths) = {len(padchest_val_image_paths)}')
+            assert removed_count > 0
+            print_red(f'NOTE: Removed {removed_count} broken images from PadChest', bold=True)
+
+            # 5. Collect image paths for BIMCV-COVID19 (train, validate)
+            bimcv_train_df = challenge_train_df[challenge_train_df['source'] == 'BIMCV-COVID19']
+            bimcv_val_df = challenge_val_df[challenge_val_df['source'] == 'BIMCV-COVID19']
+            assert len(bimcv_train_df) > 0
+            assert len(bimcv_val_df) > 0
+            bimcv_train_image_paths = []
+            for images_path in bimcv_train_df['images_path']:
+                images_path = eval(images_path)
+                for image_path in images_path:
+                    actual_image_path = os.path.join(BIMCV_COVID19_IMAGES_DIR, os.path.basename(image_path))
+                    assert os.path.exists(actual_image_path)
+                    bimcv_train_image_paths.append(actual_image_path)
+            bimcv_val_image_paths = []
+            for images_path in bimcv_val_df['images_path']:
+                images_path = eval(images_path)
+                for image_path in images_path:
+                    actual_image_path = os.path.join(BIMCV_COVID19_IMAGES_DIR, os.path.basename(image_path))
+                    assert os.path.exists(actual_image_path)
+                    bimcv_val_image_paths.append(actual_image_path)
+            print(f'len(bimcv_train_image_paths) = {len(bimcv_train_image_paths)}')
+            print(f'len(bimcv_val_image_paths) = {len(bimcv_val_image_paths)}')
+
+            # 6. Collect image paths for the public test set
+            interpret_cxr_public_test_image_paths = load_interpret_cxr_test_public_image_paths()
             print(f'len(interpret_cxr_public_test_image_paths) = {len(interpret_cxr_public_test_image_paths)}')
 
-            # 5. Collect image paths for the hidden test set
-            interpret_cxr_hidden_test_image_paths = _load_interpret_cxr_test_hidden_image_paths()
+            # 7. Collect image paths for the hidden test set
+            interpret_cxr_hidden_test_image_paths = load_interpret_cxr_test_hidden_image_paths()
             print(f'len(interpret_cxr_hidden_test_image_paths) = {len(interpret_cxr_hidden_test_image_paths)}')
 
-            # 6. Run inference on all images
+            # 8. Run inference on all images
             image_paths = (
                 mimiccxr_train_image_paths + mimiccxr_val_image_paths +
                 chexpert_train_image_paths + chexpert_val_image_paths +
                 iuxray_train_image_paths + iuxray_val_image_paths +
+                padchest_train_image_paths + padchest_val_image_paths +
+                bimcv_train_image_paths + bimcv_val_image_paths +                
                 interpret_cxr_public_test_image_paths + interpret_cxr_hidden_test_image_paths
             )
+
             print(f'len(image_paths) = {len(image_paths)}')
-            probs, image_paths = _run_inference_for_label_based_fact_classification_on_images(
+            probs, features, image_paths = _run_inference_for_label_based_fact_classification_on_images(
                 image_paths=image_paths,
                 checkpoint_folder_path=checkpoint_folder_path,
                 model_kwargs=model_kwargs,
@@ -1594,14 +1645,17 @@ def _evaluate_model(
                 fact_embedding_batch_size=fact_embedding_batch_size,
                 fact_embedding_num_workers=fact_embedding_num_workers,
                 fact_embedding_device=fact_embedding_device,
+                compute_image_features=True,
             )
+
             save_pickle({
                 'image_paths': image_paths,
                 'probs': probs,
-            }, probs_savepath)
-            print_blue(f'Saved label-based probs to {probs_savepath}', bold=True)
+                'features': features,
+            }, probs_and_features_savepath)
+            print_blue(f'Saved label-based probs to {probs_and_features_savepath}', bold=True)
 
-        # 7. Tune thresholds on MIMIC-CXR (validate)
+        # 9. Tune thresholds on MIMIC-CXR (validate)
         image_path_to_idx = {image_path: i for i, image_path in enumerate(image_paths)}
         mimiccxr_val_image_idxs = [image_path_to_idx[image_path] for image_path in mimiccxr_val_image_paths]
         mimiccxr_val_probs = probs[mimiccxr_val_image_idxs]
@@ -1611,7 +1665,7 @@ def _evaluate_model(
             mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
         )
 
-        # 8. Save predictions for all images and thresholds in a pickle file
+        # 10. Save predictions for all images and thresholds in a pickle file
         save_path = get_file_path_with_hashing_if_too_long(
             folder_path=results_folder_path,
             prefix='interpret_cxr__label_based_predictions',
@@ -1623,7 +1677,7 @@ def _evaluate_model(
             force_hashing=True,
         )
         save_pickle({
-            'probs_filepath': probs_savepath, # path to probs instead of probs itself
+            'probs_and_features_filepath': probs_and_features_savepath, # path to probs and features
             'thresholds': thresholds,
             'f1s': f1s,
             'accs': accs,
@@ -1631,8 +1685,304 @@ def _evaluate_model(
         }, save_path)
         print_blue(f'Saved label-based predictions to {save_path}', bold=True)
 
+    elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL:
+
+        assert section_mode is not None
+        assert interpret_cxr_public_test_set_source_predictions_filepath is not None
+        assert interpret_cxr_label_based_predictions_filepath is not None
+        assert background_findings_and_impression_per_report_filepath is not None
+
+        test_image_paths_list, test_reports, test_source_predictions = load_interpret_cxr_test_public_data(
+            section=section_mode,
+            csv_with_source_predictions_filepath=interpret_cxr_public_test_set_source_predictions_filepath)
+        
+        label_based_predictions = load_pickle(interpret_cxr_label_based_predictions_filepath)
+        probs_and_features_filepath = label_based_predictions['probs_and_features_filepath']
+        thresholds = label_based_predictions['thresholds']
+        f1s = label_based_predictions['f1s']
+        accs = label_based_predictions['accs']
+        class_names = label_based_predictions['class_names']
+        probs_and_features = load_pickle(probs_and_features_filepath)
+        image_paths = probs_and_features['image_paths']
+        probs = probs_and_features['probs']
+        features = probs_and_features['features']
+        print(f'len(image_paths) = {len(image_paths)}')
+        print(f'probs.shape = {probs.shape}')
+        print(f'features.shape = {features.shape}')
+        print(f'len(thresholds) = {len(thresholds)}')
+        print(f'len(f1s) = {len(f1s)}')
+        print(f'len(accs) = {len(accs)}')
+        print(f'len(class_names) = {len(class_names)}')
+
+        image_path_to_idx = {image_path: i for i, image_path in enumerate(image_paths)}
+
+        def _compact_indexes_images_probs_and_features(image_indexes_list):
+            indexes = []
+            for image_indexes in image_indexes_list:
+                indexes.extend(image_indexes)
+            indexes = list(set(indexes))
+            indexes = sorted(indexes)
+            index2compact = {i: j for j, i in enumerate(indexes)}
+            compact_probs = probs[indexes]
+            compact_features = features[indexes]
+            compact_image_indexes_list = []
+            compact_image_paths_list = []
+            for image_indexes in image_indexes_list:
+                compact_image_indexes_list.append([index2compact[i] for i in image_indexes])
+                compact_image_paths_list.append([image_paths[i] for i in image_indexes])
+            return compact_image_indexes_list, compact_image_paths_list, compact_probs, compact_features
+        
+        if section_mode == 'findings':
+            section_mode_ = 'both' # use both findings and impression
+        else:
+            section_mode_ = section_mode
+
+        print_bold('Collecting sections and image indexes for MIMIC-CXR...')
+        mimiccxr_i2rm = MIMICCXR_ImageToReportMapper(background_findings_and_impression_per_report_filepath)
+        mimiccxr_sections, mimiccxr_image_indexes_list = mimiccxr_i2rm.get_sections_and_image_indexes_list(
+            section_mode_, image_path_to_index=image_path_to_idx)
+        mimiccxr_image_indexes_list, mimiccxr_image_paths_list, mimiccxr_probs, mimiccxr_features =\
+            _compact_indexes_images_probs_and_features(mimiccxr_image_indexes_list)
+        
+        print_bold('Collecting sections and image indexes for OpenI...')
+        openi_i2rm = OpenI_ImageToReportMapper()
+        openi_sections, openi_image_indexes_list = openi_i2rm.get_sections_and_image_indexes_list(
+            section_mode_, image_path_to_index=image_path_to_idx)
+        openi_image_indexes_list, openi_image_paths_list, openi_probs, openi_features =\
+            _compact_indexes_images_probs_and_features(openi_image_indexes_list)
+        
+        print_bold('Collecting sections and image indexes for CheXpert...')
+        chexpert_i2rm = CheXpert_ImageToReportMapper()
+        chexpert_sections, chexpert_image_indexes_list = chexpert_i2rm.get_sections_and_image_indexes_list(
+            section_mode_, image_path_to_index=image_path_to_idx)
+        chexpert_image_indexes_list, chexpert_image_paths_list, chexpert_probs, chexpert_features =\
+            _compact_indexes_images_probs_and_features(chexpert_image_indexes_list)
+        
+        print_bold('Collecting sections and image indexes for PadChest...')
+        padchest_i2rm = PadChest_ImageToReportMapper()
+        padchest_sections, padchest_image_indexes_list = padchest_i2rm.get_sections_and_image_indexes_list(
+            section_mode_, image_path_to_index=image_path_to_idx)
+        padchest_image_indexes_list, padchest_image_paths_list, padchest_probs, padchest_features =\
+            _compact_indexes_images_probs_and_features(padchest_image_indexes_list)
+        
+        print_bold('Collecting sections and image indexes for BIMCV-COVID19...')
+        bimcv_i2rm = BIMCV_COVID19_ImageToReportMapper()
+        bimcv_sections, bimcv_image_indexes_list = bimcv_i2rm.get_sections_and_image_indexes_list(
+            section_mode_, image_path_to_index=image_path_to_idx)
+        bimcv_image_indexes_list, bimcv_image_paths_list, bimcv_probs, bimcv_features =\
+            _compact_indexes_images_probs_and_features(bimcv_image_indexes_list)
+        
+        source_to_data = {
+            'MIMIC-CXR': {
+                'sections': mimiccxr_sections,
+                'image_indexes_list': mimiccxr_image_indexes_list,
+                'image_paths_list': mimiccxr_image_paths_list,
+                'probs': mimiccxr_probs,
+                'features': mimiccxr_features,
+            },
+            'OpenI': {
+                'sections': openi_sections,
+                'image_indexes_list': openi_image_indexes_list,
+                'image_paths_list': openi_image_paths_list,
+                'probs': openi_probs,
+                'features': openi_features,
+            },
+            'CheXpert': {
+                'sections': chexpert_sections,
+                'image_indexes_list': chexpert_image_indexes_list,
+                'image_paths_list': chexpert_image_paths_list,
+                'probs': chexpert_probs,
+                'features': chexpert_features,
+            },
+            'PadChest': {
+                'sections': padchest_sections,
+                'image_indexes_list': padchest_image_indexes_list,
+                'image_paths_list': padchest_image_paths_list,
+                'probs': padchest_probs,
+                'features': padchest_features,
+            },
+            'BIMCV-COVID19': {
+                'sections': bimcv_sections,
+                'image_indexes_list': bimcv_image_indexes_list,
+                'image_paths_list': bimcv_image_paths_list,
+                'probs': bimcv_probs,
+                'features': bimcv_features,
+            },
+        }
+        
+        wrong_sources = []
+        gen_report_sources = []
+
+        tasks = []
+
+        print_bold('Collecting tasks for similarity-based report retrieval...')
+
+        for test_image_paths, test_source_prediction in tqdm(
+                zip(test_image_paths_list, test_source_predictions),
+                total=len(test_image_paths_list), mininterval=5.0):
+            assert len(test_image_paths) > 0
+            test_image_idxs = [image_path_to_idx[image_path] for image_path in test_image_paths]
+            test_probs = probs[test_image_idxs]
+            test_features = features[test_image_idxs]
+            data = source_to_data[test_source_prediction]
+            dataset_sections = data['sections']
+            dataset_image_indexes_list = data['image_indexes_list']
+            dataset_image_paths_list = data['image_paths_list']
+            dataset_probs = data['probs']
+            dataset_features = data['features']
+            actual_source = test_source_prediction
+            if len(dataset_sections) == 0:
+                wrong_sources.append(test_source_prediction)
+                data = source_to_data['MIMIC-CXR'] # use MIMIC-CXR as default
+                dataset_sections = data['sections']
+                dataset_image_indexes_list = data['image_indexes_list']
+                dataset_image_paths_list = data['image_paths_list']
+                dataset_probs = data['probs']
+                dataset_features = data['features']                
+                actual_source = 'MIMIC-CXR'
+            assert len(dataset_sections) > 0
+            assert len(dataset_sections) == len(dataset_image_indexes_list)
+            assert len(dataset_sections) == len(dataset_image_paths_list)
+            assert len(dataset_probs) == len(dataset_features)
+            assert len(dataset_sections) <= len(dataset_probs) # some reports may have more than one image
+            assert len(dataset_sections) <= len(dataset_features) # some reports may have more than one image
+            # most_similar_idx = _find_most_similar_report_images(
+            #     query_probs=test_probs,
+            #     query_features=test_features,
+            #     dataset_probs=dataset_probs,
+            #     dataset_features=dataset_features,
+            #     dataset_image_indexes_list=dataset_image_indexes_list,
+            #     )
+            # most_similar_section = dataset_sections[most_similar_idx]
+            # gen_reports.append(most_similar_section)
+            # gen_report_image_paths.append(dataset_image_paths_list[most_similar_idx])
+            gen_report_sources.append(actual_source)
+            tasks.append((test_probs, test_features, actual_source))
+
+        if wrong_sources:
+            print_red(f'WARNING: Found {len(wrong_sources)} wrong sources: {wrong_sources}', bold=True)
+            from collections import Counter
+            print_red(str(Counter(wrong_sources)), bold=True) # count of wrong sources
+
+        print_bold('Running tasks for similarity-based report retrieval with multiprocessing...')
+        # track time
+        start_time = time.time()
+        global _shared_source_to_data
+        _shared_source_to_data = source_to_data
+        import multiprocessing as mp
+        if max_processes_for_similarity_based_report_retrieval is None:
+            max_processes_for_similarity_based_report_retrieval = mp.cpu_count()
+        with mp.Pool(processes=max_processes_for_similarity_based_report_retrieval) as pool:
+            most_similar_idx_score_pairs = pool.starmap(_find_most_similar_report_image__for_multiprocessing, tasks, chunksize=10)
+        print(f'len(most_similar_idx_score_pairs) = {len(most_similar_idx_score_pairs)}')
+        print(f'Time taken = {time.time() - start_time:.2f} seconds')
+
+        gen_reports = []
+        gen_report_image_paths = []
+        gen_report_similarity_scores = []
+        for (most_similar_idx, max_score), task in zip(most_similar_idx_score_pairs, tasks):
+            actual_source = task[2]
+            data = source_to_data[actual_source]
+            dataset_sections = data['sections']
+            dataset_image_paths_list = data['image_paths_list']
+            most_similar_section = dataset_sections[most_similar_idx]
+            gen_reports.append(most_similar_section)
+            gen_report_image_paths.append(dataset_image_paths_list[most_similar_idx])
+            gen_report_similarity_scores.append(max_score)
+
+        assert len(gen_reports) == len(test_reports)
+        assert len(gen_report_image_paths) == len(test_reports)
+        assert len(gen_report_sources) == len(test_reports)
+        assert len(gen_report_similarity_scores) == len(test_reports)
+
+        # Print a couple of examples
+        for i in range(2):
+            print_bold(f'------ Example {i + 1}:')
+            print_bold('Ground truth report:')
+            print(test_reports[i])
+            print_bold('Ground truth image paths:')
+            print(test_image_paths_list[i])
+            print_bold('Most similar report:')
+            print(gen_reports[i])
+            print_bold('Predicted source:')
+            print(gen_report_sources[i])
+            print_bold('Most similar image paths:')
+            print(gen_report_image_paths[i])
+            print_bold('Similarity score:')
+            print(gen_report_similarity_scores[i])
+            print()
+
+        # Compute and save report gen metrics
+        results_folder_path = os.path.dirname(interpret_cxr_label_based_predictions_filepath) # use the same folder
+        strings = ['similarity_based_report_retrieval', section_mode]
+        _evaluate_interpret_cxr_test_public__generic_report_gen(
+            gen_reports=gen_reports,
+            gt_reports=test_reports,
+            gt_image_paths_list=test_image_paths_list,
+            results_folder_path=results_folder_path,
+            strings=strings,
+            max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+            to_save_kwargs = {
+                'gen_report_image_paths': gen_report_image_paths,
+                'gen_report_sources': gen_report_sources,
+                'gen_report_similarity_scores': gen_report_similarity_scores,
+            },
+        )
+
     else:
         raise ValueError(f'Invalid eval_mode: {eval_mode}')
+
+_shared_source_to_data = None
+
+def _find_most_similar_report_image__for_multiprocessing(query_probs, query_features, dataset_key):
+    data = _shared_source_to_data[dataset_key]
+    dataset_image_indexes_list = data['image_indexes_list']
+    dataset_probs = data['probs']
+    dataset_features = data['features']
+    return _find_most_similar_report_images(
+        query_probs=query_probs,
+        query_features=query_features,
+        dataset_probs=dataset_probs,
+        dataset_features=dataset_features,
+        dataset_image_indexes_list=dataset_image_indexes_list,
+    )
+    
+def _find_most_similar_report_images(query_probs, query_features, dataset_probs, dataset_features, dataset_image_indexes_list):
+    assert len(query_probs) == len(query_features)
+    assert len(dataset_probs) == len(dataset_features)
+    assert query_probs.ndim == 2
+    assert query_features.ndim == 2
+    assert dataset_probs.ndim == 2
+    assert dataset_features.ndim == 2
+
+    num_query_images = len(query_probs)
+    num_dataset_images = len(dataset_probs)    
+    num_image_groups = len(dataset_image_indexes_list)
+    
+    # Compute similarity scores
+    scores = np.empty((num_query_images, num_dataset_images))
+    for i in range(num_query_images):
+        # mean absolute difference of probabilities
+        prob_scores = 1. - np.mean(np.abs(dataset_probs - query_probs[i]), axis=1) # 1 - mean absolute difference, between 0 and 1
+        # mean absolute difference of features
+        feature_scores = 1. - np.mean(np.abs(dataset_features - query_features[i]), axis=1) # 1 - mean absolute difference, between 0 and 1
+        # combine scores
+        scores[i] = prob_scores + feature_scores
+
+    # verify scores are between 0 and 2 with some tolerance
+    assert np.all(scores >= -1e-6)
+    assert np.all(scores <= 2. + 1e-6)
+
+    # Find the most similar group of images by the maximum score
+    group_max_scores = np.empty(num_image_groups)
+    for i in range(num_image_groups):
+        group_indexes = dataset_image_indexes_list[i]
+        group_max_scores[i] = scores[:, group_indexes].max() # maximum score in the group
+
+    most_similar_idx = np.argmax(group_max_scores)
+    most_similar_score = group_max_scores[most_similar_idx]
+    return most_similar_idx, most_similar_score
+
 
 def plot_label_based_metrics(metrics_path, label_based_facts, dicom_id_to_pos_neg_facts_filepath, metric_prefix, figsize):
     metrics = load_pickle(metrics_path)
@@ -1706,6 +2056,79 @@ def export_generated_reports_to_txt(gen_reports_filepath):
             f.write(gen_report + '\n')
     print(f'Saved generated reports to {save_path}')
 
+class ReportRetrievalVisualizer:
+    def __init__(self, metrics_filepath, gen_reports_filepath):
+        self.metrics = load_pickle(metrics_filepath)
+        tmp = load_pickle(gen_reports_filepath)
+        self.gt_image_paths_list = tmp['gt_image_paths_list']
+        self.gen_report_image_paths = tmp['gen_report_image_paths']
+        self.gen_reports = tmp['gen_reports']
+        self.gt_reports = tmp['gt_reports']
+        self.gen_report_sources = tmp['gen_report_sources']
+        self.gen_report_similarity_scores = tmp['gen_report_similarity_scores']
+
+    def visualize(self, i):
+
+        print_bold('Ground truth report:')
+        print(self.gt_reports[i])
+        print()
+
+        print_bold('Ground truth image paths:')
+        print(self.gt_image_paths_list[i])
+        print()
+
+        plot_images(self.gt_image_paths_list[i])
+
+        print_bold('Most similar report:')
+        print(self.gen_reports[i])
+        print()
+
+        print_bold('Most similar image paths:')
+        print(self.gen_report_image_paths[i])
+        print()
+
+        plot_images(self.gen_report_image_paths[i])
+
+        print_bold('Predicted source:')
+        print(self.gen_report_sources[i])
+        print()
+
+        print_bold('Similarity score:')
+        print(self.gen_report_similarity_scores[i])
+        print()
+
+        # Print metrics
+        print_bold('Metrics:')
+        for k in ['bleu-1', 'bleu-2', 'bleu-3', 'bleu-4', 'ciderD']:
+            print(f'{k}: {self.metrics[k][1][i]:.3f}')
+        for k in ['rougeL', 'meteor']:
+            print(f'{k}: {self.metrics[k][i]:.3f}')
+        chexpert_labels_gt = self.metrics['chexpert_labels_gt'][i]
+        chexpert_labels_gen = self.metrics['chexpert_labels_gen'][i]
+        chexbert_labels_gt = self.metrics['chexbert_labels_gt'][i]
+        chexbert_labels_gen = self.metrics['chexbert_labels_gen'][i]
+        radgraph_labels_gt = self.metrics['radgraph_labels_gt'][i]
+        radgraph_labels_gen = self.metrics['radgraph_labels_gen'][i]
+        print_bold('Chexpert labels:')
+        print(f'Accuracy: {(chexpert_labels_gt == chexpert_labels_gen).mean():.3f}')
+        print(f'GT: {[CHEXPERT_LABELS[i] for i, x in enumerate(chexpert_labels_gt) if x]}')
+        print(f'Gen: {[CHEXPERT_LABELS[i] for i, x in enumerate(chexpert_labels_gen) if x]}')
+        print_bold('Chexbert labels:')
+        print(f'Accuracy: {(chexbert_labels_gt == chexbert_labels_gen).mean():.3f}')
+        print(f'GT: {[CHEXBERT_LABELS[i] for i, x in enumerate(chexbert_labels_gt) if x]}')
+        print(f'Gen: {[CHEXBERT_LABELS[i] for i, x in enumerate(chexbert_labels_gen) if x]}')
+        print_bold('Radgraph F1:')
+        print(f1_between_dicts(radgraph_labels_gt, radgraph_labels_gen))
+        print_bold('fact_embedding_soft:')
+        print(self.metrics['fact_embedding_soft'][i])
+        print_bold('fact_embedding_p:')
+        print(self.metrics['fact_embedding_p'][i])
+        print_bold('fact_embedding_r:')
+        print(self.metrics['fact_embedding_r'][i])
+        print_bold('fact_embedding_f1:')
+        print(self.metrics['fact_embedding_f1'][i])
+
+
 def evaluate(
     checkpoint_folder_path,
     num_workers,
@@ -1735,6 +2158,9 @@ def evaluate(
     mimiccxr_interpret_cxr_challenge_split_filepath,
     chexpert_interpret_cxr_challenge_split_filepath,
     iuxray_interpret_cxr_challenge_split_filepath,
+    interpret_cxr_label_based_predictions_filepath,
+    interpret_cxr_public_test_set_source_predictions_filepath,
+    max_processes_for_similarity_based_report_retrieval,
 ):
     print_blue('----- Evaluating model -----', bold=True)
 
@@ -1777,6 +2203,9 @@ def evaluate(
         mimiccxr_interpret_cxr_challenge_split_filepath=mimiccxr_interpret_cxr_challenge_split_filepath,
         chexpert_interpret_cxr_challenge_split_filepath=chexpert_interpret_cxr_challenge_split_filepath,
         iuxray_interpret_cxr_challenge_split_filepath=iuxray_interpret_cxr_challenge_split_filepath,
+        interpret_cxr_label_based_predictions_filepath=interpret_cxr_label_based_predictions_filepath,
+        interpret_cxr_public_test_set_source_predictions_filepath=interpret_cxr_public_test_set_source_predictions_filepath,
+        max_processes_for_similarity_based_report_retrieval=max_processes_for_similarity_based_report_retrieval,
     )
 
 if __name__ == '__main__':

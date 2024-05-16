@@ -13,9 +13,11 @@ def collect_report_level_results(dataset_name):
     vm_dirs = os.listdir(os.path.join(RESULTS_DIR,'visual_module'))
     rg_dirs = os.listdir(os.path.join(RESULTS_DIR,'report_gen'))
     pg_dirs = os.listdir(os.path.join(RESULTS_DIR,'phrase_grounding'))
+    seq2seq_dirs = os.listdir(os.path.join(RESULTS_DIR,'seq2seq'))
+    print(seq2seq_dirs)
     results = []
-    for dirs, kind in zip([vqa_dirs, qa_dirs, vm_dirs, rg_dirs, pg_dirs],
-                          ['vqa', 'qa', 'visual_module', 'report_gen', 'phrase_grounding']):
+    for dirs, kind in zip([vqa_dirs, qa_dirs, vm_dirs, rg_dirs, pg_dirs, seq2seq_dirs],
+                          ['vqa', 'qa', 'visual_module', 'report_gen', 'phrase_grounding', 'seq2seq']):
         for exp_name in dirs:
             exp_result_filenames = [x for x in os.listdir(os.path.join(RESULTS_DIR, kind, exp_name))\
                                     if ('report_level' in x or 'report_gen' in x) and dataset_name in x]

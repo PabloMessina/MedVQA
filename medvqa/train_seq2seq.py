@@ -118,6 +118,7 @@ def parse_args(args=None):
     parser.add_argument('--use_fact_based_reports_in_mlm', action='store_true')
     parser.add_argument('--use_report_nli_entailment_dataset', action='store_true')
     parser.add_argument('--use_report_nli_paraphrases_dataset', action='store_true')
+    parser.add_argument('--use_numeric_templates', action='store_true')
     parser.add_argument('--only_validate_nli', action='store_true')
     parser.add_argument('--nli1_only_on_train', action='store_true')
     parser.add_argument('--nli1_only_on_val', action='store_true')
@@ -363,6 +364,7 @@ def train_from_scratch(
     use_fact_based_reports_in_mlm,
     use_report_nli_entailment_dataset,
     use_report_nli_paraphrases_dataset,
+    use_numeric_templates,
     task_name,
     experiment_name,
     multitask_name_list,
@@ -468,6 +470,7 @@ def train_from_scratch(
         report_section_to_generate=report_section_to_generate,
         include_public_test_in_train=include_public_test_in_train,
         best_k_classes=best_k_classes,
+        use_numeric_templates=use_numeric_templates,
     )
 
     collate_batch_fn_kwargs = dict(

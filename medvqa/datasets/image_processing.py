@@ -28,6 +28,7 @@ from medvqa.datasets.augmentation import (
     ImageAugmentationTransforms,
     ImageBboxAugmentationTransforms,
 )
+from medvqa.utils.logging import print_red
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -71,7 +72,9 @@ def get_image_transform(
     if use_clip_transform:
         assert clip_version is not None
         print(f'Using CLIP transform for version {clip_version}')
-        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        # use cv2 instead, to read as RGB
+        tf_load_image = T.Lambda(lambda x: cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB))
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
         mean, std = CLIP_VERSION_2_IMAGE_MEAN_STD.get(clip_version, CLIP_DEFAULT_IMAGE_MEAN_STD)
         tf_normalize = T.Normalize(mean, std)
@@ -88,7 +91,8 @@ def get_image_transform(
             image_size = (feature_extractor.size["height"], feature_extractor.size["width"])
         if type(image_size) is int:
             image_size = (image_size, image_size)
-        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        tf_load_image = T.Lambda(lambda x: cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB))
         tf_resize = T.Resize(image_size, interpolation=BICUBIC)
         tf_normalize = T.Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
 
@@ -108,7 +112,7 @@ def get_image_transform(
     elif use_bbox_aware_transform:
         print(f'  Using bounding box aware transforms')
         tf_load_image = T.Lambda(lambda x: cv2.imread(x))
-        # tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
+        tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
         tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
         tf_hflip = T.Lambda(lambda x: cv2.flip(x, 1))
         tf_totensor = T.ToTensor()
@@ -125,7 +129,7 @@ def get_image_transform(
             image = tf_load_image(image_path)
             if return_image_size:
                 size_before = image.shape[:2] # (H, W)
-            # image = tf_bgr2rgb(image)
+            image = tf_bgr2rgb(image)
             image = tf_resize(image)
             if return_image_size:
                 size_after = image.shape[:2]
@@ -376,7 +380,8 @@ def get_image_transform(
 
     else:
         print(f'Using standard transform')
-        tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
+        tf_load_image = T.Lambda(lambda x: cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB))
         tf_resize = T.Resize(image_size)
         tf_normalize = T.Normalize(mean, std)
 

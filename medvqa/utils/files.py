@@ -15,6 +15,7 @@ MAX_FILENAME_LENGTH = os.statvfs('/').f_namemax
 _json_cache = dict()
 _jsonl_cache = dict()
 _pickle_cache = dict()
+_csv_dataframe_cache = dict()
 
 def get_cached_json_file(path):
     try:
@@ -37,6 +38,16 @@ def get_cached_pickle_file(path):
         file = None
     if file is None:
         file = _pickle_cache[path] = load_pickle(path)
+    return file
+
+def get_cached_dataframe_from_csv(path):
+    import pandas as pd
+    try:
+        file = _csv_dataframe_cache[path]
+    except KeyError:
+        file = None
+    if file is None:
+        file = _csv_dataframe_cache[path] = pd.read_csv(path)
     return file
 
 def load_json(path):

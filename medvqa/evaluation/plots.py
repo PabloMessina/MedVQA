@@ -338,13 +338,15 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
             # plot the scores as text on top of the bars
             for j in range(m):
                 plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01 , f'{scores[j]:.3f}', ha='center',
-                         va='bottom', fontsize=scores_fontsize, rotation=45)
+                         va='bottom', fontsize=scores_fontsize, rotation=90)
         plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
-                   fontsize=metrics_tick_fontsize, rotation=45, ha='right')
+                   fontsize=metrics_tick_fontsize, rotation=90, ha='right')
         print([(j+0.5) * (metrics_axis_size / m) for j in range(0, m)])
         plt.xlabel('Metric')
         plt.ylabel('Score')
         plt.grid(axis='y')
+        # plot legend above the plot
+        plt.legend(bbox_to_anchor=(0.5, 1.1), loc='lower center', borderaxespad=0.)
     else:
         bar_height = 0.9 * metrics_axis_size / (n * m)
         for i in range(n):
@@ -360,9 +362,10 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
         plt.ylabel('Metric')
         plt.xlabel('Score')
         plt.grid(axis='x')
+        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.title(title)
     # Plot legend outside the plot
-    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    # plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     plt.show()
 
 def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_aliases, metric_names, label_frequencies,
@@ -899,4 +902,31 @@ def plot_barchart(data, title, xlabel, ylabel, figsize=(10, 10), color='blue', h
             for i in range(n):
                 plt.text(i+1, data[i], f'{data[i]:.1f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
     plt.title(title)
+    plt.show()
+
+def plot_images(image_paths, titles=None, image_figsize=(5, 5), max_cols=3):
+    import matplotlib.pyplot as plt
+    import os
+    import cv2
+
+    # Create a grid of subplots
+    n_cols = min(len(image_paths), max_cols)
+    n_rows = math.ceil(len(image_paths) / n_cols)
+    whole_figsize = (image_figsize[0] * n_cols, image_figsize[1] * n_rows)
+    fig, ax = plt.subplots(n_rows, n_cols, figsize=whole_figsize, squeeze=False)
+    assert ax.shape == (n_rows, n_cols)
+
+    # Load and show images
+    for k, image_path in enumerate(image_paths):
+        row = k // n_cols
+        col = k % n_cols
+        image = cv2.imread(image_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # Convert from BGR to RGB
+        ax[row, col].imshow(image)
+        ax[row, col].axis('off')
+        if titles is not None:
+            ax[row, col].set_title(titles[k])
+        else:
+            ax[row, col].set_title(os.path.basename(image_path))
+
     plt.show()
