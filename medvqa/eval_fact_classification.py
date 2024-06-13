@@ -6,9 +6,11 @@ import time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from nltk.tokenize import wordpunct_tokenize
 from sklearn.metrics import accuracy_score
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
+from medvqa.datasets.chexpert.chexpert_dataset_management import load_all_chexpert_image_paths_and_labels
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import (
     get_imageId2PartPatientStudy,
@@ -54,6 +56,10 @@ from medvqa.datasets.interpret_cxr_challenge import (
     MIMICCXR_ImageToReportMapper,
     OpenI_ImageToReportMapper,
     PadChest_ImageToReportMapper,
+    load_interpret_cxr_chexpert_val_image_paths,
+    load_interpret_cxr_chexpert_val_image_paths_and_reports,
+    load_interpret_cxr_mimiccxr_val_image_paths,
+    load_interpret_cxr_mimiccxr_val_image_paths_and_reports,
     load_interpret_cxr_test_hidden_image_paths,
     load_interpret_cxr_test_public_data,
     load_interpret_cxr_test_public_image_paths,
@@ -81,6 +87,8 @@ class _EvalModes:
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN = 'interpret_cxr_test_public_label_based__json_to_gpt_report_gen'
     INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS = 'interpret_cxr_compute_and_save_label_based_predictions'
     INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL = 'interpret_cxr_test_public__similarity_based_report_retrieval'
+    INTERPRET_CXR_TEST_HIDDEN_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'interpret_cxr_test_hidden_label_based__template_based_report_gen'
+    INTERPRET_CXR_VAL_LABEL_BASED__CHEXPERT_LABELS__CLASSIF_AND_TEMPLATE_REPORT_GEN = 'interpret_cxr_val_label_based__chexpert_labels__classif_and_template_report_gen'
 
     @staticmethod
     def choices():
@@ -91,7 +99,9 @@ class _EvalModes:
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS,
-            _EvalModes.INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL,            
+            _EvalModes.INTERPRET_CXR_TEST_PUBLIC__SIMILARITY_BASED_REPORT_RETRIEVAL,
+            _EvalModes.INTERPRET_CXR_TEST_HIDDEN_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
+            _EvalModes.INTERPRET_CXR_VAL_LABEL_BASED__CHEXPERT_LABELS__CLASSIF_AND_TEMPLATE_REPORT_GEN,
         ]
 
 def parse_args(args=None):
@@ -107,7 +117,7 @@ def parse_args(args=None):
     parser.add_argument('--fact_embedding_batch_size', type=int, default=32)
     parser.add_argument('--fact_embedding_num_workers', type=int, default=4)
     parser.add_argument('--fact_embedding_device', type=str, default='cuda')
-    parser.add_argument('--chexpert_labels_filepath', type=str)
+    parser.add_argument('--mimiccxr_chexpert_labels_filepath', type=str)
     parser.add_argument('--chest_imagenome_label_names_filepath', type=str)
     parser.add_argument('--chest_imagenome_image_id_to_labels_filepath', type=str)
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
@@ -127,6 +137,7 @@ def parse_args(args=None):
     parser.add_argument('--interpret_cxr_public_test_set_source_predictions_filepath', type=str, default=None)
     parser.add_argument('--interpret_cxr_label_based_predictions_filepath', type=str, default=None)
     parser.add_argument('--max_processes_for_similarity_based_report_retrieval', type=str, default=None)
+    parser.add_argument('--labels_kind', type=str, default=None, choices=['label_based_facts', 'chexpert_labels'])
 
     return parser.parse_args(args=args)
 
@@ -251,20 +262,28 @@ def _compute_and_save_classification_metrics(pred_probs, pred_labels, gt_labels,
     met = MultiLabelAccuracy(device='cpu')
     met.update((pred_labels, gt_labels))
     metrics[f'{metric_prefix}_acc'] = met.compute()
+    print_bold(f'{metric_prefix}_acc = {metrics[f"{metric_prefix}_acc"]}')
     
     # compute prf1
     print('Computing prf1 ...')
     met = MultiLabelPRF1(device='cpu')
     met.update((pred_labels, gt_labels))
     metrics[f'{metric_prefix}_prf1'] = met.compute()
+    for x in ['p', 'r', 'f1']:
+        for y in ['micro', 'macro']:
+            print_bold(f'{metric_prefix}_prf1_{x}_{y} = {metrics[f"{metric_prefix}_prf1"][f"{x}_{y}_avg"]}')
     
     # compute roc auc
     print('Computing roc auc ...')
     metrics[f'{metric_prefix}_rocauc'] = roc_auc_fn(pred_probs, gt_labels)
+    print_bold(f'{metric_prefix}_rocauc_micro_avg = {metrics[f"{metric_prefix}_rocauc"]["micro_avg"]}')
+    print_bold(f'{metric_prefix}_rocauc_macro_avg = {metrics[f"{metric_prefix}_rocauc"]["macro_avg"]}')
     
     # compute prc auc
     print('Computing prc auc ...')
     metrics[f'{metric_prefix}_prcauc'] = prc_auc_fn(pred_probs, gt_labels)
+    print_bold(f'{metric_prefix}_prcauc_micro_avg = {metrics[f"{metric_prefix}_prcauc"]["micro_avg"]}')
+    print_bold(f'{metric_prefix}_prcauc_macro_avg = {metrics[f"{metric_prefix}_prcauc"]["macro_avg"]}')
 
     strings_ = []
     strings_.append(metric_prefix)
@@ -276,8 +295,8 @@ def _compute_and_save_classification_metrics(pred_probs, pred_labels, gt_labels,
     print_bold(f'Fact classification metrics saved to {save_path}')
     return metrics
 
-def _evaluate_mimiccxr_test_set_chexpert_fact_classification(
-        probs, pred_labels, chexpert_labels_filepath, dicom_ids, results_folder_path, strings):
+def _evaluate_mimiccxr_chexpert_fact_classification(
+        probs, pred_labels, chexpert_labels_filepath, dicom_ids, results_folder_path, strings, dataset_name):
     label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
     probs_ = probs[:, label_idxs]
     pred_labels_ = pred_labels[:, label_idxs]
@@ -292,13 +311,34 @@ def _evaluate_mimiccxr_test_set_chexpert_fact_classification(
         pred_labels=pred_labels_,
         gt_labels=gt_labels_,
         results_folder_path=results_folder_path,
-        dataset_name='mimiccxr_test_set',
+        dataset_name=dataset_name,
         metric_prefix='chexpert',
         strings=strings,
     )
 
-def _evaluate_mimiccxr_test_set_mimic_cxr_lt_fact_classification(
-        probs, pred_labels, dicom_ids, results_folder_path, strings):
+def _evaluate_chexpert_dataset_chexpert_fact_classification(
+        probs, pred_labels, image_paths, results_folder_path, strings, dataset_name):
+    label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
+    probs_ = probs[:, label_idxs]
+    pred_labels_ = pred_labels[:, label_idxs]
+    all_image_paths, all_gt_labels = load_all_chexpert_image_paths_and_labels()
+    image_path_to_idx = {image_path: i for i, image_path in enumerate(all_image_paths)}
+    gt_labels_ = np.array([all_gt_labels[image_path_to_idx[image_path]] for image_path in image_paths])
+    assert gt_labels_.shape == probs_.shape
+    print('probs_.shape =', probs_.shape)
+    print('gt_labels_.shape =', gt_labels_.shape)
+    _compute_and_save_classification_metrics(
+        pred_probs=probs_,
+        pred_labels=pred_labels_,
+        gt_labels=gt_labels_,
+        results_folder_path=results_folder_path,
+        dataset_name=dataset_name,
+        metric_prefix='chexpert',
+        strings=strings,
+    )
+
+def _evaluate_mimiccxr_mimic_cxr_lt_fact_classification(
+        probs, pred_labels, dicom_ids, results_folder_path, strings, dataset_name):
     label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__MIMIC_CXR_LT]
     probs_ = probs[:, label_idxs]
     pred_labels_ = pred_labels[:, label_idxs]
@@ -315,15 +355,15 @@ def _evaluate_mimiccxr_test_set_mimic_cxr_lt_fact_classification(
         pred_labels=pred_labels_,
         gt_labels=gt_labels_,
         results_folder_path=results_folder_path,
-        dataset_name='mimiccxr_test_set',
+        dataset_name=dataset_name,
         metric_prefix='mimic_cxr_lt',
         strings=strings,
     )
 
-def _evaluate_mimiccxr_test_set_chest_imagenome_fact_classification(
+def _evaluate_mimiccxr_chest_imagenome_fact_classification(
         probs, pred_labels, dicom_ids, results_folder_path,
         chest_imagenome_label_names_filepath,
-        chest_imagenome_image_id_to_labels_filepath, strings):
+        chest_imagenome_image_id_to_labels_filepath, strings, dataset_name):
     label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEST_IMAGENOME]
     probs_ = probs[:, label_idxs]
     pred_labels_ = pred_labels[:, label_idxs]
@@ -359,14 +399,14 @@ def _evaluate_mimiccxr_test_set_chest_imagenome_fact_classification(
         pred_labels=pred_labels_,
         gt_labels=gt_labels_,
         results_folder_path=results_folder_path,
-        dataset_name='mimiccxr_test_set',
+        dataset_name=dataset_name,
         metric_prefix='chest_imagenome',
         strings=strings,
     )
 
-def _evaluate_mimiccxr_test_set_nli_based_labels_fact_classification(
+def _evaluate_mimiccxr_nli_based_labels_fact_classification(
         probs, pred_labels, dicom_ids, results_folder_path, label_based_facts, label_group_name,
-        mimiccxr_report_fact_nli_integrated_data_filepath, strings):
+        mimiccxr_report_fact_nli_integrated_data_filepath, strings, dataset_name):
     data = get_cached_pickle_file(mimiccxr_report_fact_nli_integrated_data_filepath)
     label_based_nli_predictions = data['label_based_nli_predictions']
     label_based_facts_ = data['label_based_facts']
@@ -391,7 +431,7 @@ def _evaluate_mimiccxr_test_set_nli_based_labels_fact_classification(
         pred_labels=pred_labels_,
         gt_labels=gt_labels_,
         results_folder_path=results_folder_path,
-        dataset_name='mimiccxr_test_set',
+        dataset_name=dataset_name,
         metric_prefix=f'{label_group_name}_nli_based_labels',
         strings=strings,
     )
@@ -417,17 +457,19 @@ def _save_gen_reports(gen_reports, dicom_ids, report_idxs, dataset_name, results
     }, save_path)
     print_bold(f'Generated reports successfully saved to {save_path}')
 
-def _save_gen_reports_v2(gen_reports, gt_reports, gt_image_paths_list, dataset_name, results_folder_path, strings,
-                         to_save_kwargs=None):
-    assert len(gen_reports) == len(gt_reports)
+def _save_gen_reports_v2(gen_reports, gt_image_paths_list, dataset_name, results_folder_path, strings,
+                        gt_reports=None,to_save_kwargs=None):
+    if gt_reports is not None:
+        assert len(gen_reports) == len(gt_reports)
     assert len(gen_reports) == len(gt_image_paths_list)
     save_path = os.path.join(results_folder_path,
         f'{dataset_name}_gen_reports({",".join(strings)}).pkl')
     output = {
         'gen_reports': gen_reports,
-        'gt_reports': gt_reports,
         'gt_image_paths_list': gt_image_paths_list,
     }
+    if gt_reports is not None:
+        output['gt_reports'] = gt_reports
     if to_save_kwargs is not None:
         assert type(to_save_kwargs) == dict
         for key in to_save_kwargs:
@@ -545,6 +587,80 @@ def _evaluate_interpret_cxr_test_public__nli_based_labels__template_based_report
         gt_reports=gt_reports,
         gt_image_paths_list=image_paths_list,
         dataset_name='interpret_cxr_test_public',
+        results_folder_path=results_folder_path,
+        strings=strings,
+    )
+
+def _evaluate_template_based_report_gen__chexpert_labels(
+        pred_labels, gt_reports, image_paths_list, results_folder_path, strings, dataset_name,
+        max_processes_for_chexpert_labeler, report_cleanup_fn=None):
+    
+    assert len(pred_labels) == len(gt_reports)
+    assert len(pred_labels) == len(image_paths_list)
+    assert pred_labels.shape == (len(gt_reports), len(CHEXPERT_LABELS))
+
+    from medvqa.models.report_generation.templates.chexpert import (
+        CreateReportGivenLabels, TEMPLATES_CHEXPERT_v4, GROUPS_v1)
+    # from medvqa.models.report_generation.templates.chexpert import CreateSimpleReport, TEMPLATES_CHEXPERT_v1
+    
+    gen_reports = []
+    for i in range(len(pred_labels)):
+        labels_dict = { CHEXPERT_LABELS[j]: pred_labels[i, j] for j in range(len(CHEXPERT_LABELS) ) }
+        report = CreateReportGivenLabels(labels_dict, TEMPLATES_CHEXPERT_v4, GROUPS_v1, redundant_reports=True)
+        # labels_dict = { CHEXPERT_LABELS[j]: pred_labels[i, j] for j in range(1, len(CHEXPERT_LABELS) ) } # exclude 'No Finding'
+        # report = CreateSimpleReport(labels_dict, TEMPLATES_CHEXPERT_v1)
+        gen_reports.append(report)
+
+    if report_cleanup_fn is not None:
+        gen_reports = [report_cleanup_fn(report) for report in gen_reports]
+    
+    print('len(gen_reports) =', len(gen_reports))
+    print('len(gt_reports) =', len(gt_reports))
+    assert len(gen_reports) == len(gt_reports)
+
+    _compute_and_save_report_gen_metrics(
+        gt_reports=gt_reports,
+        gen_reports=gen_reports,
+        # dataset_name='interpret_cxr_test_public',
+        dataset_name=dataset_name,
+        results_folder_path=results_folder_path,
+        max_processes=max_processes_for_chexpert_labeler,
+        strings=strings,
+    )
+    _save_gen_reports_v2(
+        gen_reports=gen_reports,
+        gt_reports=gt_reports,
+        gt_image_paths_list=image_paths_list,
+        # dataset_name='interpret_cxr_test_public',
+        dataset_name=dataset_name,
+        results_folder_path=results_folder_path,
+        strings=strings,
+    )
+
+def _evaluate_interpret_cxr_test_hidden__chexpert_labels__template_based_report_gen(
+    pred_labels, image_paths_list, results_folder_path, strings):
+    
+    assert len(pred_labels) == len(image_paths_list)
+    assert pred_labels.shape == (len(image_paths_list), len(CHEXPERT_LABELS))
+
+    from medvqa.models.report_generation.templates.chexpert import (
+        CreateReportGivenLabels, TEMPLATES_CHEXPERT_v4, GROUPS_v1)
+    # from medvqa.models.report_generation.templates.chexpert import CreateSimpleReport, TEMPLATES_CHEXPERT_v1
+    
+    gen_reports = []
+    for i in range(len(pred_labels)):
+        labels_dict = { CHEXPERT_LABELS[j]: pred_labels[i, j] for j in range(len(CHEXPERT_LABELS) ) }
+        report = CreateReportGivenLabels(labels_dict, TEMPLATES_CHEXPERT_v4, GROUPS_v1, redundant_reports=True)
+        # labels_dict = { CHEXPERT_LABELS[j]: pred_labels[i, j] for j in range(1, len(CHEXPERT_LABELS) ) } # exclude 'No Finding'
+        # report = CreateSimpleReport(labels_dict, TEMPLATES_CHEXPERT_v1)
+        gen_reports.append(report)
+    
+    print('len(gen_reports) =', len(gen_reports))
+
+    _save_gen_reports_v2(
+        gen_reports=gen_reports,
+        gt_image_paths_list=image_paths_list,
+        dataset_name='interpret_cxr_test_hidden',
         results_folder_path=results_folder_path,
         strings=strings,
     )
@@ -768,30 +884,87 @@ def _tune_thresholds_for_label_based_fact_classification(
     print(f'best_accs.mean() = {best_accs.mean()}')
     return best_thresholds, best_f1s, best_accs
 
-def _compute_thresholds(mimiccxr_report_fact_nli_integrated_data_filepath, results_folder_path,
+def _tune_thresholds_for_chexpert_labels(probs, image_paths, mimiccxr_gt_labels_filepath):
+
+    chexpert_image_paths, chexpert_gt_labels = load_all_chexpert_image_paths_and_labels()
+    chexpert_image_path_to_idx = {image_path: i for i, image_path in enumerate(chexpert_image_paths)}
+
+    mimiccxr_gt_labels = get_cached_pickle_file(mimiccxr_gt_labels_filepath)
+
+    chexpert_label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
+    assert len(chexpert_label_idxs) == len(mimiccxr_gt_labels[0])
+    
+    dicom_id2ridx = get_imageId2reportId()
+    gt_labels = np.empty((len(image_paths), len(chexpert_label_idxs)), dtype=np.int8)
+    mimiccxr_count = 0
+    chexpert_count = 0
+    for i, image_path in enumerate(image_paths):
+        if 'mimic' in image_path:
+            dicom_id = os.path.basename(image_path).split('.')[0]
+            ridx = dicom_id2ridx[dicom_id]
+            gt_labels[i] = mimiccxr_gt_labels[ridx]
+            mimiccxr_count += 1
+        else:
+            assert 'chexpert' in image_path
+            idx = chexpert_image_path_to_idx[image_path]
+            gt_labels[i] = chexpert_gt_labels[idx]
+            chexpert_count += 1
+    assert mimiccxr_count > 0
+    assert chexpert_count > 0
+    assert gt_labels.min() == 0
+    assert gt_labels.max() == 1
+
+    probs = probs[:, chexpert_label_idxs]
+    assert gt_labels.shape == probs.shape
+    print('probs.shape =', probs.shape)
+    print('gt_labels.shape =', gt_labels.shape)
+
+    best_thresholds = np.empty(probs.shape[1])
+    best_f1s = np.empty(probs.shape[1])
+    best_accs = np.empty(probs.shape[1])
+    for i in range(probs.shape[1]):
+        best_t, best_f1 = best_threshold_and_f1_score(probs[:, i], gt_labels[:, i])
+        best_thresholds[i] = best_t
+        best_f1s[i] = best_f1
+        best_accs[i] = accuracy_score(gt_labels[:, i], probs[:, i] > best_t)
+    print(f'best_f1s.mean() = {best_f1s.mean()}')
+    print(f'best_accs.mean() = {best_accs.mean()}')
+    return best_thresholds, best_f1s, best_accs
+
+def _compute_thresholds(labels_kind, results_folder_path,
     checkpoint_folder_path, model_kwargs, val_image_transform_kwargs, max_images_per_batch,
     max_facts_per_image, num_workers, device, fact_embedding_model_name,
     fact_embedding_model_checkpoint_folder_path, fact_embedding_batch_size, fact_embedding_num_workers,
     fact_embedding_device, count_print,
+    image_paths, dataset_name,
+    mimiccxr_report_fact_nli_integrated_data_filepath=None,
+    mimiccxr_chexpert_labels_filepath=None,
 ):
-    assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+    assert labels_kind in ['label_based_facts', 'chexpert_labels']
+    
+    strings = [labels_kind, dataset_name]
+    
+    if labels_kind == 'label_based_facts':
+        assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        strings.append(mimiccxr_report_fact_nli_integrated_data_filepath)
+    elif labels_kind == 'chexpert_labels':
+        assert mimiccxr_chexpert_labels_filepath is not None
+        strings.append(mimiccxr_chexpert_labels_filepath)
+    else: assert False
+
     thresholds_save_path = get_file_path_with_hashing_if_too_long(
         folder_path=results_folder_path,
         prefix='thresholds',
-        strings=[
-            'label_based_facts',
-            mimiccxr_report_fact_nli_integrated_data_filepath,
-            'mimiccxr:validate+test',
-        ],
+        strings=strings,
         force_hashing=True,
     )
     if os.path.exists(thresholds_save_path):
         print('Loading thresholds from', thresholds_save_path)
         output = load_pickle(thresholds_save_path)
     else:
-        count_print('Tuning thresholds on MIMIC-CXR validation and test sets with label-based facts')
-        probs, dicom_ids = _run_inference_for_label_based_fact_classification_on_mimiccxr_split(
-            split=['validate', 'test'], # use both validation and test sets
+        count_print(f'Tuning thresholds on {dataset_name} with {labels_kind}')
+        probs, image_paths = _run_inference_for_label_based_fact_classification_on_images(
+            image_paths=image_paths,
             checkpoint_folder_path=checkpoint_folder_path,
             model_kwargs=model_kwargs,
             val_image_transform_kwargs=val_image_transform_kwargs,
@@ -805,16 +978,34 @@ def _compute_thresholds(mimiccxr_report_fact_nli_integrated_data_filepath, resul
             fact_embedding_num_workers=fact_embedding_num_workers,
             fact_embedding_device=fact_embedding_device,
         )
-        assert len(probs) == len(dicom_ids)
-        thresholds, f1s, accs = _tune_thresholds_for_label_based_fact_classification(
-            probs=probs,
-            dicom_ids=dicom_ids,
-            mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
-        )
+        
+        if labels_kind == 'label_based_facts':
+            dicom_ids = [os.path.basename(image_path).split('.')[0] for image_path in image_paths]
+            assert len(probs) == len(image_paths)
+            assert len(probs) == len(dicom_ids)
+            thresholds, f1s, accs = _tune_thresholds_for_label_based_fact_classification(
+                probs=probs,
+                dicom_ids=dicom_ids,
+                mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+            )
+        elif labels_kind == 'chexpert_labels':
+            thresholds, f1s, accs = _tune_thresholds_for_chexpert_labels(
+                probs=probs,
+                image_paths=image_paths,
+                mimiccxr_gt_labels_filepath=mimiccxr_chexpert_labels_filepath,
+            )
+        else: assert False
+        
         print('Saving thresholds to', thresholds_save_path)
         output = { 'thresholds': thresholds, 'f1s': f1s , 'accs': accs }
         save_pickle(output, thresholds_save_path)
-    assert len(output['thresholds']) == len(LABEL_BASED_FACTS)
+    
+    if labels_kind == 'label_based_facts':
+        assert len(output['thresholds']) == len(LABEL_BASED_FACTS)
+    elif labels_kind == 'chexpert_labels':
+        assert len(output['thresholds']) == len(CHEXPERT_LABELS)
+    else: assert False
+    
     return output
 
 def _evaluate_model(
@@ -831,7 +1022,7 @@ def _evaluate_model(
     fact_embedding_batch_size,
     fact_embedding_num_workers,
     fact_embedding_device,
-    chexpert_labels_filepath,
+    mimiccxr_chexpert_labels_filepath,
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
@@ -851,12 +1042,13 @@ def _evaluate_model(
     interpret_cxr_label_based_predictions_filepath,
     interpret_cxr_public_test_set_source_predictions_filepath,
     max_processes_for_similarity_based_report_retrieval,
+    labels_kind,
 ):
     count_print = CountPrinter()
 
     if eval_mode == _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED:
 
-        assert chexpert_labels_filepath is not None
+        assert mimiccxr_chexpert_labels_filepath is not None
         assert chest_imagenome_label_names_filepath is not None
         assert chest_imagenome_image_id_to_labels_filepath is not None
         assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
@@ -917,28 +1109,30 @@ def _evaluate_model(
 
         # Compute metrics with CheXpert labels
         count_print('Computing metrics with CheXpert labels')
-        _evaluate_mimiccxr_test_set_chexpert_fact_classification(
+        _evaluate_mimiccxr_chexpert_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
-            chexpert_labels_filepath=chexpert_labels_filepath,
+            chexpert_labels_filepath=mimiccxr_chexpert_labels_filepath,
             dicom_ids=test_dicom_ids,
             results_folder_path=results_folder_path,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
         # Compute metrics with MIMIC-CXR LT labels
         count_print('Computing metrics with MIMIC-CXR LT labels')
-        _evaluate_mimiccxr_test_set_mimic_cxr_lt_fact_classification(
+        _evaluate_mimiccxr_mimic_cxr_lt_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
             dicom_ids=test_dicom_ids,
             results_folder_path=results_folder_path,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
         # Compute metrics with Chest ImaGenome labels
         count_print('Computing metrics with Chest ImaGenome labels')
-        _evaluate_mimiccxr_test_set_chest_imagenome_fact_classification(
+        _evaluate_mimiccxr_chest_imagenome_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
             dicom_ids=test_dicom_ids,
@@ -946,11 +1140,12 @@ def _evaluate_model(
             chest_imagenome_label_names_filepath=chest_imagenome_label_names_filepath,
             chest_imagenome_image_id_to_labels_filepath=chest_imagenome_image_id_to_labels_filepath,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
         # Compute metrics with NLI-based labels and CheXpert facts
         count_print('Computing metrics with NLI-based labels and CheXpert facts')
-        _evaluate_mimiccxr_test_set_nli_based_labels_fact_classification(
+        _evaluate_mimiccxr_nli_based_labels_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
             dicom_ids=test_dicom_ids,
@@ -959,11 +1154,12 @@ def _evaluate_model(
             label_group_name='chexpert',
             mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
         # Compute metrics with NLI-based labels and MIMIC-CXR LT facts
         count_print('Computing metrics with NLI-based labels and MIMIC-CXR LT facts')
-        _evaluate_mimiccxr_test_set_nli_based_labels_fact_classification(
+        _evaluate_mimiccxr_nli_based_labels_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
             dicom_ids=test_dicom_ids,
@@ -972,11 +1168,12 @@ def _evaluate_model(
             label_group_name='mimic_cxr_lt',
             mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
         # Compute metrics with NLI-based labels and Chest ImaGenome facts
         count_print('Computing metrics with NLI-based labels and Chest ImaGenome facts')
-        _evaluate_mimiccxr_test_set_nli_based_labels_fact_classification(
+        _evaluate_mimiccxr_nli_based_labels_fact_classification(
             probs=test_probs,
             pred_labels=test_pred_labels,
             dicom_ids=test_dicom_ids,
@@ -985,6 +1182,7 @@ def _evaluate_model(
             label_group_name='chest_imagenome',
             mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
             strings=strings,
+            dataset_name='mimiccxr_test_set',
         )
 
     elif eval_mode == _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN:
@@ -1118,17 +1316,31 @@ def _evaluate_model(
     elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN:
 
         assert section_mode is not None
+        assert labels_kind is not None
 
         strings = []
         strings.append('template')
         strings.append(section_mode)
+        strings.append(labels_kind)
 
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
 
         if tune_thresholds:
+            if labels_kind == 'label_based_facts':
+                val_image_paths = _get_mimiccxr_image_paths('validate')
+                val_dataset_name = 'mimiccxr_validate'
+            elif labels_kind == 'chexpert_labels':
+                mimiccxr_val_image_paths = load_interpret_cxr_mimiccxr_val_image_paths()
+                print(f'len(mimiccxr_val_image_paths) = {len(mimiccxr_val_image_paths)}')
+                chexpert_val_image_paths = load_interpret_cxr_chexpert_val_image_paths()
+                print(f'len(chexpert_val_image_paths) = {len(chexpert_val_image_paths)}')
+                val_image_paths = mimiccxr_val_image_paths + chexpert_val_image_paths
+                print(f'len(val_image_paths) = {len(val_image_paths)}')
+                val_dataset_name = 'interpret_cxr_val__mimiccxr+chexpert'
+            else: assert False
+                
             tmp = _compute_thresholds(
-                tune_thresholds=tune_thresholds,
-                mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+                labels_kind=labels_kind,
                 results_folder_path=results_folder_path,
                 checkpoint_folder_path=checkpoint_folder_path,
                 model_kwargs=model_kwargs,
@@ -1143,9 +1355,13 @@ def _evaluate_model(
                 fact_embedding_num_workers=fact_embedding_num_workers,
                 fact_embedding_device=fact_embedding_device,
                 count_print=count_print,
+                image_paths=val_image_paths,
+                dataset_name=val_dataset_name,
+                mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+                mimiccxr_chexpert_labels_filepath=mimiccxr_chexpert_labels_filepath,
             )
+            strings.append('tuned_thresholds')
             thresholds = tmp['thresholds']
-            strings.append('thresholds')
         else:
             thresholds = 0.5 # simple thresholding
 
@@ -1177,14 +1393,27 @@ def _evaluate_model(
         image_path_to_idx = {image_path: i for i, image_path in enumerate(image_paths)}
         assert len(image_path_to_idx) == len(image_paths)
 
-        pred_labels = np.empty((len(images_path_list), len(LABEL_BASED_FACTS)), dtype=int)
-        for i, image_paths_ in enumerate(images_path_list):
-            assert len(image_paths_) > 0
-            image_idxs = [image_path_to_idx[image_path] for image_path in image_paths_]
-            probs_ = probs[image_idxs]
-            probs_ = np.mean(probs_, axis=0) # average probs
-            assert probs_.shape == (len(LABEL_BASED_FACTS),)
-            pred_labels[i] = (probs_ > thresholds).astype(int) 
+        if labels_kind == 'label_based_facts':
+            pred_labels = np.empty((len(images_path_list), len(LABEL_BASED_FACTS)), dtype=int)
+            for i, image_paths_ in enumerate(images_path_list):
+                assert len(image_paths_) > 0
+                image_idxs = [image_path_to_idx[image_path] for image_path in image_paths_]
+                probs_ = probs[image_idxs]
+                probs_ = np.mean(probs_, axis=0) # average probs
+                assert probs_.shape == (len(LABEL_BASED_FACTS),)
+                pred_labels[i] = (probs_ > thresholds).astype(int)
+        elif labels_kind == 'chexpert_labels':
+            pred_labels = np.empty((len(images_path_list), len(CHEXPERT_LABELS)), dtype=int)
+            chexpert_label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
+            probs = probs[:, chexpert_label_idxs]
+            for i, image_paths_ in enumerate(images_path_list):
+                assert len(image_paths_) > 0
+                image_idxs = [image_path_to_idx[image_path] for image_path in image_paths_]
+                probs_ = probs[image_idxs]
+                probs_ = np.mean(probs_, axis=0)
+                assert probs_.shape == (len(CHEXPERT_LABELS),)
+                pred_labels[i] = (probs_ > thresholds).astype(int)
+        else: assert False
 
         print(f'pred_labels.shape = {pred_labels.shape}')
 
@@ -1193,32 +1422,48 @@ def _evaluate_model(
         eval_chest_imagenome = True
         eval_all = True
 
+        if labels_kind == 'chexpert_labels':
+            assert eval_chexpert_only
+
         if eval_chexpert_only:
             eval_mimic_cxr_lt = False
             eval_chest_imagenome = False
             eval_all = False
 
-        # Compute report gen metrics with NLI-based labels and CheXpert facts
+        # Compute report gen metrics with CheXpert facts
         if eval_chexpert:
-            count_print('Computing report gen metrics with NLI-based labels and CheXpert facts')
             strings_ = ['chexpert']
             strings_.extend(strings)
-            if use_alternative_chexpert_template:
-                strings_.append('v1')
-                def _template_fn(i, j):
-                    return TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][j]
-            else:
-                _template_fn = None
-            _evaluate_interpret_cxr_test_public__nli_based_labels__template_based_report_gen(
-                pred_labels=pred_labels,
-                gt_reports=gt_reports_list,
-                image_paths_list=images_path_list,
-                results_folder_path=results_folder_path,
-                label_based_facts=LABEL_BASED_FACTS__CHEXPERT,
-                max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
-                strings=strings_,
-                template_fn=_template_fn,
-            )
+            if labels_kind == 'label_based_facts':
+                count_print('Computing report gen metrics with NLI-based labels and CheXpert facts')
+                if use_alternative_chexpert_template:
+                    strings_.append('v1')
+                    def _template_fn(i, j):
+                        return TEMPLATES_CHEXPERT_v1[CHEXPERT_LABELS[i]][j]
+                else:
+                    _template_fn = None
+                _evaluate_interpret_cxr_test_public__nli_based_labels__template_based_report_gen(
+                    pred_labels=pred_labels,
+                    gt_reports=gt_reports_list,
+                    image_paths_list=images_path_list,
+                    results_folder_path=results_folder_path,
+                    label_based_facts=LABEL_BASED_FACTS__CHEXPERT,
+                    max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+                    strings=strings_,
+                    template_fn=_template_fn,
+                )
+            elif labels_kind == 'chexpert_labels':
+                count_print('Computing report gen metrics with CheXpert labels')
+                _evaluate_template_based_report_gen__chexpert_labels(
+                    pred_labels=pred_labels,
+                    gt_reports=gt_reports_list,
+                    image_paths_list=images_path_list,
+                    results_folder_path=results_folder_path,
+                    strings=strings_,
+                    dataset_name='interpret_cxr_test_public',
+                    max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+                )
+            else: assert False
 
         # Compute report gen metrics with NLI-based labels and MIMIC-CXR LT facts
         if eval_mimic_cxr_lt:
@@ -1264,6 +1509,109 @@ def _evaluate_model(
                 max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
                 strings=strings_,
             )
+
+    elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_HIDDEN_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN:
+
+        assert section_mode is not None
+        assert labels_kind is not None
+
+        strings = []
+        strings.append('template')
+        strings.append(section_mode)
+        strings.append(labels_kind)
+
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+        assert labels_kind == 'chexpert_labels'
+
+        if tune_thresholds:
+            mimiccxr_val_image_paths = load_interpret_cxr_mimiccxr_val_image_paths()
+            print(f'len(mimiccxr_val_image_paths) = {len(mimiccxr_val_image_paths)}')
+            chexpert_val_image_paths = load_interpret_cxr_chexpert_val_image_paths()
+            print(f'len(chexpert_val_image_paths) = {len(chexpert_val_image_paths)}')
+            val_image_paths = mimiccxr_val_image_paths + chexpert_val_image_paths
+            print(f'len(val_image_paths) = {len(val_image_paths)}')
+            val_dataset_name = 'interpret_cxr_val__mimiccxr+chexpert'
+                
+            tmp = _compute_thresholds(
+                labels_kind=labels_kind,
+                results_folder_path=results_folder_path,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                max_images_per_batch=max_images_per_batch,
+                max_facts_per_image=max_facts_per_image,
+                num_workers=num_workers,
+                device=device,
+                fact_embedding_model_name=fact_embedding_model_name,
+                fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+                fact_embedding_batch_size=fact_embedding_batch_size,
+                fact_embedding_num_workers=fact_embedding_num_workers,
+                fact_embedding_device=fact_embedding_device,
+                count_print=count_print,
+                image_paths=val_image_paths,
+                dataset_name=val_dataset_name,
+                mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+                mimiccxr_chexpert_labels_filepath=mimiccxr_chexpert_labels_filepath,
+            )
+            strings.append('tuned_thresholds')
+            thresholds = tmp['thresholds']
+        else:
+            thresholds = 0.5 # simple thresholding
+
+        images_path_list = load_interpret_cxr_test_hidden_image_paths(section=section_mode, flattened=False)
+        print('len(images_path_list) =', len(images_path_list))
+
+        image_paths = []
+        for image_paths_ in images_path_list:
+            image_paths.extend(image_paths_)
+        print('len(image_paths) =', len(image_paths))
+        assert len(set(image_paths)) == len(image_paths) # no duplicates
+
+        probs, image_paths = _run_inference_for_label_based_fact_classification_on_images(
+            image_paths=image_paths,
+            checkpoint_folder_path=checkpoint_folder_path,
+            model_kwargs=model_kwargs,
+            val_image_transform_kwargs=val_image_transform_kwargs,
+            max_images_per_batch=max_images_per_batch,
+            max_facts_per_image=max_facts_per_image,
+            num_workers=num_workers,
+            device=device,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+            fact_embedding_device=fact_embedding_device,
+        )
+        image_path_to_idx = {image_path: i for i, image_path in enumerate(image_paths)}
+        assert len(image_path_to_idx) == len(image_paths)
+        
+        # assert labels_kind == 'chexpert_labels'
+        pred_labels = np.empty((len(images_path_list), len(CHEXPERT_LABELS)), dtype=int)
+        chexpert_label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
+        probs = probs[:, chexpert_label_idxs]
+        for i, image_paths_ in enumerate(images_path_list):
+            assert len(image_paths_) > 0
+            image_idxs = [image_path_to_idx[image_path] for image_path in image_paths_]
+            probs_ = probs[image_idxs]
+            probs_ = np.mean(probs_, axis=0)
+            assert probs_.shape == (len(CHEXPERT_LABELS),)
+            pred_labels[i] = (probs_ > thresholds).astype(int)
+
+        print(f'pred_labels.shape = {pred_labels.shape}')
+            
+        assert eval_chexpert_only
+
+        # Generate reports with CheXpert labels
+        strings_ = ['chexpert']
+        strings_.extend(strings)
+        count_print('Generating reports with CheXpert labels')
+        _evaluate_interpret_cxr_test_hidden__chexpert_labels__template_based_report_gen(
+            pred_labels=pred_labels,
+            image_paths_list=images_path_list,
+            results_folder_path=results_folder_path,
+            strings=strings_,
+        )
     
     elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN:
 
@@ -1449,6 +1797,188 @@ def _evaluate_model(
             results_folder_path=results_folder_path,
             strings=strings,
             max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+        )
+
+    elif eval_mode == _EvalModes.INTERPRET_CXR_VAL_LABEL_BASED__CHEXPERT_LABELS__CLASSIF_AND_TEMPLATE_REPORT_GEN:
+
+        assert mimiccxr_chexpert_labels_filepath is not None
+        assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        assert checkpoint_folder_path is not None
+
+        # --- Classification ---
+
+        count_print('Running inference for label-based fact classification on MIMIC-CXR validation subset in Interpret CXR')
+        mimiccxr_image_paths = load_interpret_cxr_mimiccxr_val_image_paths() # flattened
+        print(f'len(mimiccxr_image_paths) = {len(mimiccxr_image_paths)}')
+        
+        mimiccxr_probs, mimiccxr_image_paths = _run_inference_for_label_based_fact_classification_on_images(
+            image_paths=mimiccxr_image_paths,
+            checkpoint_folder_path=checkpoint_folder_path,
+            model_kwargs=model_kwargs,
+            val_image_transform_kwargs=val_image_transform_kwargs,
+            max_images_per_batch=max_images_per_batch,
+            max_facts_per_image=max_facts_per_image,
+            num_workers=num_workers,
+            device=device,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+            fact_embedding_device=fact_embedding_device,
+        )
+        mimiccxr_pred_labels = (mimiccxr_probs > 0.5).astype(int) # simple thresholding
+        mimiccxr_dicom_ids = [os.path.basename(x).split('.')[0] for x in mimiccxr_image_paths]
+
+        count_print('Running inference for label-based fact classification on CheXpert validation subset in Interpret CXR')
+        chexpert_image_paths = load_interpret_cxr_chexpert_val_image_paths() # flattened
+        print(f'len(chexpert_image_paths) = {len(chexpert_image_paths)}')
+
+        chexpert_probs, chexpert_image_paths = _run_inference_for_label_based_fact_classification_on_images(
+            image_paths=chexpert_image_paths,
+            checkpoint_folder_path=checkpoint_folder_path,
+            model_kwargs=model_kwargs,
+            val_image_transform_kwargs=val_image_transform_kwargs,
+            max_images_per_batch=max_images_per_batch,
+            max_facts_per_image=max_facts_per_image,
+            num_workers=num_workers,
+            device=device,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+            fact_embedding_device=fact_embedding_device,
+        )
+        chexpert_pred_labels = (chexpert_probs > 0.5).astype(int) # simple thresholding
+
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+        strings = []
+        strings.append('chexpert_labels')
+
+        # Compute classification metrics for MIMIC-CXR
+
+        count_print('Computing metrics with CheXpert labels on MIMIC-CXR validation subset in Interpret CXR')
+        _evaluate_mimiccxr_chexpert_fact_classification(
+            probs=mimiccxr_probs,
+            pred_labels=mimiccxr_pred_labels,
+            chexpert_labels_filepath=mimiccxr_chexpert_labels_filepath,
+            dicom_ids=mimiccxr_dicom_ids,
+            results_folder_path=results_folder_path,
+            strings=strings,
+            dataset_name='interpret_cxr_val__mimiccxr',
+        )
+
+        count_print('Computing metrics with NLI-based labels and CheXpert facts on MIMIC-CXR validation subset in Interpret CXR')
+        _evaluate_mimiccxr_nli_based_labels_fact_classification(
+            probs=mimiccxr_probs,
+            pred_labels=mimiccxr_pred_labels,
+            dicom_ids=mimiccxr_dicom_ids,
+            results_folder_path=results_folder_path,
+            label_based_facts=LABEL_BASED_FACTS__CHEXPERT,
+            label_group_name='chexpert',
+            mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+            strings=strings,
+            dataset_name='interpret_cxr_val__mimiccxr',
+        )
+
+        # Compute classification metrics for CheXpert dataset
+
+        count_print('Computing metrics with CheXpert labels on CheXpert validation subset in Interpret CXR')
+        _evaluate_chexpert_dataset_chexpert_fact_classification(
+            probs=chexpert_probs,
+            pred_labels=chexpert_pred_labels,
+            image_paths=chexpert_image_paths,
+            results_folder_path=results_folder_path,
+            strings=strings,
+            dataset_name='interpret_cxr_val__chexpert',
+        )
+
+        # --- Template-based report generation ---
+
+        def _merge_findings_and_impression(findings, impression):
+            report = ''
+            if findings:
+                report += findings
+            if impression:
+                if report:
+                    if report[-1] != '.':
+                        report += '. '
+                    else:
+                        report += ' '
+                report += impression
+            return report
+        
+        def _clean_report(report):
+            report = report.lower()
+            report = ' '.join(wordpunct_tokenize(report))
+            return report
+
+        label_idxs = [LABEL_BASED_FACTS.index(fact) for fact in LABEL_BASED_FACTS__CHEXPERT]
+        mimiccxr_pred_labels = mimiccxr_pred_labels[:, label_idxs]
+        chexpert_pred_labels = chexpert_pred_labels[:, label_idxs]
+        print(f'mimiccxr_pred_labels.shape = {mimiccxr_pred_labels.shape}')
+        print(f'chexpert_pred_labels.shape = {chexpert_pred_labels.shape}')
+
+        # Compute report gen metrics for MIMIC-CXR
+        count_print('Computing report gen metrics with CheXpert labels on MIMIC-CXR validation subset in Interpret CXR')
+        
+        mimiccxr_image_paths_list, mimiccxr_findings, mimiccxr_impressions =\
+            load_interpret_cxr_mimiccxr_val_image_paths_and_reports()
+        print(f'len(mimiccxr_image_paths_list) = {len(mimiccxr_image_paths_list)}')
+        mimiccxr_reports = [_merge_findings_and_impression(f, i) for f, i in zip(mimiccxr_findings, mimiccxr_impressions)]
+        non_empty_idxs = [i for i, report in enumerate(mimiccxr_reports) if report]
+        mimiccxr_image_paths_list = [mimiccxr_image_paths_list[i] for i in non_empty_idxs]
+        mimiccxr_reports = [mimiccxr_reports[i] for i in non_empty_idxs]
+        mimiccxr_reports = [_clean_report(report) for report in mimiccxr_reports]
+        print(f'After removing empty reports: len(mimiccxr_image_paths_list) = {len(mimiccxr_image_paths_list)}')
+        
+        mimiccxr_image_path_to_idx = {image_path: i for i, image_path in enumerate(mimiccxr_image_paths)}
+        mimiccxr_aggregate_pred_labels = np.zeros((len(mimiccxr_image_paths_list), len(LABEL_BASED_FACTS__CHEXPERT)), dtype=int)
+        for i, image_paths_ in enumerate(mimiccxr_image_paths_list):
+            assert len(image_paths_) > 0
+            image_idxs = [mimiccxr_image_path_to_idx[image_path] for image_path in image_paths_]
+            mimiccxr_aggregate_pred_labels[i] = np.max(mimiccxr_pred_labels[image_idxs], axis=0)
+
+        _evaluate_template_based_report_gen__chexpert_labels(
+            pred_labels=mimiccxr_aggregate_pred_labels,
+            gt_reports=mimiccxr_reports,
+            image_paths_list=mimiccxr_image_paths_list,
+            results_folder_path=results_folder_path,
+            strings=strings,
+            dataset_name='interpret_cxr_val__mimiccxr',
+            max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+            report_cleanup_fn=_clean_report,
+        )
+
+        # Compute report gen metrics for CheXpert dataset
+        count_print('Computing report gen metrics with CheXpert labels on CheXpert validation subset in Interpret CXR')
+
+        chexpert_image_paths_list, chexpert_findings, chexpert_impressions =\
+            load_interpret_cxr_chexpert_val_image_paths_and_reports()
+        print(f'len(chexpert_image_paths_list) = {len(chexpert_image_paths_list)}')
+        chexpert_reports = [_merge_findings_and_impression(f, i) for f, i in zip(chexpert_findings, chexpert_impressions)]
+        non_empty_idxs = [i for i, report in enumerate(chexpert_reports) if report]
+        chexpert_image_paths_list = [chexpert_image_paths_list[i] for i in non_empty_idxs]
+        chexpert_reports = [chexpert_reports[i] for i in non_empty_idxs]
+        chexpert_reports = [_clean_report(report) for report in chexpert_reports]
+        print(f'After removing empty reports: len(chexpert_image_paths_list) = {len(chexpert_image_paths_list)}')
+
+        chexpert_image_path_to_idx = {image_path: i for i, image_path in enumerate(chexpert_image_paths)}
+        chexpert_aggregate_pred_labels = np.zeros((len(chexpert_image_paths_list), len(CHEXPERT_LABELS)), dtype=int)
+        for i, image_paths_ in enumerate(chexpert_image_paths_list):
+            assert len(image_paths_) > 0
+            image_idxs = [chexpert_image_path_to_idx[image_path] for image_path in image_paths_]
+            chexpert_aggregate_pred_labels[i] = np.max(chexpert_pred_labels[image_idxs], axis=0)
+
+        _evaluate_template_based_report_gen__chexpert_labels(
+            pred_labels=chexpert_aggregate_pred_labels,
+            gt_reports=chexpert_reports,
+            image_paths_list=chexpert_image_paths_list,
+            results_folder_path=results_folder_path,
+            strings=strings,
+            dataset_name='interpret_cxr_val__chexpert',
+            max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
+            report_cleanup_fn=_clean_report,
         )
 
     elif eval_mode == _EvalModes.INTERPRET_CXR_COMPUTE_AND_SAVE_LABEL_BASED_PREDICTIONS:
@@ -1983,7 +2513,6 @@ def _find_most_similar_report_images(query_probs, query_features, dataset_probs,
     most_similar_score = group_max_scores[most_similar_idx]
     return most_similar_idx, most_similar_score
 
-
 def plot_label_based_metrics(metrics_path, label_based_facts, dicom_id_to_pos_neg_facts_filepath, metric_prefix, figsize):
     metrics = load_pickle(metrics_path)
     assert all(fact in LABEL_BASED_FACTS for fact in label_based_facts)
@@ -2141,7 +2670,7 @@ def evaluate(
     fact_embedding_batch_size,
     fact_embedding_num_workers,
     fact_embedding_device,
-    chexpert_labels_filepath,
+    mimiccxr_chexpert_labels_filepath,
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
@@ -2161,6 +2690,7 @@ def evaluate(
     interpret_cxr_label_based_predictions_filepath,
     interpret_cxr_public_test_set_source_predictions_filepath,
     max_processes_for_similarity_based_report_retrieval,
+    labels_kind,
 ):
     print_blue('----- Evaluating model -----', bold=True)
 
@@ -2186,7 +2716,7 @@ def evaluate(
         fact_embedding_batch_size=fact_embedding_batch_size,
         fact_embedding_num_workers=fact_embedding_num_workers,
         fact_embedding_device=fact_embedding_device,
-        chexpert_labels_filepath=chexpert_labels_filepath,
+        mimiccxr_chexpert_labels_filepath=mimiccxr_chexpert_labels_filepath,
         chest_imagenome_label_names_filepath=chest_imagenome_label_names_filepath,
         chest_imagenome_image_id_to_labels_filepath=chest_imagenome_image_id_to_labels_filepath,
         mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
@@ -2206,6 +2736,7 @@ def evaluate(
         interpret_cxr_label_based_predictions_filepath=interpret_cxr_label_based_predictions_filepath,
         interpret_cxr_public_test_set_source_predictions_filepath=interpret_cxr_public_test_set_source_predictions_filepath,
         max_processes_for_similarity_based_report_retrieval=max_processes_for_similarity_based_report_retrieval,
+        labels_kind=labels_kind,
     )
 
 if __name__ == '__main__':

@@ -9,10 +9,11 @@ import os  # for reading API key
 import re  # for matching endpoint from request URL
 import tiktoken  # for counting tokens
 import time  # for sleeping after rate limit is hit
+import random  # for sampling error messages
 from dataclasses import dataclass, field
 
 from medvqa.utils.common import get_timestamp
-from medvqa.utils.files import load_jsonl, save_jsonl  # for storing API inputs, outputs, and metadata
+from medvqa.utils.files import load_jsonl, load_pickle, save_jsonl, save_pickle  # for storing API inputs, outputs, and metadata
 
 __all__ = [
     "process_api_requests_from_file",
@@ -28,6 +29,7 @@ _ALLOWED_GPT_CHAT_MODELS = (
     "gpt-4",
     "gpt-4-0613",
     "gpt-4-1106-preview",
+    "gpt-4o",
 )
 
 GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
@@ -44,6 +46,14 @@ def process_api_requests_from_file(
     logging_level: int = logging.INFO,
     log_info_every_n_requests: int = 100,
 ):
+    assert os.path.exists(requests_filepath), f"API requests file {requests_filepath} does not exist"
+    assert api_key is not None, "API key must be provided"
+    assert request_url is not None, "Request URL must be provided"
+    assert max_requests_per_minute is not None, "Max requests per minute must be provided"
+    assert max_tokens_per_minute is not None, "Max tokens per minute must be provided"
+    assert token_encoding_name is not None, "Token encoding name must be provided"
+    assert max_attempts is not None, "Max attempts must be provided"
+
     if save_filepath is None:
         save_filepath = requests_filepath.replace(".jsonl", "_results.jsonl")
 
@@ -85,52 +95,207 @@ def _generate_request(system_instructions, query, model_name, max_tokens,
         },
     }
 
+# Based on https://platform.openai.com/docs/guides/batch/getting-started
+def _generate_batch_request(custom_id, model_name, system_instructions, query, max_tokens,
+                            temperature=0.0, frequency_penalty=0.0, presence_penalty=0.0):
+    assert len(system_instructions) > 0
+    assert len(query) > 0
+    assert model_name in _ALLOWED_GPT_CHAT_MODELS, f"Unknown model name: {model_name}"
+    return {
+        "custom_id": custom_id,
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_instructions,
+                },
+                {
+                    "role": "user",
+                    "content": query,
+                },
+            ],
+            "temperature": temperature,
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+            "max_tokens": max_tokens,
+        },
+    }
+
 def run_common_boilerplate_for_api_requests(
         api_responses_filepath,
         texts, system_instructions, api_key_name, openai_model_name, openai_request_url,
         max_tokens_per_request, max_requests_per_minute, max_tokens_per_minute,
         temperature, frequency_penalty, presence_penalty,
-        logger, logging_level, parse_openai_output, tmp_dir,save_filepath,
+        logger, logging_level, parse_openai_output, tmp_dir, save_filepath,
         delete_api_requests_and_responses=True,
+        use_batch_api=False,
+        batch_description=None,
+        batch_input_file_id=None,
         ):
     """Runs common boilerplate for API requests."""
 
     if api_responses_filepath is None:
-    
-        # Prepare API requests
-        jobs = []
-        for text in texts:
-            jobs.append(_generate_request(
-                system_instructions=system_instructions,
-                query=text,
-                model_name=openai_model_name,
-                max_tokens=max_tokens_per_request,
-                temperature=temperature,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-            ))
-            assert 'metadata' in jobs[-1]
-        
-        timestamp = get_timestamp()
-        api_requests_filepath = os.path.join(tmp_dir, "openai", f"api_requests_{timestamp}.jsonl")
-        api_responses_filepath = os.path.join(tmp_dir, "openai", f"api_responses_{timestamp}.jsonl")
-        logger.info(f"Saving API requests to {api_requests_filepath}")
-        logger.info(f"Saving API responses to {api_responses_filepath}")
-        save_jsonl(jobs, api_requests_filepath)
 
-        # Send API requests
-        process_api_requests_from_file(
-            requests_filepath=api_requests_filepath,
-            save_filepath=api_responses_filepath,
-            request_url=openai_request_url,
-            api_key=os.getenv(api_key_name),
-            max_requests_per_minute=max_requests_per_minute,
-            max_tokens_per_minute=max_tokens_per_minute,
-            token_encoding_name=tiktoken.encoding_for_model(openai_model_name).name,
-            max_attempts=5,
-            logging_level=logging_level,
-            log_info_every_n_requests=50,
-        )
+        if use_batch_api:
+            
+            if batch_input_file_id is not None:
+                batch_object_filepath = os.path.join(tmp_dir, "openai", "batch_api", f"{batch_input_file_id}.pkl")
+                assert os.path.exists(batch_object_filepath), f"Batch object file {batch_object_filepath} does not exist"
+                logger.info(f"Checking status of batch with input file ID {batch_input_file_id}")
+                
+                batch_object = load_pickle(batch_object_filepath)
+                logger.info(f"Batch object: {batch_object}")
+                
+                # We need to check the status of an existing batch already created through the API
+                from openai import OpenAI
+                client = OpenAI(api_key=os.getenv(api_key_name))
+                batch = client.batches.retrieve(batch_object.id)
+                logger.info(f"Batch: {batch}")
+                logger.info(f"Batch status: {batch.status}")
+                
+                if batch.status == 'completed':
+                    logger.info(f"Batch with input file ID {batch_input_file_id} is completed")
+
+                    logger.info(f"Retrieving batch input file ID {batch.input_file_id}")
+                    input_content = client.files.content(batch.input_file_id)
+                    custom_id_to_metadata = {}
+                    for line in input_content.iter_lines():
+                        api_request = json.loads(line)
+                        custom_id = api_request['custom_id']
+                        query = api_request['body']['messages'][1]['content']
+                        metadata = { "query": query }
+                        custom_id_to_metadata[custom_id] = metadata
+                    logger.info(f"Retrieved metadata for {len(custom_id_to_metadata)} queries")
+
+                    logger.info(f"Retrieving batch output file ID {batch.output_file_id}")
+                    output_content = client.files.content(batch.output_file_id)
+                    postprocessed_responses = []
+                    api_responses = []
+                    error_messages = []
+                    for line in output_content.iter_lines():
+                        api_response = json.loads(line)
+                        api_responses.append(api_response)
+                        try:
+                            # text = api_response[1]['choices'][0]['message']['content']
+                            custom_id = api_response['custom_id']
+                            text = api_response['response']['body']['choices'][0]['message']['content']
+                            parsed_output = parse_openai_output(text)
+                            metadata = custom_id_to_metadata[custom_id]
+                            postprocessed_responses.append({
+                                "metadata": metadata,
+                                "parsed_response": parsed_output,
+                            })
+                        except Exception as e:
+                            api_response_string = json.dumps(api_response)
+                            error_messages.append(f"Error parsing response {api_response_string} for query \"{metadata['query']}\": {e}")
+                            continue
+                    if len(error_messages) > 0:
+                        logger.error(f"{len(error_messages)} error messages occurred while parsing responses")
+                        # sample 5 error messages
+                        for i in random.sample(range(len(error_messages)), min(5, len(error_messages))):
+                            logger.error(error_messages[i])
+                    if len(postprocessed_responses) == 0:
+                        logger.warning(f"None of the {len(api_responses)} API responses could be parsed. Exiting.")
+                    else:
+                        # Save processed texts by appending to existing file
+                        n_processed = len(postprocessed_responses)
+                        n_total = len(api_responses)
+                        logger.info(f"""Succesfully processed {n_processed} of {n_total} API responses.
+                                    {n_total - n_processed} of {n_total} API responses could not be processed.
+                                    Saving processed texts to {save_filepath}""")
+                        save_jsonl(postprocessed_responses, save_filepath, append=True)
+
+                return # We are done with the batch API
+            
+            else:
+                # Check if batch_description is provided
+                assert batch_description is not None, "batch_description must be provided when use_batch_api is True"
+                
+                # Prepare API requests
+                jobs = []
+                for i, text in enumerate(texts):
+                    jobs.append(_generate_batch_request(
+                        custom_id=str(i),
+                        model_name=openai_model_name,
+                        system_instructions=system_instructions,
+                        query=text,
+                        max_tokens=max_tokens_per_request,
+                        temperature=temperature,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty,
+                    ))
+                timestamp = get_timestamp()
+                batch_api_requests_filepath = os.path.join(tmp_dir, "openai", f"batch_api_requests_{timestamp}.jsonl")
+                logger.info(f"Saving batch API requests to {batch_api_requests_filepath}")
+                save_jsonl(jobs, batch_api_requests_filepath)
+
+                from openai import OpenAI
+                client = OpenAI(api_key=os.getenv(api_key_name))
+                batch_input_file = client.files.create(
+                    file=open(batch_api_requests_filepath, "rb"),
+                    purpose="batch"
+                )
+                batch_input_file_id = batch_input_file.id
+                logger.info(f"Creating batch with input file ID {batch_input_file_id}")
+
+                batch_object =client.batches.create(
+                    input_file_id=batch_input_file_id,
+                    endpoint="/v1/chat/completions",
+                    completion_window="24h",
+                    metadata={
+                        "description": batch_description,
+                    },
+                )
+                logger.info(f"Batch object: {batch_object}")
+                batch_object_filepath = os.path.join(tmp_dir, "openai", "batch_api", f"{batch_input_file_id}.pkl")
+                logger.info(f"Saving batch object to {batch_object_filepath}")
+                save_pickle(batch_object, batch_object_filepath)
+
+                # Delete batch API requests
+                if delete_api_requests_and_responses:
+                    logger.info(f"Deleting batch API requests at {batch_api_requests_filepath}")
+                    os.remove(batch_api_requests_filepath)
+
+                return # Exit early, because batch API requests are asynchronous
+        
+        else:
+            # Prepare API requests
+            jobs = []
+            for text in texts:
+                jobs.append(_generate_request(
+                    system_instructions=system_instructions,
+                    query=text,
+                    model_name=openai_model_name,
+                    max_tokens=max_tokens_per_request,
+                    temperature=temperature,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty,
+                ))
+                assert 'metadata' in jobs[-1]
+            
+            timestamp = get_timestamp()
+            api_requests_filepath = os.path.join(tmp_dir, "openai", f"api_requests_{timestamp}.jsonl")
+            api_responses_filepath = os.path.join(tmp_dir, "openai", f"api_responses_{timestamp}.jsonl")
+            logger.info(f"Saving API requests to {api_requests_filepath}")
+            logger.info(f"Saving API responses to {api_responses_filepath}")
+            save_jsonl(jobs, api_requests_filepath)
+
+            # Send API requests
+            process_api_requests_from_file(
+                requests_filepath=api_requests_filepath,
+                save_filepath=api_responses_filepath,
+                request_url=openai_request_url,
+                api_key=os.getenv(api_key_name),
+                max_requests_per_minute=max_requests_per_minute,
+                max_tokens_per_minute=max_tokens_per_minute,
+                token_encoding_name=tiktoken.encoding_for_model(openai_model_name).name,
+                max_attempts=5,
+                logging_level=logging_level,
+                log_info_every_n_requests=50,
+            )
 
     else:
         assert os.path.exists(api_responses_filepath), f"API responses file {api_responses_filepath} does not exist"
@@ -182,7 +347,6 @@ def run_common_boilerplate_for_api_requests(
                     {n_total - n_processed} of {n_total} API responses could not be processed.
                     Saving processed texts to {save_filepath}""")
         save_jsonl(postprocessed_responses, save_filepath, append=True)
-
 
 async def __process_api_requests_from_file(
     requests_filepath: str,

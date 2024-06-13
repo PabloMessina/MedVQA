@@ -11,7 +11,7 @@ from medvqa.models.huggingface_utils import (
 
 load_dotenv()
 T5_FACT_EXTRACTOR_DEFAULT_MODEL_NAME = os.environ['T5_FACT_EXTRACTOR_DEFAULT_MODEL_NAME']
-T5_FACT_EXTRACTOR_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH = os.environ['T5_FACT_EXTRACTOR_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH']
+T5_FACT_EXTRACTOR_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH = os.environ['T5_FACT_EXTRACTOR_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH_v2']
 FACT_EMBEDDING_DEFAULT_MODEL_NAME = os.environ['FACT_EMBEDDING_DEFAULT_MODEL_NAME']
 FACT_EMBEDDING_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH = os.environ['FACT_EMBEDDING_DEFAULT_MODEL_CHECKPOINT_FOLDER_PATH_v4']
 
@@ -82,7 +82,8 @@ class FactEmbeddingScorer:
         self.verbose = verbose
         self.threshold = threshold
 
-    def __call__(self, gen_reports, gt_reports, update_cache_on_disk=False, return_avg_score=True, only_soft_score=False):
+    def __call__(self, gen_reports, gt_reports, update_cache_on_disk=False, return_avg_score=True, only_soft_score=False,
+                 skip_cache=False):
         assert type(gen_reports) in [list, tuple, np.ndarray]
         assert type(gt_reports) in [list, tuple, np.ndarray]
         assert len(gen_reports) == len(gt_reports)
@@ -92,9 +93,9 @@ class FactEmbeddingScorer:
 
         facts = []
         f2idx = {}
-
+            
         gen_facts_list = self.t5_fact_extractor(
-              gen_reports, update_cache_on_disk=update_cache_on_disk) # list of list of facts
+            gen_reports, update_cache_on_disk=update_cache_on_disk, skip_cache=skip_cache) # list of list of facts
         gen_fact_idxs_list = [None] * len(gen_facts_list)
         for i, gen_facts in enumerate(gen_facts_list):
             for f in gen_facts:
@@ -105,7 +106,7 @@ class FactEmbeddingScorer:
             gen_fact_idxs_list[i] = gen_fact_idxs
         
         gt_facts_list = self.t5_fact_extractor(
-                gt_reports, update_cache_on_disk=update_cache_on_disk) # list of list of facts
+            gt_reports, update_cache_on_disk=update_cache_on_disk, skip_cache=skip_cache) # list of list of facts
         gt_fact_idxs_list = [None] * len(gt_facts_list)
         for i, gt_facts in enumerate(gt_facts_list):
             for f in gt_facts:

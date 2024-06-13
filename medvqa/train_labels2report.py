@@ -64,7 +64,7 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
     get_results_folder_path,
     load_pickle,
-    save_to_pickle,
+    save_pickle,
 )
 from medvqa.training.labels2report import get_engine
 from medvqa.training.vision import get_engine as get_vision_engine
@@ -372,7 +372,7 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
                     'pred_chexpert_probs': pred_chexpert_probs,
                     'dicom_ids': [mimiccxr_trainer.dicom_ids[i] for i in inference_engine.state.metrics['idxs']],
                 }
-                save_to_pickle(data, precomputed_chexpert_sigmoids_path)
+                save_pickle(data, precomputed_chexpert_sigmoids_path)
                 print_magenta(f'Saved to {precomputed_chexpert_sigmoids_path}', bold=True)
                 output[k]['chexpert_sigmoids_path'] = precomputed_chexpert_sigmoids_path
 
@@ -390,7 +390,7 @@ def _precompute_sigmoids_for_ensemble(model_folder_paths, classify_chexpert, cla
                     'pred_chest_imagenome_probs': pred_chest_imagenome_probs,
                     'dicom_ids': [mimiccxr_trainer.dicom_ids[i] for i in inference_engine.state.metrics['idxs']],
                 }
-                save_to_pickle(data, precomputed_chest_imagenome_sigmoids_path)
+                save_pickle(data, precomputed_chest_imagenome_sigmoids_path)
                 print_magenta(f'Saved to {precomputed_chest_imagenome_sigmoids_path}', bold=True)
                 output[k]['chest_imagenome_sigmoids_path'] = precomputed_chest_imagenome_sigmoids_path
 
@@ -549,7 +549,7 @@ def _precompute_filtered_labels_for_ensemble(model_folder_paths, classify_chexpe
                                                            label_score_threshold, 'f1')
             output[k]['chexpert_indices_path'] = save_path
             output[k]['chexpert_num_indices'] = len(top_k_label_indices)
-            save_to_pickle(top_k_label_indices, save_path)
+            save_pickle(top_k_label_indices, save_path)
         if classify_chest_imagenome:
             dicom_id_to_pred_chest_imagenome_probs = tmp['dicom_id_to_pred_chest_imagenome_probs']
             dicom_id_to_gt_chest_imagenome_labels = tmp['dicom_id_to_gt_chest_imagenome_labels']
@@ -566,7 +566,7 @@ def _precompute_filtered_labels_for_ensemble(model_folder_paths, classify_chexpe
                                                            label_score_threshold, 'f1')
             output[k]['chest_imagenome_indices_path'] = save_path
             output[k]['chest_imagenome_num_indices'] = len(top_k_label_indices)
-            save_to_pickle(top_k_label_indices, save_path)
+            save_pickle(top_k_label_indices, save_path)
     
     return output
 

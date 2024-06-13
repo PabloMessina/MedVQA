@@ -13,6 +13,7 @@ from medvqa.utils.nlp import sort_sentences
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
+    load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
 from medvqa.utils.files import load_json, load_jsonl
@@ -144,8 +145,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--api_responses_filepath", type=str, default=None)
+    parser.add_argument("--batch_input_file_id", type=str, default=None)
     parser.add_argument("--preprocessed_sentences_to_skip_filepaths", nargs="+", default=None)    
-    parser.add_argument("--preprocessed_reports_filepath", type=str, required=True)
+    parser.add_argument("--preprocessed_reports_filepath", type=str)
     
     parser.add_argument("--cxr_bert_model_name", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized")
     parser.add_argument("--cxr_bert_checkpoint_folder_path", type=str, default=None)
@@ -154,23 +156,26 @@ if __name__ == '__main__':
     parser.add_argument("--num_clusters", type=int, default=200)
     parser.add_argument("--num_iterations", type=int, default=300)
 
-    parser.add_argument("--offset", type=int, required=True)
-    parser.add_argument("--num_sentences", type=int, required=True)
+    parser.add_argument("--offset", type=int, default=None)
+    parser.add_argument("--num_sentences", type=int, default=None)
     parser.add_argument("--rank_sentences_by_difficulty", action="store_true", default=False)
     parser.add_argument("--sample_sentences_uniformly", action="store_true", default=False)
     parser.add_argument("--process_kth_of_every_n_sentences", type=int, nargs=2, default=None,
                         help="If specified, only process the kth of every n sentences.")
     parser.add_argument("--only_conditional_sentences", action="store_true", default=False)
+    parser.add_argument("--use_test_set_sentences", action="store_true", default=False)
 
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--openai_request_url", type=str, default="https://api.openai.com/v1/chat/completions")
     parser.add_argument("--api_key_name", type=str, default="OPENAI_API_KEY")
-    parser.add_argument("--max_requests_per_minute", type=int, required=True)
-    parser.add_argument("--max_tokens_per_minute", type=int, required=True)
-    parser.add_argument("--max_tokens_per_request", type=int, required=True)
+    parser.add_argument("--max_requests_per_minute", type=int, default=None)
+    parser.add_argument("--max_tokens_per_minute", type=int, default=None)
+    parser.add_argument("--max_tokens_per_request", type=int, default=None)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--alias", type=str, default="")
+    parser.add_argument("--use_batch_api", action="store_true", default=False)
+    parser.add_argument("--batch_description", type=str, default=None)
     args = parser.parse_args()
 
     processed_sentences_save_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_facts_from_sentences{args.alias}.jsonl")
@@ -178,7 +183,7 @@ if __name__ == '__main__':
     # Set up logging
     logger = get_console_logger(args.logging_level)
 
-    if args.api_responses_filepath is None:
+    if args.api_responses_filepath is None and args.batch_input_file_id is None:
 
         # Load already processed sentences if they exist
         already_processed = set()
@@ -192,20 +197,34 @@ if __name__ == '__main__':
         unique_sentences = set()
         assert os.path.exists(args.preprocessed_reports_filepath)
         logger.info(f"Loading preprocessed reports from {args.preprocessed_reports_filepath}")
-        reports = load_json(args.preprocessed_reports_filepath)
-        texts = []
-        for r in reports:
-            impression = r['impression']
-            findings = r['findings']
-            if len(impression) > 0:
-                texts.append(impression)
-            if len(findings) > 0:
-                texts.append(findings)
+        if args.use_test_set_sentences:
+            data = load_mimiccxr_reports_detailed_metadata(
+                background_findings_and_impression_per_report_filepath=args.preprocessed_reports_filepath
+            )
+            reports = load_json(args.preprocessed_reports_filepath)
+            texts = []
+            for findings, impression, split in zip(data['findings'], data['impressions'], data['splits']):
+                if split == 'test':
+                    if len(impression) > 0:
+                        texts.append(impression)
+                    if len(findings) > 0:
+                        texts.append(findings)
+            logger.info(f"Loaded {len(texts)} texts from MIMIC-CXR test set")
+        else:
+            reports = load_json(args.preprocessed_reports_filepath)
+            texts = []
+            for r in reports:
+                impression = r['impression']
+                findings = r['findings']
+                if len(impression) > 0:
+                    texts.append(impression)
+                if len(findings) > 0:
+                    texts.append(findings)
+            logger.info(f"Loaded {len(texts)} texts from reports")
         sentences_list = sentence_tokenize_texts_in_parallel(texts)
         for sentences in sentences_list:
             for sentence in sentences:
                 unique_sentences.add(sentence)
-        logger.info(f"Loaded {len(reports)} reports from {args.preprocessed_reports_filepath}")
         logger.info(f"Found {len(unique_sentences)} unique sentences in reports")
         assert len(unique_sentences) > 0
 
@@ -213,32 +232,33 @@ if __name__ == '__main__':
         unique_sentences = list(unique_sentences)
         unique_sentences = sort_sentences(unique_sentences, logger, args.rank_sentences_by_difficulty, cache_ranking=True)
 
-        # Obtain kmeans cluster labels for sentences
-        emb_extractor = CachedTextEmbeddingExtractor(
-            model_name=args.cxr_bert_model_name,
-            model_checkpoint_folder_path=args.cxr_bert_checkpoint_folder_path,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-        )
-        kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, num_clusters=args.num_clusters, num_iterations=args.num_iterations)
-        assert len(kmeans_labels) == len(unique_sentences)
-        label2idxs = {}
-        for i, label in enumerate(kmeans_labels):
-            if label not in label2idxs:
-                label2idxs[label] = []
-            label2idxs[label].append(i)
-        # sort clusters by size
-        sorted_idx_clusters = sorted(list(label2idxs.values()), key=lambda x: len(x), reverse=True)
-        # flatten clusters into a list of indices, alternating between clusters
-        sorted_indices = []
-        for i in range(len(sorted_idx_clusters[0])):
-            for cluster in sorted_idx_clusters:
-                if i < len(cluster):
-                    sorted_indices.append(cluster[i])
-                else:
-                    break
-        assert len(sorted_indices) == len(unique_sentences), f"len(sorted_indices)={len(sorted_indices)} != len(unique_sentences)={len(unique_sentences)}"
-        unique_sentences = [unique_sentences[i] for i in sorted_indices]
+        if not args.use_test_set_sentences:
+            # Obtain kmeans cluster labels for sentences
+            emb_extractor = CachedTextEmbeddingExtractor(
+                model_name=args.cxr_bert_model_name,
+                model_checkpoint_folder_path=args.cxr_bert_checkpoint_folder_path,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+            )
+            kmeans_labels = emb_extractor.compute_kmeans_labels(unique_sentences, num_clusters=args.num_clusters, num_iterations=args.num_iterations)
+            assert len(kmeans_labels) == len(unique_sentences)
+            label2idxs = {}
+            for i, label in enumerate(kmeans_labels):
+                if label not in label2idxs:
+                    label2idxs[label] = []
+                label2idxs[label].append(i)
+            # sort clusters by size
+            sorted_idx_clusters = sorted(list(label2idxs.values()), key=lambda x: len(x), reverse=True)
+            # flatten clusters into a list of indices, alternating between clusters
+            sorted_indices = []
+            for i in range(len(sorted_idx_clusters[0])):
+                for cluster in sorted_idx_clusters:
+                    if i < len(cluster):
+                        sorted_indices.append(cluster[i])
+                    else:
+                        break
+            assert len(sorted_indices) == len(unique_sentences), f"len(sorted_indices)={len(sorted_indices)} != len(unique_sentences)={len(unique_sentences)}"
+            unique_sentences = [unique_sentences[i] for i in sorted_indices]
         
         # Print example sentences
         logger.info(f"Example sentences (immediately after clustering-based sorting):")
@@ -312,7 +332,8 @@ if __name__ == '__main__':
             logger.info(f"{i+1}. {sentences_to_process[i]}")
 
     else:
-        assert os.path.exists(args.api_responses_filepath)
+        if args.api_responses_filepath is not None:
+            assert os.path.exists(args.api_responses_filepath)
         sentences_to_process = None
 
     # Run OpenAI API requests
@@ -334,4 +355,7 @@ if __name__ == '__main__':
         parse_openai_output=parse_openai_model_output,
         tmp_dir=MIMICCXR_FAST_TMP_DIR,
         save_filepath=processed_sentences_save_filepath,
+        use_batch_api=args.use_batch_api,
+        batch_description=args.batch_description,
+        batch_input_file_id=args.batch_input_file_id,
     )

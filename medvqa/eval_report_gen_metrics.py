@@ -15,7 +15,7 @@ from medvqa.evaluation.ranking_evaluation_utils import load_mimiccxr_custom_radi
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.metrics.medical.fact_embedding import FactEmbeddingScorer
-from medvqa.metrics.medical.radgraph import RadGraphLabeler
+from medvqa.metrics.medical.radgraph import RadGraphLabeler, RadGraphLabelerOriginal
 from medvqa.metrics.nlp.cider import CiderD
 from medvqa.metrics.nlp.meteor import Meteor
 from medvqa.metrics.nlp.rouge import RougeL
@@ -52,7 +52,7 @@ def cache_matrix_to_file(alias, uses_sentences=True, uses_labels=False, uses_obs
                 n2, m2 = anat_labels.shape
                 cache_filepath = os.path.join(LARGE_FAST_CACHE_DIR, f'score_matrix({alias},{n1},{m1},{n2},{m2}).pkl')
             else:
-                raise ValueError('Either uses_sentences or uses_labels must be True')
+                cache_filepath = os.path.join(LARGE_FAST_CACHE_DIR, f'score_matrix({alias}).pkl')
             matrix = load_pickle(cache_filepath)
             if matrix is None:
                 start = time.time()
@@ -243,6 +243,21 @@ def compute_chest_imagenome_gold_contradiction_matrix(obs_labels):
         contradiction_matrix[j, i] = c
     return contradiction_matrix
 
+@cache_matrix_to_file('iuxray_gold_tags_jaccard', uses_sentences=False)
+def compute_iuxray_gold_tags_jaccard_matrix(tag_sets):
+    print_bold('Computing gold jaccard index between each pair of sentences')
+    n = len(tag_sets)
+    args = [(i, j) for i in range(n) for j in range(i, n)]
+    global _sets
+    _sets = tag_sets
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        jaccards = pool.map(_compute_jaccard, args)
+    jaccard_matrix = np.zeros((n, n))
+    for (i, j), rel in zip(args, jaccards):
+        jaccard_matrix[i, j] = rel
+        jaccard_matrix[j, i] = rel
+    return jaccard_matrix
+
 @cache_matrix_to_file('custom_mimiccxr_radiologist_annotations_relevance', uses_sentences=False, uses_labels=True)
 def compute_custom_mimiccxr_radiologist_annotations_relevance_matrix(labels):
     print_bold('Computing custom MIMIC-CXR radiologist annotations relevance between each pair of sentences')
@@ -346,6 +361,8 @@ def compute_rougel_score_matrix(sentences):
 def compute_meteor_score_matrix(sentences):
     print_bold('Computing METEOR score between each pair of sentences')
     tokenized_sentences = word_tokenize_texts_in_parallel(sentences)
+    # for s, ts in zip(sentences, tokenized_sentences):
+    #     assert len(ts) > 0, f'Failed to tokenize sentence: {s} (tokenized: {ts})'
     return _compute_score_matrix(tokenized_sentences, _compute_meteor_score_for_row)
 
 @cache_matrix_to_file('ciderd')
@@ -354,8 +371,9 @@ def compute_ciderd_score_matrix(sentences):
     return _compute_score_matrix(sentences, _compute_ciderd_score_for_row)
 
 def _compute_bertscore_scores(gen_texts, gt_texts):
-    from bert_score import score as bert_score
-    _, _, F1 = bert_score(gen_texts, gt_texts, lang='en', verbose=True, use_fast_tokenizer=True)
+    # from bert_score import score as bert_score
+    from medvqa.metrics.nlp.bertscore import BertScore
+    _, _, F1 = BertScore()(gt_texts, gen_texts)
     return F1.cpu().numpy()
 
 @cache_matrix_to_file('bertscore')
@@ -495,6 +513,18 @@ def _compute_radgraph_f1_scores(gen_texts, gt_texts):
         f1s[i] = f1_between_dicts(gt_labels[i], gen_labels[i])
     return f1s
 
+def _compute_radgraph_f1_partial_scores(gen_texts, gt_texts):
+    from medvqa.metrics.medical.radgraph import compute_reward
+    labeler = RadGraphLabelerOriginal(verbose=True)
+    texts = gen_texts + gt_texts
+    labels = labeler(texts, update_cache_on_disk=True)
+    gen_labels = labels[:len(gen_texts)]
+    gt_labels = labels[len(gen_texts):]
+    f1s = np.zeros(len(gen_texts))
+    for i in range(len(gen_texts)):
+        f1s[i] = compute_reward(gt_labels[i], gen_labels[i], "partial")
+    return f1s
+
 @cache_matrix_to_file('radgraph_f1')
 def compute_radgraph_f1_matrix(sentences):
     print_bold('Computing RadGraph F1 score between each pair of sentences')
@@ -504,6 +534,26 @@ def compute_radgraph_f1_matrix(sentences):
     for i in range(len(sentences)):
         for j in range(len(sentences)):
             matrix[i, j] = f1_between_dicts(labels[i], labels[j])
+    return matrix
+
+@cache_matrix_to_file('radgraph_f1_partial')
+def compute_radgraph_f1_partial_matrix(sentences):
+    print_bold('Computing RadGraph F1 partial score between each pair of sentences')
+    from medvqa.metrics.medical.radgraph import compute_reward
+    labeler = RadGraphLabelerOriginal(verbose=True)
+    labels = labeler(sentences, update_cache_on_disk=True)
+    matrix = np.zeros((len(sentences), len(sentences)))
+    for i in range(len(sentences)):
+        for j in range(len(sentences)):
+            try:
+                matrix[i, j] = compute_reward(labels[i], labels[j], "partial")
+            except:
+                print(f'Failed to compute reward for {i} and {j}')
+                print(f'sentence1: {sentences[i]}')
+                print(f'sentence2: {sentences[j]}')
+                print(f'labels1: {labels[i]}')
+                print(f'labels2: {labels[j]}')
+                raise
     return matrix
 
 def _compute_fact_embedding_scores(gen_texts, gt_texts, checkpoint_folder_path):
@@ -628,11 +678,14 @@ def evaluate_metrics__chest_imagenome_gold(
     # Compute CheXbert f1 between each pair of sentences
     chexbert_f1_matrix = compute_chexbert_f1_matrix(sentences)
 
-    # Compute RadGraph jaccard index between each pair of sentences
-    radgraph_jaccard_matrix = compute_radgraph_jaccard_matrix(sentences)
+    # # Compute RadGraph jaccard index between each pair of sentences
+    # radgraph_jaccard_matrix = compute_radgraph_jaccard_matrix(sentences)
 
     # Compute RadGraph F1 score between each pair of sentences
     radgraph_f1_matrix = compute_radgraph_f1_matrix(sentences)
+
+    # Compute RadGraph F1 partial score between each pair of sentences
+    radgraph_f1_partial_matrix = compute_radgraph_f1_partial_matrix(sentences)
 
     # Compute Fact Embedding Score between each pair of sentences
     fact_embedding_score_matrix_list = [
@@ -648,8 +701,9 @@ def evaluate_metrics__chest_imagenome_gold(
         rougel_score_matrix,
         meteor_score_matrix,
         ciderd_score_matrix,
-        radgraph_jaccard_matrix,
+        # radgraph_jaccard_matrix,
         radgraph_f1_matrix,
+        radgraph_f1_partial_matrix,
         bertscore_matrix,
         chexpert_accuracy_matrix,
         chexbert_accuracy_matrix,
@@ -663,8 +717,9 @@ def evaluate_metrics__chest_imagenome_gold(
         'ROUGE-L',
         'METEOR',
         'CIDEr-D',
-        'RadGraph Jaccard',
-        'RadGraph F1',
+        # 'RadGraph Jaccard',
+        'RadGraph F1 Full',
+        'RadGraph F1 Partial',
         'BERTScore',
         'CheXpert Accuracy',
         'CheXbert Accuracy',
@@ -753,7 +808,7 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
     # Compute accuracy between each pair of reports
     gold_accuracy_matrix = compute_gold_accuracy_matrix(labels)
 
-    # Compute jacccard index between each pair of reports
+    # Compute jaccard index between each pair of reports
     gold_jaccard_matrix = compute_chest_imagenome_gold_jaccard_matrix(observation_labels, anatomy_labels)
 
     # Compute BLEU score between each pair of reports
@@ -783,11 +838,14 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
     # Compute CheXbert f1 between each pair of reports
     chexbert_f1_matrix = compute_chexbert_f1_matrix(reports)
 
-    # Compute RadGraph jaccard index between each pair of reports
-    radgraph_jaccard_matrix = compute_radgraph_jaccard_matrix(reports)
+    # # Compute RadGraph jaccard index between each pair of reports
+    # radgraph_jaccard_matrix = compute_radgraph_jaccard_matrix(reports)
 
     # Compute RadGraph F1 score between each pair of reports
     radgraph_f1_matrix = compute_radgraph_f1_matrix(reports)
+
+    # Compute RadGraph F1 partial score between each pair of reports
+    radgraph_f1_partial_matrix = compute_radgraph_f1_partial_matrix(reports)
 
     # Compute Fact Embedding Score between each pair of reports
     fact_embedding_score_matrix_list = [
@@ -803,8 +861,9 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
         rougel_score_matrix,
         meteor_score_matrix,
         ciderd_score_matrix,
-        radgraph_jaccard_matrix,
+        # radgraph_jaccard_matrix,
         radgraph_f1_matrix,
+        radgraph_f1_partial_matrix,
         bertscore_matrix,
         chexpert_accuracy_matrix,
         chexbert_accuracy_matrix,
@@ -818,8 +877,9 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
         'ROUGE-L',
         'METEOR',
         'CIDEr-D',
-        'RadGraph Jaccard',
-        'RadGraph F1',
+        # 'RadGraph Jaccard',
+        'RadGraph F1 Full',
+        'RadGraph F1 Partial',
         'BERTScore',
         'CheXpert Accuracy',
         'CheXbert Accuracy',
@@ -970,6 +1030,9 @@ def evaluate_metrics__NLI(
     # Compute RadGraph F1 score between each pair of sentences
     radgraph_f1_scores = _compute_radgraph_f1_scores(premises, hypotheses)
 
+    # Compute RadGraph F1 partial score between each pair of sentences
+    radgraph_f1_partial_scores = _compute_radgraph_f1_partial_scores(premises, hypotheses)
+
     # Compute Fact Embedding Score between each pair of sentences
     fact_embedding_scores_list = [
         _compute_fact_embedding_scores(premises, hypotheses, checkpoint_folder_path)
@@ -984,6 +1047,7 @@ def evaluate_metrics__NLI(
         ciderd_scores,
         radgraph_jaccard_scores,
         radgraph_f1_scores,
+        radgraph_f1_partial_scores,
         bertscore_scores,
         chexpert_accuracy_scores,
         chexbert_accuracy_scores,
@@ -997,6 +1061,7 @@ def evaluate_metrics__NLI(
         'CIDEr-D',
         'RadGraph Jaccard',
         'RadGraph F1',
+        'RadGraph F1 Partial',
         'BERTScore',
         'CheXpert Accuracy',
         'CheXbert Accuracy',
@@ -1127,6 +1192,127 @@ def evaluate_metrics__custom_mimiccxr_radiologist_annotations():
         metric_name='Average Number of Contradictions @k',
         xlabel='k',
         ylabel='Average Number of Contradictions @k',
+        figsize=(10, 6),
+    )
+
+def evaluate_metrics__iuxray_tags__report_level(
+        fact_embedding_model_checkpoint_folder_paths,
+        fact_embedding_model_names,
+    ):
+
+    assert len(fact_embedding_model_checkpoint_folder_paths) == len(fact_embedding_model_names)
+    assert len(fact_embedding_model_checkpoint_folder_paths) > 0
+
+    from medvqa.datasets.iuxray import load_reports_and_tag_sets
+
+    reports, tag_sets = load_reports_and_tag_sets()
+    print(f'Number of reports: {len(reports)}')
+    print(f'Number of tag_sets: {len(tag_sets)}')
+    assert len(reports) == len(tag_sets)
+
+    # Compute jaccard index between each pair of tag sets
+    gold_jaccard_matrix = compute_iuxray_gold_tags_jaccard_matrix(tag_sets)
+
+    # Compute BLEU score between each pair of reports
+    bleu_score_matrix = compute_bleu_score_matrix(reports)
+
+    # Compute ROUGE-L score between each pair of reports
+    rougel_score_matrix = compute_rougel_score_matrix(reports)
+
+    # Compute METEOR score between each pair of reports
+    meteor_score_matrix = compute_meteor_score_matrix(reports)
+
+    # Compute CIDEr-D score between each pair of reports
+    ciderd_score_matrix = compute_ciderd_score_matrix(reports)
+
+    # Compute BERTScore between each pair of reports
+    bertscore_matrix = compute_bertscore_matrix(reports)
+
+    # Compute CheXpert labeler accuracy between each pair of reports
+    chexpert_accuracy_matrix = compute_chexpert_accuracy_matrix(reports)
+
+    # Compute CheXpert labeler f1 between each pair of reports
+    chexpert_f1_matrix = compute_chexpert_f1_matrix(reports)
+
+    # Compute CheXbert accuracy between each pair of reports
+    chexbert_accuracy_matrix = compute_chexbert_accuracy_matrix(reports)
+
+    # Compute CheXbert f1 between each pair of reports
+    chexbert_f1_matrix = compute_chexbert_f1_matrix(reports)
+
+    # Compute RadGraph F1 score between each pair of reports
+    radgraph_f1_matrix = compute_radgraph_f1_matrix(reports)
+
+    # Compute RadGraph F1 partial score between each pair of reports
+    radgraph_f1_partial_matrix = compute_radgraph_f1_partial_matrix(reports)
+
+    # Compute Fact Embedding Score between each pair of reports
+    fact_embedding_score_matrix_list = [
+        compute_fact_embedding_score_matrix(reports, checkpoint_folder_path)
+        for checkpoint_folder_path in fact_embedding_model_checkpoint_folder_paths
+    ]
+
+    # Plot a correlation matrix between all metrics
+    scores_list = [
+        gold_jaccard_matrix,
+        bleu_score_matrix,
+        rougel_score_matrix,
+        meteor_score_matrix,
+        ciderd_score_matrix,
+        radgraph_f1_matrix,
+        radgraph_f1_partial_matrix,
+        bertscore_matrix,
+        chexpert_accuracy_matrix,
+        chexbert_accuracy_matrix,
+        chexpert_f1_matrix,
+        chexbert_f1_matrix,
+    ]
+    method_names = [
+        'Gold Jaccard',
+        'BLEU',
+        'ROUGE-L',
+        'METEOR',
+        'CIDEr-D',
+        'RadGraph F1 Full',
+        'RadGraph F1 Partial',
+        'BERTScore',
+        'CheXpert Accuracy',
+        'CheXbert Accuracy',
+        'CheXpert F1',
+        'CheXbert F1',
+    ]
+    scores_list.extend(fact_embedding_score_matrix_list)
+    method_names.extend(fact_embedding_model_names)
+    assert len(scores_list) == len(method_names)
+    flattend_scores_list = [score_matrix.flatten() for score_matrix in scores_list]
+    plot_correlation_matrix(
+        correlation_matrix=np.corrcoef(flattend_scores_list),
+        method_names=method_names,
+        title=f'Correlation Matrix between metrics (IU X-ray, report level, N={len(reports)})',
+    )
+
+    # remove gold metrics
+    scores_list = scores_list[1:]
+    method_names = method_names[1:]
+
+    # Compute average jaccard index @k for each metric
+    print_bold('Computing average jaccard index @k for each metric')
+    max_k = 100
+    mean_average_jaccard_at_k_list = []
+    for method_name, score_matrix in zip(method_names, scores_list):
+        print_bold(f'Computing average jaccard index @k for {method_name}')
+        mean_average_jaccard_at_k = compute_mean_average_accuracy_at_k(gold_jaccard_matrix, score_matrix, max_k)
+        mean_average_jaccard_at_k_list.append(mean_average_jaccard_at_k)
+        for k in (1, 5, 10, 20, 50, 100):
+            print(f'  mean_average_jaccard_at_{k}: {mean_average_jaccard_at_k[k - 1]}')
+    # Plot mean average jaccard index @k for each metric
+    plot_metric_lists(
+        metric_lists=mean_average_jaccard_at_k_list,
+        method_names=method_names,
+        title=f'Mean Average Jaccard Index @k for each metric (IU X-ray, report level, N={len(reports)})',
+        metric_name='Mean Average Jaccard Index @k',
+        xlabel='k',
+        ylabel='Mean Average Jaccard Index @k',
         figsize=(10, 6),
     )
 

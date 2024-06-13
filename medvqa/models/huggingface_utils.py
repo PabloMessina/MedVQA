@@ -248,6 +248,52 @@ def generate_text_with_T5(input_texts, model_name, model_checkpoint_folder_path,
     # Return output
     return output_texts
 
+LLAMA3_MODELS = [
+    "meta-llama/Meta-Llama-3-8B-Instruct",
+]
+
+def generate_text_with_llama3(system_instructions, user_input_texts, model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+                              device=None, device_map="auto", max_len=256, do_sample=True, temperature=0.6, top_p=0.9,
+                              transformers_logging_level=40): # 40 = ERROR
+
+    assert model_id in LLAMA3_MODELS
+
+    import transformers
+
+    pipeline = transformers.pipeline(
+        "text-generation",
+        model=model_id,
+        model_kwargs={"torch_dtype": torch.bfloat16},
+        device_map=device_map,
+        device=device,
+    )
+
+    terminators = [
+        pipeline.tokenizer.eos_token_id,
+        pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+    ]
+
+    generated_texts = []
+
+    transformers.logging.set_verbosity(transformers_logging_level)
+
+    for text in tqdm(user_input_texts, total=len(user_input_texts), mininterval=2):
+        messages = [
+            {"role": "system", "content": system_instructions},
+            {"role": "user", "content": text},
+        ]
+        outputs = pipeline(
+            messages,
+            max_new_tokens=max_len,
+            eos_token_id=terminators,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        generated_texts.append(outputs[0]["generated_text"][-1]["content"])
+
+    return generated_texts
+
 class CachedTextEmbeddingExtractor:
     def __init__(self, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
                  average_token_embeddings=False):
@@ -445,7 +491,7 @@ class CachedT5FactExtractor:
                 # Load environment variables from .env file
                 from dotenv import load_dotenv
                 load_dotenv()
-                INTEGRATED_SENTENCE_FACTS_JSONL_PATH = os.getenv('INTEGRATED_SENTENCE_FACTS_JSONL_PATH')
+                INTEGRATED_SENTENCE_FACTS_JSONL_PATH = os.getenv('INTEGRATED_SENTENCE_FACTS_JSONL_PATH_v2')
                 # Populate cache with facts from integrated sentence facts
                 print(f'Populating cache with facts from {INTEGRATED_SENTENCE_FACTS_JSONL_PATH}')
                 rows = load_jsonl(INTEGRATED_SENTENCE_FACTS_JSONL_PATH)
@@ -458,7 +504,7 @@ class CachedT5FactExtractor:
                 print(f'Saved T5 facts to {self._cache_path}')
         return self._cache
     
-    def _compute_facts(self, sentences):
+    def _extract_facts(self, sentences):
 
         # Load model
         model = self.t5_model
@@ -510,7 +556,7 @@ class CachedT5FactExtractor:
                     output.append(f)
         return output
 
-    def __call__(self, texts, update_cache_on_disk=True):
+    def __call__(self, texts, update_cache_on_disk=True, skip_cache=False):
         assert type(texts) in [list, tuple, np.ndarray]
         assert isinstance(texts[0], str)
         sentences_per_text = sentence_tokenize_texts_in_parallel(texts)
@@ -525,18 +571,21 @@ class CachedT5FactExtractor:
         facts_per_sentence = [None] * len(unique_sentences)
         cache = self.cache
         sentences_to_process = []
-        for i, s in enumerate(unique_sentences):
-            try:
-                facts_per_sentence[i] = cache[hashes[i]]
-            except KeyError:
-                sentences_to_process.append((s, i)) # (sentence, index)
+        if skip_cache:
+            sentences_to_process = [(s, i) for i, s in enumerate(unique_sentences)]
+        else:
+            for i, s in enumerate(unique_sentences):
+                try:
+                    facts_per_sentence[i] = cache[hashes[i]]
+                except KeyError:
+                    sentences_to_process.append((s, i)) # (sentence, index)
         if len(sentences_to_process) > 0:
-            facts_per_sentence_to_process = self._compute_facts([s for s, _ in sentences_to_process])
+            facts_per_sentence_to_process = self._extract_facts([s for s, _ in sentences_to_process])
             for i, facts in enumerate(facts_per_sentence_to_process):
                 idx = sentences_to_process[i][1]
                 facts_per_sentence[idx] = facts
                 cache[hashes[idx]] = facts # update cache with new facts
-            if update_cache_on_disk:
+            if update_cache_on_disk and not skip_cache:
                 save_pickle(cache, self._cache_path)
                 print(f'Saved updated T5 facts to {self._cache_path}')
                 print(f'New cache size = {len(cache)}')

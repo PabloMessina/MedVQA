@@ -418,15 +418,99 @@ def load_interpret_cxr_test_public_image_paths():
             image_path_list.append(image_path)
     return image_path_list
 
-def load_interpret_cxr_test_hidden_image_paths():
+def load_interpret_cxr_test_hidden_image_paths(section=None, flattened=True):
     df = pd.read_csv(INTERPRET_CXR_TEST_HIDDEN_CSV_PATH)
-    df = df.replace(np.nan, '', regex=True) # replace nan with empty string
+    if section is not None:
+        assert section in ['findings', 'impression', 'both']
+        df = df.replace(np.nan, '', regex=True) # replace nan with empty string
+        # remove rows with empty findings and impression
+        if section == 'findings':
+            df = df[df['findings'] != '']
+        elif section == 'impression':
+            df = df[df['impression'] != '']
+        elif section == 'both':
+            df = df[(df['findings'] != '') | (df['impression'] != '')]
     image_paths_list = df['images_path'].tolist()
     image_paths_list = [eval(x) for x in image_paths_list] # convert string to list
-    image_path_list = []
-    for image_paths in image_paths_list:
-        for image_path in image_paths:
-            image_path = os.path.join(INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+    if flattened:
+        image_path_list = []
+        for image_paths in image_paths_list:
+            for image_path in image_paths:
+                image_path = os.path.join(INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+                assert os.path.exists(image_path)
+                image_path_list.append(image_path)
+        return image_path_list # flattened list
+    else:
+        image_paths_list_ = []
+        for image_paths in image_paths_list:
+            image_paths_ = []
+            for image_path in image_paths:
+                image_path = os.path.join(INTERPRET_CXR_TEST_HIDDEN_IMAGES_FOLDER_PATH, os.path.basename(image_path))
+                assert os.path.exists(image_path)
+                image_paths_.append(image_path)
+            image_paths_list_.append(image_paths_)
+        return image_paths_list_ # list of lists
+
+def load_interpret_cxr_mimiccxr_val_image_paths():
+    val_data = get_cached_json_file(INTERPRET_CXR_VAL_MIMICCXR_JSON_FILEPATH)
+    imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+    image_paths = []
+    for item in val_data:
+        for image_path in item['images_path']:
+            dicom_id = os.path.basename(image_path).split('.')[0] # remove extension
+            image_paths.append(get_mimiccxr_medium_image_path(*imageId2PartPatientStudy[dicom_id], dicom_id))
+            assert os.path.exists(image_paths[-1])
+    return image_paths
+
+def load_interpret_cxr_mimiccxr_val_image_paths_and_reports():
+    val_data = get_cached_json_file(INTERPRET_CXR_VAL_MIMICCXR_JSON_FILEPATH)
+    imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+    image_paths_list = []
+    findings_list = []
+    impression_list = []
+    for item in val_data:
+        image_paths_ = []
+        for image_path in item['images_path']:
+            dicom_id = os.path.basename(image_path).split('.')[0] # remove extension
+            image_path = get_mimiccxr_medium_image_path(*imageId2PartPatientStudy[dicom_id], dicom_id)
             assert os.path.exists(image_path)
-            image_path_list.append(image_path)
-    return image_path_list
+            image_paths_.append(image_path)
+        if image_paths_:
+            image_paths_list.append(image_paths_)
+            findings_list.append(item['findings'])
+            impression_list.append(item['impression'])
+    return image_paths_list, findings_list, impression_list
+
+def load_interpret_cxr_chexpert_val_image_paths():
+    challenge_val_df = get_cached_dataframe_from_csv(INTERPRET_CXR_VAL_CSV_PATH)
+    chexpert_val_df = challenge_val_df[challenge_val_df['source'] == 'CheXpert']
+    assert len(chexpert_val_df) > 0
+    image_paths = []
+    for images_path_old in chexpert_val_df['images_path_old']:
+        images_path_old = [eval(x)[21:] for x in images_path_old[1:-1].split()]
+        for image_path in images_path_old:
+            image_path = os.path.join(CHEXPERT_V1_0_SMALL_DATASET_DIR, image_path)
+            assert os.path.exists(image_path)
+            image_paths.append(image_path)
+    return image_paths
+
+def load_interpret_cxr_chexpert_val_image_paths_and_reports():
+    challenge_val_df = get_cached_dataframe_from_csv(INTERPRET_CXR_VAL_CSV_PATH)
+    chexpert_val_df = challenge_val_df[challenge_val_df['source'] == 'CheXpert']
+    chexpert_val_df.fillna('', inplace=True)
+    assert len(chexpert_val_df) > 0
+    image_paths_list = []
+    findings_list = []
+    impression_list = []
+    for images_path_old, findings, impression in chexpert_val_df[['images_path_old', 'findings', 'impression']].values:
+        images_path_old = [eval(x)[21:] for x in images_path_old[1:-1].split()]
+        image_paths_ = []
+        for image_path in images_path_old:
+            image_path = os.path.join(CHEXPERT_V1_0_SMALL_DATASET_DIR, image_path)
+            assert os.path.exists(image_path)
+            image_paths_.append(image_path)
+        if image_paths_:
+            image_paths_list.append(image_paths_)
+            findings_list.append(findings)
+            impression_list.append(impression)
+    return image_paths_list, findings_list, impression_list

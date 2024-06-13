@@ -381,8 +381,9 @@ def get_image_transform(
     else:
         print(f'Using standard transform')
         # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
-        tf_load_image = T.Lambda(lambda x: cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB))
+        tf_load_image = T.Lambda(lambda x: Image.fromarray(cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB)))
         tf_resize = T.Resize(image_size)
+        # tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
         tf_normalize = T.Normalize(mean, std)
 
     if type(image_size) is int:

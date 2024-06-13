@@ -15,7 +15,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import l
 from medvqa.datasets.mimiccxr import get_mimiccxr_image_paths
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.metrics.medical.fact_embedding import FactEmbeddingScorer
-from medvqa.metrics.medical.radgraph import RadGraphLabeler
+from medvqa.metrics.medical.radgraph import RadGraphLabeler, RadGraphLabelerOriginal, compute_reward
 from medvqa.metrics.nlp import Bleu, RougeL, CiderD, Meteor
 from medvqa.metrics.medical import (
     ChexpertLabelsF1score,
@@ -278,6 +278,11 @@ def compute_report_level_metrics(gt_reports, gen_reports, metric_names=_REPORT_L
         metrics['radgraph_labels_gt'] = labeler.get_labels(gt_texts, update_cache_on_disk=True)
         metrics['radgraph_labels_gen'] = labeler.get_labels(gen_texts, update_cache_on_disk=True)
         print_bold(f'RadGraph F1: {np.mean([f1_between_dicts(x,y) for x,y in zip(metrics["radgraph_labels_gt"], metrics["radgraph_labels_gen"])])}')
+
+        labeler_orig = RadGraphLabelerOriginal(verbose=True)
+        metrics['radgraph_labels_orig_gt'] = labeler_orig.get_labels(gt_texts, update_cache_on_disk=True)
+        metrics['radgraph_labels_orig_gen'] = labeler_orig.get_labels(gen_texts, update_cache_on_disk=True)
+        print_bold(f'RadGraph Partial (original) F1: {np.mean([compute_reward(x,y,"partial") for x,y in zip(metrics["radgraph_labels_orig_gen"], metrics["radgraph_labels_orig_gt"])])}')
 
     metric_name = 'fact_embedding_score'
     if metric_name in metric_names:

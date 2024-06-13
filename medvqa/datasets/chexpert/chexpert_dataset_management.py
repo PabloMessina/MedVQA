@@ -136,6 +136,30 @@ class CheXpertTrainerBase(LabelBasedVQAClass):
             print(f'len(self.test_image_paths) = {len(self.test_image_paths)}')
             print(f'self.test_labels.shape = {self.test_labels.shape}')
 
+def load_all_chexpert_image_paths_and_labels():
+    df_train = pd.read_csv(CHEXPERT_TRAIN_VISUALCHEXBERT_CSV_PATH)
+    df_train['Path'] = df_train['Path'].\
+        apply(lambda x: x.replace('CheXpert-v1.0', 'CheXpert-v1.0-small')) # use small images
+    train_image_paths = (CHEXPERT_DATASET_DIR + os.path.sep + df_train['Path']).to_list()
+    train_labels = df_train[CHEXPERT_LABELS].to_numpy().astype(np.int8)
+            
+    df_valid = pd.read_csv(CHEXPERT_VALID_CSV_PATH)
+    valid_image_paths = (CHEXPERT_DATASET_DIR + os.path.sep + df_valid['Path']).to_list()
+    valid_labels = df_valid[CHEXPERT_LABELS].to_numpy().astype(np.int8)
+
+    df_test_labels = pd.read_csv(CHEXPERT_TEST_LABELS_CSV_PATH)
+    test_image_paths = [os.path.join(CHEXLOCALIZE_IMAGE_DIR_512X512, 'test', path[5:]) for path in df_test_labels['Path']]
+    test_labels = df_test_labels[CHEXPERT_LABELS].to_numpy().astype(np.int8)
+
+    all_image_paths = np.concatenate([train_image_paths, valid_image_paths, test_image_paths])
+    all_labels = np.concatenate([train_labels, valid_labels, test_labels])
+    print(f'len(all_image_paths) = {len(all_image_paths)}')
+    print(f'all_labels.shape = {all_labels.shape}')
+    assert len(all_image_paths) == len(all_labels)
+    assert 0 == all_labels.min() and all_labels.max() == 1
+    return all_image_paths, all_labels
+
+
 class CheXpert_VisualModuleTrainer(CheXpertTrainerBase):
     def __init__(self, transform, batch_size, collate_batch_fn, num_workers):        
         super().__init__()

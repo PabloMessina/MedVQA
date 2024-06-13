@@ -58,7 +58,7 @@ from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
 from medvqa.utils.files import (
     get_cached_json_file,
     get_results_folder_path,
-    save_to_pickle,
+    save_pickle,
 )
 from medvqa.training.vqa import get_engine
 from medvqa.datasets.dataloading_utils import get_vqa_collate_batch_fn
@@ -126,7 +126,7 @@ def _compute_and_save_report_level_metrics(results_dict, dataset_name, tokenizer
         save_path = os.path.join(results_folder_path, f'{dataset_name}_report_level_metrics({parenthesis_text}).pkl')
     else:
         save_path = os.path.join(results_folder_path, f'{dataset_name}_report_level_metrics.pkl')
-    save_to_pickle(metrics, save_path)
+    save_pickle(metrics, save_path)
     print (f'Report-level metrics successfully saved to {save_path}')
     return metrics
 
@@ -181,7 +181,7 @@ def _save_results_for_error_analysis(results_dict, dataset_name, results_folder_
     }
     parenthesis_text = f'({parenthesis_text})' if parenthesis_text else ''
     save_path = os.path.join(results_folder_path, f'{dataset_name}_report_results_for_error_analysis{parenthesis_text}.pkl')
-    save_to_pickle(output, save_path)
+    save_pickle(output, save_path)
     print (f'Report-level results for error analysis successfully saved to {save_path}')
 
 def _get_eval_mode_text(eval_mode, n_questions_per_report, qclass_threshold, checkpoint_path,

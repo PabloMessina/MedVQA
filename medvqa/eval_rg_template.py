@@ -58,12 +58,12 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
     get_checkpoint_folder_path,
     get_results_folder_path,
-    load_jsonl,
+    load_pickle,
     save_pickle,
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_orange
 from medvqa.evaluation.report_generation import (
     TemplateBasedModes,
     compute_report_level_metrics,
@@ -91,7 +91,7 @@ def parse_args():
     parser.add_argument('--label_score_threshold', type=float, default=None, help='if not None, keep only labels with score >= threshold')
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str, default=None)
     parser.add_argument('--fact_embedding_cluster_labels_per_report_filepath', type=str, default=None)
-    parser.add_argument('--integrated_report_facts_filepath', type=str, default=None)
+    parser.add_argument('--sentence_to_facts_filepath', type=str, default=None)
     parser.add_argument('--use_amp', action='store_true', default=False)
     parser.add_argument('--cache_computations', action='store_true', default=False)
     
@@ -388,28 +388,31 @@ def _evaluate_fact_embedding_template_based_oracle(
 
 def _evaluate_facts_extracted_from_reports_template_based_oracle(
         background_findings_and_impression_per_report_filepath,
-        integrated_report_facts_filepath,
+        sentence_to_facts_filepath,
         max_processes_for_chexpert_labeler,
         template_based_mode,
 ):
     print('Evaluating facts extracted from reports template-based oracle ...')
     assert background_findings_and_impression_per_report_filepath is not None
-    assert integrated_report_facts_filepath is not None
+    assert sentence_to_facts_filepath is not None
     
     mimiccxr_detailed_metadata = load_mimiccxr_reports_detailed_metadata(background_findings_and_impression_per_report_filepath=
                                                                          background_findings_and_impression_per_report_filepath)
     test_idxs = [i for i, split in enumerate(mimiccxr_detailed_metadata['splits']) if split == 'test']
-    integrated_report_facts = load_jsonl(integrated_report_facts_filepath)
-    
+    sentence_to_facts = load_pickle(sentence_to_facts_filepath)
+
+    from nltk.tokenize import sent_tokenize
+
     gt_reports = []
     gen_reports = []
+    not_found_count = 0
     for i in test_idxs:
-        assert mimiccxr_detailed_metadata['filepaths'][i] == integrated_report_facts[i]['path']
+        # assert mimiccxr_detailed_metadata['filepaths'][i] == integrated_report_facts[i]['path']
         # gt report
         findings = mimiccxr_detailed_metadata['findings'][i]
         impression = mimiccxr_detailed_metadata['impressions'][i]
-        assert findings == integrated_report_facts[i]['findings']
-        assert impression == integrated_report_facts[i]['impression']
+        # assert findings == integrated_report_facts[i]['findings']
+        # assert impression == integrated_report_facts[i]['impression']
         gt_report = ""
         for text in (findings, impression):
             if gt_report:
@@ -417,8 +420,18 @@ def _evaluate_facts_extracted_from_reports_template_based_oracle(
             gt_report += text
         gt_reports.append(gt_report)
         # gen report
-        gen_report = integrated_report_facts[i]['fact_based_report']
+        facts = []
+        for section in [findings, impression]:
+            if section:
+                for sentence in sent_tokenize(section):
+                    if sentence in sentence_to_facts:
+                        facts.extend(sentence_to_facts[sentence])
+                    else:
+                        not_found_count += 1
+        gen_report = '. '.join(facts)
         gen_reports.append(gen_report)
+    if not_found_count > 0:
+        print_orange(f'Warning: {not_found_count} sentences not found in sentence_to_facts', bold=True)
 
     results_folder_path = get_results_folder_path(get_checkpoint_folder_path('report_gen', 'mimiccxr', 'oracle'))
     _compute_and_save_report_level_metrics(
@@ -701,6 +714,37 @@ def _find_top_k_label_indices(dicom_id_to_gt_labels, dicom_id_to_pred_probs, thr
         print_bold(f'{idx+1}. {label_names[i]}: {score_list[i]}')
     return top_k_label_indices
 
+def compute_sentence_to_facts_with_t5_model_mimiccxr_test_set(
+    background_findings_and_impression_per_report_filepath, t5_model_name, t5_checkpoint_folder_path,
+    batch_size=100, num_workers=4
+):
+    print('Computing sentence to facts with T5 model on MIMIC-CXR test set ...')
+    assert background_findings_and_impression_per_report_filepath is not None
+    assert t5_model_name is not None
+    assert t5_checkpoint_folder_path is not None
+
+    from nltk.tokenize import sent_tokenize
+    from medvqa.models.huggingface_utils import CachedT5FactExtractor
+    
+    data = load_mimiccxr_reports_detailed_metadata(background_findings_and_impression_per_report_filepath=
+                                                                         background_findings_and_impression_per_report_filepath)
+    sentences = set()
+    for findings, impression, split in zip(data['findings'], data['impressions'], data['splits']):
+        if split != 'test':
+            continue
+        for text in (findings, impression):
+            for sentence in sent_tokenize(text):
+                sentences.add(sentence)
+    sentences = list(sentences)
+    
+    t5_fact_extractor = CachedT5FactExtractor(model_name=t5_model_name, model_checkpoint_folder_path=t5_checkpoint_folder_path,
+                                              batch_size=batch_size, num_workers=num_workers)
+    facts_per_sentence = t5_fact_extractor._extract_facts(sentences)
+    
+    s2fs = { s:fs for s, fs in zip(sentences, facts_per_sentence) }
+    return s2fs
+
+
 def _evaluate_model(
     tokenizer_kwargs,
     model_kwargs,
@@ -721,7 +765,7 @@ def _evaluate_model(
     chest_imagenome_labels_filename=None,
     background_findings_and_impression_per_report_filepath=None,
     fact_embedding_cluster_labels_per_report_filepath=None,
-    integrated_report_facts_filepath=None,
+    sentence_to_facts_filepath=None,
     cache_computations=False,
 ):
     if eval_mimiccxr:
@@ -759,10 +803,10 @@ def _evaluate_model(
             )
         elif template_based_mode == TemplateBasedModes.FACTS_EXTRACTED_FROM_REPORTS__ORACLE:
             assert background_findings_and_impression_per_report_filepath is not None
-            assert integrated_report_facts_filepath is not None
+            assert sentence_to_facts_filepath is not None
             _evaluate_facts_extracted_from_reports_template_based_oracle(
                 background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
-                integrated_report_facts_filepath=integrated_report_facts_filepath,
+                sentence_to_facts_filepath=sentence_to_facts_filepath,
                 max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
                 template_based_mode=template_based_mode,
             )
@@ -981,7 +1025,7 @@ def evaluate_model(
     label_score_threshold=None,
     background_findings_and_impression_per_report_filepath=None,
     fact_embedding_cluster_labels_per_report_filepath=None,
-    integrated_report_facts_filepath=None,
+    sentence_to_facts_filepath=None,
     cache_computations=False,
 ):
     print()
@@ -1021,7 +1065,7 @@ def evaluate_model(
         chest_imagenome_labels_filename=chest_imagenome_labels_filename,
         background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
         fact_embedding_cluster_labels_per_report_filepath=fact_embedding_cluster_labels_per_report_filepath,
-        integrated_report_facts_filepath=integrated_report_facts_filepath,
+        sentence_to_facts_filepath=sentence_to_facts_filepath,
         cache_computations=cache_computations,
     )
 

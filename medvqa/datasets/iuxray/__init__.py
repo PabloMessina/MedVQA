@@ -38,3 +38,41 @@ def get_iuxray_all_image_ids():
     for report in reports.values():
         image_ids.extend(image['id'] for image in report['images'])
     return image_ids
+
+def load_reports_and_tag_sets():
+    reports = get_cached_json_file(IUXRAY_REPORTS_MIN_JSON_PATH)
+    report_texts = []
+    tag_sets = []
+    for report in reports.values():
+        tags_manual = report['tags_manual']
+        tags_auto = report['tags_auto']
+        tag_set = set()
+        for tag in tags_manual + tags_auto:
+            tag = tag.lower()
+            if '/' in tag or ',' in tag:
+                tag_parts = tag.replace(',', '/').split('/')
+            else:
+                tag_parts = [tag]
+            for tag_part in tag_parts:
+                tag_part = tag_part.strip()
+                tag_set.add(tag_part)
+                if ' ' in tag_part:
+                    # add individual words
+                    words = tag_part.split()
+                    for word in words:
+                        tag_set.add(word)
+        assert len(tag_set) > 0
+        tag_sets.append(tag_set)
+        findings = report['findings']
+        impression = report['impression']
+        text = ""
+        if findings:
+            text += findings
+        if impression:
+            if text:
+                if text[-1] != '.':
+                    text += '.'
+                text += ' '
+            text += impression
+        report_texts.append(text)
+    return report_texts, tag_sets
