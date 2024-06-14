@@ -15,6 +15,7 @@ from medvqa.evaluation.ranking_evaluation_utils import load_mimiccxr_custom_radi
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.metrics.medical.fact_embedding import FactEmbeddingScorer
+from medvqa.metrics.medical.radcliq import RADCLIQ_METRIC_NAMES
 from medvqa.metrics.medical.radgraph import RadGraphLabeler, RadGraphLabelerOriginal
 from medvqa.metrics.nlp.cider import CiderD
 from medvqa.metrics.nlp.meteor import Meteor
@@ -525,6 +526,11 @@ def _compute_radgraph_f1_partial_scores(gen_texts, gt_texts):
         f1s[i] = compute_reward(gt_labels[i], gen_labels[i], "partial")
     return f1s
 
+def _compute_radcliq_scores(gen_texts, gt_texts, device_id):
+    from medvqa.metrics.medical.radcliq import invoke_radcliq_process
+    out = invoke_radcliq_process(gt_texts, gen_texts, device_id=device_id)
+    return out
+
 @cache_matrix_to_file('radgraph_f1')
 def compute_radgraph_f1_matrix(sentences):
     print_bold('Computing RadGraph F1 score between each pair of sentences')
@@ -945,6 +951,7 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
 def evaluate_metrics__NLI(
         fact_embedding_model_checkpoint_folder_paths,
         fact_embedding_model_names,
+        radcliq_device_id,
     ):
 
     assert len(fact_embedding_model_checkpoint_folder_paths) == len(fact_embedding_model_names)
@@ -965,6 +972,9 @@ def evaluate_metrics__NLI(
             premises.append(p)
             hypotheses.append(h)
             labels.append(0)
+    mscxrt_count = len(labels)
+    print(f'Number of entailment samples: {sum(labels)}')
+    print(f'Number of contradiction samples: {len(labels) - sum(labels)}')
 
     rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
     print(f'Number of RadNLI dev samples: {len(rows)}')
@@ -990,10 +1000,11 @@ def evaluate_metrics__NLI(
         elif l == 'contradiction':
             premises.append(p)
             hypotheses.append(h)
-            labels.append(0)            
-
-    print(f'Number of entailment samples: {sum(labels)}')
-    print(f'Number of contradiction samples: {len(labels) - sum(labels)}')
+            labels.append(0)
+    radnli_count = len(labels) - mscxrt_count
+    print(f'Number of RadNLI samples: {radnli_count}')
+    print(f'Number of entailment samples: {sum(labels[mscxrt_count:])}')
+    print(f'Number of contradiction samples: {radnli_count - sum(labels[mscxrt_count:])}')
 
     # Compute BLEU score between each pair of sentences
     bleu_scores = _compute_bleu_scores(premises, hypotheses)
@@ -1033,6 +1044,11 @@ def evaluate_metrics__NLI(
     # Compute RadGraph F1 partial score between each pair of sentences
     radgraph_f1_partial_scores = _compute_radgraph_f1_partial_scores(premises, hypotheses)
 
+    # Compute RadCliQ between each pair of sentences
+    radcliq_scores = _compute_radcliq_scores(premises, hypotheses, device_id=radcliq_device_id)
+    radcliq_scores['RadCliQ-v0'] = -1 * radcliq_scores['RadCliQ-v0'] # lower is better
+    radcliq_scores['RadCliQ-v1'] = -1 * radcliq_scores['RadCliQ-v1'] # lower is better
+
     # Compute Fact Embedding Score between each pair of sentences
     fact_embedding_scores_list = [
         _compute_fact_embedding_scores(premises, hypotheses, checkpoint_folder_path)
@@ -1068,11 +1084,23 @@ def evaluate_metrics__NLI(
         'CheXpert F1',
         'CheXbert F1',
     ]
+    scores_list.extend([radcliq_scores[x] for x in RADCLIQ_METRIC_NAMES])
+    method_names.extend([f'RadCliQ_{x}' for x in RADCLIQ_METRIC_NAMES])
     scores_list.extend(fact_embedding_scores_list)
     method_names.extend(fact_embedding_model_names)
     assert len(scores_list) == len(method_names)
 
     print_bold('Computing AUC for each metric')
+    print()
+    print_bold('MS-CXR-T:')
+    for method_name, scores in zip(method_names, scores_list):
+        print(f'{method_name} AUC: {auc(scores[:mscxrt_count], labels[:mscxrt_count])}')
+    print()
+    print_bold('RadNLI:')
+    for method_name, scores in zip(method_names, scores_list):
+        print(f'{method_name} AUC: {auc(scores[mscxrt_count:], labels[mscxrt_count:])}')
+    print()
+    print_bold('Overall:')
     for method_name, scores in zip(method_names, scores_list):
         print(f'{method_name} AUC: {auc(scores, labels)}')
 

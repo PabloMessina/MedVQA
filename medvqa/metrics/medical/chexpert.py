@@ -151,7 +151,6 @@ def invoke_chexpert_labeler_process(texts, tmp_suffix='', n_chunks=1, max_proces
                         print(f'\t#### process {i+1}: running chexpert labeler over {len(jobs[i].texts)} texts ...')
                         print(f'\tCommand = {jobs[i].cmd}')
                     next_processes.append(subprocess.Popen(jobs[i].cmd, shell=True))
-                    
             
             processes.clear()
             processes = next_processes
