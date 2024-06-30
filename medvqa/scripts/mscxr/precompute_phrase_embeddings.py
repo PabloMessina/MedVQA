@@ -40,6 +40,12 @@ def main():
     save_path = get_file_path_with_hashing_if_too_long(
         folder_path=MIMICCXR_LARGE_FAST_CACHE_DIR,
         prefix='mscxr_phrase2embedding',
+        strings=[
+            args.model_name,
+            args.model_checkpoint_folder_path,
+            *phrases,
+        ],
+        force_hashing=True,
     )
     print_blue('Saving output to:', save_path, bold=True)
     save_pickle(phrase2embedding, save_path)

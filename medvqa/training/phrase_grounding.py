@@ -231,7 +231,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     
     def step_fn__chest_imagenome_bbox_grounding(batch):
         
-        assert using_yolov8
+        # assert using_yolov8
 
         # Extract elements from batch
         if using_yolov8:
@@ -240,7 +240,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             images = batch['i'].to(device)
         phrase_embeddings = batch['pe'].to(device)
         phrase_grounding_masks = batch['pgm'].to(device)
-        if not training:
+        if not training and using_yolov8:
             chest_imagenome_bbox_coords = batch['bc']
             chest_imagenome_bbox_presence = batch['bp']
         
@@ -261,9 +261,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
-                yolov8_features = model_output['yolov8_features']
-                if not training:
-                    yolov8_predictions = model_output['yolov8_predictions']
+                if using_yolov8:
+                    yolov8_features = model_output['yolov8_features']
+                    if not training:
+                        yolov8_predictions = model_output['yolov8_predictions']
                 
                 if training:
                     # Compute losses
@@ -276,7 +277,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(attention_supervision_loss)
 
                     # 2. yolov8 loss
-                    if predict_bboxes_chest_imagenome:
+                    if using_yolov8 and predict_bboxes_chest_imagenome:
                         batch_size = images.shape[0]
                         assert batch_size == yolov8_features[0].shape[0]
                         chest_imagenome_yolov8_loss, yolov8_loss_items = mimiccxr_yolov8_criterion(yolov8_features, batch)
@@ -303,22 +304,24 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
         if training:
-            output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
-            output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-            output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-            output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+            if using_yolov8:
+                output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
+                output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
+                output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
+                output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
         else:
-            # normalize yolov8 predictions
-            resized_shapes = batch['resized_shape']
-            assert len(resized_shapes) == len(yolov8_predictions)
-            for i in range(len(resized_shapes)):
-                resized_shape = resized_shapes[i]
-                pred = yolov8_predictions[i].detach().cpu()
-                pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                yolov8_predictions[i] = pred
-            output['yolov8_predictions'] = yolov8_predictions
-            output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords
-            output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence
+            if using_yolov8:
+                # normalize yolov8 predictions
+                resized_shapes = batch['resized_shape']
+                assert len(resized_shapes) == len(yolov8_predictions)
+                for i in range(len(resized_shapes)):
+                    resized_shape = resized_shapes[i]
+                    pred = yolov8_predictions[i].detach().cpu()
+                    pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                    yolov8_predictions[i] = pred
+                output['yolov8_predictions'] = yolov8_predictions
+                output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords
+                output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
         output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()

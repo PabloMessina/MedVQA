@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
-from medvqa.losses import Focal_BCE_WBCE_Loss
+from medvqa.losses import Focal_BCE_WBCBCE_Loss
 from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.spert_loss import SpERTLoss
 from medvqa.losses.wce import WeigthedByClassCrossEntropyLoss
@@ -431,7 +431,7 @@ def get_engine(model, device,
     metadata_classifier_loss_criterion = WeigthedByClassCrossEntropyLoss()
 
     # Chest imagenome classification loss criterion as weighted cross entropy
-    chest_imagenome_classifier_loss_criterion = Focal_BCE_WBCE_Loss()
+    chest_imagenome_classifier_loss_criterion = Focal_BCE_WBCBCE_Loss()
 
     # NLI loss
     nli_loss_criterion = nn.CrossEntropyLoss()

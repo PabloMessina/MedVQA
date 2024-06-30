@@ -59,6 +59,7 @@ def parse_args(args=None):
     # Dataset and dataloading arguments
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
+    parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
 
     # Evaluation arguments
     parser.add_argument('--eval_chest_imagenome_gold', action='store_true', default=False)
@@ -79,6 +80,7 @@ def _evaluate_model(
     num_workers,
     eval_chest_imagenome_gold,
     eval_mscxr,
+    mscxr_phrase2embedding_filepath,
     device,
 ):
     count_print = CountPrinter()
@@ -107,13 +109,22 @@ def _evaluate_model(
 
     # Create phrase grounding trainer
     count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
-    bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
-    phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['pg'])
+    if eval_chest_imagenome_gold:
+        bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
+    else:
+        bbox_grounding_collate_batch_fn = None
+    if eval_mscxr:
+        phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['pg'])
+    else:
+        phrase_grounding_collate_batch_fn = None
     mimiccxr_trainer_kwargs['use_facts_for_train'] = False
+    mimiccxr_trainer_kwargs['use_facts_for_test'] = False
     mimiccxr_trainer_kwargs['use_mscxr_for_train'] = False
     mimiccxr_trainer_kwargs['use_mscxr_for_test'] = eval_mscxr
     mimiccxr_trainer_kwargs['use_chest_imagenome_for_train'] = False
     mimiccxr_trainer_kwargs['use_chest_imagenome_gold_for_test'] = eval_chest_imagenome_gold
+    if mscxr_phrase2embedding_filepath is not None:
+        mimiccxr_trainer_kwargs['mscxr_phrase2embedding_filepath'] = mscxr_phrase2embedding_filepath
 
     mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
         test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
@@ -238,7 +249,8 @@ def _evaluate_model(
         # Save metrics to file
         image_paths = []
         phrases = []
-        for dataset in  mimiccxr_trainer.mscxr_datasets:
+        for dataloader in  mimiccxr_trainer.test_mscxr_dataloader.dataloaders:
+            dataset = dataloader.dataset
             for i in dataset.indices:
                 image_paths.append(dataset.image_paths[i])
                 phrases.append(dataset.phrases[i])
@@ -280,6 +292,7 @@ def evaluate(
     max_phrases_per_image,
     eval_chest_imagenome_gold,
     eval_mscxr,
+    mscxr_phrase2embedding_filepath,
     device,
 ):
     print_blue('----- Evaluating model -----', bold=True)
@@ -314,6 +327,7 @@ def evaluate(
                 num_workers=num_workers,
                 eval_chest_imagenome_gold=eval_chest_imagenome_gold,
                 eval_mscxr=eval_mscxr,
+                mscxr_phrase2embedding_filepath=mscxr_phrase2embedding_filepath,
                 device=device,
             )
 

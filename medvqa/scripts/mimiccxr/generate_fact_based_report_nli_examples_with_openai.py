@@ -49,6 +49,7 @@ def parse_openai_model_output(text):
     assert isinstance(text, str), f'Unexpected type: {type(text)} (text = {text})'
     if GPT_IS_ACTING_WEIRD_REGEX.search(text):
         raise RuntimeError(f"GPT is protesting: {text}")
+    original_text = text
     text = text.lower()
     assert isinstance(text, str), f'Unexpected type: {type(text)} (text = {text})'
     assert text.startswith("reason: "), f"No reason found in output: {text}"
@@ -56,7 +57,7 @@ def parse_openai_model_output(text):
         try:
             idx = text.index(label)
             assert idx > 8, f"idx: {idx}, label: {label}, text: {text}"
-            reason = text[8:idx].strip()
+            reason = original_text[8:idx].strip()
             label = label[7:] # Remove "label: "
             return {
                 "reason": reason,

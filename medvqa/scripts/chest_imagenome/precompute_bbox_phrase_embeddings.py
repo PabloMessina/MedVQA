@@ -40,6 +40,11 @@ def main():
     save_path = get_file_path_with_hashing_if_too_long(
         folder_path=CHEST_IMAGENOME_LARGE_FAST_CACHE_DIR,
         prefix='bbox_phrase_embeddings',
+        strings=[
+            args.model_name,
+            args.model_checkpoint_folder_path,
+        ],
+        force_hashing=True,
     )
     print_blue('Saving output to:', save_path, bold=True)
     save_pickle(output, save_path)

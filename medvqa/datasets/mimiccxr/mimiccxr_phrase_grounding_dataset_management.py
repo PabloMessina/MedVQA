@@ -101,7 +101,7 @@ class MIMICCXR_BBoxGroundingDataset(Dataset):
 
     def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels,
                  bbox_coords, bbox_presence, use_yolov8=False):
-        assert use_yolov8 # TODO: add support for non-YOLOv8
+        # assert use_yolov8 # TODO: add support for non-YOLOv8
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
@@ -116,25 +116,29 @@ class MIMICCXR_BBoxGroundingDataset(Dataset):
     
     def __getitem__(self, i):
         image_path = self.image_paths[i]
-        tmp = self.image_transform(image_path, return_image_size=True)
-        image, image_size_before, image_size_after = tmp
+        if self.use_yolov8:
+            tmp = self.image_transform(image_path, return_image_size=True)
+            image, image_size_before, image_size_after = tmp
+        else:
+            image = self.image_transform(image_path)
         phrase_embeddings = self.phrase_embeddings
         phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
         bbox_coords = self.bbox_coords[i]
         bbox_presence = self.bbox_presence[i]
-        return {
+        output = {
             'i': image,
             'pe': phrase_embeddings,
             'pgm': phrase_grounding_masks,
             'pcl': phrase_classification_labels,
             'bc': bbox_coords,
             'bp': bbox_presence,
-            # for YOLOv8
-            'im_file': image_path,
-            'ori_shape': image_size_before,
-            'resized_shape': image_size_after,
         }
+        if self.use_yolov8:
+            output['im_file'] = image_path
+            output['ori_shape'] = image_size_before
+            output['resized_shape'] = image_size_after
+        return output
     
 def _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_presence):
     assert len(bbox_coords.shape) == 2

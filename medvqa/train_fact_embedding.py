@@ -65,6 +65,7 @@ def parse_args(args=None):
     parser.add_argument('--epochs', type=int, required=True, help='Number of epochs the model will be trained')
     parser.add_argument('--batches_per_epoch', type=int, required=True, help='Number of batches per epoch')
     parser.add_argument('--batch_size', type=int, required=True, help='Batch size')
+    parser.add_argument('--train_metrics_weight', type=float, default=0.1, help='Weight for training metrics') # 0.1 for training metrics, 0.9 for validation metrics
 
     # --- Other arguments
 
@@ -201,6 +202,9 @@ def train_model(
     assert sum([use_triplets, use_metadata, use_chest_imagenome_observations,
                 use_chest_imagenome_anatlocs, use_nli, use_entcon, use_radgraph_ner_re,
                 use_sentence_autoencoder]) > 0
+    train_metrics_weight = training_kwargs.get('train_metrics_weight', 0.1)
+    assert 0 <= train_metrics_weight <= 1
+    print(f'train_metrics_weight = {train_metrics_weight}')
     
     # Define collate batch functions
     count_print('Defining collate batch functions ...')
@@ -426,7 +430,10 @@ def train_model(
             _METRIC_WEIGHTS[f'tacc({rule_id})'] = w
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
-        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9, _metric_getter)
+        val_metrics_weight = 1 - train_metrics_weight
+        assert 0 <= val_metrics_weight <= 1
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS,
+                                                train_metrics_weight, val_metrics_weight, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(trainer_engine.state.metrics, validator_engine.state.metrics)
     else:
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
@@ -532,6 +539,7 @@ def train_from_scratch(
     # Fixed traning args
     use_amp,
     iters_to_accumulate,
+    train_metrics_weight,
     # Loss weights
     triplet_loss_weight,
     category_classif_loss_weight,
@@ -712,6 +720,7 @@ def train_from_scratch(
     
     training_kwargs = dict(
         use_amp=use_amp,
+        train_metrics_weight=train_metrics_weight,
     )
 
     return train_model(

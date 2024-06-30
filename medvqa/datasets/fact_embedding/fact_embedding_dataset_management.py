@@ -11,7 +11,7 @@ from medvqa.datasets.nli import (
     RADNLI_TEST_JSONL_PATH,
     ANLI_V1_DATASET_DIR, MULTI_NLI_DATASET_DIR, SNLI_DATASET_DIR,
 )
-from medvqa.datasets.nli.nli_dataset_management import EntailmentContradictionDataset, NLIDataset
+from medvqa.datasets.nli.nli_dataset_management import BertNLIDataset, EntailmentContradictionDataset
 from medvqa.datasets.radgraph import (
     RADGRAPH_CONLLFORMAT_DEV_JSON_PATH, RADGRAPH_CONLLFORMAT_TEST_JSON_PATH,
     RADGRAPH_CONLLFORMAT_TRAIN_JSON_PATH, RADGRAPH_CONLLFORMAT_TYPES_JSON_PATH,
@@ -568,7 +568,7 @@ class FactEmbeddingTrainer():
                 # Val NLI dataset and dataloader
                 print('----')
                 print_bold('Building val NLI dataset and dataloader...')
-                self.val_nli_dataset = NLIDataset(val_premises, val_hypotheses, val_labels, shuffle=False, infinite=False)
+                self.val_nli_dataset = BertNLIDataset(val_premises, val_hypotheses, val_labels, shuffle=False, infinite=False)
                 self.val_nli_dataloader = DataLoader(
                     self.val_nli_dataset,
                     batch_size=val_batch_size,
@@ -669,7 +669,7 @@ class FactEmbeddingTrainer():
                         key = (source, label)
                         if key in source_label_2_indices:
                             indices = source_label_2_indices[key]
-                            _datasets.append(NLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=indices))
+                            _datasets.append(BertNLIDataset(premises, hypotheses, labels, shuffle=True, infinite=True, indices=indices))
                             _weights.append(math.log2(len(indices))**3) # weight by log2(N)^3
                             print(f'Source: {source} | Label: {label} -> {len(indices)} ({_weights[-1]:.2f})')
                     label_datasets.append(CompositeInfiniteDataset(_datasets, _weights))
@@ -740,7 +740,7 @@ class FactEmbeddingTrainer():
                     for l in range(3):
                         indices = [i for i, x in enumerate(general_domain_labels) if x == l]
                         print(f'Label: {l} -> {len(indices)}')
-                        _datasets.append(NLIDataset(general_domain_premises, general_domain_hypotheses, general_domain_labels,
+                        _datasets.append(BertNLIDataset(general_domain_premises, general_domain_hypotheses, general_domain_labels,
                                                     shuffle=True, infinite=True, indices=indices))
                     _general_domain_dataset = CompositeInfiniteDataset(_datasets, [1, 1, 1]) # equal weights
                     self.train_nli_dataset = CompositeInfiniteDataset([self.train_nli_dataset, _general_domain_dataset], [1, 1])

@@ -43,9 +43,9 @@ def invoke_radcliq_process(gt_reports, gen_reports, device_id=None, remove_tmp_f
            f'--output_path "{output_path}"')
     try:            
         print(f'Running RadCliQ over {len(in_gt_df)} reports ...')
+        start = time.time()
         if verbose:
-            print(f'\tCommand = {cmd}')
-            start = time.time()                
+            print(f'\tCommand = {cmd}')        
         result = subprocess.run(
             cmd, shell=True, check=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,

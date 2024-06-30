@@ -77,7 +77,13 @@ def parse_args(args=None):
     parser.add_argument('--regions_width', type=int, default=None)
     parser.add_argument('--regions_height', type=int, default=None)
     parser.add_argument('--qkv_size', type=int, default=None)
+    parser.add_argument('--phrase_grounding_mode', type=str, default=None)
     parser.add_argument('--phrase_classifier_hidden_size', type=int, default=None)
+    parser.add_argument('--transf_d_model', type=int, default=None)
+    parser.add_argument('--transf_nhead', type=int, default=None)
+    parser.add_argument('--transf_dim_feedforward', type=int, default=None)
+    parser.add_argument('--transf_dropout', type=int, default=0)
+    parser.add_argument('--transf_num_layers', type=int, default=None)
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -432,8 +438,8 @@ def train_model(
     if use_mscxr_for_train:
         _dataset_names.append('mscxr')
         _train_weights.append(dataloading_kwargs['mscxr_weight'])
-        # _train_dataloaders.append(mimiccxr_trainer.train_mscxr_dataloader)
-        _train_dataloaders.append(mimiccxr_trainer.test_mscxr_dataloader)
+        _train_dataloaders.append(mimiccxr_trainer.train_mscxr_dataloader)
+        # _train_dataloaders.append(mimiccxr_trainer.test_mscxr_dataloader)
         print(f'len(mimiccxr_trainer.train_mscxr_dataloader) = {len(mimiccxr_trainer.train_mscxr_dataloader)}')
 
     if use_mscxr_for_test:
@@ -548,24 +554,24 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=False, val=True)
     
     if use_chest_imagenome_for_train:
-        assert use_yolov8 # TODO: eventually support other bbox predictors
-        _cond_func = lambda x: x['flag'] == 'cibg'
-        attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'cibg_y8_loss')
-        attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'cibg_y8_box_loss')
-        attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'cibg_y8_cls_loss')
-        attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'cibg_y8_dfl_loss')
-        if use_chest_imagenome_gold_for_test:
-            _gold_class_mask = get_chest_imagenome_gold_class_mask()
-            attach_condition_aware_chest_imagenome_bbox_iou(
-                validator_engine, _cond_func, use_yolov8=True, class_mask=_gold_class_mask, metric_name='cibg_y8_bbox_iou')
-        # for logging
-        metrics_to_print.append('cibg_y8_loss')
-        metrics_to_print.append('cibg_y8_box_loss')
-        metrics_to_print.append('cibg_y8_cls_loss')
-        metrics_to_print.append('cibg_y8_dfl_loss')
-        metrics_to_print.append('cibg_phrcls_loss')
-        if use_chest_imagenome_gold_for_test:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
+        if use_yolov8: # TODO: eventually support other bbox predictors
+            _cond_func = lambda x: x['flag'] == 'cibg'
+            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'cibg_y8_loss')
+            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'cibg_y8_box_loss')
+            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'cibg_y8_cls_loss')
+            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'cibg_y8_dfl_loss')
+            if use_chest_imagenome_gold_for_test:
+                _gold_class_mask = get_chest_imagenome_gold_class_mask()
+                attach_condition_aware_chest_imagenome_bbox_iou(
+                    validator_engine, _cond_func, use_yolov8=True, class_mask=_gold_class_mask, metric_name='cibg_y8_bbox_iou')
+            # for logging
+            metrics_to_print.append('cibg_y8_loss')
+            metrics_to_print.append('cibg_y8_box_loss')
+            metrics_to_print.append('cibg_y8_cls_loss')
+            metrics_to_print.append('cibg_y8_dfl_loss')
+            metrics_to_print.append('cibg_phrcls_loss')
+            if use_chest_imagenome_gold_for_test:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
 
     if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
         _cond_func = lambda x: x['flag'] == 'cibg'
@@ -778,6 +784,12 @@ def train_from_scratch(
     regions_height,
     qkv_size,
     phrase_classifier_hidden_size,
+    phrase_grounding_mode,
+    transf_d_model,
+    transf_nhead,
+    transf_dim_feedforward,
+    transf_dropout,
+    transf_num_layers,
     # Optimizer args
     optimizer_name,
     lr,
@@ -875,7 +887,7 @@ def train_from_scratch(
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     use_bbox_aware_transform = use_yolov8
-    predict_bboxes_chest_imagenome = use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test
+    predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
@@ -925,6 +937,12 @@ def train_from_scratch(
         regions_height=regions_height,
         qkv_size=qkv_size,
         phrase_classifier_hidden_size=phrase_classifier_hidden_size,
+        phrase_grounding_mode=phrase_grounding_mode,
+        transf_d_model=transf_d_model,
+        transf_nhead=transf_nhead,
+        transf_dim_feedforward=transf_dim_feedforward,
+        transf_dropout=transf_dropout,
+        transf_num_layers=transf_num_layers,
     )
     
     optimizer_kwargs = dict(

@@ -22,7 +22,7 @@ from medvqa.metrics.nlp.meteor import Meteor
 from medvqa.metrics.nlp.rouge import RougeL
 from medvqa.utils.hashing import hash_string
 
-from medvqa.utils.common import get_timestamp, LARGE_FAST_CACHE_DIR
+from medvqa.utils.common import CACHE_DIR, get_timestamp, LARGE_FAST_CACHE_DIR
 from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
 from medvqa.utils.logging import print_bold
 from medvqa.metrics.nlp import Bleu
@@ -948,63 +948,102 @@ def evaluate_metrics__chest_imagenome_gold__report_level(
         figsize=(10, 6),
     )
 
+class _NLI_Dataset_Name:
+    MSCXRT_AND_RADNLI = 'MSCXRT_AND_RADNLI'
+    CUSTOM_DATASET = 'CUSTOM_DATASET'
+    @staticmethod
+    def get_all():
+        return [
+            _NLI_Dataset_Name.MSCXRT_AND_RADNLI,
+            _NLI_Dataset_Name.CUSTOM_DATASET,
+        ]
+
 def evaluate_metrics__NLI(
         fact_embedding_model_checkpoint_folder_paths,
         fact_embedding_model_names,
-        radcliq_device_id,
+        use_radcliq=True,
+        radcliq_device_id=None,
+        dataset_name=_NLI_Dataset_Name.MSCXRT_AND_RADNLI,
+        custom_dataset_csv_path=None,
+        save_scores_to_disk=True,
+        alias=None,
     ):
 
     assert len(fact_embedding_model_checkpoint_folder_paths) == len(fact_embedding_model_names)
     assert len(fact_embedding_model_checkpoint_folder_paths) > 0
+    if use_radcliq:
+        assert radcliq_device_id is not None
 
     premises = []
     hypotheses = []
     labels = []
+
+    if dataset_name == _NLI_Dataset_Name.MSCXRT_AND_RADNLI:
     
-    df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
-    print(f'Number of MS_CXR_T samples: {len(df)}')
-    for p, h, l in zip(df.sentence_1, df.sentence_2, df.category):
-        if l == 'paraphrase':
-            premises.append(p)
-            hypotheses.append(h)
-            labels.append(1)
-        elif l == 'contradiction':
-            premises.append(p)
-            hypotheses.append(h)
-            labels.append(0)
-    mscxrt_count = len(labels)
-    print(f'Number of entailment samples: {sum(labels)}')
-    print(f'Number of contradiction samples: {len(labels) - sum(labels)}')
+        df = pd.read_csv(MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH)
+        print(f'Number of MS_CXR_T samples: {len(df)}')
+        for p, h, l in zip(df.sentence_1, df.sentence_2, df.category):
+            if l == 'paraphrase':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(1)
+            elif l == 'contradiction':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(0)
+        mscxrt_count = len(labels)
+        print(f'Number of entailment samples: {sum(labels)}')
+        print(f'Number of contradiction samples: {len(labels) - sum(labels)}')
 
-    rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
-    print(f'Number of RadNLI dev samples: {len(rows)}')
-    for x in rows:
-        p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
-        if l == 'entailment':
-            premises.append(p)
-            hypotheses.append(h)
-            labels.append(1)
-        elif l == 'contradiction':
-            premises.append(p)
-            hypotheses.append(h)
-            labels.append(0)
+        rows = load_jsonl(RADNLI_DEV_JSONL_PATH)
+        print(f'Number of RadNLI dev samples: {len(rows)}')
+        for x in rows:
+            p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+            if l == 'entailment':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(1)
+            elif l == 'contradiction':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(0)
 
-    rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
-    print(f'Number of RadNLI test samples: {len(rows)}')
-    for x in rows:
-        p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
-        if l == 'entailment':
+        rows = load_jsonl(RADNLI_TEST_JSONL_PATH)
+        print(f'Number of RadNLI test samples: {len(rows)}')
+        for x in rows:
+            p, h, l = x['sentence1'], x['sentence2'], x['gold_label']
+            if l == 'entailment':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(1)
+            elif l == 'contradiction':
+                premises.append(p)
+                hypotheses.append(h)
+                labels.append(0)
+        radnli_count = len(labels) - mscxrt_count
+        print(f'Number of RadNLI samples: {radnli_count}')
+        print(f'Number of entailment samples: {sum(labels[mscxrt_count:])}')
+        print(f'Number of contradiction samples: {radnli_count - sum(labels[mscxrt_count:])}')
+
+    elif dataset_name == _NLI_Dataset_Name.CUSTOM_DATASET:
+        
+        assert custom_dataset_csv_path is not None
+        print(f'Loading custom dataset from {custom_dataset_csv_path}')
+        df = pd.read_csv(custom_dataset_csv_path)
+        print(f'Number of custom dataset samples: {len(df)}')
+        for p, h, l in zip(df.reference, df.candidate, df.value):
             premises.append(p)
             hypotheses.append(h)
-            labels.append(1)
-        elif l == 'contradiction':
-            premises.append(p)
-            hypotheses.append(h)
-            labels.append(0)
-    radnli_count = len(labels) - mscxrt_count
-    print(f'Number of RadNLI samples: {radnli_count}')
-    print(f'Number of entailment samples: {sum(labels[mscxrt_count:])}')
-    print(f'Number of contradiction samples: {radnli_count - sum(labels[mscxrt_count:])}')
+            if l == 'entailment':
+                labels.append(1)
+            elif l == 'contradiction':
+                labels.append(0)
+            else: assert False
+        print(f'Number of entailment samples: {sum(labels)}')
+        print(f'Number of contradiction samples: {len(labels) - sum(labels)}')
+
+    else:
+        raise ValueError(f'Invalid dataset_name: {dataset_name}')
 
     # Compute BLEU score between each pair of sentences
     bleu_scores = _compute_bleu_scores(premises, hypotheses)
@@ -1045,9 +1084,10 @@ def evaluate_metrics__NLI(
     radgraph_f1_partial_scores = _compute_radgraph_f1_partial_scores(premises, hypotheses)
 
     # Compute RadCliQ between each pair of sentences
-    radcliq_scores = _compute_radcliq_scores(premises, hypotheses, device_id=radcliq_device_id)
-    radcliq_scores['RadCliQ-v0'] = -1 * radcliq_scores['RadCliQ-v0'] # lower is better
-    radcliq_scores['RadCliQ-v1'] = -1 * radcliq_scores['RadCliQ-v1'] # lower is better
+    if use_radcliq:
+        radcliq_scores = _compute_radcliq_scores(premises, hypotheses, device_id=radcliq_device_id)
+        radcliq_scores['RadCliQ-v0'] = -1 * radcliq_scores['RadCliQ-v0'] # lower is better
+        radcliq_scores['RadCliQ-v1'] = -1 * radcliq_scores['RadCliQ-v1'] # lower is better
 
     # Compute Fact Embedding Score between each pair of sentences
     fact_embedding_scores_list = [
@@ -1084,25 +1124,51 @@ def evaluate_metrics__NLI(
         'CheXpert F1',
         'CheXbert F1',
     ]
-    scores_list.extend([radcliq_scores[x] for x in RADCLIQ_METRIC_NAMES])
-    method_names.extend([f'RadCliQ_{x}' for x in RADCLIQ_METRIC_NAMES])
+    if use_radcliq:
+        scores_list.extend([radcliq_scores[x] for x in RADCLIQ_METRIC_NAMES])
+        method_names.extend([f'RadCliQ_{x}' for x in RADCLIQ_METRIC_NAMES])
     scores_list.extend(fact_embedding_scores_list)
     method_names.extend(fact_embedding_model_names)
     assert len(scores_list) == len(method_names)
 
     print_bold('Computing AUC for each metric')
     print()
-    print_bold('MS-CXR-T:')
-    for method_name, scores in zip(method_names, scores_list):
-        print(f'{method_name} AUC: {auc(scores[:mscxrt_count], labels[:mscxrt_count])}')
-    print()
-    print_bold('RadNLI:')
-    for method_name, scores in zip(method_names, scores_list):
-        print(f'{method_name} AUC: {auc(scores[mscxrt_count:], labels[mscxrt_count:])}')
-    print()
-    print_bold('Overall:')
-    for method_name, scores in zip(method_names, scores_list):
-        print(f'{method_name} AUC: {auc(scores, labels)}')
+    
+    if dataset_name == _NLI_Dataset_Name.MSCXRT_AND_RADNLI:
+        print_bold('MS-CXR-T:')
+        for method_name, scores in zip(method_names, scores_list):
+            print(f'{method_name} AUC: {auc(scores[:mscxrt_count], labels[:mscxrt_count])}')
+        print()
+        print_bold('RadNLI:')
+        for method_name, scores in zip(method_names, scores_list):
+            print(f'{method_name} AUC: {auc(scores[mscxrt_count:], labels[mscxrt_count:])}')
+        print()
+        print_bold('Overall:')
+        for method_name, scores in zip(method_names, scores_list):
+            print(f'{method_name} AUC: {auc(scores, labels)}')
+    else:
+        for method_name, scores in zip(method_names, scores_list):
+            print(f'{method_name} AUC: {auc(scores, labels)}')
+
+    if save_scores_to_disk:
+        output = {
+            'premises': premises,
+            'hypotheses': hypotheses,
+            'labels': labels,
+        }
+        for method_name, scores in zip(method_names, scores_list):
+            output[method_name] = scores
+        if dataset_name == _NLI_Dataset_Name.MSCXRT_AND_RADNLI:
+            output['source'] = ['MS-CXR-T'] * mscxrt_count + ['RadNLI'] * radnli_count
+            output_filepath = os.path.join(CACHE_DIR, f'report_gen_NLI_metrics_MSCXRT_AND_RADNLI.pkl')
+        else:
+            custom_filename = os.path.basename(custom_dataset_csv_path)
+            if alias is not None:
+                output_filepath = os.path.join(CACHE_DIR, f'report_gen_NLI_metrics_custom_{custom_filename}_{alias}.pkl')
+            else:
+                output_filepath = os.path.join(CACHE_DIR, f'report_gen_NLI_metrics_custom_{custom_filename}.pkl')
+        print_bold(f'Saving scores to {output_filepath}')
+        save_pickle(output, output_filepath)
 
 def evaluate_metrics__custom_mimiccxr_radiologist_annotations():
     sentences, labels = load_mimiccxr_custom_radiologist_annotations()

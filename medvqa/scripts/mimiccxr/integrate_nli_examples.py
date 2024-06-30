@@ -18,6 +18,7 @@ if __name__ == '__main__':
     parser.add_argument('--generated_nli_examples_v3_jsonl_filepaths', type=str, nargs='+', default=[])
     parser.add_argument('--generated_nli_examples_v5_jsonl_filepaths', type=str, nargs='+', default=[])
     parser.add_argument('--generated_nli_examples_v6_jsonl_filepaths', type=str, nargs='+', default=[])
+    parser.add_argument('--generated_nli_examples_label_driven_filepaths', type=str, nargs='+', default=[])
     parser.add_argument('--generation_methods', type=str, nargs='+', required=True)
     args = parser.parse_args()
     n1 = len(args.generated_nli_examples_jsonl_filepaths)
@@ -25,12 +26,14 @@ if __name__ == '__main__':
     n3 = len(args.generated_nli_examples_v3_jsonl_filepaths)
     n5 = len(args.generated_nli_examples_v5_jsonl_filepaths)
     n6 = len(args.generated_nli_examples_v6_jsonl_filepaths)
-    assert n1 + n2 + n3 + n5 + n6 == len(args.generation_methods), 'Number of generation methods must match number of files'
+    n7 = len(args.generated_nli_examples_label_driven_filepaths)
+    assert n1 + n2 + n3 + n5 + n6 + n7 == len(args.generation_methods), 'Number of generation methods must match number of files'
     generation_methods_1 = args.generation_methods[:n1]
     generation_methods_2 = args.generation_methods[n1:n1+n2]
     generation_methods_3 = args.generation_methods[n1+n2:n1+n2+n3]
     generation_methods_5 = args.generation_methods[n1+n2+n3:n1+n2+n3+n5]
     generation_methods_6 = args.generation_methods[n1+n2+n3+n5:n1+n2+n3+n5+n6]
+    generation_methods_7 = args.generation_methods[n1+n2+n3+n5+n6:]
 
     output = []
 
@@ -193,6 +196,41 @@ if __name__ == '__main__':
                     'source': source,
                 })
         print(output[-1])
+
+    # Load generated NLI examples label-driven
+    assert len(args.generated_nli_examples_label_driven_filepaths) == len(generation_methods_7)
+    label2label = {
+        'definitely true': 'entailment',
+        'likely true': 'entailment',
+        'unknown': 'neutral',
+        'likely false': 'contradiction',
+        'definitely false': 'contradiction',
+    }
+    for filepath, source in zip(args.generated_nli_examples_label_driven_filepaths, generation_methods_7):
+        assert os.path.exists(filepath), f'File {filepath} does not exist'
+        rows = load_jsonl(filepath)
+        print(f'Loaded {len(rows)} rows from {filepath}')
+        for row in rows:
+            query = row['metadata']['query']
+            p_idx = query.index('#P: ')
+            h_idx = query.index('| #H: ')
+            premise = query[p_idx+4:h_idx].strip()
+            hypothesis = query[h_idx+6:].strip()
+            label = row['parsed_response']['label']
+            label = label2label[label]
+            output.append({
+                'premise': premise,
+                'hypothesis': hypothesis,
+                'label': label,
+                'source': source,
+            })
+            if label == 'contradiction': # contradiction works both ways
+                output.append({
+                    'premise': hypothesis,
+                    'hypothesis': premise,
+                    'label': label,
+                    'source': source,
+                })
 
     # Load examples from MedNLI and RadNLI
     for filepath, source in zip(
