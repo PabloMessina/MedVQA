@@ -360,11 +360,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
                 assert sigmoid_attention.dim() == 3
-                n = phrase_grounding_masks.shape[1]
+                n = phrase_grounding_masks.shape[1] # number of facts with masks
                 assert sigmoid_attention.shape[1] > n # NOTE: some facts don't have masks
-                sigmoid_attention_with_mask = sigmoid_attention[:, :n] # this will be supervised with ground truth masks
+                sigmoid_attention_with_mask = sigmoid_attention[:, :n] # first n facts will be supervised with ground truth masks
                 if use_attention_regularization_loss:                    
-                    sigmoid_attention_without_mask = sigmoid_attention[:, n:] # this will be supervised with attention regularization loss
+                    sigmoid_attention_without_mask = sigmoid_attention[:, n:] # remaining facts will be supervised with attention regularization loss
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
                 if using_yolov8:
                     yolov8_features = model_output['yolov8_features']
@@ -458,7 +458,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
         output['pred_mask'] = sigmoid_attention_with_mask.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
-        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['pred_probs'] = phrase_classifier_logits.detach().sigmoid().view(-1)
         output['gt_labels'] = phrase_classification_labels.detach().view(-1)
 
         return output
@@ -526,8 +526,9 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
         output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
-        output['pred_phrase_labels'] = (phrase_classifier_logits.detach() > 0).view(-1)
-        output['gt_phrase_labels'] = phrase_classification_labels.detach().view(-1)
+        output['pred_probs'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['pred_labels'] = (phrase_classifier_logits.detach() > 0).view(-1)
+        output['gt_labels'] = phrase_classification_labels.detach().view(-1)
 
         return output
     

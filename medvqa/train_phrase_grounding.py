@@ -569,7 +569,6 @@ def train_model(
             metrics_to_print.append('cibg_y8_box_loss')
             metrics_to_print.append('cibg_y8_cls_loss')
             metrics_to_print.append('cibg_y8_dfl_loss')
-            metrics_to_print.append('cibg_phrcls_loss')
             if use_chest_imagenome_gold_for_test:
                 append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
 
@@ -609,12 +608,12 @@ def train_model(
             attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'vbg_y8_cls_loss')
             attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'vbg_y8_dfl_loss')
         attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
-        attach_condition_aware_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'vbg_prc_auc', _cond_func)
+        attach_condition_aware_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', 'vbg_prc_auc', _cond_func)
         if use_vinbig_for_test:
             if use_yolov8:
                 attach_condition_aware_vinbig_bbox_iou(
                     validator_engine, _cond_func, use_yolov8=True, metric_name='vbg_y8_bbox_iou')
-            attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'vbg_prc_auc', _cond_func)
+            attach_condition_aware_prc_auc(validator_engine, 'pred_probs', 'gt_labels', 'vbg_prc_auc', _cond_func)
         # for logging
         if use_yolov8:
             metrics_to_print.append('vbg_y8_loss')

@@ -751,6 +751,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             print(f'len(bbox_phrases) = {len(bbox_phrases)}')
             for phrase in bbox_phrases:
                 print('\t', phrase)
+            self.test_chest_imagenome_gold_bbox_phrases = bbox_phrases
 
             BIG_ENOGUGH = 1000000
             image_paths = [None] * BIG_ENOGUGH

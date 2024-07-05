@@ -31,6 +31,20 @@ def print_normal_and_bold(normal, bold):
     print(normal, end='')
     print_bold(bold)
 
+def rgba_to_ansi(rgba):
+    """
+    Convert RGBA to nearest ANSI color code.
+    
+    :param rgba: A tuple of (R, G, B, A) with values in [0, 1].
+    :return: ANSI color escape code as a string.
+    """
+    r, g, b = rgba[:3]  # Ignore alpha for console color
+    r, g, b = int(r * 255), int(g * 255), int(b * 255)
+    
+    # Map to nearest 256 color (simplified mapping)
+    ansi_code = 16 + (36 * int(r / 51)) + (6 * int(g / 51)) + int(b / 51)
+    return f'\033[38;5;{ansi_code}m'
+
 class CountPrinter:
     def __init__(self, color='blue', bold=True):
         self.count = 1

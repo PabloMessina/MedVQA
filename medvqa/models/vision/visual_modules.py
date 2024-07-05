@@ -12,7 +12,8 @@ from medvqa.datasets.chest_imagenome import (
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
-from medvqa.models.common import freeze_parameters, load_model_state_dict
+from medvqa.models.checkpoint import load_model_state_dict
+from medvqa.models.common import freeze_parameters
 from medvqa.models.mlp import MLP
 from medvqa.models.vision.bbox_regression import (
     BBoxRegressorVersion,

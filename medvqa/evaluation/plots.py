@@ -13,7 +13,7 @@ from medvqa.datasets.chest_imagenome import (
 
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.metrics import average_ignoring_nones_and_nans
-from medvqa.utils.logging import print_blue
+from medvqa.utils.logging import print_blue, print_bold, rgba_to_ansi
 
 # List of 30 different colors
 _COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
@@ -515,12 +515,16 @@ def visualize_attention_map(image_path, attention_map, figsize, title=None, atte
 def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, max_cols=3, attention_factor=1.0):
     from PIL import Image
     import matplotlib.patches as patches
+    import textwrap
 
     # Create a grid of subplots
     n_cols = min(len(attention_maps), max_cols)
     n_rows = math.ceil(len(attention_maps) / n_cols)
     fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
     assert ax.shape == (n_rows, n_cols)
+    
+    # Define wrap length for titles based on number of columns and the figure size
+    wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
 
     # Image
     image = Image.open(image_path)
@@ -544,7 +548,8 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
                 ax[row, col].add_patch(rect)
 
         if titles is not None:
-            ax[row, col].set_title(titles[k])
+            wrapped_title = "\n".join(textwrap.wrap(titles[k], wrap_length))
+            ax[row, col].set_title(wrapped_title)
 
     plt.show()
 
@@ -555,47 +560,179 @@ def visualize_image_and_polygons(image_path, polygons_list, polygon_names, figsi
 
     # Image
     image = Image.open(image_path)
-    image = image.convert('RGB')
+    image = image.convert('RGBA')
     image_width = image.size[0]
     image_height = image.size[1]
     
     if as_segmentation:
         # Draw polygons as segmentation masks
         if mask_resolution is None:
-            for i, polygon in enumerate(polygons):
-                coords = [(point[0], point[1]) for point in polygon]
-                ImageDraw.Draw(image).polygon(coords, outline='red', fill='red')
-            ax.imshow(image)
+            overlays = []
+            for i, polygons in enumerate(polygons_list):
+                for polygon in polygons:
+                    coords = [(point[0], point[1]) for point in polygon]
+                    c = _COLORS[i % len(_COLORS)]
+                    c_fill = (int(c[0]*255), int(c[1]*255), int(c[2]*255), 60) # 24% opacity
+                    c_outline = (int(c[0]*255), int(c[1]*255), int(c[2]*255), 200) # 80% opacity
+                    overlay = Image.new('RGBA', image.size, (255, 255, 255, 0))  # Transparent overlay
+                    ImageDraw.Draw(overlay).polygon(coords, fill=c_fill, outline=c_outline)
+                    overlays.append(overlay)
+            # Combine the image with the overlays
+            combined = image
+            for overlay in overlays:
+                combined = Image.alpha_composite(combined, overlay)
+            ax.imshow(combined)
         else:
             mask_height, mask_width = mask_resolution
-            mask = Image.new('1', (mask_width, mask_height))
-            for i, polygon in enumerate(polygons):
-                coords = [(point[0] * mask_width / image_width, point[1] * mask_height / image_height) for point in polygon]
-                ImageDraw.Draw(mask).polygon(coords, outline='red', fill='red')
-            mask = mask.resize((image_width, image_height), Image.NEAREST)
-            ax.imshow(image)
-            ax.imshow(mask, alpha=0.5)
+            masks = []
+            for i, polygons in enumerate(polygons_list):
+                for polygon in polygons:
+                    coords = [(point[0] * mask_width / image_width, point[1] * mask_height / image_height) for point in polygon]
+                    c = _COLORS[i % len(_COLORS)]
+                    c_fill = (int(c[0]*255), int(c[1]*255), int(c[2]*255), 60) # 24% opacity
+                    c_outline = (int(c[0]*255), int(c[1]*255), int(c[2]*255), 200) # 80% opacity
+                    mask = Image.new('RGBA', (mask_width, mask_height))
+                    ImageDraw.Draw(mask).polygon(coords, fill=c_fill, outline=c_outline)
+                    masks.append(mask)
+            # Combine the image with the masks
+            combined = image
+            for mask in masks:
+                mask = mask.resize((image_width, image_height), Image.NEAREST)
+                combined = Image.alpha_composite(combined, mask)
+            ax.imshow(combined)
     else:
         ax.imshow(image)
-        i = 0
-        for polygons, name in zip(polygons_list, polygon_names):
+        for i, polygons in enumerate(polygons_list):
             # Draw polygons
             for polygon in polygons:
                 x = [p[0] for p in polygon]
                 y = [p[1] for p in polygon]
                 ax.plot(x, y, linewidth=3, color=_COLORS[i % len(_COLORS)])
-                i += 1
-            # Draw polygon names
-            for polygon in polygons:
-                # find upper left corner of polygon
-                y, x = min((y, x) for x, y in polygon)
-                ax.text(x, y, name, fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
-        print(f'i = {i}')
+    
+    # Draw polygon names
+    for polygons, name in zip(polygons_list, polygon_names):
+        for polygon in polygons:
+            # find upper left corner of polygon
+            y, x = min((y, x) for x, y in polygon)
+            ax.text(x, y, name, fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
 
     if title is not None:
         plt.title(title)
 
     plt.show()
+
+def plot_segmentation_mask_area_vs_iou(masks_array, iou_array, figsize=(10, 8), title=None, xlabel=None, ylabel=None,
+                                       normalize_area=False, sentences=None, num_annotations=10,
+                                       highlight_points_with_sentences_containing=None):
+    """
+    Plots the IoU vs. area for a set of segmentation masks.
+
+    :param masks_array: An array of shape (n_masks, height * width) containing the segmentation masks.
+    :param iou_array: An array of shape (n_masks,) containing the IoU values.
+    :param figsize: The size of the plot.
+    :param title: The title of the plot.
+    :param xlabel: The label of the x-axis.
+    :param ylabel: The label of the y-axis.
+    :param normalize_area: Whether to normalize the area by the number of pixels in the mask.
+    :param sentences: A list of sentences corresponding to each mask.
+    :param num_annotations: The number of points to annotate with sentences.
+    :param highlight_points_with_sentences_containing: A string to highlight points with sentences containing this string.
+    """
+    masks_array =  np.array(masks_array)
+    iou_array = np.array(iou_array)
+    n_masks = len(masks_array)
+    assert n_masks == len(iou_array)
+    assert masks_array.ndim == 2
+    if highlight_points_with_sentences_containing is not None:
+        assert sentences is not None
+
+    # Calculate the area of each mask
+    areas = masks_array.sum(-1)
+    if normalize_area:
+        # Normalize the area by the number of pixels in the mask
+        areas /= masks_array[0].size
+
+    # Create the plot
+    if title is None:
+        title = 'IoU vs. Area'
+    if xlabel is None:
+        xlabel = 'Area' if not normalize_area else 'Area (normalized)'
+    if ylabel is None:
+        ylabel = 'IoU'
+    plt.figure(figsize=figsize)
+    if highlight_points_with_sentences_containing is not None:
+        idxs_with = [i for i, sentence in enumerate(sentences) if highlight_points_with_sentences_containing in sentence]
+        idxs_without = [i for i, sentence in enumerate(sentences) if highlight_points_with_sentences_containing not in sentence]
+        plt.scatter(areas[idxs_without], iou_array[idxs_without], c='blue', alpha=0.5)
+        plt.scatter(areas[idxs_with], iou_array[idxs_with], c='red', alpha=0.5)
+    else:
+        plt.scatter(areas, iou_array, c='blue', alpha=0.5)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+
+    # Annotate some of the points with sentences
+    if sentences is not None:
+        # Sort by IoU
+        sorted_indices = np.argsort(iou_array)
+        # Split the indices into 20 consecutive groups
+        groups = np.array_split(sorted_indices, 20)
+        # Choose the same number of points randomly from each group
+        num_annotations_per_group = math.ceil(num_annotations / 20)
+        indices = []
+        for group in groups:
+            indices.extend(random.sample(list(group), min(num_annotations_per_group, len(group))))
+        # Annotate the points
+        tuples = []
+        for idx in indices:
+            plt.annotate(sentences[idx], (areas[idx], iou_array[idx]), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10)
+            tuples.append((sentences[idx], iou_array[idx], areas[idx], idx))
+    
+    # Show plot
+    plt.show()
+
+    # Print annotated sentences
+    if sentences is not None:
+        tuples.sort(key=lambda x: x[1], reverse=True)
+        for sentence, iou, area, idx in tuples:
+            print_bold(f"(IoU={iou:.3f}, area={area:.3f}, idx={idx})", end=' ')
+            print(sentence)
+
+def plot_wordclouds_per_bin(sentences, scores, num_bins, figsize=(10, 5), num_words=30, width=800, height=400, background_color='white'):
+    """
+    Plots word clouds for sentences in each bin of scores.
+
+    :param sentences: A list of sentences.
+    :param scores: A list of scores.
+    :param num_bins: The number of bins to divide the scores into.
+    :param figsize: The size of the plot.
+    :param num_words: The number of words to display in each word cloud.
+    :param width: The width of the word cloud.
+    :param height: The height of the word cloud.
+    :param background_color: The background color of the word cloud.
+    """
+    assert len(sentences) == len(scores)
+    assert num_bins > 0
+
+    # Create bins
+    bins = np.linspace(min(scores), max(scores), num_bins+1)
+    bin_indices = np.digitize(scores, bins)
+
+    # Create word clouds for each bin
+    from wordcloud import WordCloud
+    for i in range(1, num_bins+1):
+        bin_sentences = [sentences[j] for j in range(len(sentences)) if bin_indices[j] == i]
+        bin_scores = [scores[j] for j in range(len(scores)) if bin_indices[j] == i]
+        if len(bin_sentences) > 0:
+            print_bold(f'==================== Bin {i} ({bins[i-1]:.3f}-{bins[i]:.3f})')
+            # plot_wordcloud(bin_sentences, bin_scores, title=f'{title} (bin {i})', score_name=score_name, figsize=figsize, num_words=num_words)
+            text = ' '.join(bin_sentences)
+            wordcloud = WordCloud(width=width, height=height, max_words=num_words, background_color=background_color).generate(text)
+            # Display the word cloud
+            plt.figure(figsize=figsize)
+            plt.imshow(wordcloud, interpolation='bilinear')
+            plt.axis('off')
+            plt.show()
 
 def plot_embeddings_and_clusters(X_dataset, X_clusters):
     # Apply PCA to reduce dimensionality to 2
@@ -624,6 +761,119 @@ def plot_embeddings(X):
     
     # Show plot
     plt.show()
+
+_dim_reducers_cache = {}
+
+def plot_embeddings_sentences_and_scores(embeddings, sentences, scores, title, score_name, num_annotations=10, figsize=(12, 10),
+                                         sentence_max_length=50, sentence_fontsize=10, sample_more_from_low_scores=False,
+                                         highlight_points_with_sentences_containing=None, use_tsne=False, use_umap=False):
+    """
+    Plots 2D embeddings of sentences colored by their scores and randomly annotates some of them with sentences.
+
+    :param embeddings: An array-like of shape (n_samples, dim) containing the embeddings.
+    :param sentences: A list of sentences corresponding to each embedding.
+    :param scores: A list or array-like of scores for each embedding.
+    :param title: Title of the plot.
+    :param score_name: Name of the score to display in the colorbar.
+    :param num_annotations: Number of sentences to annotate on the plot.
+    :param figsize: Size of the plot.
+    :param sentence_max_length: Maximum length of the sentence to display.
+    :param sentence_fontsize: Font size of the sentences.
+    :param sample_more_from_low_scores: Whether to sample more annotations from the lowest scores.
+    :param highlight_points_with_sentences_containing: A string to highlight points with sentences containing this string.
+    :param use_tsne: Whether to use t-SNE instead of PCA for dimensionality reduction.
+    :param use_umap: Whether to use UMAP instead of PCA for dimensionality reduction.
+    """
+    assert len(embeddings) == len(sentences) == len(scores), "The number of embeddings, sentences, and scores must match."
+    
+    embeddings = np.array(embeddings)
+    scores = np.array(scores)
+
+    # Apply PCA to reduce dimensionality to 2
+    if embeddings.shape[1] > 2:
+        cache_key = f'2d+{embeddings.shape[1]}+{len(sentences)}+{sum(len(s) for s in sentences)}+{embeddings.sum():.3f}'
+        if use_tsne:
+            cache_key += '+tsne'
+            xlabel = 't-SNE1'
+            ylabel = 't-SNE2'
+        elif use_umap:
+            cache_key += '+umap'
+            xlabel = 'UMAP1'
+            ylabel = 'UMAP2'
+        else:
+            cache_key += '+pca'
+            xlabel = 'PCA1'
+            ylabel = 'PCA2'
+        if cache_key in _dim_reducers_cache:
+            embeddings = _dim_reducers_cache[cache_key]
+        else:
+            if use_tsne:
+                from sklearn.manifold import TSNE
+                tsne = TSNE(n_components=2, random_state=0)
+                embeddings = tsne.fit_transform(embeddings)
+            elif use_umap:
+                import umap
+                reducer = umap.UMAP(n_components=2)
+                embeddings = reducer.fit_transform(embeddings)
+            else:
+                from sklearn.decomposition import PCA
+                pca = PCA(n_components=2)
+                embeddings = pca.fit_transform(embeddings)
+            _dim_reducers_cache[cache_key] = embeddings
+        
+    # Plot embeddings colored by scores
+    plt.figure(figsize=figsize)
+    if highlight_points_with_sentences_containing is not None:
+        idxs_with = [i for i, sentence in enumerate(sentences) if highlight_points_with_sentences_containing in sentence]
+        idxs_without = [i for i, sentence in enumerate(sentences) if highlight_points_with_sentences_containing not in sentence]
+        scatter = plt.scatter(embeddings[idxs_without, 0], embeddings[idxs_without, 1], c=scores[idxs_without], cmap='coolwarm', edgecolor='k', alpha=0.7)
+        # Use purple color, a thicker edge, and larger radius for highlighted points
+        plt.scatter(embeddings[idxs_with, 0], embeddings[idxs_with, 1], c=scores[idxs_with], cmap='coolwarm', edgecolor='purple', linewidth=4, alpha=0.7, s=100)
+    else:
+        scatter = plt.scatter(embeddings[:, 0], embeddings[:, 1], c=scores, cmap='coolwarm', edgecolor='k', alpha=0.7)
+    plt.colorbar(scatter, label=score_name)
+    plt.title(f'{title} (mean {score_name}={np.mean(scores):.3f}, n={len(scores)})')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.grid(True)
+
+    # Get the colors from the scatter plot
+    colors = scatter.to_rgba(scores)
+    
+    # Randomly choose indices for annotations
+    if sample_more_from_low_scores:
+        sorted_indices = np.argsort(scores)
+        # Attempt to sample half of the annotations from the lowest 20% of scores
+        num_low_scores = len(scores) // 5
+        num_low_score_annotations = min(num_annotations // 2, num_low_scores)
+        num_high_score_annotations = min(num_annotations - num_low_score_annotations, len(scores) - num_low_scores)
+        low_score_indices = sorted_indices[:num_low_scores]
+        other_indices = sorted_indices[num_low_scores:]
+        indices = random.sample(list(low_score_indices), num_low_score_annotations) +\
+                    random.sample(list(other_indices), num_high_score_annotations)
+    else:
+        indices = random.sample(range(len(sentences)), min(num_annotations, len(sentences)))
+    
+    tuples = []
+    for idx in indices:
+        x, y = embeddings[idx]
+        sentence = sentences[idx]
+        if len(sentence) > sentence_max_length: # truncate long sentences
+            sentence = sentence[:sentence_max_length] + '...'
+        plt.annotate(sentence, (x, y), textcoords="offset points", xytext=(5, 5), ha='center',
+                     fontsize=sentence_fontsize, color=colors[idx])
+        
+        # Convert RGBA to ANSI and print to console
+        ansi_color = rgba_to_ansi(colors[idx])
+        tuples.append((f"{ansi_color}{sentences[idx]}\033[0m", scores[idx], idx))
+    
+    # Show plot
+    plt.show()
+
+    # Print annotated sentences
+    tuples.sort(key=lambda x: x[1], reverse=True) # sort by score
+    for sentence, score, idx in tuples:
+        print(f"{sentence} ({score:.3f}, idx={idx})")
 
 def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10), first_k=None):
     assert type(metric_lists) == list

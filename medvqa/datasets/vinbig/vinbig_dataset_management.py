@@ -531,11 +531,14 @@ class VinBigBboxGroundingDataset(Dataset):
             }
 
 class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
-    def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
+    def __init__(self, collate_batch_fn,
                  mask_height, mask_width, phrase_embeddings_filepath,
-                 max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
+                 max_images_per_batch, max_phrases_per_batch,
+                 test_batch_size_factor=1,
                  training_data_mode=VinBigTrainingMode.ALL,
                  use_training_set=True, use_validation_set=True,
+                 num_train_workers=None, num_val_workers=None,
+                 train_image_transform=None, val_image_transform=None,
                  data_augmentation_enabled=False, use_yolov8=False):
         super().__init__(
             load_bouding_boxes=True,
@@ -595,8 +598,13 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         print(f'len(phrases) = {len(phrases)}')
         print(f'len(actual_phrases) = {len(actual_phrases)}')
         print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+        self.phrases = phrases
+        self.phrase_embeddings = phrase_embeddings
 
         if use_training_set:
+            assert train_image_transform is not None
+            assert num_train_workers is not None
+
             print('Generating train dataset and dataloader')
             if training_data_mode == VinBigTrainingMode.TRAIN_ONLY:
                 train_indices = self.train_indices
@@ -640,6 +648,9 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                                             pin_memory=True)
         
         if use_validation_set:
+            assert val_image_transform is not None
+            assert num_val_workers is not None
+
             print('Generating val dataset and dataloader')
             print(f'len(self.test_indices) = {len(self.test_indices)}')
             self.val_dataset = VinBigBboxGroundingDataset(

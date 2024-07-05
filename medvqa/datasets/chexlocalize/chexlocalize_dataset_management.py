@@ -31,10 +31,11 @@ class CheXLocalizePhraseGroundingDataset(Dataset):
         }
 
 class CheXlocalizePhraseGroundingTrainer:
-    def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
-                 mask_height, mask_width, class_phrase_embeddings_filepath,
-                 max_images_per_batch, max_phrases_per_batch, test_batch_size_factor,
+    def __init__(self, collate_batch_fn, mask_height, mask_width, class_phrase_embeddings_filepath,
+                 max_images_per_batch, max_phrases_per_batch, test_batch_size_factor=1,
                  use_training_set=True, use_validation_set=True,
+                 train_image_transform=None, val_image_transform=None,
+                 num_train_workers=None, num_val_workers=None,
                  use_interpret_cxr_challenge_split=False, interpret_cxr_challenge_split_filepath=None):
         
         assert use_training_set or use_validation_set
@@ -47,6 +48,8 @@ class CheXlocalizePhraseGroundingTrainer:
         class_phrase_embeddings = tmp['class_phrase_embeddings']
         class_phrases = tmp['class_phrases']
         assert class_phrase_embeddings.shape[0] == len(class_phrases)
+        self.class_phrase_embeddings = class_phrase_embeddings
+        self.class_phrases = class_phrases
         print(f'class_phrase_embeddings.shape = {class_phrase_embeddings.shape}')
         print(f'len(class_phrases) = {len(class_phrases)}')
         for phrase in class_phrases:
@@ -74,13 +77,10 @@ class CheXlocalizePhraseGroundingTrainer:
             image_partial_path_2_idx = {p: i for i, p in enumerate(all_image_partial_paths)}
 
         if use_training_set:
+            assert train_image_transform is not None
+            assert num_train_workers is not None
             print('Generating train dataset and dataloader')
             if use_interpret_cxr_challenge_split:
-                # # DEBUG:
-                # print('challenge_split[\'train\'][:10]')
-                # print(challenge_split['train'][:10])
-                # print('all_image_partial_paths[:10]')
-                # print(all_image_partial_paths[:10])
                 train_indices = [image_partial_path_2_idx[p] for p in challenge_split['train'] if p in image_partial_path_2_idx]
                 assert len(train_indices) > 0, 'No training images found in the split'
             else:
@@ -106,13 +106,10 @@ class CheXlocalizePhraseGroundingTrainer:
             )
         
         if use_validation_set:
+            assert val_image_transform is not None
+            assert num_val_workers is not None
             print('Generating val dataset and dataloader')
             if use_interpret_cxr_challenge_split:
-                # # DEBUG:
-                # print('challenge_split[\'val\'][:10]')
-                # print(challenge_split['val'][:10])
-                # print('all_image_partial_paths[:10]')
-                # print(all_image_partial_paths[:10])
                 val_indices = [image_partial_path_2_idx[p] for p in challenge_split['val'] if p in image_partial_path_2_idx]
                 assert len(val_indices) > 0, 'No validation images found in the split'
             else:
