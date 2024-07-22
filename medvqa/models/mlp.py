@@ -22,6 +22,8 @@ class MLP(nn.Module):
         if isinstance(hidden_dims, int):
             hidden_dims = [hidden_dims]
 
+        self.hidden_dims = hidden_dims
+
         for hidden_dim in hidden_dims:
             layers.append(nn.Linear(in_dim, hidden_dim))
             if normalization:

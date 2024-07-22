@@ -18,6 +18,7 @@ from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
     group_indices_for_balanced_sampling,
 )
+from medvqa.datasets.image_processing import ImageFactBasedMultilabelClassificationDataset
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
@@ -351,40 +352,6 @@ class CheXpert_MAE_Trainer(MAETrainerBase):
     
     def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
         return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
-    
-class CheXpertPhraseGroundingDataset(Dataset):
-
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_classification_labels,
-                 indices, infinite=False, shuffle_indices=False):
-        self.image_paths = image_paths
-        self.image_transform = image_transform
-        self.phrase_embeddings = phrase_embeddings
-        self.phrase_classification_labels = phrase_classification_labels
-        self.indices = indices
-        self.infinite = infinite
-        if infinite:
-            self._len = INFINITE_DATASET_LENGTH
-        else:
-            self._len = len(indices)
-        if shuffle_indices:
-            np.random.shuffle(self.indices)
-
-    def __len__(self):
-        return self._len
-    
-    def __getitem__(self, i):
-        if self.infinite:
-            i %= len(self.indices)
-        i = self.indices[i]
-        image_path = self.image_paths[i]
-        phrase_embeddings = self.phrase_embeddings
-        phrase_classification_labels = self.phrase_classification_labels[i]
-        image = self.image_transform(image_path)
-        return {
-            'i': image,
-            'pe': phrase_embeddings,
-            'pcl': phrase_classification_labels,
-        }
 
 class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
     def __init__(self, train_image_transform, val_image_transform, collate_batch_fn, num_train_workers, num_val_workers,
@@ -466,7 +433,7 @@ class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
             train_datasets = []
             train_weights = []
             for indices in grouped_indices:
-                dataset = CheXpertPhraseGroundingDataset(
+                dataset = ImageFactBasedMultilabelClassificationDataset(
                     image_paths=all_image_paths,
                     image_transform=self.train_image_transform,
                     phrase_embeddings=phrase_embeddings,
@@ -497,7 +464,7 @@ class CheXpertPhraseGroundingTrainer(CheXpertTrainerBase):
                 assert len(test_indices) == len(self.test_labels)
             print('Generating val dataset and dataloader')
             print(f'len(test_indices) = {len(test_indices)}')
-            self.val_dataset = CheXpertPhraseGroundingDataset(
+            self.val_dataset = ImageFactBasedMultilabelClassificationDataset(
                 image_paths=all_image_paths,
                 image_transform=self.val_image_transform,
                 phrase_embeddings=phrase_embeddings,

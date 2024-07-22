@@ -32,7 +32,7 @@ _ALLOWED_GPT_CHAT_MODELS = (
     "gpt-4o",
 )
 
-GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|Please|please|I apologize|Sure|I'd be happy|do you need)\b")
+GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|I apologize|Sure|I'd be happy|do you need)\b")
 
 def process_api_requests_from_file(
     requests_filepath: str,

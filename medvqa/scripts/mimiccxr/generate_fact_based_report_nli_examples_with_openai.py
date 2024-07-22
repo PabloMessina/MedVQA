@@ -7,13 +7,13 @@ import pandas as pd
 from tqdm import tqdm
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.constants import LABEL_BASED_FACTS, MIMIC_CXR_LT_LABELS
+from medvqa.utils.constants import LABEL_BASED_FACTS, CXRLT2023_CLASSES
 from medvqa.utils.hashing import hash_string
 from medvqa.utils.logging import get_console_logger
 from medvqa.datasets.mimiccxr import (
-    MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH,
-    MIMIC_CXR_LT_LABELS_DEV_CSV_PATH,
-    MIMIC_CXR_LT_LABELS_TEST_CSV_PATH,
+    MIMIC_CXR_LT_2023_TRAIN_CSV_PATH,
+    MIMIC_CXR_LT_2023_DEV_CSV_PATH,
+    MIMIC_CXR_LT_2023_TEST_CSV_PATH,
     MIMICCXR_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     get_imageId2reportId,
@@ -95,17 +95,17 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
     n_reports = len(reports)
 
     # Load MIMIC-CXR-LT labels
-    df_train = pd.read_csv(MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH)
-    df_dev = pd.read_csv(MIMIC_CXR_LT_LABELS_DEV_CSV_PATH)
-    df_test = pd.read_csv(MIMIC_CXR_LT_LABELS_TEST_CSV_PATH)
+    df_train = pd.read_csv(MIMIC_CXR_LT_2023_TRAIN_CSV_PATH)
+    df_dev = pd.read_csv(MIMIC_CXR_LT_2023_DEV_CSV_PATH)
+    df_test = pd.read_csv(MIMIC_CXR_LT_2023_TEST_CSV_PATH)
     logger.info(f"len(df_train): {len(df_train)}")
     logger.info(f"len(df_dev): {len(df_dev)}")
     logger.info(f"len(df_test): {len(df_test)}")
 
-    mcxrlt_label_id_to_report_idxs = [set() for _ in range(len(MIMIC_CXR_LT_LABELS))]
+    mcxrlt_label_id_to_report_idxs = [set() for _ in range(len(CXRLT2023_CLASSES))]
     
     for df in [df_train, df_dev, df_test]:
-        labels = df[MIMIC_CXR_LT_LABELS].values
+        labels = df[CXRLT2023_CLASSES].values
         for i, study_id in enumerate(df['study_id']):
             for j, x in enumerate(labels[i]):
                 if x == 1:
@@ -116,7 +116,7 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
                     mcxrlt_label_id_to_report_idxs[j].add(ridx)
 
     # print the number of reports for each label
-    for i, label in enumerate(MIMIC_CXR_LT_LABELS):
+    for i, label in enumerate(CXRLT2023_CLASSES):
         logger.info(f"{label}: {len(mcxrlt_label_id_to_report_idxs[i])}")
 
     # Load chest imagenome labels
@@ -151,11 +151,11 @@ def sample_queries_label_based(num_samples, integrated_report_facts_metadata_jso
         logger.info(f"{label}: {len(ci_label_id_to_report_idxs[i])}")
        
     # Define label aliases
-    mcxrlt_label2alias = { label: f'{label.lower()} seen' for label in MIMIC_CXR_LT_LABELS }
+    mcxrlt_label2alias = { label: f'{label.lower()} seen' for label in CXRLT2023_CLASSES }
     mcxrlt_label2alias['Pleural Other'] = 'pleural abnormalities seen'
     mcxrlt_label2alias['No Finding'] = 'no abnormalities seen'
-    assert len(mcxrlt_label2alias) == len(MIMIC_CXR_LT_LABELS)
-    mcxrlt_label_names = MIMIC_CXR_LT_LABELS
+    assert len(mcxrlt_label2alias) == len(CXRLT2023_CLASSES)
+    mcxrlt_label_names = CXRLT2023_CLASSES
 
     ci_label2alias = {}
     for label in ci_label_names:
@@ -484,16 +484,16 @@ def evaluate_queries_mimic_cxr_lt(integrated_report_facts_metadata_jsonl_filepat
         study_id_to_report_idx[study_id] = i
 
     # Load MIMIC-CXR-LT labels
-    df_train = pd.read_csv(MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH)
-    df_dev = pd.read_csv(MIMIC_CXR_LT_LABELS_DEV_CSV_PATH)
-    df_test = pd.read_csv(MIMIC_CXR_LT_LABELS_TEST_CSV_PATH)
+    df_train = pd.read_csv(MIMIC_CXR_LT_2023_TRAIN_CSV_PATH)
+    df_dev = pd.read_csv(MIMIC_CXR_LT_2023_DEV_CSV_PATH)
+    df_test = pd.read_csv(MIMIC_CXR_LT_2023_TEST_CSV_PATH)
     print(f"len(df_train): {len(df_train)}")
     print(f"len(df_dev): {len(df_dev)}")
     print(f"len(df_test): {len(df_test)}")
 
     report2labels = {}    
     for df in [df_train, df_dev, df_test]:
-        labels = df[MIMIC_CXR_LT_LABELS].values
+        labels = df[CXRLT2023_CLASSES].values
         for i, study_id in enumerate(df['study_id']):
             report_idx = study_id_to_report_idx[study_id]
             report = reports[report_idx]['fact_based_report']
@@ -501,15 +501,15 @@ def evaluate_queries_mimic_cxr_lt(integrated_report_facts_metadata_jsonl_filepat
 
     print(f"len(report2labels): {len(report2labels)}")
 
-    mcxrlt_label2alias = { label: f'{label.lower()} seen' for label in MIMIC_CXR_LT_LABELS }
+    mcxrlt_label2alias = { label: f'{label.lower()} seen' for label in CXRLT2023_CLASSES }
     mcxrlt_label2alias['Pleural Other'] = 'pleural abnormalities seen'
     mcxrlt_label2alias['No Finding'] = 'no abnormalities seen'
-    mcxrlt_alias2labelidx = { v: MIMIC_CXR_LT_LABELS.index(k) for k, v in mcxrlt_label2alias.items() }
+    mcxrlt_alias2labelidx = { v: CXRLT2023_CLASSES.index(k) for k, v in mcxrlt_label2alias.items() }
     print(mcxrlt_alias2labelidx)
-    assert len(mcxrlt_label2alias) == len(MIMIC_CXR_LT_LABELS)
-    assert len(mcxrlt_alias2labelidx) == len(MIMIC_CXR_LT_LABELS)
+    assert len(mcxrlt_label2alias) == len(CXRLT2023_CLASSES)
+    assert len(mcxrlt_alias2labelidx) == len(CXRLT2023_CLASSES)
 
-    return _evaluate_queries(query_jsonl_filepaths, report2labels, MIMIC_CXR_LT_LABELS, mcxrlt_alias2labelidx, figsize)
+    return _evaluate_queries(query_jsonl_filepaths, report2labels, CXRLT2023_CLASSES, mcxrlt_alias2labelidx, figsize)
 
 def evaluate_queries_chest_imagenome(integrated_report_facts_metadata_jsonl_filepath, query_jsonl_filepaths,
                                      chest_imagenome_label_names_filepath, chest_imagenome_image_id_to_labels_filepath, figsize=(8, 14)):

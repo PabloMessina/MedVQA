@@ -79,7 +79,7 @@ def auc(scores, binary_labels):
             pos += 1
     return count / (pos * (n - pos)) if pos > 0 and pos < n else 0.5
 
-def best_threshold_and_f1_score(probs, gt):
+def best_threshold_and_f1_score(gt, probs):
     idxs = np.argsort(probs)
     best_thrs = 0
     tp = gt.sum()
@@ -100,7 +100,7 @@ def best_threshold_and_f1_score(probs, gt):
             best_thrs = probs[i]
     return best_thrs, best_f1
 
-def best_threshold_and_precision_score(probs, gt):
+def best_threshold_and_precision_score(gt, probs):
     idxs = np.argsort(probs)
     best_thrs = 0
     tp = gt.sum()
@@ -119,7 +119,7 @@ def best_threshold_and_precision_score(probs, gt):
             best_thrs = probs[i]
     return best_thrs, best_precision
 
-def best_threshold_and_accuracy_score(probs, gt):
+def best_threshold_and_accuracy_score(gt, probs):
     idxs = np.argsort(probs)
     best_thrs = 0
     tp = gt.sum()

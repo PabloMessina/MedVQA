@@ -233,8 +233,8 @@ def evaluate(
             report_nli_softmaxes = all_softmaxes[offset:offset+size]
             report_nli_softmaxes = np.array(report_nli_softmaxes)
             best_thrs, best_f1 = best_threshold_and_f1_score(
-                probs=report_nli_softmaxes[:, 0],
                 gt=report_nli_gt_labels == 0, # binarize (0 -> 1, 1 -> 0, 2 -> 0)
+                probs=report_nli_softmaxes[:, 0],
             )
             print(f"Best threshold: {best_thrs}, Best F1: {best_f1}")
         

@@ -185,9 +185,9 @@ def evaluate(
     print_bold('--- RadNLI dev ---')
     radnli_dev_scores = max_sims[offset:offset+size]
     radnli_dev_labels = labels[offset:offset+size]
-    ent_threshold, f1 = best_threshold_and_f1_score(radnli_dev_scores, radnli_dev_labels == 1)
+    ent_threshold, f1 = best_threshold_and_f1_score(radnli_dev_labels == 1, radnli_dev_scores)
     print(f"ent_threshold: {ent_threshold}, F1: {f1}")
-    contr_threshold, f1 = best_threshold_and_f1_score(radnli_dev_scores, radnli_dev_labels != -1)
+    contr_threshold, f1 = best_threshold_and_f1_score(radnli_dev_labels != -1, radnli_dev_scores)
     print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold > contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(radnli_dev_scores, radnli_dev_labels, ent_threshold, contr_threshold)
@@ -198,9 +198,9 @@ def evaluate(
     print_bold('--- RadNLI test ---')
     radnli_test_scores = max_sims[offset:offset+size]
     radnli_test_labels = labels[offset:offset+size]
-    ent_threshold, f1 = best_threshold_and_f1_score(radnli_test_scores, radnli_test_labels == 1)
+    ent_threshold, f1 = best_threshold_and_f1_score(radnli_test_labels == 1, radnli_test_scores)
     print(f"ent_threshold: {ent_threshold}, F1: {f1}")
-    contr_threshold, f1 = best_threshold_and_f1_score(radnli_test_scores, radnli_test_labels != -1)
+    contr_threshold, f1 = best_threshold_and_f1_score(radnli_test_labels != -1, radnli_test_scores)
     print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(radnli_test_scores, radnli_test_labels, ent_threshold, contr_threshold)
@@ -211,9 +211,9 @@ def evaluate(
     print_bold('--- MS-CXR-T ---')
     mscxrt_scores = max_sims[offset:offset+size]
     mscxrt_labels = labels[offset:offset+size]
-    ent_threshold, f1 = best_threshold_and_f1_score(mscxrt_scores, mscxrt_labels == 1)
+    ent_threshold, f1 = best_threshold_and_f1_score(mscxrt_labels == 1, radnli_test_scores)
     print(f"ent_threshold: {ent_threshold}, F1: {f1}")
-    contr_threshold, f1 = best_threshold_and_f1_score(mscxrt_scores, mscxrt_labels != -1)
+    contr_threshold, f1 = best_threshold_and_f1_score(mscxrt_labels != -1, radnli_test_scores)
     print(f"contr_threshold: {contr_threshold}, F1: {f1}")
     assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
     _compute_confusion_matrix(mscxrt_scores, mscxrt_labels, ent_threshold, contr_threshold)
@@ -225,9 +225,9 @@ def evaluate(
         print_bold('--- GPT-4 NLI ---')
         gpt4_nli_scores = max_sims[offset:offset+size]
         gpt4_nli_labels = labels[offset:offset+size]
-        ent_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_scores, gpt4_nli_labels == 1)
+        ent_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_labels == 1, gpt4_nli_scores)
         print(f"ent_threshold: {ent_threshold}, F1: {f1}")
-        contr_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_scores, gpt4_nli_labels != -1)
+        contr_threshold, f1 = best_threshold_and_f1_score(gpt4_nli_labels != -1, gpt4_nli_scores)
         print(f"contr_threshold: {contr_threshold}, F1: {f1}")
         assert ent_threshold >= contr_threshold # higher similarity score should indicate entailment
         _compute_confusion_matrix(gpt4_nli_scores, gpt4_nli_labels, ent_threshold, contr_threshold)
@@ -273,8 +273,8 @@ def evaluate(
                     continue
                 fact_scores = report_nli_scores[idxs]
                 fact_labels = report_nli_labels[idxs]
-                ent_threshold, _ = best_threshold_and_f1_score(fact_scores, fact_labels == 1, verbose=False)
-                contr_threshold, _ = best_threshold_and_f1_score(fact_scores, fact_labels != -1, verbose=False)
+                ent_threshold, _ = best_threshold_and_f1_score(fact_labels == 1, fact_scores, verbose=False)
+                contr_threshold, _ = best_threshold_and_f1_score(fact_labels != -1, fact_scores, verbose=False)
                 if save_thresholds:
                     thresholds_dict[fact] = {'ent_threshold': ent_threshold, 'contr_threshold': contr_threshold}
                 assert ent_threshold >= contr_threshold

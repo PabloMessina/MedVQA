@@ -169,6 +169,7 @@ def get_imbalance_reduced_weights(ws, coef):
     return [1 + math.log(w/min_w)**2 * coef for w in ws]
 
 def cyclic_dataloader_generator(dataloader):
+    assert len(dataloader) > 0
     while True:
         for batch in dataloader:
             yield batch
@@ -1255,6 +1256,30 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             batch_dict['pcl'] = torch.tensor([x['pcl'] for x in batch])
             return batch_dict
     elif flag == 'chxp': # chexpert
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pcl': phrase classification labels
+            batch_dict = dict(flag=flag)
+            batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+            batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+            return batch_dict
+    elif flag == 'cxrlt2024c': # CXR-LT 2024 Challenge (using custom labels which are sparse)
+        def collate_batch_fn(batch):
+            # We expect:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pi': phrase indices
+            # - 'pcl': phrase classification labels
+            batch_dict = dict(flag=flag)
+            batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+            batch_dict['pi'] = np.array([x['pi'] for x in batch])
+            batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+            return batch_dict
+    elif flag == 'cxrlt2024o': # CXR-LT 2024 Challenge (using official labels)
         def collate_batch_fn(batch):
             # We expect:
             # - 'i': images

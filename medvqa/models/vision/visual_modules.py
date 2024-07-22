@@ -45,7 +45,7 @@ from ultralytics.yolo.utils.ops import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
 import re
 
-from medvqa.utils.logging import print_bold
+from medvqa.utils.logging import print_bold, print_red
 
 class RawImageEncoding:
     DENSENET_121 = 'densenet-121'
@@ -99,6 +99,7 @@ class MultiPurposeVisualModule(nn.Module):
                 yolov8_model_name_or_path=None,
                 yolov8_model_alias=None,
                 yolov8_use_one_detector_per_dataset=False,
+                image_encoder_dropout_p=0,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
                 use_iuxray=False,
@@ -194,6 +195,7 @@ class MultiPurposeVisualModule(nn.Module):
         self.chest_imagenome_mlc_hidden_size = chest_imagenome_mlc_hidden_size
         self.predict_bboxes_vinbig = predict_bboxes_vinbig
         self.vinbig_mlc_hidden_size = vinbig_mlc_hidden_size
+        self.image_encoder_dropout_p = image_encoder_dropout_p
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -245,7 +247,8 @@ class MultiPurposeVisualModule(nn.Module):
             else:
                 model_name = None
             self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
-                                         self.imagenet_pretrained, model_name, self.freeze_image_encoder)
+                                         self.imagenet_pretrained, model_name, self.freeze_image_encoder,
+                                         self.image_encoder_dropout_p)
             if not using_detectron2:
                 global_feat_size += self._get_raw_image_encoder_global_feat_size(self.image_local_feat_size)
         
@@ -285,29 +288,47 @@ class MultiPurposeVisualModule(nn.Module):
             return HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE
         raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
-    def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder):
+    def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder,
+                                dropout_p=0):
         print(f'  Initializing raw_image_encoder: {self.raw_image_encoding}')
         ignore_name_regex = None
         if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-            self.raw_image_encoder = create_densenet121_feature_extractor(pretrained_weights_path, imagenet_pretrained)
+            self.raw_image_encoder = create_densenet121_feature_extractor(
+                pretrained_weights_path, imagenet_pretrained, drop_rate=dropout_p)
         elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_torchxrayvision_densenet121_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_torchxrayvision_resnet_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_torchxrayvision_resnet_autoencoder_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_clip_resnet_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_clip_vit_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
                 self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
                 self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
             ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
         elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             if self.predict_bboxes_chest_imagenome:
                 if self.use_anaxnet_bbox_subset:
                     num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
@@ -320,6 +341,8 @@ class MultiPurposeVisualModule(nn.Module):
                                                              roi_heads_batch_size_per_image=self.roi_heads_batch_size_per_image,
                                                              rpn_batch_size_per_image=self.rpn_batch_size_per_image)
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             assert self.predict_bboxes_chest_imagenome or self.predict_bboxes_vinbig
             if self.yolov8_use_one_detector_per_dataset:
                 assert self.predict_bboxes_chest_imagenome and self.predict_bboxes_vinbig # at least two datasets

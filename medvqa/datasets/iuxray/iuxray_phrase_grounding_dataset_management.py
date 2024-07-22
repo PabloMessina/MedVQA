@@ -1,5 +1,5 @@
 from torch.utils.data import DataLoader
-from medvqa.datasets.image_processing import FactVisualGroundingDataset
+from medvqa.datasets.image_processing import ImageFactClassificationDataset
 from medvqa.datasets.iuxray import get_invalid_images, get_iuxray_image_path
 from medvqa.utils.files import load_pickle
 from medvqa.utils.logging import print_bold
@@ -100,7 +100,7 @@ class IUXRayPhraseGroundingTrainer:
         if do_train:
             print_bold('Building train dataloader...')
             batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
-            train_dataset = FactVisualGroundingDataset(
+            train_dataset = ImageFactClassificationDataset(
                 image_paths=image_paths, image_transform=train_image_transform,
                 fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
                 indices=train_indices, num_facts=train_num_facts_per_image)
@@ -119,7 +119,7 @@ class IUXRayPhraseGroundingTrainer:
         # Create dataset and dataloader for testing
         if do_test:
             print_bold('Building test dataloader...')
-            test_dataset = FactVisualGroundingDataset(
+            test_dataset = ImageFactClassificationDataset(
                 image_paths=image_paths, image_transform=test_image_transform,
                 fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
                 indices=test_indices, num_facts=test_num_facts_per_image)

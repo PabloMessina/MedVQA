@@ -9,7 +9,7 @@ from medvqa.metrics.classification.multilabel_prf1 import (
     DatasetAwareMultiLabelMacroAvgF1,
     DatasetAwareMultiLabelMicroAvgF1,
 )
-from medvqa.metrics.classification.prc_auc import _prc_auc, prc_auc_fn
+from medvqa.metrics.classification.prc_auc import ConditionAwareClassAveragedPRCAUC, prc_auc_score, prc_auc_fn
 from medvqa.metrics.classification.singlelabel_accuracy import ConditionAwareLogitsAboveThresholdAccuracy, InstanceConditionedTripletAccuracy
 from medvqa.metrics.condition_aware_metric import ConditionAwareEpochMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareEpochMetric
@@ -578,12 +578,32 @@ def attach_condition_aware_segmask_iou_per_class(engine, pred_field_name, gt_fie
 # General purpose prc-auc (micro-average)
 def attach_condition_aware_prc_auc(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareEpochMetric(
-        compute_fn=_prc_auc,
+        compute_fn=prc_auc_score,
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
         check_compute_fn=False,
     )
     met.attach(engine, metric_name)
+
+# General purpose prc-auc (class-averaged/macro-average)
+def attach_condition_aware_class_averaged_prc_auc(engine, pred_field_name, gt_field_name, class_indices_field_name, metric_name,
+                                             condition_function=lambda _: True):
+    # NOTE: if indices are provided, then the tensors with predictions and ground-truth are assumed to be flat tensors
+    # and the indices are used to determine to which class each prediction belongs.
+    # Otherwise, the tensors are assumed to be two-dimensional with shape (batch_size, num_classes), with
+    # each column corresponding to a class.
+    use_indices = class_indices_field_name is not None
+    if use_indices:
+        output_transform = _get_output_transform(pred_field_name, gt_field_name, class_indices_field_name)
+    else:
+        output_transform = _get_output_transform(pred_field_name, gt_field_name)
+    met = ConditionAwareClassAveragedPRCAUC(
+        output_transform=output_transform,
+        condition_function=condition_function,
+        use_indices=use_indices,
+    )
+    met.attach(engine, metric_name)
+
 
 # ---------------------------------------------
 # Losses

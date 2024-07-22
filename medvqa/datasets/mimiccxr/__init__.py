@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 from pathlib import Path
-from medvqa.utils.constants import CHEXPERT_LABELS, MIMIC_CXR_LT_LABELS
+from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
 from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_pickle
 load_dotenv()
 
@@ -28,9 +28,15 @@ MIMICCXR_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH']
 MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH']
-MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH = os.environ['MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH']
-MIMIC_CXR_LT_LABELS_DEV_CSV_PATH = os.environ['MIMIC_CXR_LT_LABELS_DEV_CSV_PATH']
-MIMIC_CXR_LT_LABELS_TEST_CSV_PATH = os.environ['MIMIC_CXR_LT_LABELS_TEST_CSV_PATH']
+MIMIC_CXR_LT_2023_TRAIN_CSV_PATH = os.environ['MIMIC_CXR_LT_2023_TRAIN_CSV_PATH']
+MIMIC_CXR_LT_2023_DEV_CSV_PATH = os.environ['MIMIC_CXR_LT_2023_DEV_CSV_PATH']
+MIMIC_CXR_LT_2023_TEST_CSV_PATH = os.environ['MIMIC_CXR_LT_2023_TEST_CSV_PATH']
+MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH = os.environ['MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH']
+MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH = os.environ['MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH']
+MIMIC_CXR_LT_2024_TASK1_EVAL_CLASSES_TXT_PATH = os.environ['MIMIC_CXR_LT_2024_TASK1_EVAL_CLASSES_TXT_PATH']
+MIMIC_CXR_LT_2024_TASK2_EVAL_CLASSES_TXT_PATH = os.environ['MIMIC_CXR_LT_2024_TASK2_EVAL_CLASSES_TXT_PATH']
+MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH = os.environ['MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH']
+
 
 MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO', 'RAO', 
                                     'AP LLD', 'AP AXIAL', 'SWIMMERS', 'PA LLD', 'XTABLE LATERAL',
@@ -289,6 +295,13 @@ def get_split2imageIds():
             split2imageIds[split].append(dicom_id)
     save_pickle(split2imageIds, cache_path)
     return split2imageIds
+
+def get_cxrlt2024_train_dev_dicom_ids():
+    df_train = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+    df_dev = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH)
+    train_dicom_ids = df_train['dicom_id'].unique().tolist()
+    dev_dicom_ids = df_dev['dicom_id'].unique().tolist()
+    return train_dicom_ids, dev_dicom_ids
 
 def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
     metadata = get_detailed_metadata_for_dicom_id(dicom_id)
@@ -616,17 +629,17 @@ def get_train_val_test_summary_text_for_chexpert_label(label, labels_filename):
                     f'Test: {test_pos_count} ({test_fraction:.2%})')
     return summary_text
 
-def get_mimic_cxr_lt_ridx2labels():
+def get_mimic_cxr_lt_2023_ridx2labels():
     metadata = load_mimiccxr_reports_detailed_metadata()
     study_id_to_report_idx = dict()
     for i, study_id in enumerate(metadata['study_ids']):
         assert study_id not in study_id_to_report_idx
         study_id_to_report_idx[study_id] = i
 
-    # Load MIMIC-CXR-LT labels
-    df_train = pd.read_csv(MIMIC_CXR_LT_LABELS_TRAIN_CSV_PATH)
-    df_dev = pd.read_csv(MIMIC_CXR_LT_LABELS_DEV_CSV_PATH)
-    df_test = pd.read_csv(MIMIC_CXR_LT_LABELS_TEST_CSV_PATH)
+    # Load MIMIC-CXR-LT 2023 labels
+    df_train = pd.read_csv(MIMIC_CXR_LT_2023_TRAIN_CSV_PATH)
+    df_dev = pd.read_csv(MIMIC_CXR_LT_2023_DEV_CSV_PATH)
+    df_test = pd.read_csv(MIMIC_CXR_LT_2023_TEST_CSV_PATH)
     print(f"len(df_train): {len(df_train)}")
     print(f"len(df_dev): {len(df_dev)}")
     print(f"len(df_test): {len(df_test)}")
@@ -634,7 +647,7 @@ def get_mimic_cxr_lt_ridx2labels():
     n_reports = len(metadata['study_ids'])
     report_labels = [None] * n_reports
     for df in [df_train, df_dev, df_test]:
-        labels = df[MIMIC_CXR_LT_LABELS].values
+        labels = df[CXRLT2023_CLASSES].values
         for i, study_id in enumerate(df['study_id']):
             report_idx = study_id_to_report_idx[study_id]
             if report_labels[report_idx] is not None:

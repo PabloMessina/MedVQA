@@ -10,8 +10,7 @@ from tqdm import tqdm
 from sklearn.cluster import KMeans
 from sklearn_extra.cluster import KMedoids
 from medvqa.datasets.text_data_utils import word_tokenize_texts_in_parallel
-from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
-from medvqa.models.common import load_model_state_dict
+from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata, load_model_state_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.models.nlp.nli import BertBasedNLI
 from medvqa.utils.data_structures import UnionFind

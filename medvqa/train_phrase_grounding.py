@@ -14,7 +14,7 @@ from medvqa.losses import BinaryMultiLabelClassificationLossNames
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
 
-from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
+from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, PhraseGroundingMode
 
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
@@ -26,6 +26,7 @@ from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
     attach_condition_aware_chest_imagenome_bbox_iou,
+    attach_condition_aware_class_averaged_prc_auc,
     attach_condition_aware_loss,
     attach_condition_aware_prc_auc,
     attach_condition_aware_segmask_iou,
@@ -71,19 +72,23 @@ def parse_args(args=None):
     parser.add_argument('--num_regions', type=int, default=None)
     parser.add_argument('--image_local_feat_size', type=int, default=None)
     parser.add_argument('--image_encoder_pretrained_weights_path', type=str, default=None)
+    parser.add_argument('--image_encoder_dropout_p', type=float, default=0)
     parser.add_argument('--yolov8_model_name_or_path', type=str, default=None)
     parser.add_argument('--yolov8_model_alias', type=str, default=None)
     parser.add_argument('--phrase_embedding_size', type=int, default=None)
     parser.add_argument('--regions_width', type=int, default=None)
     parser.add_argument('--regions_height', type=int, default=None)
     parser.add_argument('--qkv_size', type=int, default=None)
-    parser.add_argument('--phrase_grounding_mode', type=str, default=None)
+    parser.add_argument('--phrase_grounding_mode', type=str, default=None, choices=PhraseGroundingMode.get_choices())
     parser.add_argument('--phrase_classifier_hidden_size', type=int, default=None)
     parser.add_argument('--transf_d_model', type=int, default=None)
     parser.add_argument('--transf_nhead', type=int, default=None)
     parser.add_argument('--transf_dim_feedforward', type=int, default=None)
     parser.add_argument('--transf_dropout', type=int, default=0)
     parser.add_argument('--transf_num_layers', type=int, default=None)
+    parser.add_argument('--visual_feature_proj_size', type=int, default=None)
+    parser.add_argument('--visual_grounding_hidden_size', type=int, default=None)
+    parser.add_argument('--phrase_mlp_hidden_dims', nargs='+', type=int, default=None)
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -129,6 +134,7 @@ def parse_args(args=None):
     parser.add_argument('--mimiccxr_facts_weight', type=float, default=1.0)
     parser.add_argument('--chest_imagenome_anatlocs_weight', type=float, default=1.0)
     parser.add_argument('--mscxr_weight', type=float, default=1.0)
+    parser.add_argument('--cxrlt2024_weight', type=float, default=1.0)
     parser.add_argument('--vinbig_weight', type=float, default=1.0)
     parser.add_argument('--chexlocalize_weight', type=float, default=1.0)
     parser.add_argument('--chexpert_weight', type=float, default=1.0)
@@ -150,6 +156,9 @@ def parse_args(args=None):
     parser.add_argument('--use_chexpert_for_test', action='store_true', default=False)
     parser.add_argument('--use_iuxray_for_train', action='store_true', default=False)
     parser.add_argument('--use_iuxray_for_test', action='store_true', default=False)
+    parser.add_argument('--use_cxrlt2024_challenge_split', action='store_true', default=False)
+    parser.add_argument('--use_cxrlt2024_custom_labels', action='store_true', default=False)
+    parser.add_argument('--use_cxrlt2024_official_labels', action='store_true', default=False)
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_choices())
     parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_choices())
     parser.add_argument('--mask_exponent', type=float, default=1.0)
@@ -164,6 +173,9 @@ def parse_args(args=None):
     parser.add_argument('--chexpert_interpret_cxr_challenge_split_filepath', type=str, default=None)
     parser.add_argument('--chexlocalize_use_interpret_cxr_challenge_split', action='store_true', default=False)
     parser.add_argument('--chexlocalize_interpret_cxr_challenge_split_filepath', type=str, default=None)
+    parser.add_argument('--cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath', type=str, default=None)
+    parser.add_argument('--cxrlt2024_official_training_labels_for_fact_classification_filepath', type=str, default=None)
+    parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true', default=False)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -173,6 +185,7 @@ def parse_args(args=None):
     return parser.parse_args(args=args)
 
 _METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
+_METRIC_WEIGHTS['cxrlt2024o_prc_auc'] = 8.0 # Most important metric for MICCAI CXR-LT 2024 challenge
 
 def _metric_getter(metrics_dict, key):
     if key.endswith('_loss'):
@@ -217,6 +230,9 @@ def train_model(
     use_mscxr_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_train', False)
     use_chest_imagenome_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_for_train', False)
     use_chest_imagenome_gold_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_gold_for_test', False)
+    use_cxrlt2024_challenge_split = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_challenge_split', False)
+    use_cxrlt2024_custom_labels = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_custom_labels', False)
+    use_cxrlt2024_official_labels = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_official_labels', False)
     use_yolov8 = model_kwargs['raw_image_encoding'] == RawImageEncoding.YOLOV8
     use_vinbig_for_train = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_training_set', False)
     use_vinbig_for_test = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_validation_set', False)
@@ -253,6 +269,10 @@ def train_model(
         if dataloading_kwargs['mscxr_weight'] == 0:
             print_orange('WARNING: use_mscxr_for_train is True but mscxr_weight is 0', bold=True)
             use_mscxr_for_train = False
+    if use_cxrlt2024_challenge_split:
+        if dataloading_kwargs['cxrlt2024_weight'] == 0:
+            print_orange('WARNING: use_cxrlt2024_challenge_split is True but cxrlt2024_weight is 0', bold=True)
+            use_cxrlt2024_challenge_split = False
     if use_vinbig_for_train:
         if dataloading_kwargs['vinbig_weight'] == 0:
             print_orange('WARNING: use_vinbig_for_train is True but vinbig_weight is 0', bold=True)
@@ -271,7 +291,7 @@ def train_model(
             use_iuxray_for_train = False
 
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_test or use_mscxr_for_train or\
-                        use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test
+                   use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or use_cxrlt2024_challenge_split
     
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
 
@@ -282,7 +302,8 @@ def train_model(
     use_iuxray = use_iuxray_for_train or use_iuxray_for_test
 
     assert sum([use_mimiccxr_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
-                use_vinbig_for_train, use_chexlocalize_for_train, use_chexpert_for_train, use_iuxray_for_train]) > 0
+                use_cxrlt2024_challenge_split, use_vinbig_for_train, use_chexlocalize_for_train,
+                use_chexpert_for_train, use_iuxray_for_train, use_cxrlt2024_challenge_split]) > 0
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -372,6 +393,14 @@ def train_model(
             bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
         else:
             bbox_grounding_collate_batch_fn = None
+        if use_cxrlt2024_custom_labels:
+            cxrlt2024_image_phrase_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024c'])
+        else:
+            cxrlt2024_image_phrase_classifier_collate_batch_fn = None
+        if use_cxrlt2024_official_labels:
+            cxrlt2024_multilabel_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024o'])
+        else:
+            cxrlt2024_multilabel_classifier_collate_batch_fn = None
         mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
             train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
             test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
@@ -382,6 +411,8 @@ def train_model(
             fact_grounding_collate_batch_fn=fact_grounding_collate_batch_fn,
             phrase_grounding_collate_batch_fn=phrase_grounding_collate_batch_fn,
             bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
+            cxrlt2024_image_phrase_classifier_collate_batch_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
+            cxrlt2024_multilabel_classifier_collate_batch_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
             num_train_workers=num_train_workers,
             num_test_workers=num_val_workers,
             **mimiccxr_trainer_kwargs,
@@ -455,6 +486,31 @@ def train_model(
     if use_chest_imagenome_gold_for_test:
         _val_dataloaders.append(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)
         print(f'len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader) = {len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)}')
+
+    if use_cxrlt2024_challenge_split:
+        assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
+        wo = 0.80 * use_cxrlt2024_official_labels # 80% for official labels
+        wc = 0.20 * use_cxrlt2024_custom_labels # 20% for custom labels
+        wt = wo + wc
+        wo, wc = wo / wt, wc / wt # normalize weights
+        assert abs(wo + wc - 1) < 1e-6 # check if normalized weights sum to 1
+        wo *= dataloading_kwargs['cxrlt2024_weight'] # scale weights
+        wc *= dataloading_kwargs['cxrlt2024_weight'] # scale weights
+        if use_cxrlt2024_official_labels:
+            _dataset_names.append('cxrlt2024(Off)')
+            _train_weights.append(wo) # weight for official labels
+            _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_train_dataloader)
+            print(f'len(mimiccxr_trainer.cxrlt2024_official_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_train_dataloader)}')
+            _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_val_dataloader)
+            print(f'len(mimiccxr_trainer.cxrlt2024_official_val_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_val_dataloader)}')
+        if use_cxrlt2024_custom_labels:
+            _dataset_names.append('cxrlt2024(GPT4)')
+            _train_weights.append(wc) # weight for custom labels
+            _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)
+            print(f'len(mimiccxr_trainer.cxrlt2024_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
+            if not use_cxrlt2024_official_labels: # if official labels are not used
+                _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)
+                print(f'len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)}')
 
     if use_vinbig_for_train:
         _dataset_names.append('vinbig')
@@ -537,6 +593,7 @@ def train_model(
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'mimfg_cpg_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mimfg_phrcls_loss')
+            attach_condition_aware_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'mimfg_prc_auc', _cond_func)
         if in_val:
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'mimfg_att_reg_loss')
@@ -550,8 +607,7 @@ def train_model(
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_cpg_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_phrcls_loss', train=in_train, val=in_val)
-        if in_val:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=False, val=True)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=in_train, val=in_val)
     
     if use_chest_imagenome_for_train:
         if use_yolov8: # TODO: eventually support other bbox predictors
@@ -608,12 +664,12 @@ def train_model(
             attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'vbg_y8_cls_loss')
             attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'vbg_y8_dfl_loss')
         attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
-        attach_condition_aware_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', 'vbg_prc_auc', _cond_func)
+        attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
         if use_vinbig_for_test:
             if use_yolov8:
                 attach_condition_aware_vinbig_bbox_iou(
                     validator_engine, _cond_func, use_yolov8=True, metric_name='vbg_y8_bbox_iou')
-            attach_condition_aware_prc_auc(validator_engine, 'pred_probs', 'gt_labels', 'vbg_prc_auc', _cond_func)
+            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
         # for logging
         if use_yolov8:
             metrics_to_print.append('vbg_y8_loss')
@@ -652,11 +708,11 @@ def train_model(
             attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'cl_att_sup_loss')
             attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'cl_segmask_iou', _cond_func)
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cl_phrcls_loss')
-            attach_condition_aware_accuracy(trainer_engine, 'pred_phrase_labels', 'gt_phrase_labels', 'cl_phrase_acc', _cond_func)
+            attach_condition_aware_accuracy(trainer_engine, 'pred_labels', 'gt_labels', 'cl_phrase_acc', _cond_func)
         if in_val:
             attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'cl_att_sup_loss')
             attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'cl_segmask_iou', _cond_func)
-            attach_condition_aware_accuracy(validator_engine, 'pred_phrase_labels', 'gt_phrase_labels', 'cl_phrase_acc', _cond_func)
+            attach_condition_aware_accuracy(validator_engine, 'pred_labels', 'gt_labels', 'cl_phrase_acc', _cond_func)
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_att_sup_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_segmask_iou', train=in_train, val=in_val)
@@ -673,21 +729,21 @@ def train_model(
             if use_contrastive_phrase_grounding_loss:
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'chxp_cpg_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'chxp_phrcls_loss')
+            attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', None, 'chxp_prc_auc', _cond_func)
         if in_val:
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'chxp_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'chxp_cpg_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'chxp_phrcls_loss')
-            attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'chxp_prc_auc', _cond_func)
+            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None, 'chxp_prc_auc', _cond_func)
         # for logging
         if use_attention_regularization_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_att_reg_loss', train=in_train, val=in_val)
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_cpg_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_phrcls_loss', train=in_train, val=in_val)
-        if in_val:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_prc_auc', train=False, val=True)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_prc_auc', train=in_train, val=in_val)
 
     if use_iuxray:
         _cond_func = lambda x: x['flag'] == 'iufg'
@@ -699,6 +755,7 @@ def train_model(
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'iufg_cpg_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'iufg_phrcls_loss')
+            attach_condition_aware_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'iufg_prc_auc', _cond_func)
         if in_val:
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'iufg_att_reg_loss')
@@ -712,8 +769,51 @@ def train_model(
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_cpg_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_phrcls_loss', train=in_train, val=in_val)
-        if in_val:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_prc_auc', train=False, val=True)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_prc_auc', train=in_train, val=in_val)
+
+    if use_cxrlt2024_custom_labels:
+        _cond_func = lambda x: x['flag'] == 'cxrlt2024c'
+        # Train
+        if use_attention_regularization_loss:
+            attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024c_att_reg_loss')
+        attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024c_phrcls_loss')
+        attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'phrase_indices',
+                                                      'cxrlt2024c_prc_auc', _cond_func)
+    
+        # Validation
+        if not use_cxrlt2024_official_labels: # if official labels are not used
+            if use_attention_regularization_loss:
+                attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024c_att_reg_loss')
+            attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024c_phrcls_loss')
+            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'phrase_indices',
+                                                        'cxrlt2024c_prc_auc', _cond_func)
+        # for logging
+        in_val = not use_cxrlt2024_official_labels # if official labels are not used
+        if use_attention_regularization_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_att_reg_loss', val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_phrcls_loss', val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_prc_auc', val=in_val)
+
+    if use_cxrlt2024_official_labels:
+        _cond_func = lambda x: x['flag'] == 'cxrlt2024o'
+        # Train
+        if use_attention_regularization_loss:
+            attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
+        attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
+        attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', None,
+                                                      'cxrlt2024o_prc_auc', _cond_func)
+    
+        # Validation
+        if use_attention_regularization_loss:
+            attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
+        attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
+        attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None,
+                                                      'cxrlt2024o_prc_auc', _cond_func)
+        # for logging
+        if use_attention_regularization_loss:
+            metrics_to_print.append('cxrlt2024o_att_reg_loss')
+        metrics_to_print.append('cxrlt2024o_phrcls_loss')
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024o_prc_auc', train=False)
 
     # Score function
     assert len(val_metrics_to_merge) > 0
@@ -774,6 +874,7 @@ def train_from_scratch(
     num_regions,   
     image_local_feat_size,
     image_encoder_pretrained_weights_path,
+    image_encoder_dropout_p,
     pretrained_checkpoint_folder_path,
     pretrained_checkpoint_folder_paths,
     yolov8_model_name_or_path,
@@ -789,6 +890,9 @@ def train_from_scratch(
     transf_dim_feedforward,
     transf_dropout,
     transf_num_layers,
+    visual_feature_proj_size,
+    visual_grounding_hidden_size,
+    phrase_mlp_hidden_dims,
     # Optimizer args
     optimizer_name,
     lr,
@@ -822,10 +926,13 @@ def train_from_scratch(
     chexpert_interpret_cxr_challenge_split_filepath,
     chexlocalize_use_interpret_cxr_challenge_split,
     chexlocalize_interpret_cxr_challenge_split_filepath,
+    cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
+    cxrlt2024_official_training_labels_for_fact_classification_filepath,
     # Dataloading args
     mimiccxr_facts_weight,
     chest_imagenome_anatlocs_weight,
     mscxr_weight,
+    cxrlt2024_weight,
     vinbig_weight,
     chexlocalize_weight,
     chexpert_weight,
@@ -852,6 +959,10 @@ def train_from_scratch(
     use_chexpert_for_test,
     use_iuxray_for_train,
     use_iuxray_for_test,
+    use_cxrlt2024_challenge_split,
+    use_cxrlt2024_custom_labels,
+    use_cxrlt2024_official_labels,
+    cxrlt2024_do_balanced_sampling,
     vinbig_training_data_mode,
     chexpert_training_data_mode,
     use_amp,
@@ -888,7 +999,8 @@ def train_from_scratch(
     use_bbox_aware_transform = use_yolov8
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
-                     use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test
+                     use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
+                     use_cxrlt2024_challenge_split # this challenge is built on top of MIMIC-CXR
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
     use_chexpert = use_chexpert_for_train or use_chexpert_for_test
@@ -898,7 +1010,7 @@ def train_from_scratch(
 
     assert use_mimiccxr or use_vinbig or use_chexlocalize or use_chexpert or use_iuxray
     assert use_chest_imagenome_gold_for_test or use_mscxr_for_test or use_vinbig_for_test or use_chexlocalize_for_test or\
-           use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test
+           use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test or use_cxrlt2024_challenge_split
     if use_chest_imagenome_gold_for_test:
         assert use_chest_imagenome_for_train
     if use_mscxr_for_test:
@@ -921,11 +1033,15 @@ def train_from_scratch(
         raw_image_encoding=raw_image_encoding,
         freeze_image_encoder=freeze_image_encoder,
         image_local_feat_size=image_local_feat_size,
+        image_encoder_dropout_p=image_encoder_dropout_p,
         image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,
         num_regions=num_regions,
         yolov8_model_name_or_path=yolov8_model_name_or_path,
         yolov8_model_alias=yolov8_model_alias,
         yolov8_use_one_detector_per_dataset=(predict_bboxes_chest_imagenome and predict_bboxes_vinbig),
+        visual_feature_proj_size=visual_feature_proj_size,
+        visual_grounding_hidden_size=visual_grounding_hidden_size,
+        phrase_mlp_hidden_dims=phrase_mlp_hidden_dims,
         # Aux tasks
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
@@ -963,6 +1079,7 @@ def train_from_scratch(
         mimiccxr_facts_weight=mimiccxr_facts_weight,
         chest_imagenome_anatlocs_weight=chest_imagenome_anatlocs_weight,
         mscxr_weight=mscxr_weight,
+        cxrlt2024_weight=cxrlt2024_weight,
         vinbig_weight=vinbig_weight,
         chexlocalize_weight=chexlocalize_weight,
         chexpert_weight=chexpert_weight,
@@ -1017,6 +1134,10 @@ def train_from_scratch(
         collate_batch_fn_kwargs['pg'] = { 'flag': 'pg', **_kwargs }
         # chest imagenome bbox grounding
         collate_batch_fn_kwargs['cibg'] = { 'flag': 'cibg', **_kwargs }
+        # cxrlt2024 challenge custom labels
+        collate_batch_fn_kwargs['cxrlt2024c'] = { 'flag': 'cxrlt2024c', **_kwargs }
+        # cxrlt2024 challenge official labels
+        collate_batch_fn_kwargs['cxrlt2024o'] = { 'flag': 'cxrlt2024o', **_kwargs }
     if use_vinbig:
         collate_batch_fn_kwargs['vbg'] = { 'flag': 'vbg', **_kwargs }
     if use_chexlocalize:
@@ -1056,6 +1177,12 @@ def train_from_scratch(
             cluster_and_label_weights_for_facts_filepath=cluster_and_label_weights_for_facts_filepath,
             use_interpret_cxr_challenge_split=mimiccxr_use_interpret_cxr_challenge_split,
             interpret_cxr_challenge_split_filepath=mimiccxr_interpret_cxr_challenge_split_filepath,
+            use_cxrlt2024_challenge_split=use_cxrlt2024_challenge_split,
+            use_cxrlt2024_custom_labels=use_cxrlt2024_custom_labels,
+            use_cxrlt2024_official_labels=use_cxrlt2024_official_labels,
+            cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
+            cxrlt2024_official_training_labels_for_fact_classification_filepath=cxrlt2024_official_training_labels_for_fact_classification_filepath,
+            cxrlt2024_do_balanced_sampling=cxrlt2024_do_balanced_sampling,
         )
     else:
         mimiccxr_trainer_kwargs = None

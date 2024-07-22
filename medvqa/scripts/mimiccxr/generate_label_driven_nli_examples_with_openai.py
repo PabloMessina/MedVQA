@@ -266,8 +266,6 @@ def generate_chest_imagenome_NLI_examples(chest_imagenome_silver_phrase_to_label
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--api_responses_filepath", type=str, default=None)
-    parser.add_argument("--batch_input_file_id", type=str, default=None)
     parser.add_argument("--preprocessed_queries_to_skip_filepaths", nargs="+", default=None)
     parser.add_argument("--integrated_sentence_facts_jsonl_filepath", type=str, default=None)
     
@@ -289,8 +287,10 @@ if __name__ == '__main__':
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--alias", type=str, default="")
+    parser.add_argument("--api_responses_filepath", type=str, default=None)
     parser.add_argument("--use_batch_api", action="store_true", default=False)
     parser.add_argument("--batch_description", type=str, default=None)
+    parser.add_argument("--batch_input_file_id", type=str, default=None)
     args = parser.parse_args()
 
     processed_texts_save_filepath = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_label_driven_nli_queries{args.alias}.jsonl")

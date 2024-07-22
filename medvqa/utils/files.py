@@ -127,9 +127,11 @@ def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
     os.makedirs(full_path, exist_ok=True)
     return full_path
 
-def get_results_folder_path(checkpoint_folder_path):
+def get_results_folder_path(checkpoint_folder_path, create_if_not_exists=True):
     results_folder_path = checkpoint_folder_path.replace(f'{os.path.sep}models{os.path.sep}',
                                                          f'{os.path.sep}results{os.path.sep}')
+    if create_if_not_exists:
+        os.makedirs(results_folder_path, exist_ok=True)
     return results_folder_path
 
 def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings=[], ext='pkl', force_hashing=False):

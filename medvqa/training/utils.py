@@ -1,5 +1,7 @@
 import torch
 
+from medvqa.models.checkpoint import load_model_state_dict
+
 def append_metric_name(train_list, val_list, log_list, metric_name, train=True, val=True, log=True):
     if train: train_list.append(metric_name)
     if val: val_list.append(metric_name)
@@ -49,7 +51,6 @@ def run_common_boilerplate_code_and_start_training(
     )
     from medvqa.models.checkpoint import get_checkpoint_filepath, save_metadata
     from medvqa.metrics.utils import get_hybrid_score_name
-    from medvqa.models.common import load_model_state_dict
     from medvqa.models.checkpoint.model_wrapper import ModelWrapper
     from medvqa.utils.logging import print_red
     import torch

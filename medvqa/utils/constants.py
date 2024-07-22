@@ -65,7 +65,8 @@ CHEXPERT_LABELS_5 = ["Cardiomegaly", "Edema", "Consolidation", "Atelectasis", "P
 CHEXBERT_LABELS_5_INDICES = np.where(np.isin(CHEXBERT_LABELS, CHEXBERT_LABELS_5))[0]
 CHEXPERT_LABELS_5_INDICES = np.where(np.isin(CHEXPERT_LABELS, CHEXPERT_LABELS_5))[0]
 
-MIMIC_CXR_LT_LABELS = [
+# See https://physionet.org/content/cxr-lt-iccv-workshop-cvamd/1.1.0/
+CXRLT2023_CLASSES = [
     'Atelectasis', 'Calcification of the Aorta', 'Cardiomegaly', 'Consolidation', 'Edema',
     'Emphysema', 'Enlarged Cardiomediastinum', 'Fibrosis', 'Fracture',
     'Hernia', 'Infiltration', 'Lung Lesion', 'Lung Opacity', 'Mass',
@@ -74,7 +75,94 @@ MIMIC_CXR_LT_LABELS = [
     'Pneumoperitoneum', 'Pneumothorax', 'Subcutaneous Emphysema',
     'Support Devices', 'Tortuous Aorta',
 ]
-assert len(MIMIC_CXR_LT_LABELS) == 26
+assert len(CXRLT2023_CLASSES) == 26
+
+# See https://bionlplab.github.io/2024_MICCAI_CXRLT/
+CXRLT2024_CLASSES = [
+    # With labels
+    'Adenopathy', 'Atelectasis', 'Azygos Lobe', 'Calcification of the Aorta', 'Cardiomegaly', 'Clavicle Fracture',
+    'Consolidation', 'Edema', 'Emphysema', 'Enlarged Cardiomediastinum', 'Fibrosis', 'Fissure', 'Fracture', 'Granuloma',
+    'Hernia', 'Hydropneumothorax', 'Infarction', 'Infiltration', 'Kyphosis', 'Lobar Atelectasis', 'Lung Lesion',
+    'Lung Opacity', 'Mass', 'Nodule', 'Normal', 'Pleural Effusion', 'Pleural Other', 'Pleural Thickening', 'Pneumomediastinum',
+    'Pneumonia', 'Pneumoperitoneum', 'Pneumothorax', 'Pulmonary Embolism', 'Pulmonary Hypertension', 'Rib Fracture',
+    'Round(ed) Atelectasis', 'Subcutaneous Emphysema', 'Support Devices', 'Tortuous Aorta', 'Tuberculosis',
+    # Without labels
+    'Bulla', 'Cardiomyopathy', 'Hilum', 'Osteopenia', 'Scoliosis',
+]
+assert len(CXRLT2024_CLASSES) == 45
+for x in CXRLT2023_CLASSES:
+    if x == 'No Finding': continue
+    assert x in CXRLT2024_CLASSES, f'{x} not in CXRLT2024_CLASSES'
+
+CXRLT2024_TASK1_CLASSES = [
+    'Adenopathy','Atelectasis','Azygos Lobe','Calcification of the Aorta','Cardiomegaly','Clavicle Fracture',
+    'Consolidation','Edema','Emphysema','Enlarged Cardiomediastinum','Fibrosis','Fissure','Fracture','Granuloma',
+    'Hernia','Hydropneumothorax','Infarction','Infiltration','Kyphosis','Lobar Atelectasis','Lung Lesion',
+    'Lung Opacity','Mass','Nodule','Normal','Pleural Effusion','Pleural Other','Pleural Thickening',
+    'Pneumomediastinum','Pneumonia','Pneumoperitoneum','Pneumothorax','Pulmonary Embolism','Pulmonary Hypertension',
+    'Rib Fracture','Round(ed) Atelectasis','Subcutaneous Emphysema','Support Devices','Tortuous Aorta','Tuberculosis',
+]
+assert len(CXRLT2024_TASK1_CLASSES) == 40
+assert CXRLT2024_CLASSES[:40] == CXRLT2024_TASK1_CLASSES # make sure the first 40 classes are the same
+
+CXRLT2024_TASK2_CLASSES = [
+    'Atelectasis','Calcification of the Aorta','Cardiomegaly','Consolidation','Edema','Emphysema', 'Enlarged Cardiomediastinum',
+    'Fibrosis','Fracture','Hernia','Infiltration','Lung Lesion','Lung Opacity','Mass','Normal','Nodule','Pleural Effusion',
+    'Pleural Other','Pleural Thickening','Pneumomediastinum','Pneumonia','Pneumoperitoneum','Pneumothorax',
+    'Subcutaneous Emphysema','Support Devices','Tortuous Aorta',
+]
+assert len(CXRLT2024_TASK2_CLASSES) == 26
+assert all(x in CXRLT2024_CLASSES for x in CXRLT2024_TASK2_CLASSES)
+
+CXRLT2024_CLASS_2_SENTENCE = {
+    'Adenopathy': 'adenopathy seen',
+    'Atelectasis': 'atelectasis seen',
+    'Azygos Lobe': 'azygos lobe seen',
+    'Calcification of the Aorta': 'calcification of the aorta seen',
+    'Cardiomegaly': 'cardiomegaly seen',
+    'Clavicle Fracture': 'clavicle fracture seen',
+    'Consolidation': 'consolidation seen',
+    'Edema': 'edema seen',
+    'Emphysema': 'emphysema seen',
+    'Enlarged Cardiomediastinum': 'enlarged cardiomediastinum seen',
+    'Fibrosis': 'fibrosis seen',
+    'Fissure': 'fissure seen',
+    'Fracture': 'fracture seen',
+    'Granuloma': 'granuloma seen',
+    'Hernia': 'hernia seen',
+    'Hydropneumothorax': 'hydropneumothorax seen',
+    'Infarction': 'infarction seen',
+    'Infiltration': 'infiltration seen',
+    'Kyphosis': 'kyphosis seen',
+    'Lobar Atelectasis': 'lobar atelectasis seen',
+    'Lung Lesion': 'lung lesion seen',
+    'Lung Opacity': 'lung opacity seen',
+    'Mass': 'mass seen',
+    'Nodule': 'nodule seen',
+    'Normal': 'no abnormalities seen',
+    'Pleural Effusion': 'pleural effusion seen',
+    'Pleural Other': 'pleural abnormalities seen',
+    'Pleural Thickening': 'pleural thickening seen',
+    'Pneumomediastinum': 'pneumomediastinum seen',
+    'Pneumonia': 'pneumonia seen',
+    'Pneumoperitoneum': 'pneumoperitoneum seen',
+    'Pneumothorax': 'pneumothorax seen',
+    'Pulmonary Embolism': 'pulmonary embolism seen',
+    'Pulmonary Hypertension': 'pulmonary hypertension seen',
+    'Rib Fracture': 'rib fracture seen',
+    'Round(ed) Atelectasis': 'round atelectasis seen',
+    'Subcutaneous Emphysema': 'subcutaneous emphysema seen',
+    'Support Devices': 'support devices seen',
+    'Tortuous Aorta': 'tortuous aorta seen',
+    'Tuberculosis': 'tuberculosis seen',
+    'Bulla': 'bulla seen',
+    'Cardiomyopathy': 'cardiomyopathy seen',
+    'Hilum': 'hilar abnormalities seen',
+    'Osteopenia': 'osteopenia seen',
+    'Scoliosis': 'scoliosis seen',
+}
+CXRLT2024_SENTENCE_2_CLASS = { v: k for k, v in CXRLT2024_CLASS_2_SENTENCE.items() }
+assert len(CXRLT2024_CLASS_2_SENTENCE) == len(CXRLT2024_SENTENCE_2_CLASS)
 
 CXR14_LABELS = [
     'No Finding',
@@ -649,7 +737,7 @@ LABEL_BASED_FACTS__MIMIC_CXR_LT = [
     'support devices seen', # Support Devices
     'tortuous aorta seen', # Tortuous Aorta
 ]
-assert len(LABEL_BASED_FACTS__MIMIC_CXR_LT) == len(MIMIC_CXR_LT_LABELS)
+assert len(LABEL_BASED_FACTS__MIMIC_CXR_LT) == len(CXRLT2023_CLASSES)
 assert all(l in LABEL_BASED_FACTS for l in LABEL_BASED_FACTS__MIMIC_CXR_LT)
 
 LABEL_BASED_FACTS__MIMIC_CXR_LT_2_SHORT = {

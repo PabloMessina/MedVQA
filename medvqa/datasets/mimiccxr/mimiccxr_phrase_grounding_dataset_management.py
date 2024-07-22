@@ -1,3 +1,4 @@
+import math
 import os
 import numpy as np
 import random
@@ -13,23 +14,25 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_gold_bbox_dicom_ids,
     load_nondecent_chest_imagenome_dicom_ids,
 )
-from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset, SequentialDataLoader
-from medvqa.datasets.image_processing import FactVisualGroundingDataset
+from medvqa.datasets.dataloading_utils import CompositeInfiniteDataset, SequentialDataLoader, group_indices_for_balanced_sampling
+from medvqa.datasets.image_processing import ImageFactBasedMultilabelClassificationDataset, ImageFactClassificationDataset
 from medvqa.datasets.ms_cxr import get_ms_cxr_dicom_id_2_phrases_and_masks, get_ms_cxr_dicom_ids
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_LARGE_FAST_CACHE_DIR,
     MIMICCXR_ImageSizeModes,
     MIMICCXR_ViewModes,
+    get_cxrlt2024_train_dev_dicom_ids,
     get_dicom_id_and_orientation_list,
     get_image_path_getter,
+    get_imageId2PartPatientStudy,
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
-from medvqa.utils.logging import print_bold
+from medvqa.utils.logging import print_bold, print_magenta, print_orange, print_red
 
-class MIMICCXR_FactGroundingDataset(FactVisualGroundingDataset):
+class MIMICCXR_FactGroundingDataset(ImageFactClassificationDataset):
 
     def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, negative_facts, indices, num_facts,
                  infinite=False, shuffle=False, use_weights=False, weights_filepath=None):
@@ -95,6 +98,36 @@ class MIMICCXR_PhraseGroundingDataset(Dataset):
             'i': image,
             'pe': phrase_embeddings,
             'pgm': phrase_grounding_masks,
+        }
+    
+class MIMICCXR_CXRLT2024_ClassificationDataset(Dataset):
+
+    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_idxs, phrase_classification_labels,
+                 indices, shuffle=False):
+        self.image_paths = image_paths
+        self.image_transform = image_transform
+        self.phrase_embeddings = phrase_embeddings
+        self.phrase_idxs = phrase_idxs
+        self.phrase_classification_labels = phrase_classification_labels
+        self.indices = indices
+        if shuffle:
+            random.shuffle(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, i):
+        idx = self.indices[i]
+        image_path = self.image_paths[idx]
+        image = self.image_transform(image_path)
+        phrase_idxs = self.phrase_idxs[idx]
+        phrase_embeddings = self.phrase_embeddings[phrase_idxs]
+        phrase_classification_labels = self.phrase_classification_labels[idx]
+        return {
+            'i': image,
+            'pe': phrase_embeddings,
+            'pi': phrase_idxs,
+            'pcl': phrase_classification_labels,
         }
 
 class MIMICCXR_BBoxGroundingDataset(Dataset):
@@ -276,6 +309,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 fact_grounding_collate_batch_fn=None,
                 phrase_grounding_collate_batch_fn=None,
                 bbox_grounding_collate_batch_fn=None,
+                cxrlt2024_image_phrase_classifier_collate_batch_fn=None,
+                cxrlt2024_multilabel_classifier_collate_batch_fn=None,
                 test_batch_size_factor=1,
                 mask_width=None, mask_height=None,
                 use_facts_for_train=False,
@@ -298,6 +333,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                 cluster_and_label_weights_for_facts_filepath=None,
                 use_interpret_cxr_challenge_split=False,
                 interpret_cxr_challenge_split_filepath=None,
+                use_cxrlt2024_challenge_split=False,
+                use_cxrlt2024_custom_labels=False,
+                use_cxrlt2024_official_labels=False,
+                cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=None,
+                cxrlt2024_official_training_labels_for_fact_classification_filepath=None,
+                cxrlt2024_do_balanced_sampling=False,
                 **unused_kwargs,
             ):
 
@@ -306,7 +347,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
         # Sanity checks
         assert sum([use_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
-                    use_mscxr_for_test, use_chest_imagenome_gold_for_test]) > 0 # at least one of them must be True
+                    use_mscxr_for_test, use_chest_imagenome_gold_for_test, use_cxrlt2024_challenge_split]) > 0 # at least one of them must be True
         assert 0 < mask_exponent <= 1
         print(f'mask_exponent = {mask_exponent}')
         
@@ -315,6 +356,9 @@ class MIMICCXR_PhraseGroundingTrainer:
         self.use_mscxr_for_train = use_mscxr_for_train
         self.use_mscxr_for_test = use_mscxr_for_test
         self.use_chest_imagenome_gold_for_test = use_chest_imagenome_gold_for_test
+        self.use_cxrlt2024_challenge_split = use_cxrlt2024_challenge_split
+        self.use_cxrlt2024_custom_labels = use_cxrlt2024_custom_labels
+        self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
         
         self.use_yolov8 = use_yolov8
 
@@ -323,6 +367,29 @@ class MIMICCXR_PhraseGroundingTrainer:
         if exclude_noisy_images:
             noisy_dicom_ids = set(load_nondecent_chest_imagenome_dicom_ids())
             forbidden_train_dicom_ids |= noisy_dicom_ids
+
+        if use_cxrlt2024_challenge_split:
+            assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
+            assert not use_mscxr_for_test # only for training
+            assert not use_chest_imagenome_gold_for_test # only for training
+            assert not use_facts_for_test # only for training
+            assert not use_interpret_cxr_challenge_split
+            cxrlt2024_train_dicom_ids, cxrlt2024_dev_dicom_ids = get_cxrlt2024_train_dev_dicom_ids()
+            cxrlt2024_train_dicom_ids = set(cxrlt2024_train_dicom_ids)
+            cxrlt2024_dev_dicom_ids = set(cxrlt2024_dev_dicom_ids)
+            print(f'len(cxrlt2024_train_dicom_ids) = {len(cxrlt2024_train_dicom_ids)}')
+            print(f'len(cxrlt2024_dev_dicom_ids) = {len(cxrlt2024_dev_dicom_ids)}')
+            forbidden_train_dicom_ids |= cxrlt2024_dev_dicom_ids # exclude dev set
+
+        if use_cxrlt2024_official_labels:
+            assert use_cxrlt2024_challenge_split
+            assert cxrlt2024_official_training_labels_for_fact_classification_filepath is not None
+            assert cxrlt2024_multilabel_classifier_collate_batch_fn is not None
+
+        if use_cxrlt2024_custom_labels:
+            assert use_cxrlt2024_challenge_split
+            assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
+            assert cxrlt2024_image_phrase_classifier_collate_batch_fn is not None
 
         if use_mscxr_for_test:
             ms_cxr_dicom_ids = set(get_ms_cxr_dicom_ids())
@@ -335,9 +402,215 @@ class MIMICCXR_PhraseGroundingTrainer:
 
         print(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
 
+        # Create train and dev datasets for CXR-LT-2024 challenge
+        if use_cxrlt2024_challenge_split:
+            print_magenta('Preparing CXR-LT-2024 challenge datasets and dataloaders for training/testing...', bold=True)
+
+            imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
+
+            if self.use_cxrlt2024_custom_labels:
+
+                assert cxrlt2024_image_phrase_classifier_collate_batch_fn is not None
+                assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
+
+                cxrlt2024_dicom_id_to_pos_neg_facts = load_pickle(cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath)
+                print(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["train"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["train"])}')
+                print(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"])}')
+
+                BIG_ENOGUGH = 1000000
+                phrases = cxrlt2024_dicom_id_to_pos_neg_facts['class_sentences']
+                phrase_embeddings = cxrlt2024_dicom_id_to_pos_neg_facts['class_sentence_embeddings']
+                image_paths = [None] * BIG_ENOGUGH
+                phrase_idxs = [None] * BIG_ENOGUGH
+                phrase_classification_labels = [None] * BIG_ENOGUGH
+                idx = 0
+
+                train_indices = []
+                dev_indices = []
+                    
+                for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['train'].items():
+                    if dicom_id in forbidden_train_dicom_ids:
+                        continue
+                    assert dicom_id in cxrlt2024_train_dicom_ids
+                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                    phrase_idxs[idx] = neg_idxs + pos_idxs
+                    phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                        np.ones(len(pos_idxs), dtype=np.int64)])
+                    train_indices.append(idx)
+                    idx += 1
+
+                for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['dev'].items():
+                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                    phrase_idxs[idx] = neg_idxs + pos_idxs
+                    phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                        np.ones(len(pos_idxs), dtype=np.int64)])
+                    dev_indices.append(idx)
+                    idx += 1
+
+                print(f'Total number of images: {idx}')
+                image_paths = image_paths[:idx]
+                phrase_idxs = phrase_idxs[:idx]
+                phrase_classification_labels = phrase_classification_labels[:idx]
+
+                # Create dataset and dataloader for training
+                print_bold('Building cxrlt2024 train phrase classifier dataloader...')
+                num_phrases_2_idxs = {}
+                for idx in train_indices:
+                    num_phrases = len(phrase_idxs[idx])
+                    try:
+                        num_phrases_2_idxs[num_phrases].append(idx)
+                    except KeyError:
+                        num_phrases_2_idxs[num_phrases] = [idx]
+                train_dataloaders = []
+                for num_phrases, indices in num_phrases_2_idxs.items():
+                    print(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
+                    dataset = MIMICCXR_CXRLT2024_ClassificationDataset(
+                        image_paths=image_paths, image_transform=train_image_transform,
+                        phrase_embeddings=phrase_embeddings, phrase_idxs=phrase_idxs,
+                        phrase_classification_labels=phrase_classification_labels,
+                        indices=indices, shuffle=True)
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1), # at least 1
+                        shuffle=True,
+                        num_workers=num_train_workers,
+                        collate_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    train_dataloaders.append(dataloader)
+                self.cxrlt2024_custom_train_dataloader = SequentialDataLoader(train_dataloaders)
+
+                # Create dataset and dataloader for dev
+                print_bold('Building cxrlt2024 dev phrase classifier dataloader...')
+                num_phrases_2_idxs = {}
+                for idx in dev_indices:
+                    num_phrases = len(phrase_idxs[idx])
+                    try:
+                        num_phrases_2_idxs[num_phrases].append(idx)
+                    except KeyError:
+                        num_phrases_2_idxs[num_phrases] = [idx]
+                dev_dataloaders = []
+                for num_phrases, indices in num_phrases_2_idxs.items():
+                    print(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
+                    dataset = MIMICCXR_CXRLT2024_ClassificationDataset(
+                        image_paths=image_paths, image_transform=test_image_transform,
+                        phrase_embeddings=phrase_embeddings, phrase_idxs=phrase_idxs,
+                        phrase_classification_labels=phrase_classification_labels,
+                        indices=indices, shuffle=False)
+                    dataloader = DataLoader(
+                        dataset,
+                        batch_size=int(max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1) * test_batch_size_factor), # at least 1
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
+                        pin_memory=True,
+                    )
+                    dev_dataloaders.append(dataloader)
+                self.cxrlt2024_custom_dev_dataloader = SequentialDataLoader(dev_dataloaders)
+
+            if self.use_cxrlt2024_official_labels:
+                # We will create an additional dataloader for training the fact classifier
+                # using the official training labels provided by the challenge organizers
+                print_bold('Building cxrlt2024 train/val dataloader for fact classifier using official labels...')
+                data = load_pickle(cxrlt2024_official_training_labels_for_fact_classification_filepath)
+                dicom_ids = data['dicom_ids']
+                labels = data['labels']
+                train_indices = data['train_indices']
+                val_indices = data['val_indices']
+                class_names = data['class_names']
+                class_embeddings = data['class_embeddings']
+                assert labels.shape == (len(dicom_ids), len(class_embeddings))
+                assert len(train_indices) + len(val_indices) == len(dicom_ids)
+                print(f'len(dicom_ids) = {len(dicom_ids)}')
+                print(f'len(train_indices) = {len(train_indices)}')
+                print(f'len(val_indices) = {len(val_indices)}')
+                print(f'labels.shape = {labels.shape}')
+                print(f'class_embeddings.shape = {class_embeddings.shape}')
+                image_paths = []
+                for dicom_id in dicom_ids:
+                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                    image_paths.append(image_path_getter(part_id, subject_id, study_id, dicom_id))
+
+                # Clean train_indinces
+                len_before = len(train_indices)
+                train_indices = [i for i in train_indices if dicom_ids[i] not in forbidden_train_dicom_ids]
+                len_after = len(train_indices)
+                if len_before != len_after:
+                    print_orange(f'{len_before - len_after} train indices removed due to forbidden_train_dicom_ids')
+
+                if cxrlt2024_do_balanced_sampling:
+                    print_orange('Balanced sampling is enabled for CXR-LT-2024 fact classifier training')
+                    # Group train indices for balanced sampling
+                    grouped_indices = group_indices_for_balanced_sampling(
+                        label_matrix=labels, indices=train_indices, label_names=class_names, min_group_size=100)
+                    
+                    # Create train dataset
+                    train_datasets = []
+                    train_weights = []
+                    for indices in grouped_indices:
+                        dataset = ImageFactBasedMultilabelClassificationDataset(
+                            image_paths=image_paths,
+                            image_transform=train_image_transform,
+                            phrase_embeddings=class_embeddings,
+                            phrase_classification_labels=labels,
+                            indices=indices,
+                            infinite=True,
+                            shuffle_indices=True,
+                        )
+                        weight = math.log2(len(indices)) ** 3
+                        train_datasets.append(dataset)
+                        train_weights.append(weight)
+                        print(f'  len(indices) = {len(indices)}, weight = {weight}')
+                    self.cxrlt2024_official_train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(class_names)), 1) # at least 1 image per batch
+                    self.cxrlt2024_official_train_dataloader = DataLoader(self.cxrlt2024_official_train_dataset,
+                                                    batch_size=batch_size,
+                                                    shuffle=False,
+                                                    num_workers=num_train_workers,
+                                                    collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+                                                    pin_memory=True)
+                else:
+                    print_orange('Normal sampling is enabled for CXR-LT-2024 fact classifier training')
+                    self.cxrlt2024_official_train_dataset = ImageFactBasedMultilabelClassificationDataset(
+                        image_paths=image_paths,
+                        image_transform=train_image_transform,
+                        phrase_embeddings=class_embeddings,
+                        phrase_classification_labels=labels,
+                        indices=train_indices,
+                        infinite=False,
+                        shuffle_indices=True,
+                    )
+                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(class_names)), 1) # at least 1 image per batch
+                    self.cxrlt2024_official_train_dataloader = DataLoader(self.cxrlt2024_official_train_dataset,
+                                                    batch_size=batch_size,
+                                                    shuffle=False,
+                                                    num_workers=num_train_workers,
+                                                    collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+                                                    pin_memory=True)
+                
+                # Create val dataset
+                val_dataset = ImageFactBasedMultilabelClassificationDataset(
+                    image_paths=image_paths,
+                    image_transform=test_image_transform,
+                    phrase_embeddings=class_embeddings,
+                    phrase_classification_labels=labels,
+                    indices=val_indices,
+                    infinite=False,
+                    shuffle_indices=False,
+                )
+                self.cxrlt2024_official_val_dataloader = DataLoader(val_dataset,
+                                                batch_size=int(batch_size * test_batch_size_factor),
+                                                shuffle=False,
+                                                num_workers=num_test_workers,
+                                                collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+                                                pin_memory=True)
+
         # Create train mimiccxr facts dataset
         if use_facts_for_train or use_facts_for_test:
-            print_bold('Preparing MIMIC-CXR-Facts datasets and dataloaders for training/testing...')
+            print_magenta('Preparing MIMIC-CXR-Facts datasets and dataloaders for training/testing...', bold=True)
             assert dicom_id_to_pos_neg_facts_filepath is not None
             assert fact_grounding_collate_batch_fn is not None
             assert num_train_workers is not None
@@ -394,6 +667,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                             split = 'validate'
                         else:
                             continue # ignore test set
+
+                    if use_cxrlt2024_challenge_split:
+                        if dicom_id in cxrlt2024_train_dicom_ids:
+                            split = 'train'
+                        else:
+                            continue # ignore dev set
 
                     if split == 'validate' or split == 'test':
                         if use_facts_for_test:
@@ -461,6 +740,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             if use_facts_for_train:
                 print_bold('Building train fact dataloader...')
                 batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
+                print(f'batch_size = {batch_size}')
 
                 if balance_long_middle_short_tail:
                     print('Balancing long, middle, and short tail classes...')
@@ -505,7 +785,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     train_fact_dataset = MIMICCXR_FactGroundingDataset(
                         image_paths=image_paths, image_transform=train_image_transform,
                         fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
-                        indices=indices, num_facts=train_num_facts_per_image,
+                        indices=train_indices, num_facts=train_num_facts_per_image,
                         use_weights=use_weighted_phrase_classifier_loss,
                         weights_filepath=cluster_and_label_weights_for_facts_filepath)
                     train_fact_dataloader = DataLoader(
@@ -544,7 +824,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
         # Create mscxr train/test dataset and dataloader
         if use_mscxr_for_train or use_mscxr_for_test:
-            print_bold('Preparing MS-CXR dataset and dataloader for training/testing...')
+            print_magenta('Preparing MS-CXR dataset and dataloader for training/testing...', bold=True)
             assert mask_width is not None
             assert mask_height is not None
             assert mscxr_phrase2embedding_filepath is not None
@@ -564,6 +844,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             BIG_ENOGUGH = 1000000
             image_paths = [None] * BIG_ENOGUGH
+            dicom_ids = [None] * BIG_ENOGUGH
             phrases = [None] * BIG_ENOGUGH
             phrase_embeddings = [None] * BIG_ENOGUGH
             phrase_grounding_masks = [None] * BIG_ENOGUGH
@@ -572,12 +853,12 @@ class MIMICCXR_PhraseGroundingTrainer:
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
             idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
+            for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
                 tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
                     mimiccxr_metadata['subject_ids'],
                     mimiccxr_metadata['study_ids'],
                     mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
-                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                     if dicom_id not in dicom_id_2_phrases_and_masks:
                         continue
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
@@ -588,7 +869,9 @@ class MIMICCXR_PhraseGroundingTrainer:
                     idx += 1
 
             print(f'Total number of images: {idx}')
+            assert idx > 0
             image_paths = image_paths[:idx]
+            dicom_ids = dicom_ids[:idx]
             phrases = phrases[:idx]
             phrase_embeddings = phrase_embeddings[:idx]
             phrase_grounding_masks = phrase_grounding_masks[:idx]
@@ -602,7 +885,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 except KeyError:
                     num_phrases_2_idxs[num_phrases] = [i]
 
-            # Create datasets and dataloaders for testing
+            # Create datasets and dataloaders for training and testing
             if use_mscxr_for_train:
                 train_mscxr_dataloaders = []
             if use_mscxr_for_test:
@@ -616,11 +899,19 @@ class MIMICCXR_PhraseGroundingTrainer:
                     assert phrase_embeddings[i].shape[0] == phrase_grounding_masks[i].shape[0] == num_phrases
                 
                 if use_mscxr_for_train:
+                    clean_indices = [i for i in indices if dicom_ids[i] not in forbidden_train_dicom_ids] # exclude forbidden images
+                    if use_cxrlt2024_challenge_split:
+                        clean_indices = [i for i in clean_indices if dicom_ids[i] in cxrlt2024_train_dicom_ids] # it has to be in the train set
+                    if len(clean_indices) < len(indices):
+                        print_orange(f'Excluding {len(indices) - len(clean_indices)} images from training...', bold=True)
+                        if len(clean_indices) == 0:
+                            print_red('WARNING: No images left for training!', bold=True)
+                            continue
                     batch_size = max(min(max_images_per_batch, max_phrases_per_batch // num_phrases), 1)
                     dataset = MIMICCXR_PhraseGroundingDataset(
                         image_paths=image_paths, image_transform=train_image_transform, phrases=phrases,
                         phrase_embeddings=phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
-                        indices=indices)
+                        indices=clean_indices)
                     dataloader = DataLoader(
                         dataset,
                         batch_size=batch_size,
@@ -652,7 +943,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
         # Create train chest imagenome dataset
         if use_chest_imagenome_for_train:
-            print_bold('Preparing Chest Imagenome dataset and dataloader for training...')
+            print_magenta('Preparing Chest Imagenome dataset and dataloader for training...', bold=True)
 
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
             assert mask_width is not None
@@ -698,6 +989,9 @@ class MIMICCXR_PhraseGroundingTrainer:
                         continue
                     if dicom_id in forbidden_train_dicom_ids:
                         continue
+                    if use_cxrlt2024_challenge_split:
+                        if dicom_id not in cxrlt2024_train_dicom_ids: # it has to be in the challenge's official training set
+                            continue
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
                     i = did2idx[dicom_id]
                     chest_imagenome_bbox_coords[idx] = bbox_coords_array[i]
@@ -730,7 +1024,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         
         # Create chest imagenome test dataset and dataloader
         if use_chest_imagenome_gold_for_test:
-            print_bold('Preparing Chest Imagenome dataset and dataloader for testing...')
+            print_magenta('Preparing Chest Imagenome dataset and dataloader for testing...', bold=True)
             assert mask_width is not None
             assert mask_height is not None
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None

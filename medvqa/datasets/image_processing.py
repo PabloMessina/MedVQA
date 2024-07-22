@@ -28,7 +28,6 @@ from medvqa.datasets.augmentation import (
     ImageAugmentationTransforms,
     ImageBboxAugmentationTransforms,
 )
-from medvqa.utils.logging import print_red
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -47,7 +46,7 @@ def get_image_transform(
     image_size = (256, 256),
     mean = (0.485, 0.456, 0.406),
     std = (0.229, 0.224, 0.225),
-    augmentation_mode = None,
+    augmentation_mode=None,
     default_prob=0.5,
     use_clip_transform=False,
     clip_version=None,
@@ -513,7 +512,7 @@ class ImageDataset(Dataset):
         else:
             return {'i': self.image_transform(self.image_paths[i]) }
         
-class FactVisualGroundingDataset(Dataset):
+class ImageFactClassificationDataset(Dataset):
     def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts,
                  negative_facts, indices, num_facts, infinite=False, shuffle=False):
         self.image_paths = image_paths
@@ -590,6 +589,40 @@ class FactVisualGroundingDataset(Dataset):
             'i': image,
             'pe': embeddings, # phrase embeddings
             'l': labels, # labels
+        }
+    
+class ImageFactBasedMultilabelClassificationDataset(Dataset):
+
+    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_classification_labels,
+                 indices, infinite=False, shuffle_indices=False):
+        self.image_paths = image_paths
+        self.image_transform = image_transform
+        self.phrase_embeddings = phrase_embeddings
+        self.phrase_classification_labels = phrase_classification_labels
+        self.indices = indices
+        self.infinite = infinite
+        if infinite:
+            self._len = INFINITE_DATASET_LENGTH
+        else:
+            self._len = len(indices)
+        if shuffle_indices:
+            np.random.shuffle(self.indices)
+
+    def __len__(self):
+        return self._len
+    
+    def __getitem__(self, i):
+        if self.infinite:
+            i %= len(self.indices)
+        i = self.indices[i]
+        image_path = self.image_paths[i]
+        phrase_embeddings = self.phrase_embeddings
+        phrase_classification_labels = self.phrase_classification_labels[i]
+        image = self.image_transform(image_path)
+        return {
+            'i': image,
+            'pe': phrase_embeddings,
+            'pcl': phrase_classification_labels,
         }
 
 def classify_and_rank_questions(image_paths, transform, image_local_feat_size, n_questions, pretrained_weights, batch_size,

@@ -13,7 +13,7 @@ from medvqa.datasets.chest_imagenome import (
 
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.metrics import average_ignoring_nones_and_nans
-from medvqa.utils.logging import print_blue, print_bold, rgba_to_ansi
+from medvqa.utils.logging import print_blue, print_orange, print_bold, rgba_to_ansi
 
 # List of 30 different colors
 _COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
@@ -96,7 +96,11 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
             val_scores = _replace_nans_with_local_avgs(val_scores)
             print(f'WARNING: {metric_name} val_scores has some nans, but not all. Replacing nans with nearest non-nan values')
         
-        assert len(train_scores) == len(val_scores)
+        if len(train_scores) != len(val_scores):
+            print(f'WARNING: {metric_name} train_scores and val_scores have different lengths ({len(train_scores)} vs {len(val_scores)}). Truncating the longer one.')
+            min_len = min(len(train_scores), len(val_scores))
+            train_scores = train_scores[:min_len]
+            val_scores = val_scores[:min_len]
         
         epochs = list(range(1, len(train_scores)+1))        
         
@@ -303,7 +307,7 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
 
 def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, metric_aliases, title,
                                 figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
-                                sort_metrics=True, sort_methods=True, vertical=False):
+                                sort_metrics=True, row_idx_to_sort_by=None, sort_methods=True, vertical=False):
     n = len(dataframe_rows)
     assert n == len(method_aliases)
     assert n > 0
@@ -315,7 +319,10 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
     mean_score_per_metric = [np.mean([scores_per_method[i][j] for i in range(n)]) for j in range(m)]
     metric_idxs = list(range(m))
     if sort_metrics:
-        metric_idxs.sort(key=lambda i: mean_score_per_metric[i])
+        if row_idx_to_sort_by is not None: # sort by a specific row
+            metric_idxs.sort(key=lambda i: scores_per_method[row_idx_to_sort_by][i])
+        else: # sort by the mean score
+            metric_idxs.sort(key=lambda i: mean_score_per_metric[i])
     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     if sort_methods:
@@ -396,7 +403,7 @@ def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_alia
 
 def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10, 8), color='blue',
                  horizontal=False, sort_metrics=False, show_metrics_above_bars=False, eps=0.005, draw_grid=False,
-                 append_average_to_title=False):
+                 append_average_to_title=False, xticks_rotation=0, yticks_rotation=0, text_rotation=0):
     n = len(metric_values)
     assert n == len(metric_values)
     assert n == len(metric_names)
@@ -413,20 +420,33 @@ def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10
         plt.xlabel(xlabel)
         if show_metrics_above_bars:
             for i in range(n):
-                plt.text(metric_values[i] + eps, i+1, f'{metric_values[i]:.3f}', ha='left', va='center')
+                plt.text(metric_values[i] + eps, i+1, f'{metric_values[i]:.3f}', ha='left', va='center',
+                         rotation=text_rotation)
         if draw_grid:
-            plt.grid(axis='x')
+            plt.grid(axis='x')        
     else:
         plt.bar(range(1, n+1), metric_values, tick_label=metric_names, color=color)
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         if show_metrics_above_bars:
             for i in range(n):
-                plt.text(i+1, metric_values[i] + eps, f'{metric_values[i]:.3f}', ha='center', va='bottom')
+                plt.text(i+1, metric_values[i] + eps, f'{metric_values[i]:.3f}', ha='center', va='bottom',
+                         rotation=text_rotation)
         if draw_grid:
             plt.grid(axis='y')
     if append_average_to_title:
-        title = f'{title} (average={np.mean(metric_values):.3f})'
+        # remove nan values from metric_values
+        metric_values_ = []
+        for i in range(n):
+            if np.isnan(metric_values[i]):
+                print_orange(f'WARNING: metric_values[{i}] ({metric_names[i]}) is nan. Skipping it.')
+            else:
+                metric_values_.append(metric_values[i])
+        title = f'{title} (average={np.mean(metric_values_):.3f})'
+    if xticks_rotation != 0:
+        plt.xticks(rotation=xticks_rotation)
+    if yticks_rotation != 0:
+        plt.yticks(rotation=yticks_rotation)
     plt.title(title)
     plt.show()
 
@@ -1123,34 +1143,34 @@ def plot_nli_distribution(report_nli_input_output_jsonl_filepaths, figsize1=(10,
     plt.show()
 
 
-def plot_barchart(data, title, xlabel, ylabel, figsize=(10, 10), color='blue', horizontal=False, bar_names=None, sort_data=False,
+def plot_barchart(values, title, xlabel, ylabel, figsize=(10, 10), color='blue', horizontal=False, bar_names=None, sort_values=False,
                     write_values_on_bars=False, values_fontsize=10, values_color='black', values_rotation=0):
-    n = len(data)
-    if sort_data:
+    n = len(values)
+    if sort_values:
         indices = list(range(n))
-        indices.sort(key=lambda i: data[i], reverse=not horizontal)
-        data = [data[i] for i in indices]
+        indices.sort(key=lambda i: values[i], reverse=not horizontal)
+        values = [values[i] for i in indices]
         if bar_names is not None:
             bar_names = [bar_names[i] for i in indices]
     if bar_names is None:
         bar_names = range(1, n+1)
     plt.figure(figsize=figsize)
     if horizontal:
-        plt.barh(range(1, n+1), data, color=color)
+        plt.barh(range(1, n+1), values, color=color)
         plt.yticks(range(1, n+1), bar_names)
         plt.ylabel(ylabel)
         plt.xlabel(xlabel)
         if write_values_on_bars:
             for i in range(n):
-                plt.text(data[i], i+1, f'{data[i]:.1f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+                plt.text(values[i], i+1, f'{values[i]:.1f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
     else:
-        plt.bar(range(1, n+1), data, color=color)
+        plt.bar(range(1, n+1), values, color=color)
         plt.xticks(range(1, n+1), bar_names)
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         if write_values_on_bars:
             for i in range(n):
-                plt.text(i+1, data[i], f'{data[i]:.1f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+                plt.text(i+1, values[i], f'{values[i]:.1f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
     plt.title(title)
     plt.show()
 

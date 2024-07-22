@@ -36,6 +36,7 @@ class _Task:
     ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS = 'assign_representative_facts_to_reports'
     INTEGRATE_AND_EXPORT_ALL_DATA = 'integrate_and_export_all_data'
     EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS = 'export_dicom_id_to_positive_negative_facts'
+    EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS = 'export_dicom_id_to_positive_negative_facts__replace_embeddings'
     COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS = 'compute_clusters_and_cluster_weights_for_facts'
     
     @staticmethod
@@ -54,6 +55,7 @@ class _Task:
             _Task.ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS,
             _Task.INTEGRATE_AND_EXPORT_ALL_DATA,
             _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS,
+            _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS,
             _Task.COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS,
         ]
     
@@ -1772,6 +1774,48 @@ def export_dicom_id_to_positive_negative_facts(
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
+def export_dicom_id_to_positive_negative_facts__replace_embeddings(
+    dicom_id_to_pos_neg_facts_filepath,
+    fact_embedding_model_name,
+    fact_embedding_model_checkpoint_folder_path,
+    fact_embedding_batch_size,
+    fact_embedding_num_workers,
+):
+    print(f'Reading {dicom_id_to_pos_neg_facts_filepath}...')
+    data = load_pickle(dicom_id_to_pos_neg_facts_filepath)
+    facts = data['facts']
+    embeddings = data['embeddings']
+    dicom_id_to_pos_neg_facts = data['dicom_id_to_pos_neg_facts']
+
+    # Compute new embeddings
+    print_blue('Computing new embeddings...')
+    text_encoder = CachedTextEmbeddingExtractor(
+        model_name=fact_embedding_model_name,
+        model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+        batch_size=fact_embedding_batch_size,
+        num_workers=fact_embedding_num_workers,
+        device='cuda',
+    )
+    new_embeddings = text_encoder.compute_text_embeddings(facts)
+    assert new_embeddings.shape == embeddings.shape
+
+    # Save output
+    output = {
+        'facts': facts,
+        'embeddings': new_embeddings,
+        'dicom_id_to_pos_neg_facts': dicom_id_to_pos_neg_facts,
+    }
+    strings = [
+        dicom_id_to_pos_neg_facts_filepath,
+        fact_embedding_model_name,
+        fact_embedding_model_checkpoint_folder_path,
+    ]
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        folder_path=LARGE_FAST_CACHE_DIR, prefix=f'mimiccxr_dicom_id_to_pos_neg_facts(num_facts={len(facts)})',
+        strings=strings, force_hashing=True)
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
 def compute_clusters_and_cluster_weights_for_facts(
     dicom_id_to_pos_neg_facts_filepath,
     num_clusters,
@@ -2085,6 +2129,14 @@ def main():
             mimiccxr_report_fact_nli_integrated_data_filepath=args.mimiccxr_report_fact_nli_integrated_data_filepath,
             gpt4_report_nli_input_output_jsonl_filepaths=args.gpt4_report_nli_input_output_jsonl_filepaths,
             integrated_report_facts_jsonl_filepaths=args.integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_name=args.fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=args.fact_embedding_batch_size,
+            fact_embedding_num_workers=args.fact_embedding_num_workers,
+        )
+    elif args.task == _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS:
+        export_dicom_id_to_positive_negative_facts__replace_embeddings(
+            dicom_id_to_pos_neg_facts_filepath=args.dicom_id_to_pos_neg_facts_filepath,
             fact_embedding_model_name=args.fact_embedding_model_name,
             fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
             fact_embedding_batch_size=args.fact_embedding_batch_size,

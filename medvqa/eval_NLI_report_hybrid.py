@@ -334,15 +334,15 @@ def evaluate(
         assert len(idxs) > 0, f"len(idxs) == 0 for {h}"
         # Entailment
         best_et, best_f1 = best_threshold_and_f1_score(
-            probs=mlp_nli_softmaxes[idxs, 0],
             gt=report_nli_gt_labels[idxs] == 0, # binarize (0 -> 1, 1 -> 0, 2 -> 0)
+            probs=mlp_nli_softmaxes[idxs, 0],
         )
         mlp_h2et[h] = best_et
         # print(f"{h}: Best ent. threshold: {best_et}, Best F1: {best_f1} (size: {len(idxs)})")
         # Contradiction
         best_ct, best_f1 = best_threshold_and_f1_score(
-            probs=mlp_nli_softmaxes[idxs, 2],
             gt=report_nli_gt_labels[idxs] == 2, # binarize (0 -> 0, 1 -> 0, 2 -> 1)
+            probs=mlp_nli_softmaxes[idxs, 2],
         )
         mlp_h2ct[h] = best_ct
         # print(f"{h}: Best cont. threshold: {best_ct}, Best F1: {best_f1} (size: {len(idxs)})")
