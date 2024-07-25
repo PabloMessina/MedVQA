@@ -578,7 +578,7 @@ def attach_condition_aware_segmask_iou_per_class(engine, pred_field_name, gt_fie
 # General purpose prc-auc (micro-average)
 def attach_condition_aware_prc_auc(engine, pred_field_name, gt_field_name, metric_name, condition_function=lambda _: True):
     met = ConditionAwareEpochMetric(
-        compute_fn=prc_auc_score,
+        compute_fn=lambda pred, gt: prc_auc_score(gt, pred), # swap gt and pred
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
         check_compute_fn=False,

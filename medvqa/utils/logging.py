@@ -18,6 +18,9 @@ def print_red(*args, bold=False, end='\n'):
 def print_magenta(*args, bold=False, end='\n'):
     _print_with_color('magenta', *args, bold=bold, end=end)
 
+def print_green(*args, bold=False, end='\n'):
+    _print_with_color('green', *args, bold=bold, end=end)
+
 def print_orange(*args, bold=False, end='\n'):
     if bold:
         print(*[f'\033[93m\033[1m{x}\033[0m' for x in args], end=end)

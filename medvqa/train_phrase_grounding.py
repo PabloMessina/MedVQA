@@ -16,6 +16,7 @@ from medvqa.losses.schedulers import create_lr_scheduler
 
 from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, PhraseGroundingMode
 
+from medvqa.models.vision.visual_modules import comes_with_positional_encoding
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
 from medvqa.utils.constants import (
@@ -69,6 +70,7 @@ def parse_args(args=None):
     parser.add_argument('--pretrained_checkpoint_folder_paths', type=str, nargs='+', default=None)
     parser.add_argument('--freeze_image_encoder', action='store_true', default=False)
     parser.add_argument('--raw_image_encoding', type=str, default=RawImageEncoding.YOLOV8)
+    parser.add_argument('--huggingface_model_name', type=str, default=None)
     parser.add_argument('--num_regions', type=int, default=None)
     parser.add_argument('--image_local_feat_size', type=int, default=None)
     parser.add_argument('--image_encoder_pretrained_weights_path', type=str, default=None)
@@ -161,7 +163,6 @@ def parse_args(args=None):
     parser.add_argument('--use_cxrlt2024_official_labels', action='store_true', default=False)
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_choices())
     parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_choices())
-    parser.add_argument('--mask_exponent', type=float, default=1.0)
     parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true', default=False)
     parser.add_argument('--mimiccxr_long_middle_short_tail_thresholds', nargs=2, type=float, default=(0.02, 0.05))
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str, default=None)
@@ -185,7 +186,9 @@ def parse_args(args=None):
     return parser.parse_args(args=args)
 
 _METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
-_METRIC_WEIGHTS['cxrlt2024o_prc_auc'] = 8.0 # Most important metric for MICCAI CXR-LT 2024 challenge
+# Most important metrics for MICCAI CXR-LT 2024 challenge
+_METRIC_WEIGHTS['cxrlt2024o_prc_auc'] = 5.0 
+_METRIC_WEIGHTS['cxrlt2024c_prc_auc'] = 5.0
 
 def _metric_getter(metrics_dict, key):
     if key.endswith('_loss'):
@@ -507,7 +510,7 @@ def train_model(
             _dataset_names.append('cxrlt2024(GPT4)')
             _train_weights.append(wc) # weight for custom labels
             _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)
-            print(f'len(mimiccxr_trainer.cxrlt2024_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
+            print(f'len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
             if not use_cxrlt2024_official_labels: # if official labels are not used
                 _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)
                 print(f'len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)}')
@@ -871,6 +874,7 @@ def train_from_scratch(
     # Model args
     freeze_image_encoder,
     raw_image_encoding,
+    huggingface_model_name,
     num_regions,   
     image_local_feat_size,
     image_encoder_pretrained_weights_path,
@@ -969,7 +973,6 @@ def train_from_scratch(
     gradient_accumulation_steps,
     pos_area_prior,
     neg_area_prior,
-    mask_exponent,    
     # Loss weights
     attention_supervision_loss_weight,
     phrase_classifier_loss_weight,
@@ -1031,6 +1034,7 @@ def train_from_scratch(
         pretrained_checkpoint_folder_paths=pretrained_checkpoint_folder_paths,
         # Image encoder
         raw_image_encoding=raw_image_encoding,
+        huggingface_model_name=huggingface_model_name,
         freeze_image_encoder=freeze_image_encoder,
         image_local_feat_size=image_local_feat_size,
         image_encoder_dropout_p=image_encoder_dropout_p,
@@ -1046,7 +1050,7 @@ def train_from_scratch(
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
         # Other
-        apply_positional_encoding=True,
+        apply_positional_encoding=not comes_with_positional_encoding(raw_image_encoding), # apply PE only if not comes with PE
         phrase_embedding_size=phrase_embedding_size,
         regions_width=regions_width,
         regions_height=regions_height,
@@ -1169,7 +1173,6 @@ def train_from_scratch(
             source_image_size_mode=source_image_size_mode,
             exclude_noisy_images=mimiccxr_exclude_noisy_images,
             use_yolov8=use_yolov8,
-            mask_exponent=mask_exponent,
             balance_long_middle_short_tail=mimiccxr_balance_long_middle_short_tail,
             long_middle_short_tail_thresholds=mimiccxr_long_middle_short_tail_thresholds,
             report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,

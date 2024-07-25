@@ -7,7 +7,6 @@ from sklearn.metrics import roc_auc_score
 
 from medvqa.metrics.classification.prc_auc import prc_auc_score
 from medvqa.utils.files import load_json, load_pickle
-from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.utils.logging import print_blue
 from medvqa.utils.metrics import (
     best_threshold_and_accuracy_score,
@@ -55,10 +54,10 @@ class MultilabelOptimalEnsembleSearcher:
         self.gt = gt
         self.probs = probs
         self.n = gt.shape[0] # number of samples
-        self.m = gt.shape[1] # number of labels
+        self.m = gt.shape[1] # number of classes
         self.k = probs.shape[0] # number of models
         self.topk = topk # number of best weights to keep
-        self.minheaps = [[] for _ in range(self.m)]
+        self.minheaps = [[] for _ in range(self.m)] # keep track of the topk best weights for each class
         
     def _update_minheap(self, i, weights, score, threshold=None):
         item = _Item(weights, score, threshold)
@@ -70,9 +69,10 @@ class MultilabelOptimalEnsembleSearcher:
         
     def try_basic_weight_heuristics(self):
         print('Trying basic weight heuristics...')
+        
         # For each model, try 1 for that model and 0 for the others
         # This is equivalent to trying the model alone
-        print('  1) Try each model alone')
+        print('1) Try each model alone:')
         for i in tqdm(range(self.k)):
             weights = np.zeros(self.k)
             weights[i] = 1
@@ -84,8 +84,9 @@ class MultilabelOptimalEnsembleSearcher:
                     score = self.score_func(self.gt.T[j], merged_probs.T[j])
                     threshold = None
                 self._update_minheap(j, weights, score, threshold)
+        
         # Try 1 for two models and 0 for the others, for each pair of models
-        print('  2) Try pairs of models')
+        print('2) Try pairs of models:')
         pairs = list(itertools.combinations(range(self.k), 2))
         if len(pairs) > 50:
             pairs = random.sample(pairs, 50)
@@ -102,8 +103,9 @@ class MultilabelOptimalEnsembleSearcher:
                     score = self.score_func(self.gt.T[k], merged_probs.T[k])
                     threshold = None
                 self._update_minheap(k, weights, score, threshold)
+        
         # Try the average of all models
-        print('  3) Try the average of all models')
+        print('3) Try the average of all models')
         weights = np.ones(self.k)
         weights /= weights.sum()
         merged_probs = np.average(self.probs, 0, weights=weights)
@@ -114,12 +116,35 @@ class MultilabelOptimalEnsembleSearcher:
                 score = self.score_func(self.gt.T[j], merged_probs.T[j])
                 threshold = None
             self._update_minheap(j, weights, score, threshold)
-        print('  Done')
+        
+        # Try weights proportional to the scores of the models
+        print('4) Try weights proportional to the scores of the individual models')
+        for j in range(self.m): # for each class
+            model_scores = []
+            for i in range(self.k): # for each model
+                model_probs = self.probs[i].T[j]
+                if self.use_threshold:
+                    _, score = self.score_func(self.gt.T[j], model_probs)
+                else:
+                    score = self.score_func(self.gt.T[j], model_probs)
+                model_scores.append(score + 1e-6) # add a small value to avoid division by zero
+            weights = np.array(model_scores)
+            weights /= weights.sum() # normalize
+            merged_probs = np.average(self.probs[:, :, j], 0, weights=weights) # (k, n) -> (n)
+            assert merged_probs.shape == self.gt.T[j].shape
+            if self.use_threshold:
+                threshold, score = self.score_func(self.gt.T[j], merged_probs)
+            else:
+                score = self.score_func(self.gt.T[j], merged_probs)
+                threshold = None
+            self._update_minheap(j, weights, score, threshold)
+        print('Done!')
     
     def sample_weights(self, n_tries):
         """
         Randomly sample weights and update the ensemble for each label
         """
+        print('Sampling weights...')
         for _ in tqdm(range(n_tries)):
             weights = np.random.rand(self.k)
             weights /= weights.sum() # normalize
@@ -136,6 +161,7 @@ class MultilabelOptimalEnsembleSearcher:
         """
         Randomly sample weights around the best weights found so far
         """
+        print('Sampling weights around the best weights found so far...')
         probs = self.probs.transpose(1, 2, 0)
         for _ in tqdm(range(n_tries)):
             weights_array = np.empty((self.m, self.k))

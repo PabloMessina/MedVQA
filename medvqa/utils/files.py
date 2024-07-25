@@ -224,3 +224,10 @@ def list_filepaths_with_prefix_and_timestamps(path_prefix, must_contain=None):
                 matching_files.append((full_path, timestamp_human_readable))
     matching_files.sort(key=lambda x:x[1], reverse=True)
     return matching_files
+
+def print_file_size(filepath):
+    size = os.path.getsize(filepath)
+    size_kb = size / 1024
+    size_mb = size_kb / 1024
+    size_gb = size_mb / 1024
+    print(f'File size: {size} bytes ({size_kb:.2f} KB, {size_mb:.2f} MB, {size_gb:.2f} GB)')

@@ -10,7 +10,7 @@ from collections import Counter
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.constants import CXRLT2024_CLASS_2_SENTENCE, CXRLT2024_CLASSES, CXRLT2024_SENTENCE_2_CLASS, CXRLT2024_TASK1_CLASSES
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string
 from medvqa.utils.logging import get_console_logger, print_orange
 from medvqa.datasets.mimiccxr import (
     MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH,
@@ -18,10 +18,11 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_LARGE_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     get_imageId2PartPatientStudy,
+    get_imageId2reportId,
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.files import load_jsonl, load_pickle, read_txt, save_pickle
 
 INSTRUCTIONS = """Given a report (#R) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} is one or two short explanation sentences and {label} is one of {definitely true, likely true, unknown, likely false, definitely false}. Be careful with tricky sentences that mention multiple findings. Remember that unknown applies when both #R and #H might be true but there is no conclusive way to know with the information provided."""
 
@@ -757,6 +758,102 @@ def eval_nli_queries_for_fact_classification(
 
     return mistakes_per_class
 
+def generate_dataframe_for_manual_inspection(
+        cxrlt2024_integrated_nli_queries_for_fact_classification_filepath,
+        background_findings_and_impression_per_report_filepath,
+        processed_queries_filepath,
+    ):
+    """
+    Generate a dataframe for manual inspection.
+    """
+
+    # Load integrated NLI queries for fact classification
+    output = load_pickle(cxrlt2024_integrated_nli_queries_for_fact_classification_filepath)
+
+    # Load CXR-LT 2024 train data
+    train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+    train_labels = train_df[CXRLT2024_TASK1_CLASSES].values
+    train_dicom_ids = train_df['dicom_id'].values
+    dicom_id_to_idx = { dicom_id: i for i, dicom_id in enumerate(train_dicom_ids) }
+
+    not_found = 0
+    cases_per_class = { x: {'tp': [], 'fp': [], 'tn': [], 'fn': [] } for x in CXRLT2024_TASK1_CLASSES }
+
+    for split in ['train', 'dev']:
+        dicom_id_to_neg_pos_labels = output[split]
+        for dicom_id, (neg_idxs, pos_idxs) in dicom_id_to_neg_pos_labels.items():
+            if dicom_id not in dicom_id_to_idx:
+                not_found += 1
+                continue
+            idx = dicom_id_to_idx[dicom_id]
+            if len(neg_idxs) > 0:
+                for neg_idx in neg_idxs:
+                    if neg_idx >= len(CXRLT2024_TASK1_CLASSES): # Skip zero-shot classes
+                        continue
+                    c = 'tn' if train_labels[idx, neg_idx] == 0 else 'fn'
+                    cases_per_class[CXRLT2024_TASK1_CLASSES[neg_idx]][c].append(dicom_id)
+            if len(pos_idxs) > 0:
+                for pos_idx in pos_idxs:
+                    if pos_idx >= len(CXRLT2024_TASK1_CLASSES): # Skip zero-shot classes
+                        continue
+                    c = 'tp' if train_labels[idx, pos_idx] == 1 else 'fp'
+                    cases_per_class[CXRLT2024_TASK1_CLASSES[pos_idx]][c].append(dicom_id)
+    
+    if not_found > 0:
+        print_orange(f"{not_found} dicom ids not found in the train set", bold=True)
+
+    # Map dicom ids to reports
+    imageId2reportId = get_imageId2reportId()
+    for cases in cases_per_class.values():
+        for c in ['tp', 'fp', 'tn', 'fn']:
+            dicom_ids = cases[c]
+            report_ids = [imageId2reportId[dicom_id] for dicom_id in dicom_ids]
+            report_ids = list(set(report_ids)) # Remove duplicates
+            cases[c] = report_ids
+
+    # Generate dataframe
+    metadata = load_mimiccxr_reports_detailed_metadata(
+        background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath)
+    processed_queries = load_jsonl(processed_queries_filepath)
+    columns = ['case', 'class', 'CXRLT2024_label', 'GPT-4_label', 'filepath', 'part_id', 'subject_id', 'study_id',
+               'original_report', 'parsed_report', 'GPT-4_query', 'GPT-4_reason', 'GPT-4_answer']
+    rows = []
+    for class_name, cases in cases_per_class.items():
+        for c in ['tp', 'fp', 'tn', 'fn']:
+            report_ids = cases[c]
+            sampled_report_ids = random.sample(report_ids, min(2, len(report_ids))) # Sample at most 2 reports
+            for report_id in sampled_report_ids:
+                filepath = metadata['filepaths'][report_id]
+                part_id = metadata['part_ids'][report_id]
+                subject_id = metadata['subject_ids'][report_id]
+                study_id = metadata['study_ids'][report_id]
+                original_report = read_txt(filepath)
+                parsed_report = _build_report(metadata, report_id)
+                query = _build_query(parsed_report, CXRLT2024_CLASS_2_SENTENCE[class_name])
+                found = False
+                for idx, pq in enumerate(processed_queries):
+                    if pq['metadata']['query'] == query:
+                        found = True
+                        break
+                assert found, f"Query not found: {query}"
+                rows.append({
+                    'case': c,
+                    'class': class_name,
+                    'CXRLT2024_label': 1 if c in ['tp', 'fn'] else 0,
+                    'GPT-4_label': 1 if c in ['tp', 'fp'] else 0,
+                    'filepath': filepath,
+                    'part_id': part_id,
+                    'subject_id': subject_id,
+                    'study_id': study_id,
+                    'original_report': original_report,
+                    'parsed_report': parsed_report,
+                    'GPT-4_query': query,
+                    'GPT-4_reason': processed_queries[idx]['parsed_response']['reason'],
+                    'GPT-4_answer': processed_queries[idx]['parsed_response']['label'],
+                })
+
+    return pd.DataFrame(rows, columns=columns) # Return dataframe
+
 
 if __name__ == '__main__':
 
@@ -820,16 +917,18 @@ if __name__ == '__main__':
         already_processed = set()
         if os.path.exists(processed_queries_save_filepath):
             rows = load_jsonl(processed_queries_save_filepath)
-            for row in rows:
-                already_processed.add(hash_string(row['metadata']['query']))
+            # for row in rows:
+            #     already_processed.add(hash_string(row['metadata']['query']))
+            already_processed.update(compute_hashes_in_parallel([x['metadata']['query'] for x in rows]))
             logger.info(f"Loaded {len(rows)} already processed queries from {processed_queries_save_filepath}")
 
         # Load queries to skip
         if args.queries_to_skip_filepaths is not None:
             for queries_to_skip_filepath in args.queries_to_skip_filepaths:
                 rows = load_jsonl(queries_to_skip_filepath)
-                for row in rows:
-                    already_processed.add(hash_string(row['metadata']['query']))
+                # for row in rows:
+                #     already_processed.add(hash_string(row['metadata']['query']))
+                already_processed.update(compute_hashes_in_parallel([x['metadata']['query'] for x in rows]))
                 logger.info(f"Loaded {len(rows)} queries to skip from {queries_to_skip_filepath}")
 
         # Sample queries

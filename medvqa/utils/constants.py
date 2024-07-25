@@ -114,6 +114,12 @@ CXRLT2024_TASK2_CLASSES = [
 assert len(CXRLT2024_TASK2_CLASSES) == 26
 assert all(x in CXRLT2024_CLASSES for x in CXRLT2024_TASK2_CLASSES)
 
+CXRLT2024_TASK3_CLASSES = [
+    'Bulla', 'Cardiomyopathy', 'Hilum', 'Osteopenia', 'Scoliosis',
+]
+assert len(CXRLT2024_TASK3_CLASSES) == 5
+assert all(x in CXRLT2024_CLASSES for x in CXRLT2024_TASK3_CLASSES)
+
 CXRLT2024_CLASS_2_SENTENCE = {
     'Adenopathy': 'adenopathy seen',
     'Atelectasis': 'atelectasis seen',

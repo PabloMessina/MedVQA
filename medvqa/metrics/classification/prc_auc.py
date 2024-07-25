@@ -110,7 +110,7 @@ class ConditionAwareClassAveragedPRCAUC(ConditionAwareMetric):
     def _compute_without_indices(self):
         gt = np.concatenate(self._gt, axis=0)
         probs = np.concatenate(self._probs, axis=0)
-        return prc_auc_macro_avg_fn(probs, gt)
+        return prc_auc_macro_avg_fn(gt, probs)
         
     def compute(self):
         return self._compute()

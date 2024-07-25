@@ -29,7 +29,7 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.constants import LABEL_BASED_FACTS
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
+from medvqa.utils.files import get_cached_pickle_file, load_pickle, print_file_size, save_pickle
 from medvqa.utils.logging import print_bold, print_magenta, print_orange, print_red
 
 class MIMICCXR_FactGroundingDataset(ImageFactClassificationDataset):
@@ -182,7 +182,7 @@ def _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox
     for i in range(len(bbox_coords)):
         if bbox_presence[i] == 1:
             x1, y1, x2, y2 = bbox_coords[i]
-            mask[i] = compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flatten=True)
+            mask[i] = compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flatten=True, binary=True)
     return mask
 
 def _clean_bbox_coords_and_presence(bbox_coords, bbox_presence):
@@ -213,6 +213,7 @@ def _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2b
     save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR, f'bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)}).pkl')
     if os.path.exists(save_path):
         print_bold(f'Loading precomputed bbox_coords_and_presence_and_mask from {save_path}...')
+        print_file_size(save_path)
         return get_cached_pickle_file(save_path)
 
     print_bold(f'Precomputing bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)})...')
@@ -229,7 +230,7 @@ def _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2b
         results = pool.map(_clean_bbox_coords_and_presence_and_compute_mask, dicom_ids)
     bbox_coords = np.array([r[0] for r in results])
     bbox_presence = np.array([r[1] for r in results])
-    phrase_grounding_masks = np.array([r[2] for r in results])
+    phrase_grounding_masks = np.array([r[2] for r in results], dtype=np.uint8) # use uint8 in order to save memory
     print(f'bbox_coords.shape = {bbox_coords.shape}')
     print(f'bbox_presence.shape = {bbox_presence.shape}')
     print(f'phrase_grounding_masks.shape = {phrase_grounding_masks.shape}')
@@ -325,7 +326,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 exclude_noisy_images=False,
                 use_yolov8=False,
-                mask_exponent=1,
                 balance_long_middle_short_tail=False,
                 long_middle_short_tail_thresholds=(0.02, 0.05),
                 report_fact_nli_integrated_data_filepath=None,
@@ -348,8 +348,6 @@ class MIMICCXR_PhraseGroundingTrainer:
         # Sanity checks
         assert sum([use_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
                     use_mscxr_for_test, use_chest_imagenome_gold_for_test, use_cxrlt2024_challenge_split]) > 0 # at least one of them must be True
-        assert 0 < mask_exponent <= 1
-        print(f'mask_exponent = {mask_exponent}')
         
         self.use_facts_for_train = use_facts_for_train
         self.use_chest_imagenome_for_train = use_chest_imagenome_for_train
@@ -865,7 +863,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     phrases_, masks_ = dicom_id_2_phrases_and_masks[dicom_id]
                     phrases[idx] = phrases_
                     phrase_embeddings[idx] = np.array([phrase2embedding[p] for p in phrases_])
-                    phrase_grounding_masks[idx] = np.array(masks_) ** mask_exponent # apply mask exponent
+                    phrase_grounding_masks[idx] = np.array(masks_)
                     idx += 1
 
             print(f'Total number of images: {idx}')
@@ -977,14 +975,17 @@ class MIMICCXR_PhraseGroundingTrainer:
             bbox_coords_array = tmp['bbox_coords']
             bbox_presence_array = tmp['bbox_presence']
             phrase_grounding_masks_array = tmp['phrase_grounding_masks']
+            assert phrase_grounding_masks_array.dtype == np.uint8
+            assert phrase_grounding_masks_array.min() == 0
+            assert phrase_grounding_masks_array.max() == 1
 
             idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
+            for part_id, subject_id, study_id, dicom_id_view_pairs in \
+                tqdm(zip(mimiccxr_metadata['part_ids'],
                     mimiccxr_metadata['subject_ids'],
                     mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
-                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                    mimiccxr_metadata['dicom_id_view_pos_pairs']), mininterval=2):
+                for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                     if dicom_id not in did2idx:
                         continue
                     if dicom_id in forbidden_train_dicom_ids:
@@ -996,7 +997,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     i = did2idx[dicom_id]
                     chest_imagenome_bbox_coords[idx] = bbox_coords_array[i]
                     chest_imagenome_bbox_presence[idx] = bbox_presence_array[i]
-                    phrase_grounding_masks[idx] = phrase_grounding_masks_array[i] ** mask_exponent # apply mask exponent
+                    phrase_grounding_masks[idx] = phrase_grounding_masks_array[i]
                     idx += 1
 
             print(f'Total number of images: {idx}')
@@ -1076,7 +1077,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     chest_imagenome_bbox_presence[idx] = bbox_presence
                     phrase_grounding_masks[idx] = _compute_mask_from_bounding_boxes(mask_height, mask_width,
                                                                                     bbox_coords[gold_pres_indices], # use only gold subset
-                                                                                    bbox_presence[gold_pres_indices]) ** mask_exponent # apply mask exponent
+                                                                                    bbox_presence[gold_pres_indices])
                     phrase_classification_labels[idx] = bbox_presence[gold_pres_indices] # use bbox_presence as classification labels, use only gold subset
                     idx += 1
 

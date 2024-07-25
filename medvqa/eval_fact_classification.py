@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from nltk.tokenize import wordpunct_tokenize
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, average_precision_score, f1_score, roc_auc_score
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
 from medvqa.datasets.chexpert.chexpert_dataset_management import load_all_chexpert_image_paths_and_labels
@@ -39,8 +39,10 @@ from medvqa.utils.constants import (
     CHEXBERT_LABELS,
     CHEXPERT_LABELS,
     CXRLT2024_CLASS_2_SENTENCE,
+    CXRLT2024_SENTENCE_2_CLASS,
     CXRLT2024_TASK1_CLASSES,
     CXRLT2024_TASK2_CLASSES,
+    CXRLT2024_TASK3_CLASSES,
     DATASET_NAMES,
     LABEL_BASED_FACTS,
     LABEL_BASED_FACTS__CHEST_IMAGENOME,
@@ -83,7 +85,7 @@ from medvqa.utils.files import (
     load_jsonl, load_pickle,
     read_lines_from_txt, save_pickle,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_red
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_orange, print_red, print_green
 from medvqa.utils.metrics import best_threshold_and_f1_score, f1_between_dicts
 
 class _EvalModes:
@@ -100,8 +102,10 @@ class _EvalModes:
     CXRLT_2024_TASKS_1_2_3_DEV_SUBMISSION = 'cxrlt_2024_tasks_1_2_3_dev_submission'
     CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_1_dev_submission__ensemble'
     CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_2_dev_submission__ensemble'
+    CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_3_dev_submission__ensemble'
     CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA = 'cxrlt_2024_train_val_split_from_training_data'
     CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA__ENSEMBLE = 'cxrlt_2024_train_val_split_from_training_data__ensemble'
+    CXRLT_2024_TRAIN_DEV_SPLIT_GPT4_SPARSE_CUSTOM_LABELS__ENSEMBLE = 'cxrlt_2024_train_dev_split_gpt4_sparse_custom_labels__ensemble'
 
     @staticmethod
     def choices():
@@ -119,8 +123,10 @@ class _EvalModes:
             _EvalModes.CXRLT_2024_TASKS_1_2_3_DEV_SUBMISSION,
             _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE,
             _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE,
+            _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE,
             _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA,
             _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA__ENSEMBLE,
+            _EvalModes.CXRLT_2024_TRAIN_DEV_SPLIT_GPT4_SPARSE_CUSTOM_LABELS__ENSEMBLE,
         ]
 
 def parse_args(args=None):
@@ -163,6 +169,7 @@ def parse_args(args=None):
     parser.add_argument('--ensemble_checkpoint_folder_paths', type=str, nargs='+', default=None)
     parser.add_argument('--cxrlt2024_task1_dev_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--cxrlt2024_task2_dev_submission_csv_paths', type=str, nargs='+', default=None)
+    parser.add_argument('--cxrlt2024_task3_dev_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--ensemble_filepath', type=str, default=None)
 
     return parser.parse_args(args=args)
@@ -1164,6 +1171,7 @@ def _evaluate_model(
     ensemble_checkpoint_folder_paths,
     cxrlt2024_task1_dev_submission_csv_paths,
     cxrlt2024_task2_dev_submission_csv_paths,
+    cxrlt2024_task3_dev_submission_csv_paths,
     ensemble_filepath,
 ):
     count_print = CountPrinter()
@@ -2638,6 +2646,10 @@ def _evaluate_model(
         else:
             assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
 
+        assert (checkpoint_folder_path is None) != (ensemble_checkpoint_folder_paths is None) # exactly one should be provided
+        checkpoint_folder_paths = [checkpoint_folder_path] if checkpoint_folder_path is not None\
+              else ensemble_checkpoint_folder_paths
+
         from medvqa.datasets.mimiccxr import MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH
         dev_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH)
         dev_dicom_ids = dev_df['dicom_id'].tolist()
@@ -2646,8 +2658,7 @@ def _evaluate_model(
         for dicom_id in dev_dicom_ids:
             part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
             dev_image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
-
-        # Run inference
+        
         if use_cxrlt2024_official_labels:
             tmp = load_pickle(cxrlt2024_official_training_labels_for_fact_classification_filepath)
             facts = tmp['class_names']
@@ -2657,24 +2668,6 @@ def _evaluate_model(
             facts = tmp['class_sentences']
             fact_embeddings = tmp['class_sentence_embeddings']
         fact2idx = {fact: i for i, fact in enumerate(facts)}
-        probs_, dev_image_paths_ = _run_inference_for_label_based_fact_classification_on_images(
-            image_paths=dev_image_paths,
-            checkpoint_folder_path=checkpoint_folder_path,
-            model_kwargs=model_kwargs,
-            val_image_transform_kwargs=val_image_transform_kwargs,
-            max_images_per_batch=max_images_per_batch,
-            max_facts_per_image=max_facts_per_image,
-            num_workers=num_workers,
-            device=device,
-            fact_embeddings=fact_embeddings,
-        )
-        assert len(probs_) == len(dev_image_paths_)
-        assert len(dev_image_paths_) == len(dev_image_paths) # make sure no images were skipped
-        new_ip2idx = { ip:i for i, ip in enumerate(dev_image_paths_) }
-        old_order = [new_ip2idx[ip] for ip in dev_image_paths]
-        probs = probs_[old_order] # reorder probs to match the original order
-
-        results_folder_path = get_results_folder_path(checkpoint_folder_path)
 
         if use_cxrlt2024_official_labels:
             eval_classes_txt_paths = [ # task 1 and task 2
@@ -2688,19 +2681,63 @@ def _evaluate_model(
                 MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH,
             ]
 
-        timestamp = get_timestamp()
-        for i, eval_classes_filepath in enumerate(eval_classes_txt_paths):
-            class_names = read_lines_from_txt(eval_classes_filepath)
-            if use_cxrlt2024_official_labels:
-                class_idxs = [fact2idx[x] for x in class_names] # class names are the same as fact names
-            else:
-                class_idxs = [fact2idx[CXRLT2024_CLASS_2_SENTENCE[x]] for x in class_names] # convert class names to factual sentences
-            submission_csv_path = os.path.join(results_folder_path, f'cxrlt_2024_task{i+1}_dev_submission_{timestamp}.csv')
-            task_probs = probs[:, class_idxs]
-            submission_df = pd.DataFrame(task_probs, columns=class_names)
-            submission_df.insert(0, 'dicom_id', dev_dicom_ids)
-            submission_df.to_csv(submission_csv_path, index=False)
-            print_blue(f'Saved task{i+1} dev submission CSV to {submission_csv_path}', bold=True)
+        for idx, checkpoint_folder_path in enumerate(checkpoint_folder_paths):
+
+            print_bold("=" * 100)
+            tasks_string = ', '.join([f'task{i+1}' for i in range(len(eval_classes_txt_paths))])
+            print_bold(f'{idx+1}/{len(checkpoint_folder_paths)}:',
+                       f'Generating dev submission CSVs for CXR-LT 2024 {tasks_string} using checkpoint at {checkpoint_folder_path}')
+            
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+            # Skip if all tasks have already been evaluated
+            skip = True
+            for task_number in range(1, len(eval_classes_txt_paths) + 1): # task1, task2, task3
+                found = False
+                for filename in os.listdir(results_folder_path):
+                    if filename.startswith(f'cxrlt_2024_task{task_number}_dev_submission_') and filename.endswith('.csv'):
+                        found = True
+                        print_orange(f'NOTE: Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}', bold=True)
+                if not found:
+                    skip = False
+            if skip:
+                print_magenta('NOTE: All tasks have already been evaluated. Skipping...', bold=True)
+                continue
+
+            metadata = load_metadata(checkpoint_folder_path)
+            model_kwargs = metadata['model_kwargs']
+            val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+        
+            probs_, dev_image_paths_ = _run_inference_for_label_based_fact_classification_on_images(
+                image_paths=dev_image_paths,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                max_images_per_batch=max_images_per_batch,
+                max_facts_per_image=max_facts_per_image,
+                num_workers=num_workers,
+                device=device,
+                fact_embeddings=fact_embeddings,
+            )
+            assert len(probs_) == len(dev_image_paths_)
+            assert len(dev_image_paths_) == len(dev_image_paths) # make sure no images were skipped
+            new_ip2idx = { ip:i for i, ip in enumerate(dev_image_paths_) }
+            old_order = [new_ip2idx[ip] for ip in dev_image_paths]
+            probs = probs_[old_order] # reorder probs to match the original order
+
+            timestamp = get_timestamp()
+            for i, eval_classes_filepath in enumerate(eval_classes_txt_paths):
+                class_names = read_lines_from_txt(eval_classes_filepath)
+                if use_cxrlt2024_official_labels:
+                    class_idxs = [fact2idx[x] for x in class_names] # class names are the same as fact names
+                else:
+                    class_idxs = [fact2idx[CXRLT2024_CLASS_2_SENTENCE[x]] for x in class_names] # convert class names to factual sentences
+                submission_csv_path = os.path.join(results_folder_path, f'cxrlt_2024_task{i+1}_dev_submission_{timestamp}.csv')
+                task_probs = probs[:, class_idxs]
+                submission_df = pd.DataFrame(task_probs, columns=class_names)
+                submission_df.insert(0, 'dicom_id', dev_dicom_ids)
+                submission_df.to_csv(submission_csv_path, index=False)
+                print_blue(f'Saved task{i+1} dev submission CSV to {submission_csv_path}', bold=True)
 
     elif eval_mode == _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA:
 
@@ -3038,8 +3075,226 @@ def _evaluate_model(
         save_pickle(output, save_path)
         print_blue(f'Saved CXR-LT 2024 val split results + ensemble to {save_path}', bold=True)
 
+    elif eval_mode == _EvalModes.CXRLT_2024_TRAIN_DEV_SPLIT_GPT4_SPARSE_CUSTOM_LABELS__ENSEMBLE:
+            
+        assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
+
+        # Load data
+        tmp = load_pickle(cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath)
+        facts = tmp['class_sentences']
+        fact2idx = {fact: i for i, fact in enumerate(facts)}
+        fact_embeddings = tmp['class_sentence_embeddings']
+        dicom_id_to_pos_neg_facts = tmp['dev'] # use dev set to tune the weights of the ensemble
+        dicom_ids = list(dicom_id_to_pos_neg_facts.keys())
+        dicom_ids.sort() # sort for reproducibility
+        
+        # Adapt the data to a better format for ensembling
+        class_to_labels = [[] for _ in range(len(facts))]
+        class_to_idxs = [[] for _ in range(len(facts))]
+        for i, dicom_id in enumerate(dicom_ids):
+            neg_fact_idxs, pos_fact_idxs = dicom_id_to_pos_neg_facts[dicom_id]
+            for j in pos_fact_idxs:
+                class_to_labels[j].append(1)
+                class_to_idxs[j].append(i)
+            for j in neg_fact_idxs:
+                class_to_labels[j].append(0)
+                class_to_idxs[j].append(i)
+        class_to_labels = [np.array(x) for x in class_to_labels]
+        class_to_idxs = [np.array(x) for x in class_to_idxs]
+        dev_pos_count = [labels.sum() for labels in class_to_labels]
+        dev_neg_count = [len(labels) - labels.sum() for labels in class_to_labels]
+        
+        # Collect image paths
+        image_paths = []
+        imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+        for dicom_id in dicom_ids:
+            part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+            image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
+
+        # 1) Run inferece with each model individually
+        probs_list = []
+
+        def _print_metrics(output):
+            print_bold('Macro-average results (dev set):')
+            print_bold(f" PRCAUC: {np.mean(output['dev_prcauc']):.4f}")
+            print_bold(f" ROCAUC: {np.mean(output['dev_rocauc']):.4f}")
+            print_bold(f" F1: {np.mean(output['dev_f1']):.4f}")
+
+        for checkpoint_folder_path in ensemble_checkpoint_folder_paths:
+
+            print_bold('-' * 100)
+
+            # Check if results already exist
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            results_save_path = get_file_path_with_hashing_if_too_long(
+                folder_path=results_folder_path,
+                prefix='cxrlt_2024_train_dev_split_gpt4_sparse_custom_labels_results__for_ensemble',
+                strings=[
+                    cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
+                    f'len(dicom_ids)={len(dicom_ids)}',
+                ],
+                force_hashing=True,
+            )
+            if os.path.exists(results_save_path):
+                print_blue(f'Loading precomputed results from {results_save_path}', bold=True)
+                output = load_pickle(results_save_path)
+                dev_dicom_ids_ = output['dev_dicom_ids']
+                dev_probs_ = output['dev_probs']
+                assert dev_dicom_ids_ == dicom_ids # make sure the same dev set is used
+                probs_list.append(dev_probs_) # for ensembling
+                _print_metrics(output)
+                continue
+
+            # Run inference
+            metadata = load_metadata(checkpoint_folder_path)
+            model_kwargs = metadata['model_kwargs']
+            val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+            
+            probs_, image_paths_ = _run_inference_for_label_based_fact_classification_on_images(
+                image_paths=image_paths,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                max_images_per_batch=max_images_per_batch,
+                max_facts_per_image=max_facts_per_image,
+                num_workers=num_workers,
+                device=device,
+                fact_embeddings=fact_embeddings,
+            )
+            assert len(probs_) == len(image_paths_)
+            assert len(image_paths_) == len(image_paths) # make sure no images were skipped
+            new_ip2idx = { ip:i for i, ip in enumerate(image_paths_) }
+            old_order = [new_ip2idx[ip] for ip in image_paths]
+            probs = probs_[old_order] # reorder probs to match the original order
+
+            dev_prcauc = []
+            dev_rocauc = []
+            dev_f1 = []
+            for i in range(len(facts)):
+                labels = class_to_labels[i]
+                idxs = class_to_idxs[i]
+                probs_i = probs[idxs, i]
+                assert labels.shape == probs_i.shape
+                dev_prcauc.append(prc_auc_score(labels, probs_i))
+                dev_rocauc.append(roc_auc_score(labels, probs_i))
+                dev_f1.append(f1_score(labels, probs_i > 0.5))
+
+            # Save results
+            output = {
+                'class_names': facts,
+                'dev_pos_count': dev_pos_count,
+                'dev_neg_count': dev_neg_count,
+                'dev_prcauc': dev_prcauc,
+                'dev_rocauc': dev_rocauc,
+                'dev_f1': dev_f1,
+                'dev_dicom_ids': dicom_ids,
+                'dev_probs': probs,
+            }
+            _print_metrics(output)
+            save_pickle(output, results_save_path)
+            print_blue(f'Saved results to {results_save_path}', bold=True)
+
+            probs_list.append(probs) # for ensembling
+
+        # 2) Ensemble the predictions
+        print_bold('-' * 100)
+        print_bold('Ensembling predictions...')
+        from sklearn.linear_model import LogisticRegression
+        from medvqa.models.ensemble import MultilabelOptimalEnsembleSearcher
+        
+        all_probs = np.stack(probs_list, axis=0) # shape: (num_models, num_samples, num_classes)
+        print(f'all_probs.shape = {all_probs.shape}')
+
+        best_method_per_class = []
+        
+        for i in range(len(facts)): # for each class
+            labels = class_to_labels[i]
+            idxs = class_to_idxs[i]
+
+            print_blue(f'------- Class {i}: {facts[i]} (pos_count={dev_pos_count[i]}, neg_count={dev_neg_count[i]}) -------', bold=True)
+        
+            # Method 1: LogisticRegression
+            print_bold('Method 1: LogisticRegression')
+            probs_i = all_probs[:, idxs, i].T # shape: (num_samples, num_models)
+            lr = LogisticRegression(max_iter=2000)
+            lr.fit(probs_i, labels)
+            logreg_merged_probs = lr.predict_proba(probs_i)[:, 1] # probability of positive class
+            logreg_prcauc = prc_auc_score(labels, logreg_merged_probs)
+            logrec_rocauc = roc_auc_score(labels, logreg_merged_probs)
+            logrec_threshold, logrec_f1 = best_threshold_and_f1_score(labels, logreg_merged_probs)
+            print_bold(f'PRCAUC: {logreg_prcauc:.4f}, threshold: {logrec_threshold:.4f}, F1: {logrec_f1:.4f}')
+        
+            # Method 2: MultilabelOptimalEnsembleSearcher
+            print_bold('Method 2: MultilabelOptimalEnsembleSearcher')
+            probs_i = all_probs[:, idxs, i][:, :, None] # shape: (num_models, num_samples, 1)
+            labels_ = labels[:, None] # shape: (num_samples, 1)
+            mloes = MultilabelOptimalEnsembleSearcher(probs=probs_i, gt=labels_, score_name='prc_auc')
+            mloes.try_basic_weight_heuristics()
+            mloes.sample_weights(n_tries=100)
+            mloes.sample_weights_from_previous_ones(n_tries=100)
+            output = mloes.compute_best_merged_probs_weights()
+            wavg_merged_probs = output['merged_probs'][:, 0] # shape: (num_samples,)
+            wavg_prcauc = prc_auc_score(labels, wavg_merged_probs)
+            wavg_rocauc = roc_auc_score(labels, wavg_merged_probs)
+            wavg_threshold, wavg_f1 = best_threshold_and_f1_score(labels, wavg_merged_probs)
+            print_bold(f'PRCAUC: {wavg_prcauc:.4f}, threshold: {wavg_threshold:.4f}, F1: {wavg_f1:.4f}')
+
+            # Choose the best method
+            if logreg_prcauc > wavg_prcauc:
+                best_method_per_class.append({
+                    'method': 'logistic_regression',
+                    'model': lr,
+                    'prcauc': logreg_prcauc,
+                    'rocauc': logrec_rocauc,
+                    'f1': logrec_f1,
+                    'f1_threshold': logrec_threshold,
+                })  
+                print_magenta(f'Best method: LogisticRegression (PRCAUC: {logreg_prcauc:.4f})', bold=True)
+            else:
+                best_method_per_class.append({
+                    'method': 'weighted_average',
+                    'weights': output['weights'].flatten(), # shape: (num_models,)
+                    'prcauc': wavg_prcauc,
+                    'rocauc': wavg_rocauc,
+                    'f1': wavg_f1,
+                    'f1_threshold': wavg_threshold,
+                })
+                print_green(f'Best method: Weighted average (PRCAUC: {wavg_prcauc:.4f})', bold=True)
+        
+        # Final ensembling results
+        print_blue('=' * 100, bold=True)
+        print_bold('Final ensembling results:')
+        print_bold(f"  PRCAUC: {np.mean([x['prcauc'] for x in best_method_per_class]):.4f}")
+        print_bold(f"  ROCAUC: {np.mean([x['rocauc'] for x in best_method_per_class]):.4f}")
+        print_bold(f"  F1: {np.mean([x['f1'] for x in best_method_per_class]):.4f}")
+
+        # Save results
+        results_folder_path = get_results_folder_path(ensemble_checkpoint_folder_paths[0]) # use the first checkpoint folder
+        output = {
+            'class_names': [CXRLT2024_SENTENCE_2_CLASS[f] for f in facts],
+            'ensemble_checkpoint_folder_paths': ensemble_checkpoint_folder_paths,
+            'best_method_per_class': best_method_per_class,
+            'dev_pos_count': dev_pos_count,
+            'dev_neg_count': dev_neg_count,
+            'dev_prcauc': [x['prcauc'] for x in best_method_per_class],
+            'dev_rocauc': [x['rocauc'] for x in best_method_per_class],
+            'dev_f1': [x['f1'] for x in best_method_per_class],
+        }
+        save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=results_folder_path,
+            prefix='cxrlt_2024_dev_split_gpt4_sparse_custom_labels_results+ensemble',
+            strings=[
+                cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
+                *ensemble_checkpoint_folder_paths,
+            ],
+            force_hashing=True,
+        )
+        save_pickle(output, save_path)
+        print_blue(f'Saved CXR-LT 2024 dev split results + ensemble to {save_path}', bold=True)
+
     elif (eval_mode == _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE or
-          eval_mode == _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE):
+          eval_mode == _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE or
+          eval_mode == _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE):
         
         if eval_mode == _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE:
             assert cxrlt2024_task1_dev_submission_csv_paths is not None
@@ -3051,6 +3306,11 @@ def _evaluate_model(
             submission_csv_paths = cxrlt2024_task2_dev_submission_csv_paths
             class_names = CXRLT2024_TASK2_CLASSES
             task_number = 2
+        elif eval_mode == _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE:
+            assert cxrlt2024_task3_dev_submission_csv_paths is not None
+            submission_csv_paths = cxrlt2024_task3_dev_submission_csv_paths
+            class_names = CXRLT2024_TASK3_CLASSES
+            task_number = 3
         else: assert False # should not reach here
         
         assert len(submission_csv_paths) >= 2 # ensembling at least 2 models
@@ -3098,6 +3358,16 @@ def _evaluate_model(
                 # all_probs[:, :, i] shape: (num_models, num_samples)
                 # weights shape: (num_models,)
                 final_probs[:, i] = np.average(all_probs[:, :, i], axis=0, weights=weights) # weighted average
+            # Apply threshold
+            threshold = best_method_per_class[idx]['f1_threshold']
+            assert 0 < threshold < 1 # make sure the threshold is between 0 and 1
+            assert final_probs[:, i].min() >= 0 and final_probs[:, i].max() <= 1 # make sure the probabilities are between 0 and 1
+            assert final_probs[:, i].max() > threshold # make sure the maximum probability is above the threshold
+            above_threshold_idxs = final_probs[:, i] > threshold
+            below_threshold_idxs = final_probs[:, i] <= threshold
+            final_probs[above_threshold_idxs, i] = 0.5 + 0.5 * (final_probs[above_threshold_idxs, i] - threshold) / (final_probs[:, i].max() - threshold)
+            final_probs[below_threshold_idxs, i] = 0.5 * final_probs[below_threshold_idxs, i] / threshold
+
         print('final_probs.shape =', final_probs.shape)
 
         # Save results
@@ -3111,6 +3381,130 @@ def _evaluate_model(
 
     else:
         raise ValueError(f'Invalid eval_mode: {eval_mode}')
+    
+def evaluate_cxrlt2024_submission_with_custom_annotations(
+        submission_csv_path,
+        cxrlt2024_custom_dicom_id_to_neg_pos_facts_filepath,
+        figsize=(5, 10),
+    ):
+    # Load submission
+    df = pd.read_csv(submission_csv_path)
+    sub_dicom_ids = df['dicom_id'].tolist()
+    sub_dicom_id_to_idx = {dicom_id: i for i, dicom_id in enumerate(sub_dicom_ids)}
+    sub_classes = df.columns[1:].tolist() # exclude 'dicom_id'
+    sub_probs = df[sub_classes].values
+    
+    # Load data
+    data = load_pickle(cxrlt2024_custom_dicom_id_to_neg_pos_facts_filepath)
+    train_dicom_id_to_neg_pos_facts = data['train']
+    dev_dicom_id_to_neg_pos_facts = data['dev']
+    facts = data['class_sentences']
+    fact2idx = {fact: i for i, fact in enumerate(facts)}
+    dicom_ids_with_annotations = list(train_dicom_id_to_neg_pos_facts.keys()) + list(dev_dicom_id_to_neg_pos_facts.keys())
+    assert len(dicom_ids_with_annotations) == len(set(dicom_ids_with_annotations)) # make sure no duplicates
+
+    # Adapt the data to a better format
+    class_to_labels = [[] for _ in range(len(facts))]
+    class_to_idxs = [[] for _ in range(len(facts))]
+    for i, dicom_id in enumerate(dicom_ids_with_annotations):
+        for dicom_id_to_neg_pos_facts in [train_dicom_id_to_neg_pos_facts, dev_dicom_id_to_neg_pos_facts]:
+            if dicom_id in dicom_id_to_neg_pos_facts:
+                neg_fact_idxs, pos_fact_idxs = dicom_id_to_neg_pos_facts[dicom_id]
+                for j in pos_fact_idxs:
+                    class_to_labels[j].append(1)
+                    class_to_idxs[j].append(i)
+                for j in neg_fact_idxs:
+                    class_to_labels[j].append(0)
+                    class_to_idxs[j].append(i)
+    class_to_labels = [np.array(x) for x in class_to_labels]
+    class_to_idxs = [np.array(x) for x in class_to_idxs]
+
+    # Evaluate each class
+    prcaucs = [] # PRC-AUC
+    rocacus = [] # ROC-AUC
+    aps = [] # Average Precision
+    f1s = [] # F1 score
+    pos_counts = []
+    neg_counts = []
+    density_count = 0
+    for i, class_name in enumerate(sub_classes):
+        class_idx = fact2idx[CXRLT2024_CLASS_2_SENTENCE[class_name]]
+        labels = class_to_labels[class_idx]
+        idxs = class_to_idxs[class_idx]
+        actual_idxs = []
+        actual_labels = []
+        for j, idx in enumerate(idxs):
+            try:
+                actual_idxs.append(sub_dicom_id_to_idx[dicom_ids_with_annotations[idx]])
+                actual_labels.append(labels[j])
+            except KeyError:
+                pass
+        actual_labels = np.array(actual_labels)
+        actual_probs = sub_probs[actual_idxs, i]
+        density_count += len(actual_labels) # count the number of (dicom_id, class) pairs with annotations
+        prcauc = prc_auc_score(actual_labels, actual_probs)
+        roc_auc = roc_auc_score(actual_labels, actual_probs)
+        ap = average_precision_score(actual_labels, actual_probs)
+        f1 = f1_score(actual_labels, actual_probs > 0.5)
+        prcaucs.append(prcauc)
+        rocacus.append(roc_auc)
+        aps.append(ap)
+        f1s.append(f1)
+        pos_counts.append(actual_labels.sum())
+        neg_counts.append(len(actual_labels) - actual_labels.sum())
+
+    # Plot results
+    print_bold(f'Density: {density_count} / {len(sub_classes) * len(sub_probs)} ({density_count / len(sub_classes) / len(sub_probs) * 100:.2f}%)')
+
+    metric_names = [f'{CXRLT2024_CLASS_2_SENTENCE[class_name]} ({pos_counts[i]}/{neg_counts[i]})' for i, class_name in enumerate(sub_classes)]
+    plot_metrics(
+        metric_names=metric_names,
+        metric_values=prcaucs,
+        title='PRC-AUC per class',
+        ylabel='Class',
+        xlabel='PRC-AUC',
+        append_average_to_title=True,
+        horizontal=True,
+        sort_metrics=True,
+        show_metrics_above_bars=True,
+        figsize=figsize,
+    )
+    plot_metrics(
+        metric_names=metric_names,
+        metric_values=rocacus,
+        title='ROC-AUC per class',
+        ylabel='Class',
+        xlabel='ROC-AUC',
+        append_average_to_title=True,
+        horizontal=True,
+        sort_metrics=True,
+        show_metrics_above_bars=True,
+        figsize=figsize,
+    )
+    plot_metrics(
+        metric_names=metric_names,
+        metric_values=aps,
+        title='Average Precision per class',
+        ylabel='Class',
+        xlabel='Average Precision',
+        append_average_to_title=True,
+        horizontal=True,
+        sort_metrics=True,
+        show_metrics_above_bars=True,
+        figsize=figsize,
+    )
+    plot_metrics(
+        metric_names=metric_names,
+        metric_values=f1s,
+        title='F1 score per class',
+        ylabel='Class',
+        xlabel='F1 score',
+        append_average_to_title=True,
+        horizontal=True,
+        sort_metrics=True,
+        show_metrics_above_bars=True,
+        figsize=figsize,
+    )
 
 _shared_source_to_data = None
 
@@ -3347,6 +3741,7 @@ def evaluate(
     ensemble_checkpoint_folder_paths,
     cxrlt2024_task1_dev_submission_csv_paths,
     cxrlt2024_task2_dev_submission_csv_paths,
+    cxrlt2024_task3_dev_submission_csv_paths,
     ensemble_filepath,
 ):
     print_blue('----- Evaluating model -----', bold=True)
@@ -3400,6 +3795,7 @@ def evaluate(
         ensemble_checkpoint_folder_paths=ensemble_checkpoint_folder_paths,
         cxrlt2024_task1_dev_submission_csv_paths=cxrlt2024_task1_dev_submission_csv_paths,
         cxrlt2024_task2_dev_submission_csv_paths=cxrlt2024_task2_dev_submission_csv_paths,
+        cxrlt2024_task3_dev_submission_csv_paths=cxrlt2024_task3_dev_submission_csv_paths,
         ensemble_filepath=ensemble_filepath,
     )
 

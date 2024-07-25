@@ -100,6 +100,7 @@ def compute_masks_and_binary_labels_from_bounding_boxes(mask_height, mask_width,
         binary_labels[class_id] = 1
     if flatten_grid:
         mask = mask.reshape((len(VINBIG_BBOX_NAMES), -1))
+    mask = (mask > 0).astype(np.float32) # binarize
     return mask, binary_labels
 
 def _merge_labels(*labels_list):

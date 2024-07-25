@@ -40,7 +40,6 @@ from medvqa.utils.constants import (
     VINBIG_BBOX_NAMES,
     VINBIG_LABELS,
 )
-from transformers import AutoModel, ViTModel
 from ultralytics.yolo.utils.ops import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
 import re
@@ -59,6 +58,8 @@ class RawImageEncoding:
     CLIP_RESNET__HUGGINGFACE = 'clip-resnet-huggingface'
     VITMODEL__HUGGINGFACE = 'vitmodel-huggingface'
     VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
+    CONVNEXTMODEL__HUGGINGFACE = 'convnextmodel-huggingface'
+    RAD_DINO__HUGGINGFACE = 'rad-dino-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
 
@@ -72,6 +73,16 @@ def does_include_image(visual_input_mode):
 
 def does_include_visual_features(visual_input_mode):
     return visual_input_mode in (VisualInputMode.PRECOMP_FEAT, VisualInputMode.HYBRID)
+
+def comes_with_positional_encoding(raw_image_encoding):
+    return raw_image_encoding in [
+        RawImageEncoding.CLIP_VIT,
+        RawImageEncoding.CLIP_VIT__HUGGINGFACE,
+        RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE,
+        RawImageEncoding.VITMODEL__HUGGINGFACE,
+        RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE,
+        RawImageEncoding.RAD_DINO__HUGGINGFACE,
+    ]
 
 
 class MultiPurposeVisualModule(nn.Module):
@@ -202,7 +213,15 @@ class MultiPurposeVisualModule(nn.Module):
             assert int(np.sqrt(self.num_regions)) ** 2 == self.num_regions
             self.num_regions_sqrt = int(np.sqrt(self.num_regions))
         
-        if raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE:
+        if raw_image_encoding in [
+            RawImageEncoding.VITMODEL__HUGGINGFACE,
+            RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE,
+            RawImageEncoding.CLIP_VIT__HUGGINGFACE,
+            RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE,
+            RawImageEncoding.CLIP_RESNET__HUGGINGFACE,
+            RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
+            RawImageEncoding.RAD_DINO__HUGGINGFACE,
+        ]:
             assert huggingface_model_name is not None
         if raw_image_encoding in [
             RawImageEncoding.DENSENET_121__TORCHXRAYVISION,
@@ -286,6 +305,10 @@ class MultiPurposeVisualModule(nn.Module):
             return HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             return HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
+            return HUGGINGFACE_CONVNEXTMODEL_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
+            return HUGGINGFACE_RAD_DINO_GLOBAL_FEAT_SIZE
         raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
     def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder,
@@ -390,6 +413,14 @@ class MultiPurposeVisualModule(nn.Module):
                 print(f'  num_bbox_classes: {offset}')
                 self.num_bbox_classes = offset
                 self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=offset, class_names=class_names)
+        elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_huggingface_convnextmodel_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_huggingface_rad_dino_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -639,6 +670,10 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = DETECTRON2_YAML_2_SHORT[self.detectron2_model_yaml]
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
             img_str = self.yolov8_model_alias
+        elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
+            img_str = HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
+            img_str = HUGGINGFACE_RAD_DINO_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -779,9 +814,20 @@ class MultiPurposeVisualModule(nn.Module):
             elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
                     self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE or \
                     self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
-                    self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
+                    self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE or \
+                    self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
                 tmp = self.raw_image_encoder(raw_images)
-                global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state
+                global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state[:, 1:] # remove CLS token
+                if compute_global_features:
+                    global_list.append(global_feat)
+
+            elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
+                tmp = self.raw_image_encoder(raw_images)
+                global_feat, local_feat_NxCxHxW = tmp.pooler_output, tmp.last_hidden_state
+                if permute_and_flatten_local_feat:
+                    batch_size = raw_images.size(0)
+                    feat_size = local_feat_NxCxHxW.size(1)
+                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 if compute_global_features:
                     global_list.append(global_feat)
 
@@ -1212,6 +1258,9 @@ _HUGGINGFACE_VITMODEL_VERSIONS = [
     'CenIA/vit-mae-base-finetuned-mimic',
     'CenIA/vit-mae-large-finetuned-mimic',
 ]
+_HUGGINGFACE_RAD_DINO_VERSIONS = [
+    'microsoft/rad-dino',
+]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 CLIP_VERSION_2_IMAGE_MEAN_STD = {}
@@ -1240,6 +1289,14 @@ HUGGINGFACE_VITMODEL_NAMES_2_SHORT = {
     'facebook/vit-mae-large': 'facebook/vit-mae-large',
     'CenIA/vit-mae-base-finetuned-mimic': 'CenIA/vit-mae-base-ft-mimic',
     'CenIA/vit-mae-large-finetuned-mimic': 'CenIA/vit-mae-large-ft-mimic',
+}
+
+HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT = {
+    'facebook/convnext-small-224': 'facebook/convnext-small-224',
+}
+
+HUGGINGFACE_RAD_DINO_NAMES_2_SHORT = {
+    'microsoft/rad-dino': 'microsoft/rad-dino',
 }
 
 DETECTRON2_YAML_2_SHORT = {
@@ -1301,6 +1358,8 @@ HUGGINGFACE_CLIP_VIT_GLOBAL_FEAT_SIZE = 768
 HUGGINGFACE_CLIP_VIT_LARGE_GLOBAL_FEAT_SIZE = 1024
 HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE = 768
 HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE = 1024
+HUGGINGFACE_CONVNEXTMODEL_GLOBAL_FEAT_SIZE = 768
+HUGGINGFACE_RAD_DINO_GLOBAL_FEAT_SIZE = 768
 
 HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX = re.compile(r'\bpooler\b')
 
@@ -1330,15 +1389,30 @@ def create_clip_resnet_feature_extractor(clip_resnet_version, pretrained_weights
     return resnet
 
 def create_huggingface_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
-    assert clip_vit_version in _HUGGINGFACE_CLIP_VIT_VERSIONS, f'Unknown Hugginface CLIP ViT version {clip_vit_version}'
+    from transformers import AutoModel
+    assert clip_vit_version in _HUGGINGFACE_CLIP_VIT_VERSIONS, f'Unknown Huggingface CLIP ViT version {clip_vit_version}'
     model = AutoModel.from_pretrained(clip_vit_version, use_auth_token=True)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     vit = model.vision_model.float()
     return vit
 
 def create_huggingface_vitmodel_feature_extractor(vitmodel_version, pretrained_weights_path):
-    assert vitmodel_version in _HUGGINGFACE_VITMODEL_VERSIONS, f'Unknown Hugginface ViTModel version {vitmodel_version}'
+    from transformers import ViTModel
+    assert vitmodel_version in _HUGGINGFACE_VITMODEL_VERSIONS, f'Unknown Huggingface ViTModel version {vitmodel_version}'
     model = ViTModel.from_pretrained(vitmodel_version, use_auth_token=True)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model
+
+def create_huggingface_convnextmodel_feature_extractor(convnextmodel_version, pretrained_weights_path):
+    from transformers import ConvNextModel
+    model = ConvNextModel.from_pretrained(convnextmodel_version, use_auth_token=True)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model
+
+def create_huggingface_rad_dino_feature_extractor(rad_dino_version, pretrained_weights_path):
+    from transformers import AutoModel
+    assert rad_dino_version in _HUGGINGFACE_RAD_DINO_VERSIONS, f'Unknown Huggingface RadDINO version {rad_dino_version}' 
+    model = AutoModel.from_pretrained(rad_dino_version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 

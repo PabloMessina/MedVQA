@@ -51,6 +51,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             phrase_classifier_hidden_size,
             phrase_grounding_mode=PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER,
             image_encoder_dropout_p=0,
+            huggingface_model_name=None,
             # FiLM-based approach's hyperparameters
             visual_feature_proj_size=None,
             visual_grounding_hidden_size=None,
@@ -73,6 +74,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         super().__init__(
             # Image Encoder kwargs
             raw_image_encoding=raw_image_encoding,
+            huggingface_model_name=huggingface_model_name,
             freeze_image_encoder=freeze_image_encoder,
             image_local_feat_size=image_local_feat_size,
             image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,

@@ -9,7 +9,7 @@ def _area_of_intersection(x1, y1, w1, h1, x2, y2, w2, h2):
     else:
         return 0
     
-def compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flatten=False, mask=None):
+def compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flatten=False, mask=None, binary=False):
     assert 0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1, f'Invalid bounding box: x1={x1}, y1={y1}, x2={x2}, y2={y2}'
     if mask is None:
         mask = np.zeros((mask_height, mask_width), dtype=np.float32)
@@ -28,6 +28,8 @@ def compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flat
         for x in range(x_min, x_max):
             if 0 <= x < mask_width and 0 <= y < mask_height:
                 mask[y, x] = _area_of_intersection(x1, y1, w, h, x * cw, y * ch, cw, ch) / ca
+    if binary:
+        mask = (mask > 0).astype(np.uint8) # binary mask
     if flatten:
         mask = mask.reshape(-1)
     return mask
