@@ -16,6 +16,7 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
+from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
 from medvqa.datasets.nli import (
     ANLI_V1_DATASET_DIR,
     MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH,
@@ -629,6 +630,79 @@ def load_report_nli_examples_filepaths(filepaths, nli1_only=False, verbose=True,
 
     return input_texts, output_texts, labels
 
+def load_raw_report_nli_examples_filepaths(nli_examples_filepaths, integrated_report_facts_jsonl_filepath, nli1_only=False, verbose=True,
+                                           medical_sentences=None, whole_sentences=None, splittable_sentences=None):
+    
+    if verbose:
+        print('----')
+        print(f'Loading raw report NLI examples from {nli_examples_filepaths}...')
+    
+    integrated_report_facts = get_cached_jsonl_file(integrated_report_facts_jsonl_filepath)
+    input_texts = []
+    output_texts = []
+    labels = []
+
+    def _build_report(idx):
+        background = integrated_report_facts[idx]['background']
+        findings = integrated_report_facts[idx]['findings']
+        impression = integrated_report_facts[idx]['impression']
+        return concatenate_report_parts(background, findings, impression)
+    
+    report2idx = { _build_report(idx): idx for idx in range(len(integrated_report_facts)) }
+    if verbose:
+        print(f'len(report2idx): {len(report2idx)}')
+
+    if type(nli_examples_filepaths) is str:
+        nli_examples_filepaths = [nli_examples_filepaths] # make it a list
+
+    debug = True
+
+    for input_output_jsonl_filepath in nli_examples_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            query = input_output['metadata']['query']
+            report_start_idx = query.index("#R: ") + 4
+            report_end_idx = query.index(" | #H: ")
+            p = query[report_start_idx:report_end_idx] # raw report
+            if verbose and debug:
+                print(f'Raw report: {p}')
+            p = integrated_report_facts[report2idx[p]]['fact_based_report'] # use fact-based report instead
+            if verbose and debug:
+                print(f'Fact-based report: {p}')
+                debug = False # print only once
+            h = query[report_end_idx+7:]
+            response = input_output['parsed_response']
+            if type(response) is str:
+                l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[response]
+            else:
+                assert type(response) is dict
+                assert 'reason' in response
+                assert 'label' in response
+                l = _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL[response['label']]
+
+            if medical_sentences is not None:
+                medical_sentences.add(p)
+                medical_sentences.add(h)
+            if splittable_sentences is not None:
+                splittable_sentences.add(p)
+            if whole_sentences is not None:
+                whole_sentences.add(h)
+            
+            input_text, output_text = _get_nli_input_output_1(p, h, l)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            labels.append(l)
+
+            if not nli1_only:
+                input_text, output_text = _get_nli_input_output_2(p, h, l)
+                input_texts.append(input_text)
+                output_texts.append(output_text)
+                labels.append(l)
+
+    return input_texts, output_texts, labels
+
 _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL = {
     "definitely true": "entailment",
     "likely true": "entailment",
@@ -639,6 +713,7 @@ _REPORT_NLI_LABEL_TO_STANDARD_NLI_LABEL = {
 
 def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, use_anli=False, use_multinli=False,
                       use_snli=False, use_report_nli=False,
+                      raw_report_nli_input_output_train_jsonl_filepaths=None,
                       report_nli_input_output_train_jsonl_filepaths=None,
                       report_nli_input_output_val_jsonl_filepaths=None,
                       use_report_nli_entailment_dataset=False, integrated_report_facts_jsonl_filepath=None,
@@ -888,6 +963,16 @@ def _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_input_output_for_nli, u
         from_labels_input_texts, from_labels_output_texts, from_labels_labels = load_report_nli_examples_filepaths(
             from_labels_filepath, nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences,
             whole_sentences=whole_sentences, splittable_sentences=splittable_sentences)
+
+        if raw_report_nli_input_output_train_jsonl_filepaths is not None:
+            assert integrated_report_facts_jsonl_filepath is not None
+            _input_texts, _output_texts, _labels = load_raw_report_nli_examples_filepaths(
+                raw_report_nli_input_output_train_jsonl_filepaths, integrated_report_facts_jsonl_filepath,
+                nli1_only=nli1_only_on_train, verbose=verbose, medical_sentences=medical_sentences,
+                whole_sentences=whole_sentences, splittable_sentences=splittable_sentences)
+            from_labels_input_texts.extend(_input_texts)
+            from_labels_output_texts.extend(_output_texts)
+            from_labels_labels.extend(_labels)
         
         input_texts.extend(from_labels_input_texts)
         output_texts.extend(from_labels_output_texts)
@@ -2049,6 +2134,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         use_sentence2facts_for_nli=False,
                                         use_anli=False, use_multinli=False, use_snli=False,
                                         use_report_nli=False,
+                                        raw_report_nli_input_output_train_jsonl_filepaths=None,
                                         report_nli_input_output_train_jsonl_filepaths=None,
                                         report_nli_input_output_val_jsonl_filepaths=None,
                                         use_fact_based_reports_in_mlm=False,
@@ -2117,6 +2203,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
     elif task_name == Seq2SeqTaskNames.NLI:
         train_dataset, val_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, None,
                           use_anli, use_multinli, use_snli, use_report_nli,
+                          raw_report_nli_input_output_train_jsonl_filepaths,
                           report_nli_input_output_train_jsonl_filepaths,
                           report_nli_input_output_val_jsonl_filepaths,
                           use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,
@@ -2347,6 +2434,7 @@ class Seq2SeqTrainer():
                  use_sentence2facts_for_nli=False,
                  use_anli=False, use_multinli=False, use_snli=False,
                  use_report_nli=False,
+                 raw_report_nli_input_output_train_jsonl_filepaths=None,
                  report_nli_input_output_train_jsonl_filepaths=None,
                  report_nli_input_output_val_jsonl_filepaths=None,
                  multitask_name_list=None, task2weight=None,
@@ -2388,6 +2476,7 @@ class Seq2SeqTrainer():
             use_sentence2facts_for_nli=use_sentence2facts_for_nli,
             use_anli=use_anli, use_multinli=use_multinli, use_snli=use_snli,
             use_report_nli=use_report_nli,
+            raw_report_nli_input_output_train_jsonl_filepaths=raw_report_nli_input_output_train_jsonl_filepaths,
             report_nli_input_output_train_jsonl_filepaths=report_nli_input_output_train_jsonl_filepaths,
             report_nli_input_output_val_jsonl_filepaths=report_nli_input_output_val_jsonl_filepaths,
             multitask_name_list=multitask_name_list, task2weight=task2weight,

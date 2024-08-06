@@ -7,6 +7,7 @@ import random
 import numpy as np
 import pandas as pd
 from collections import Counter
+from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.constants import CXRLT2024_CLASS_2_SENTENCE, CXRLT2024_CLASSES, CXRLT2024_SENTENCE_2_CLASS, CXRLT2024_TASK1_CLASSES
@@ -295,21 +296,7 @@ def _build_report(metadata, idx):
     background = metadata['backgrounds'][idx]
     findings = metadata['findings'][idx]
     impression = metadata['impressions'][idx]
-    parts = []
-    if background:
-        parts.append(background)
-    if findings:
-        parts.append(f'Findings: {findings}')
-    if impression:
-        parts.append(f'Impression: {impression}')
-    report = ""
-    for part in parts:
-        if report:
-            if report[-1] != '.':
-                report += '.'
-            report += ' '
-        report += part
-    return report
+    return concatenate_report_parts(background, findings, impression)
 
 def _collect_candidate_study_ids_per_class(
         chest_imagenome_image_id_to_labels_filepath,
@@ -416,24 +403,14 @@ def sample_queries_label_based(
         chest_imagenome_label_names_filepath,
         mimiccxr_background_findings_and_impression_per_report_filepath,
         already_processed_queries,
+        specific_classes=None,
+        pos_weight=0.85, # 85% positive samples by default
     ):
     """
     Sample queries based on label-based facts.
     """
 
-    assert split in ['train', 'dev']
-
-    if split == 'train':
-        train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
-        allowed_study_ids = train_df['study_id'].unique()
-    elif split == 'dev':
-        dev_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH)
-        allowed_study_ids = dev_df['study_id'].unique()
-    else: assert False
-
-    assert allowed_study_ids[0][0] == 's'
-    allowed_study_ids = set(int(s[1:]) for s in allowed_study_ids) # Remove 's' prefix
-    logger.info(f"Loaded {len(allowed_study_ids)} allowed study IDs from the {split} set")
+    assert 0 < pos_weight < 1
 
     metadata = load_mimiccxr_reports_detailed_metadata(
         background_findings_and_impression_per_report_filepath=mimiccxr_background_findings_and_impression_per_report_filepath)
@@ -441,6 +418,24 @@ def sample_queries_label_based(
     reports = [_build_report(metadata, i) for i in range(n_reports)]
     study_id_to_report = { study_id: report for study_id, report in zip(metadata['study_ids'], reports) }
     assert len(study_id_to_report) == n_reports
+
+    assert split in ['train', 'dev']
+
+    if split == 'train':
+        train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+        allowed_study_ids = train_df['study_id'].unique()
+        assert allowed_study_ids[0][0] == 's'
+        allowed_study_ids = set(int(s[1:]) for s in allowed_study_ids) # Remove 's' prefix
+    elif split == 'dev':
+        allowed_study_ids = set(metadata['study_ids'])
+        train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+        for study_id in train_df['study_id'].unique():
+            study_id = int(study_id[1:]) # Remove 's' prefix
+            if study_id in allowed_study_ids:
+                allowed_study_ids.remove(study_id) # Remove study ID in the train set
+    else: assert False
+    
+    logger.info(f"Loaded {len(allowed_study_ids)} allowed study IDs from the {split} set")
  
     sampled_queries = []
 
@@ -450,12 +445,20 @@ def sample_queries_label_based(
         mimiccxr_background_findings_and_impression_per_report_filepath=mimiccxr_background_findings_and_impression_per_report_filepath,
     )
 
-    num_samples_per_class = math.ceil(num_samples / len(CXRLT2024_CLASSES))
-    num_pos_samples_per_class = math.ceil(num_samples_per_class * 0.85) # 85% positive samples
+    if specific_classes is not None:
+        assert len(specific_classes) > 0
+        assert len(specific_classes) == len(set(specific_classes)) # No duplicates
+        assert all([class_name in CXRLT2024_CLASSES for class_name in specific_classes]) # All classes are valid
+        classes_to_process = specific_classes
+    else:
+        classes_to_process = CXRLT2024_CLASSES
+
+    num_samples_per_class = math.ceil(num_samples / len(classes_to_process))
+    num_pos_samples_per_class = math.ceil(num_samples_per_class * pos_weight) # Positive samples
     num_neg_samples_per_class = max(num_samples_per_class - num_pos_samples_per_class, 1) # At least 1 negative sample
     logger.info(f"Sampling {num_samples} queries ({num_pos_samples_per_class} positive, {num_neg_samples_per_class} negative) per class")
 
-    for class_name in CXRLT2024_CLASSES:
+    for class_name in classes_to_process:
 
         class_sentence = CXRLT2024_CLASS_2_SENTENCE[class_name]
             
@@ -864,6 +867,8 @@ if __name__ == '__main__':
     parser.add_argument("--chest_imagenome_label_names_filepath", type=str, default=None)
     parser.add_argument("--mimiccxr_background_findings_and_impression_per_report_filepath", type=str, default=None)
     parser.add_argument("--queries_to_skip_filepaths", type=str, nargs="+", default=None)
+    parser.add_argument("--specific_classes", type=str, nargs="+", default=None)
+    parser.add_argument("--pos_weight", type=float, default=0.85)
     
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--openai_request_url", type=str, default="https://api.openai.com/v1/chat/completions")
@@ -939,6 +944,8 @@ if __name__ == '__main__':
             chest_imagenome_label_names_filepath=args.chest_imagenome_label_names_filepath,
             mimiccxr_background_findings_and_impression_per_report_filepath=args.mimiccxr_background_findings_and_impression_per_report_filepath,
             already_processed_queries=already_processed,
+            specific_classes=args.specific_classes,
+            pos_weight=args.pos_weight,
         )
 
         logger.info(f"Total number of queries to process: {len(queries_to_process)}")

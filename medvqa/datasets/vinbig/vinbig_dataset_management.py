@@ -483,6 +483,7 @@ class VinBigBboxGroundingDataset(Dataset):
         self.phrase_embeddings = phrase_embeddings
         self.phrase_grounding_masks = phrase_grounding_masks
         self.phrase_classification_labels = phrase_classification_labels
+        self.phrase_classification_labels_with_bbox = phrase_classification_labels[:, :len(VINBIG_BBOX_NAMES)]
         self.bboxes = bboxes
         self.use_yolov8 = use_yolov8
         self.indices = indices
@@ -522,7 +523,9 @@ class VinBigBboxGroundingDataset(Dataset):
                 'resized_shape': image_size_after,
             }
         else:
-            image = self.image_transform(image_path)
+            image, phrase_grounding_masks, _ = self.image_transform(
+                image_path, phrase_grounding_masks, self.phrase_classification_labels_with_bbox[i],
+            )
             return {
                 'i': image,
                 'pe': phrase_embeddings,

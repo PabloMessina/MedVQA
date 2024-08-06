@@ -11,9 +11,9 @@ from medvqa.datasets.mimiccxr import get_mimiccxr_large_image_path
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_BBOX_NAMES,
-    CHEST_IMAGENOME_BBOXES_FILEPATH,
+    CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH,
 )
-from medvqa.utils.files import save_to_pickle
+from medvqa.utils.files import save_pickle
 
 if __name__ == '__main__':
     # Parse arguments
@@ -66,5 +66,5 @@ if __name__ == '__main__':
         imageId2bboxcoords[scene_graph['image_id']] = _obtain_bbox_coords_and_presence(scene_graph)
 
     # Save imageId2bboxcoords
-    print(f'Saving imageId2bboxcoords to {CHEST_IMAGENOME_BBOXES_FILEPATH}')
-    save_to_pickle(imageId2bboxcoords, CHEST_IMAGENOME_BBOXES_FILEPATH)
+    print(f'Saving imageId2bboxcoords to {CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH}')
+    save_pickle(imageId2bboxcoords, CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH)

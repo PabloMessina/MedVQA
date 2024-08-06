@@ -161,6 +161,7 @@ def parse_args(args=None):
     parser.add_argument('--use_cxrlt2024_challenge_split', action='store_true', default=False)
     parser.add_argument('--use_cxrlt2024_custom_labels', action='store_true', default=False)
     parser.add_argument('--use_cxrlt2024_official_labels', action='store_true', default=False)
+    parser.add_argument('--use_all_cxrlt2024_official_labels_for_training', action='store_true', default=False)
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_choices())
     parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_choices())
     parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true', default=False)
@@ -492,8 +493,8 @@ def train_model(
 
     if use_cxrlt2024_challenge_split:
         assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
-        wo = 0.80 * use_cxrlt2024_official_labels # 80% for official labels
-        wc = 0.20 * use_cxrlt2024_custom_labels # 20% for custom labels
+        wo = 0.5 * use_cxrlt2024_official_labels # 50% for official labels
+        wc = 0.5 * use_cxrlt2024_custom_labels # 50% for custom labels
         wt = wo + wc
         wo, wc = wo / wt, wc / wt # normalize weights
         assert abs(wo + wc - 1) < 1e-6 # check if normalized weights sum to 1
@@ -504,14 +505,15 @@ def train_model(
             _train_weights.append(wo) # weight for official labels
             _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_train_dataloader)
             print(f'len(mimiccxr_trainer.cxrlt2024_official_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_train_dataloader)}')
-            _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_val_dataloader)
-            print(f'len(mimiccxr_trainer.cxrlt2024_official_val_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_val_dataloader)}')
+            if not mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training: # if not all official labels are used for training
+                _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_val_dataloader)
+                print(f'len(mimiccxr_trainer.cxrlt2024_official_val_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_val_dataloader)}')
         if use_cxrlt2024_custom_labels:
             _dataset_names.append('cxrlt2024(GPT4)')
             _train_weights.append(wc) # weight for custom labels
             _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)
             print(f'len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
-            if not use_cxrlt2024_official_labels: # if official labels are not used
+            if not use_cxrlt2024_official_labels or mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training:
                 _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)
                 print(f'len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)}')
 
@@ -784,14 +786,14 @@ def train_model(
                                                       'cxrlt2024c_prc_auc', _cond_func)
     
         # Validation
-        if not use_cxrlt2024_official_labels: # if official labels are not used
+        in_val = not use_cxrlt2024_official_labels or mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training
+        if in_val:
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024c_att_reg_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024c_phrcls_loss')
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'phrase_indices',
                                                         'cxrlt2024c_prc_auc', _cond_func)
         # for logging
-        in_val = not use_cxrlt2024_official_labels # if official labels are not used
         if use_attention_regularization_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_att_reg_loss', val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_phrcls_loss', val=in_val)
@@ -807,16 +809,18 @@ def train_model(
                                                       'cxrlt2024o_prc_auc', _cond_func)
     
         # Validation
-        if use_attention_regularization_loss:
-            attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
-        attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
-        attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None,
-                                                      'cxrlt2024o_prc_auc', _cond_func)
+        in_val = not mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training
+        if in_val:
+            if use_attention_regularization_loss:
+                attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
+            attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
+            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None,
+                                                        'cxrlt2024o_prc_auc', _cond_func)
         # for logging
         if use_attention_regularization_loss:
             metrics_to_print.append('cxrlt2024o_att_reg_loss')
         metrics_to_print.append('cxrlt2024o_phrcls_loss')
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024o_prc_auc', train=False)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024o_prc_auc', val=in_val)
 
     # Score function
     assert len(val_metrics_to_merge) > 0
@@ -966,6 +970,7 @@ def train_from_scratch(
     use_cxrlt2024_challenge_split,
     use_cxrlt2024_custom_labels,
     use_cxrlt2024_official_labels,
+    use_all_cxrlt2024_official_labels_for_training,
     cxrlt2024_do_balanced_sampling,
     vinbig_training_data_mode,
     chexpert_training_data_mode,
@@ -1000,6 +1005,7 @@ def train_from_scratch(
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     use_bbox_aware_transform = use_yolov8
+    use_segmentation_mask_aware_transform = not use_yolov8 # for now, only yolov8 uses bbox-aware transform
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
@@ -1098,6 +1104,9 @@ def train_from_scratch(
         augmentation_mode=img_aug_mode,
         use_bbox_aware_transform=use_bbox_aware_transform,
         for_yolov8=use_yolov8,
+        use_segmentation_mask_aware_transform=use_segmentation_mask_aware_transform,
+        mask_height=regions_height, # for segmentation mask-aware transform
+        mask_width=regions_width, # for segmentation mask-aware transform
     )
     if use_mimiccxr:
         train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = _kwargs.copy()
@@ -1183,6 +1192,7 @@ def train_from_scratch(
             use_cxrlt2024_challenge_split=use_cxrlt2024_challenge_split,
             use_cxrlt2024_custom_labels=use_cxrlt2024_custom_labels,
             use_cxrlt2024_official_labels=use_cxrlt2024_official_labels,
+            use_all_cxrlt2024_official_labels_for_training=use_all_cxrlt2024_official_labels_for_training,
             cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
             cxrlt2024_official_training_labels_for_fact_classification_filepath=cxrlt2024_official_training_labels_for_fact_classification_filepath,
             cxrlt2024_do_balanced_sampling=cxrlt2024_do_balanced_sampling,

@@ -2692,14 +2692,20 @@ def _evaluate_model(
 
             # Skip if all tasks have already been evaluated
             skip = True
+            messages = []
             for task_number in range(1, len(eval_classes_txt_paths) + 1): # task1, task2, task3
                 found = False
                 for filename in os.listdir(results_folder_path):
                     if filename.startswith(f'cxrlt_2024_task{task_number}_dev_submission_') and filename.endswith('.csv'):
                         found = True
-                        print_orange(f'NOTE: Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}', bold=True)
+                        # print_orange(f'NOTE: Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}', bold=True)
+                        messages.append(f'Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}')
                 if not found:
                     skip = False
+            if messages:
+                messages.sort(reverse=True)
+                for message in messages:
+                    print_orange(message, bold=True)
             if skip:
                 print_magenta('NOTE: All tasks have already been evaluated. Skipping...', bold=True)
                 continue
@@ -3230,8 +3236,8 @@ def _evaluate_model(
             labels_ = labels[:, None] # shape: (num_samples, 1)
             mloes = MultilabelOptimalEnsembleSearcher(probs=probs_i, gt=labels_, score_name='prc_auc')
             mloes.try_basic_weight_heuristics()
-            mloes.sample_weights(n_tries=100)
-            mloes.sample_weights_from_previous_ones(n_tries=100)
+            mloes.sample_weights(n_tries=400)
+            mloes.sample_weights_from_previous_ones(n_tries=400)
             output = mloes.compute_best_merged_probs_weights()
             wavg_merged_probs = output['merged_probs'][:, 0] # shape: (num_samples,)
             wavg_prcauc = prc_auc_score(labels, wavg_merged_probs)
@@ -3341,8 +3347,11 @@ def _evaluate_model(
         ensemble_checkpoint_folder_paths = ensemble['ensemble_checkpoint_folder_paths']
         for i, checkpoint_folder_path in enumerate(ensemble_checkpoint_folder_paths):
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
-            assert submission_csv_paths[i].startswith(results_folder_path) # make sure the submission CSV is in the same folder
-            assert os.path.basename(submission_csv_paths[i]) in os.listdir(results_folder_path) # make sure the submission CSV exists
+            # make sure the submission CSV is in the same folder
+            assert submission_csv_paths[i].startswith(results_folder_path), \
+                f'Expected submission CSV path to start with {results_folder_path}, but got {submission_csv_paths[i]}'
+            # make sure the submission CSV exists
+            assert os.path.basename(submission_csv_paths[i]) in os.listdir(results_folder_path)
 
         # Ensemble the predictions
         print_bold('Ensembling predictions...')

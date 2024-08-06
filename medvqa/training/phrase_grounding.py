@@ -857,6 +857,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
         BinaryMultiLabelClassificationLossNames.FOCAL,
         BinaryMultiLabelClassificationLossNames.FOCAL_BCE,
         BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
+        BinaryMultiLabelClassificationLossNames.FOCAL_BCE_NPBBCE,
     ]
     if binary_multilabel_classif_loss_name == BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE:
         assert focal_loss_weight is not None
@@ -880,7 +881,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
     mimiccxr_phrase_classifier_criterion = get_binary_multilabel_loss(binary_multilabel_classif_loss_name, **binary_loss_kwargs)
 
     # Generic phrase classifier loss
-    generic_phrase_classifier_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE)
+    generic_phrase_classifier_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE_NPBBCE)
 
     # Standard binary multi-label classification loss
     binary_multilabel_classification_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCBCE)

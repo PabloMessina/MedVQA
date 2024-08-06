@@ -39,6 +39,7 @@ def parse_args(args=None):
                         help='Relative path to folder with checkpoint to resume training from')
 
     # Model arguments
+    parser.add_argument('--pretrained_checkpoint_folder_path', type=str, default=None)
     parser.add_argument('--embedding_dim', type=int, default=None, help='Dimension of the embeddings')
     parser.add_argument('--mlp_hidden_dims', type=int, nargs='+', default=None, help='Hidden dimensions of the MLP')
     parser.add_argument('--dropout', type=float, default=None, help='Dropout rate')
@@ -61,6 +62,7 @@ def parse_args(args=None):
     parser.add_argument('--use_multinli', action='store_true', default=False)
     parser.add_argument('--use_snli', action='store_true', default=False)
     parser.add_argument('--use_report_nli', action='store_true', default=False)
+    parser.add_argument('--raw_report_nli_input_output_train_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--report_nli_input_output_train_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--report_nli_input_output_val_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--use_report_nli_entailment_dataset', action='store_true', default=False)
@@ -212,6 +214,7 @@ def train_model(
 
 def train_from_scratch(
     # Model args
+    pretrained_checkpoint_folder_path,
     embedding_dim,
     mlp_hidden_dims,
     dropout,
@@ -234,6 +237,7 @@ def train_from_scratch(
     use_multinli,
     use_snli,
     use_report_nli,
+    raw_report_nli_input_output_train_jsonl_filepaths,
     report_nli_input_output_train_jsonl_filepaths,
     report_nli_input_output_val_jsonl_filepaths,
     paraphrased_inputs_jsonl_filepaths,
@@ -256,6 +260,7 @@ def train_from_scratch(
     print_blue('----- Training model from scratch ------', bold=True)
     
     model_kwargs = dict(
+        pretrained_checkpoint_folder_path=pretrained_checkpoint_folder_path,
         embedding_dim=embedding_dim,
         mlp_hidden_dims=mlp_hidden_dims,
         dropout=dropout,
@@ -286,6 +291,7 @@ def train_from_scratch(
         use_multinli=use_multinli,
         use_snli=use_snli,
         use_report_nli=use_report_nli,
+        raw_report_nli_input_output_train_jsonl_filepaths=raw_report_nli_input_output_train_jsonl_filepaths,
         report_nli_input_output_train_jsonl_filepaths=report_nli_input_output_train_jsonl_filepaths,
         report_nli_input_output_val_jsonl_filepaths=report_nli_input_output_val_jsonl_filepaths,
         use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,

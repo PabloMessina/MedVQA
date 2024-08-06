@@ -84,12 +84,15 @@ class BertBasedNLI(nn.Module):
         
 class EmbeddingBasedNLI(nn.Module):
 
-    def __init__(self, embedding_dim, mlp_hidden_dims, dropout):
+    def __init__(self, embedding_dim, mlp_hidden_dims, dropout, **unused_kwargs):
         super().__init__()
         print('EmbeddingBasedNLI')
         print(f'  embedding_dim: {embedding_dim}')
         print(f'  mlp_hidden_dims: {mlp_hidden_dims}')
         print(f'  dropout: {dropout}')
+        if len(unused_kwargs) > 0:
+            print_orange(f'WARNING: unused_kwargs: {unused_kwargs}', bold=True)
+
         self.embedding_dim = embedding_dim
         self.mlp_hidden_dims = mlp_hidden_dims
         self.mlp = MLP(in_dim=embedding_dim * 6, out_dim=3, hidden_dims=mlp_hidden_dims, dropout=dropout)

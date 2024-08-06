@@ -27,6 +27,7 @@ from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import (
     ImageAugmentationTransforms,
     ImageBboxAugmentationTransforms,
+    ImageSegmentationMaskAugmentationTransforms,
 )
 
 try:
@@ -43,17 +44,20 @@ _AUGMENTATION_MODES = [
 ]
 
 def get_image_transform(
-    image_size = (256, 256),
-    mean = (0.485, 0.456, 0.406),
-    std = (0.229, 0.224, 0.225),
+    image_size=(256, 256),
+    mean=(0.485, 0.456, 0.406),
+    std=(0.229, 0.224, 0.225),
+    mask_height=None,
+    mask_width=None,
     augmentation_mode=None,
-    default_prob=0.5,
+    default_prob=0.4,
     use_clip_transform=False,
     clip_version=None,
     use_huggingface_vitmodel_transform=False,
     use_torchxrayvision_transform=False,
     huggingface_vitmodel_name=None,
     use_bbox_aware_transform=False,
+    use_segmentation_mask_aware_transform=False,
     horizontal_flip_prob=0,
     use_detectron2_transform=False,
     for_yolov8=False,
@@ -66,7 +70,7 @@ def get_image_transform(
 
     # Only one of the following can be true
     assert sum([use_clip_transform, use_huggingface_vitmodel_transform, use_torchxrayvision_transform,
-                use_bbox_aware_transform, use_detectron2_transform]) <= 1
+                use_bbox_aware_transform, use_segmentation_mask_aware_transform, use_detectron2_transform]) <= 1
 
     if use_clip_transform:
         assert clip_version is not None
@@ -318,6 +322,102 @@ def get_image_transform(
 
             print(f'    Returning augmented transforms with mode {augmentation_mode}')
             return transform_fn
+        
+    elif use_segmentation_mask_aware_transform:
+
+        assert not for_yolov8 # not supported
+        assert mask_height is not None
+        assert mask_width is not None
+
+        print(f'  Using segmentation mask aware transforms')
+        tf_load_image = T.Lambda(lambda x: cv2.imread(x))
+        tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
+        tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
+        tf_totensor = T.ToTensor()
+        tf_normalize = T.Normalize(mean, std)
+
+        def _default_transform(image_path, *args):
+            image = tf_load_image(image_path)
+            image = tf_bgr2rgb(image)
+            image = tf_resize(image)
+            image = tf_totensor(image)
+            image = tf_normalize(image)
+            if args:
+                return image, *args # return image and other arguments
+            return image
+
+        if augmentation_mode is None: # no augmentation
+            print('    Returning default transform (no augmentation)')
+            return _default_transform
+        
+        img_mask_aug_transfoms = ImageSegmentationMaskAugmentationTransforms(image_size)
+        if augmentation_mode == 'random-color':
+            aug_transforms = img_mask_aug_transfoms.get_color_transforms_list()
+        elif augmentation_mode == 'random-spatial':
+            aug_transforms = img_mask_aug_transfoms.get_spatial_transforms_list()
+        elif augmentation_mode == 'random-color-and-spatial':
+            aug_transforms = img_mask_aug_transfoms.get_merged_spatial_color_transforms_list()
+        else:
+            raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
+        
+        def _get_transform(tf_img_mask_aug): # closure (needed to capture tf_img_mask_aug)
+            def _transform(image_path, masks=None, labels=None):
+                # image_path: str, masks: np.ndarray, labels: np.ndarray
+                image = tf_load_image(image_path)
+                image = tf_bgr2rgb(image)
+                image = tf_resize(image)
+                if masks is None:
+                    assert labels is None
+                    augmented = tf_img_mask_aug(image=image) # apply augmentation only to image
+                    image = augmented['image']
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    return image
+                assert masks.ndim == 2 # (N, H * W)
+                if labels is None:
+                    pos_idxs = np.arange(masks.shape[0]) # all masks are positive
+                else:
+                    assert labels.ndim == 1 # (N,)
+                    assert masks.shape[0] == labels.shape[0] # same number of masks and labels
+                    pos_idxs = np.where(labels == 1)[0] # positive masks
+                # resize positive masks
+                masks_to_augment = [cv2.resize(masks[i].reshape(mask_height, mask_width),
+                                               image_size, interpolation=cv2.INTER_NEAREST) for i in pos_idxs]
+                augmented = tf_img_mask_aug(image=image, masks=masks_to_augment)
+                image = augmented['image']
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                # resize augmented masks back to original size
+                masks_to_augment = augmented['masks']
+                final_masks = masks.copy()
+                for i, idx in enumerate(pos_idxs): 
+                    final_masks[idx] = cv2.resize(masks_to_augment[i], (mask_width, mask_height), interpolation=cv2.INTER_NEAREST).flatten()
+                if labels is None:
+                    return image, final_masks
+                return image, final_masks, labels
+            return _transform
+
+        _augmented_mask_transforms = [_get_transform(tf) for tf in aug_transforms]
+        
+        print('    len(_augmented_mask_transforms) =', len(_augmented_mask_transforms))
+        print('    augmentation_mode =', augmentation_mode)
+        print('    default_prob =', default_prob)
+
+        def transform_fn(image_path, masks=None, labels=None):
+            # randomly choose between default transform and augmented transform
+            if random.random() < default_prob:
+                img = _default_transform(image_path)
+                if masks is None:
+                    assert labels is None
+                    return img
+                if labels is None:
+                    return img, masks
+                return img, masks, labels
+            # randomly choose an augmented transform
+            return random.choice(_augmented_mask_transforms)(image_path, masks, labels)
+
+        print(f'    Returning augmented transforms with mode {augmentation_mode}')
+        return transform_fn
 
     elif use_detectron2_transform:
         print(f'  Using detectron2 aware transforms')

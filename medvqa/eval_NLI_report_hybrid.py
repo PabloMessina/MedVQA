@@ -11,6 +11,8 @@ from medvqa.datasets.dataloading_utils import embedding_based_nli_collate_batch_
 from medvqa.datasets.nli.nli_dataset_management import EmbeddingNLIDatasetWrapper
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     Seq2SeqDataset,
+    load_ms_cxr_t_temporal_sentence_similarity_v1_data,
+    load_radnli_test_data,
     load_report_nli_examples_filepaths,
 )
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
@@ -232,6 +234,96 @@ def compute_BART_nli_predictions(
         print(f"Saved BART NLI predictions to {save_path}")
 
     return seq2seq_nli_predictions
+
+def evaluate_mlp_nli(
+    device,
+    fact_embedding_model_name,
+    fact_embedding_model_checkpoint_folder_path,
+    fact_embedding_batch_size,
+    fact_embedding_num_workers,
+    mlp_batch_size,
+    mlp_num_workers,
+    nli_checkpoint_folder_path,
+    report_nli_input_output_jsonl_filepaths,
+    logging_level='INFO',
+    cache_output=False,
+):
+    global logger
+    if logger is None:
+        logger = get_console_logger(logging_level)
+    
+    whole_sentences = set()
+    splittable_sentences = set()
+    input_texts, output_texts, _ = load_report_nli_examples_filepaths(
+        report_nli_input_output_jsonl_filepaths, nli1_only=True, whole_sentences=whole_sentences,
+        splittable_sentences=splittable_sentences)
+    
+    radnli_test_input_texts, radnli_test_output_texts = load_radnli_test_data(nli1_only=True, whole_sentences=whole_sentences)
+    input_texts.extend(radnli_test_input_texts)
+    output_texts.extend(radnli_test_output_texts)
+
+    mscxrt_input_texts, mscxrt_output_texts = load_ms_cxr_t_temporal_sentence_similarity_v1_data(
+        nli1_only=True, whole_sentences=whole_sentences)
+    input_texts.extend(mscxrt_input_texts)
+    output_texts.extend(mscxrt_output_texts)
+    
+    print(f"Total input_texts: {len(input_texts)}")
+    print(f"Total output_texts: {len(output_texts)}")
+    print(f"Total whole_sentences: {len(whole_sentences)}")
+    print(f"Total splittable_sentences: {len(splittable_sentences)}")
+
+    unique_sentences = set()
+    unique_sentences.update(whole_sentences)
+    tokenized_sentences = sentence_tokenize_texts_in_parallel(splittable_sentences)
+    for sentences in tokenized_sentences:
+        unique_sentences.update(sentences)
+    unique_sentences = list(unique_sentences)
+    sentence2idx = {s: i for i, s in enumerate(unique_sentences)}
+    
+    print(f"Total unique_sentences: {len(unique_sentences)}")
+
+    # Compute MLP NLI softmaxes
+    mlp_nli_softmaxes = compute_mlp_nli_softmaxes(
+        device=device,
+        fact_embedding_model_name=fact_embedding_model_name,
+        fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+        fact_embedding_batch_size=fact_embedding_batch_size,
+        fact_embedding_num_workers=fact_embedding_num_workers,
+        mlp_batch_size=mlp_batch_size,
+        mlp_num_workers=mlp_num_workers,
+        unique_sentences=unique_sentences,
+        sentence2idx=sentence2idx,
+        whole_sentences=whole_sentences,
+        splittable_sentences=splittable_sentences,
+        input_texts=input_texts,
+        output_texts=output_texts,
+        nli_checkpoint_folder_path=nli_checkpoint_folder_path,
+        cache_output=cache_output,
+    )
+    
+    output2label = {'entailment': 0, 'neutral': 1, 'contradiction': 2}
+    report_nli_gt_labels = np.array([output2label[output_text] for output_text in output_texts])
+
+    print("Adjusting thresholds for MLP NLI")
+    # Entailment
+    best_et, best_et_f1 = best_threshold_and_f1_score(
+        gt=report_nli_gt_labels == 0, # binarize (0 -> 1, 1 -> 0, 2 -> 0)
+        probs=mlp_nli_softmaxes[:, 0],
+    )
+    # Neutral
+    best_nt, best_nt_f1 = best_threshold_and_f1_score(
+        gt=report_nli_gt_labels == 1, # binarize (0 -> 0, 1 -> 1, 2 -> 0)
+        probs=mlp_nli_softmaxes[:, 1],
+    )
+    # Contradiction
+    best_ct, best_ct_f1 = best_threshold_and_f1_score(
+        gt=report_nli_gt_labels == 2, # binarize (0 -> 0, 1 -> 0, 2 -> 1)
+        probs=mlp_nli_softmaxes[:, 2],
+    )
+    print_blue(f"Best entailment threshold: {best_et}, Best F1: {best_et_f1}", bold=True)
+    print_blue(f"Best neutral threshold: {best_nt}, Best F1: {best_nt_f1}", bold=True)
+    print_blue(f"Best contradiction threshold: {best_ct}, Best F1: {best_ct_f1}", bold=True)
+
 
 def evaluate(
     device,

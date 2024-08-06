@@ -360,6 +360,7 @@ class EmbeddingNLITrainer:
                 use_multinli=False,
                 use_snli=False,
                 use_report_nli=False,
+                raw_report_nli_input_output_train_jsonl_filepaths=None,
                 report_nli_input_output_train_jsonl_filepaths=None,
                 report_nli_input_output_val_jsonl_filepaths=None,
                 use_report_nli_entailment_dataset=False,
@@ -393,6 +394,7 @@ class EmbeddingNLITrainer:
                 input_to_paraphrases = None
             train_dataset, dev_dataset = _prepare_nli_data(integrated_nli_jsonl_filepath, s2f_aux,
                           use_anli, use_multinli, use_snli, use_report_nli,
+                          raw_report_nli_input_output_train_jsonl_filepaths,
                           report_nli_input_output_train_jsonl_filepaths,
                           report_nli_input_output_val_jsonl_filepaths,
                           use_report_nli_entailment_dataset=use_report_nli_entailment_dataset,

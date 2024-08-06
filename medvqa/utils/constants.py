@@ -639,11 +639,6 @@ class ReportEvalMode:
     CHEXPERT_AND_QUESTION_CLASSIFICATION = 'chexpert+qclass'
     VINBIG_DISEASES = 'vinbig-diseases'
 
-def get_enum_class_attribute_values(enum_class):
-    for name, value in vars(enum_class).items():
-        if not name.startswith('__'):
-            yield value
-
 LABEL_BASED_FACTS = [
     'atelectasis seen', 'calcification of the aorta seen', 'cardiomegaly seen', 'consolidation seen',
     'edema seen', 'emphysema seen', 'enlarged cardiomediastinum seen', 'fibrosis seen', 'fracture seen',

@@ -91,9 +91,9 @@ class MIMICCXR_PhraseGroundingDataset(Dataset):
         # print(f'MIMICCXR_PhraseGroundingDataset.__getitem__({i})')
         idx = self.indices[i]
         image_path = self.image_paths[idx]
-        image = self.image_transform(image_path)
         phrase_embeddings = self.phrase_embeddings[idx]
         phrase_grounding_masks = self.phrase_grounding_masks[idx]
+        image, phrase_grounding_masks = self.image_transform(image_path, phrase_grounding_masks)
         return {
             'i': image,
             'pe': phrase_embeddings,
@@ -149,16 +149,17 @@ class MIMICCXR_BBoxGroundingDataset(Dataset):
     
     def __getitem__(self, i):
         image_path = self.image_paths[i]
-        if self.use_yolov8:
-            tmp = self.image_transform(image_path, return_image_size=True)
-            image, image_size_before, image_size_after = tmp
-        else:
-            image = self.image_transform(image_path)
         phrase_embeddings = self.phrase_embeddings
         phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
         bbox_coords = self.bbox_coords[i]
         bbox_presence = self.bbox_presence[i]
+        if self.use_yolov8:
+            tmp = self.image_transform(image_path, return_image_size=True)
+            image, image_size_before, image_size_after = tmp
+        else:
+            image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
+                image_path, phrase_grounding_masks, phrase_classification_labels)
         output = {
             'i': image,
             'pe': phrase_embeddings,
@@ -336,6 +337,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 use_cxrlt2024_challenge_split=False,
                 use_cxrlt2024_custom_labels=False,
                 use_cxrlt2024_official_labels=False,
+                use_all_cxrlt2024_official_labels_for_training=False,
                 cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=None,
                 cxrlt2024_official_training_labels_for_fact_classification_filepath=None,
                 cxrlt2024_do_balanced_sampling=False,
@@ -357,6 +359,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         self.use_cxrlt2024_challenge_split = use_cxrlt2024_challenge_split
         self.use_cxrlt2024_custom_labels = use_cxrlt2024_custom_labels
         self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
+        self.use_all_cxrlt2024_official_labels_for_training = use_all_cxrlt2024_official_labels_for_training
         
         self.use_yolov8 = use_yolov8
 
@@ -527,12 +530,18 @@ class MIMICCXR_PhraseGroundingTrainer:
                 print(f'len(val_indices) = {len(val_indices)}')
                 print(f'labels.shape = {labels.shape}')
                 print(f'class_embeddings.shape = {class_embeddings.shape}')
+                if use_all_cxrlt2024_official_labels_for_training:
+                    print_orange('Using all CXR-LT-2024 official labels for training the fact classifier', bold=True)
+                    train_indices += val_indices
+                    val_indices = []
+                    print(f'len(train_indices) = {len(train_indices)}')
+                    print(f'len(val_indices) = {len(val_indices)}')
                 image_paths = []
                 for dicom_id in dicom_ids:
                     part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
                     image_paths.append(image_path_getter(part_id, subject_id, study_id, dicom_id))
 
-                # Clean train_indinces
+                # Clean train_indices
                 len_before = len(train_indices)
                 train_indices = [i for i in train_indices if dicom_ids[i] not in forbidden_train_dicom_ids]
                 len_after = len(train_indices)
@@ -590,21 +599,23 @@ class MIMICCXR_PhraseGroundingTrainer:
                                                     pin_memory=True)
                 
                 # Create val dataset
-                val_dataset = ImageFactBasedMultilabelClassificationDataset(
-                    image_paths=image_paths,
-                    image_transform=test_image_transform,
-                    phrase_embeddings=class_embeddings,
-                    phrase_classification_labels=labels,
-                    indices=val_indices,
-                    infinite=False,
-                    shuffle_indices=False,
-                )
-                self.cxrlt2024_official_val_dataloader = DataLoader(val_dataset,
-                                                batch_size=int(batch_size * test_batch_size_factor),
-                                                shuffle=False,
-                                                num_workers=num_test_workers,
-                                                collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
-                                                pin_memory=True)
+                if len(val_indices) > 0:
+                    print_orange('Creating CXR-LT-2024 official val dataset and dataloader...')
+                    val_dataset = ImageFactBasedMultilabelClassificationDataset(
+                        image_paths=image_paths,
+                        image_transform=test_image_transform,
+                        phrase_embeddings=class_embeddings,
+                        phrase_classification_labels=labels,
+                        indices=val_indices,
+                        infinite=False,
+                        shuffle_indices=False,
+                    )
+                    self.cxrlt2024_official_val_dataloader = DataLoader(val_dataset,
+                                                    batch_size=int(batch_size * test_batch_size_factor),
+                                                    shuffle=False,
+                                                    num_workers=num_test_workers,
+                                                    collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+                                                    pin_memory=True)
 
         # Create train mimiccxr facts dataset
         if use_facts_for_train or use_facts_for_test:
@@ -950,7 +961,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert num_train_workers is not None
             assert train_image_transform is not None
 
-            print(f'Loding bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
+            print(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']
@@ -1035,7 +1046,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             _, gold_pres_indices = get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices()
 
-            print(f'Loding bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
+            print(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']

@@ -347,3 +347,20 @@ def integrate_reports_facts_and_metadata(
         })
 
     return sentence_facts_rows, fact_metadata_rows, report_facts_metadata_rows, facts_without_metadata
+
+def concatenate_report_parts(background, findings, impression):
+    parts = []
+    if background:
+        parts.append(background)
+    if findings:
+        parts.append(f'Findings: {findings}')
+    if impression:
+        parts.append(f'Impression: {impression}')
+    report = ""
+    for part in parts:
+        if report:
+            if report[-1] != '.':
+                report += '.'
+            report += ' '
+        report += part
+    return report

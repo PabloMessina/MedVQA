@@ -1,14 +1,16 @@
 import argparse
 import numpy as np
 import torch
+import math
+import random
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-import math
 from multiprocessing import Pool
 from sklearn.cluster import KMeans
 from sklearn_extra.cluster import KMedoids
 from medvqa.datasets.dataloading_utils import embedding_based_nli_collate_batch_fn
 from medvqa.datasets.mimiccxr import load_mimiccxr_reports_detailed_metadata
+from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
 from medvqa.datasets.text_data_utils import word_tokenize_texts_in_parallel
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
@@ -35,8 +37,10 @@ class _Task:
     FIND_K_MOST_SIMILAR_REPRESENTATIVE_FACTS_FOR_EACH_FACT = 'find_k_most_similar_representative_facts_for_each_fact'
     ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS = 'assign_representative_facts_to_reports'
     INTEGRATE_AND_EXPORT_ALL_DATA = 'integrate_and_export_all_data'
+    SAMPLE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI = 'sample_negative_facts_per_report_with_fact_embeddings_and_mlp_nli'
     EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS = 'export_dicom_id_to_positive_negative_facts'
     EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS = 'export_dicom_id_to_positive_negative_facts__replace_embeddings'
+    EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__IMPROVED_MLP_NLI_BASED_NEGATIVE_SAMPLING = 'export_dicom_id_to_positive_negative_facts__improved_mlp_nli_based_negative_sampling'
     COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS = 'compute_clusters_and_cluster_weights_for_facts'
     
     @staticmethod
@@ -54,8 +58,10 @@ class _Task:
             _Task.FIND_K_MOST_SIMILAR_REPRESENTATIVE_FACTS_FOR_EACH_FACT,
             _Task.ASSIGN_REPRESENTATIVE_FACTS_TO_REPORTS,
             _Task.INTEGRATE_AND_EXPORT_ALL_DATA,
+            _Task.SAMPLE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI,
             _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS,
             _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS,
+            _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__IMPROVED_MLP_NLI_BASED_NEGATIVE_SAMPLING,
             _Task.COMPUTE_CLUSTERS_AND_CLUSTER_WEIGHTS_FOR_FACTS,
         ]
     
@@ -82,9 +88,14 @@ def _assign_gpt4_facts_to_reports(
         input_output_jsonl = get_cached_jsonl_file(filepath)
         for input_output in input_output_jsonl:
             query = input_output['metadata']['query']
-            report_start_idx = query.index("#F ") + 3
-            report_end_idx = query.index(" | #H ")
-            h = query[report_end_idx+6:]
+            try:
+                report_start_idx = query.index("#F ") + 3
+                report_end_idx = query.index(" | #H ")
+                h = query[report_end_idx+6:]
+            except ValueError: # handle alternative format
+                report_start_idx = query.index("#R: ") + 4
+                report_end_idx = query.index(" | #H: ")
+                h = query[report_end_idx+7:]
             if allowed_facts is not None and h not in allowed_facts:
                 skipped += 1
                 continue
@@ -117,9 +128,14 @@ def _assign_gpt4_facts_to_reports(
         else:
             assert len(output) == n
         for i, row in enumerate(rows):
-            r = row['fact_based_report']
-            if r in report2labels:
-                output[i].update(report2labels[r])
+            fbr = row['fact_based_report']
+            fullr = concatenate_report_parts(row['background'], row['findings'], row['impression'])
+            found = False
+            for x in [fbr, fullr]:
+                if x in report2labels:
+                    output[i].update(report2labels[x])
+                    found = True
+            if found:
                 count += 1
         print(f'Number of reports with labels: {count}/{n}')
 
@@ -373,6 +389,84 @@ def compute_mlp_label_based_nli_softmaxes(
         'softmaxes': all_softmaxes,
     }, output_filepath)
 
+def _compute_mlp_fact_based_nli_softmaxes_per_report(
+    embeddings,
+    sentence2idx,
+    report_facts,
+    ridx_fidx_pairs,
+    representative_facts,
+    mlp_batch_size,
+    mlp_num_workers,
+    mlp_nli_checkpoint_folder_path,
+    device,        
+):
+    nli_dataset = FactNLIDataset(
+        embeddings=embeddings,
+        sentence2idx=sentence2idx,
+        report_facts=report_facts,
+        ridx_fidx_pairs=ridx_fidx_pairs,
+        representative_facts=representative_facts,
+    )
+    dataloader = DataLoader(
+        nli_dataset,
+        batch_size=mlp_batch_size,
+        shuffle=False,
+        num_workers=mlp_num_workers,
+        collate_fn=lambda *args: embedding_based_nli_collate_batch_fn(*args, include_labels=False),
+        pin_memory=True,
+    )
+
+    # Load model metadata
+    metadata = load_metadata(mlp_nli_checkpoint_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    
+    # Device
+    device = torch.device('cuda' if torch.cuda.is_available() and device in ['cuda', 'gpu', 'GPU'] else 'cpu')
+    
+    # Create model
+    print("Creating model")
+    model = EmbeddingBasedNLI(**model_kwargs)
+    model = model.to(device)
+
+    # Load model weights
+    print(f"Loading model weights from {mlp_nli_checkpoint_folder_path}")
+    checkpoint_path = get_checkpoint_filepath(mlp_nli_checkpoint_folder_path)
+    print(f"Loading model weights from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model'])
+
+    # Set model to evaluation mode
+    model.eval()
+
+    # Estimate output memory size
+    all_softmaxes = np.empty((len(ridx_fidx_pairs), 3), dtype=np.float32)
+    output = {
+        'ridx_fidx_pairs': ridx_fidx_pairs,
+        'softmaxes': all_softmaxes,
+    }
+    memory_size = sum([output[k].nbytes for k in output])
+    print(f'Estimated output memory size: {memory_size / 1024**2:.2f} MB')
+
+    # Compute softmaxes
+    print("Computing softmaxes...")
+    with torch.no_grad():
+        i = 0
+        for batch in tqdm(dataloader, total=len(dataloader), mininterval=3):
+            h_embs = batch['h_embs'].to(device)
+            p_most_sim_embs = batch['p_most_sim_embs'].to(device)
+            p_least_sim_embs = batch['p_least_sim_embs'].to(device)
+            p_max_embs = batch['p_max_embs'].to(device)
+            p_avg_embs = batch['p_avg_embs'].to(device)
+            logits = model(h_embs, p_most_sim_embs, p_least_sim_embs, p_max_embs, p_avg_embs)
+            softmaxes = torch.softmax(logits, dim=1)
+            bsize = len(softmaxes)
+            all_softmaxes[i:i+bsize] = softmaxes.cpu().numpy()
+            i += bsize
+        assert i == len(ridx_fidx_pairs)
+
+    # Return output
+    return output
+
 def compute_mlp_fact_based_nli_softmaxes(
     deduplicated_representative_facts_filepath,
     assigned_representative_facts_to_reports_filepath,
@@ -449,69 +543,17 @@ def compute_mlp_fact_based_nli_softmaxes(
     embeddings = embedding_extractor.compute_text_embeddings(unique_sentences)
     print(f'embeddings.shape: {embeddings.shape}')
 
-    nli_dataset = FactNLIDataset(
+    output = _compute_mlp_fact_based_nli_softmaxes_per_report(
         embeddings=embeddings,
         sentence2idx=sentence2idx,
         report_facts=report_facts,
         ridx_fidx_pairs=ridx_fidx_pairs,
         representative_facts=representative_facts,
+        mlp_batch_size=mlp_batch_size,
+        mlp_num_workers=mlp_num_workers,
+        mlp_nli_checkpoint_folder_path=mlp_nli_checkpoint_folder_path,
+        device=device,
     )
-    dataloader = DataLoader(
-        nli_dataset,
-        batch_size=mlp_batch_size,
-        shuffle=False,
-        num_workers=mlp_num_workers,
-        collate_fn=lambda *args: embedding_based_nli_collate_batch_fn(*args, include_labels=False),
-        pin_memory=True,
-    )
-
-    # Load model metadata
-    metadata = load_metadata(mlp_nli_checkpoint_folder_path)
-    model_kwargs = metadata['model_kwargs']
-    
-    # Device
-    device = torch.device('cuda' if torch.cuda.is_available() and device in ['cuda', 'gpu', 'GPU'] else 'cpu')
-    
-    # Create model
-    print("Creating model")
-    model = EmbeddingBasedNLI(**model_kwargs)
-    model = model.to(device)
-
-    # Load model weights
-    print(f"Loading model weights from {mlp_nli_checkpoint_folder_path}")
-    checkpoint_path = get_checkpoint_filepath(mlp_nli_checkpoint_folder_path)
-    print(f"Loading model weights from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint['model'])
-
-    # Set model to evaluation mode
-    model.eval()
-
-    # Estimate output memory size
-    all_softmaxes = np.empty((len(ridx_fidx_pairs), 3), dtype=np.float32)
-    output = {
-        'ridx_fidx_pairs': ridx_fidx_pairs,
-        'softmaxes': all_softmaxes,
-    }
-    memory_size = sum([output[k].nbytes for k in output])
-    print(f'Estimated output memory size: {memory_size / 1024**2:.2f} MB')
-
-    # Compute softmaxes
-    print("Computing softmaxes...")
-    with torch.no_grad():
-        i = 0
-        for batch in tqdm(dataloader, total=len(dataloader)):
-            h_embs = batch['h_embs'].to(device)
-            p_most_sim_embs = batch['p_most_sim_embs'].to(device)
-            p_least_sim_embs = batch['p_least_sim_embs'].to(device)
-            p_max_embs = batch['p_max_embs'].to(device)
-            p_avg_embs = batch['p_avg_embs'].to(device)
-            logits = model(h_embs, p_most_sim_embs, p_least_sim_embs, p_max_embs, p_avg_embs)
-            softmaxes = torch.softmax(logits, dim=1)
-            bsize = len(softmaxes)
-            all_softmaxes[i:i+bsize] = softmaxes.cpu().numpy()
-            i += bsize
-        assert i == len(ridx_fidx_pairs)
 
     output_filepath = get_file_path_with_hashing_if_too_long(
         folder_path=LARGE_FAST_CACHE_DIR,
@@ -529,10 +571,138 @@ def compute_mlp_fact_based_nli_softmaxes(
         force_hashing=True,
     )
     print(f'Saving {output_filepath}...')
-    save_pickle({
-        'ridx_fidx_pairs': ridx_fidx_pairs,
-        'softmaxes': all_softmaxes,
-    }, output_filepath)
+    save_pickle(output, output_filepath)
+
+def sample_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
+    integrated_report_facts_jsonl_filepath,
+    device,
+    fact_embedding_model_name,
+    fact_embedding_model_checkpoint_folder_path,
+    fact_embedding_batch_size,
+    fact_embedding_num_workers,
+    mlp_batch_size,
+    mlp_num_workers,
+    mlp_nli_checkpoint_folder_path,
+    mlp_nli_entailment_threshold,
+    num_clusters,
+    max_negative_facts_per_report,
+):
+    # Load integrated report facts
+    print(f'Reading {integrated_report_facts_jsonl_filepath}...')
+    report_facts = load_jsonl(integrated_report_facts_jsonl_filepath)
+    n_reports = len(report_facts)
+    print(f'n_reports: {n_reports}')
+    unique_sentences = set()
+    for rf in report_facts:
+        unique_sentences.update(rf['facts'])
+    unique_sentences = list(unique_sentences)
+    unique_sentences.sort()
+    sentence2idx = {s: i for i, s in enumerate(unique_sentences)}
+    print(f'len(unique_sentences): {len(unique_sentences)}')
+    
+    # Extract embeddings
+    embedding_extractor = CachedTextEmbeddingExtractor(
+        model_name=fact_embedding_model_name,
+        model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+        batch_size=fact_embedding_batch_size,
+        num_workers=fact_embedding_num_workers,
+        device=device,
+    )
+    embeddings = embedding_extractor.compute_text_embeddings(unique_sentences)
+    print(f'embeddings.shape: {embeddings.shape}')
+
+    # Cluster embeddings
+    print("Clustering embeddings...")
+    cluster_labels = embedding_extractor.compute_kmeans_labels(
+        texts=unique_sentences, num_clusters=num_clusters, embeddings=embeddings)
+    cluster2idxs = [[] for _ in range(num_clusters)]
+    for i, c in enumerate(cluster_labels):
+        cluster2idxs[c].append(i)
+
+    # Assign candidate negative facts to reports randomly
+    print("Assigning candidate negative facts to reports...")
+    ridx_fidx_pairs = np.empty((n_reports * max_negative_facts_per_report, 2), dtype=np.int32)
+    num_samples_per_cluster = math.ceil(max_negative_facts_per_report / num_clusters)
+    for ridx in tqdm(range(n_reports), total=n_reports, mininterval=3):
+        report_fidxs = set([sentence2idx[f] for f in report_facts[ridx]['facts']])
+        sampled_idxs = []
+        for cidxs in cluster2idxs:
+            sampled_idxs.extend(random.sample(cidxs, num_samples_per_cluster))
+        sampled_idxs = [i for i in sampled_idxs if i not in report_fidxs] # remove positive facts
+        
+        if len(sampled_idxs) > max_negative_facts_per_report: # truncate
+            random.shuffle(sampled_idxs) # shuffle to avoid bias
+            sampled_idxs = sampled_idxs[:max_negative_facts_per_report]
+        elif len(sampled_idxs) < max_negative_facts_per_report: # pad with random facts
+            idxs_to_skip = set(sampled_idxs)
+            idxs_to_skip.update(report_fidxs)
+            assert len(idxs_to_skip) == len(sampled_idxs) + len(report_fidxs) # sanity check that there are no duplicates
+            while len(sampled_idxs) < max_negative_facts_per_report:
+                i = random.randint(0, len(unique_sentences) - 1)
+                if i in idxs_to_skip: continue
+                sampled_idxs.append(i)
+                idxs_to_skip.add(i) # avoid duplicates
+
+        assert len(sampled_idxs) == max_negative_facts_per_report
+        s = ridx * max_negative_facts_per_report
+        e = s + max_negative_facts_per_report
+        ridx_fidx_pairs[s:e, 0] = ridx # report index
+        ridx_fidx_pairs[s:e, 1] = sampled_idxs # fact index
+
+    # Compute softmaxes over candidate negative facts
+    print("Computing softmaxes over candidate negative facts...")
+    tmp = _compute_mlp_fact_based_nli_softmaxes_per_report(
+        embeddings=embeddings,
+        sentence2idx=sentence2idx,
+        report_facts=report_facts,
+        ridx_fidx_pairs=ridx_fidx_pairs,
+        representative_facts=unique_sentences,
+        mlp_batch_size=mlp_batch_size,
+        mlp_num_workers=mlp_num_workers,
+        mlp_nli_checkpoint_folder_path=mlp_nli_checkpoint_folder_path,
+        device=device,
+    )
+    softmaxes = tmp['softmaxes']
+    assert softmaxes.shape[0] == ridx_fidx_pairs.shape[0]
+
+    # Filter out negative facts with high entailment softmaxes
+    print("Filtering out negative facts with high entailment softmaxes...")
+    valid_idxs = np.where(softmaxes[:, 0] < mlp_nli_entailment_threshold)[0]
+    negative_fact_idxs_per_report = [[] for _ in range(n_reports)]
+    for i in valid_idxs:
+        ridx, fidx = ridx_fidx_pairs[i]
+        negative_fact_idxs_per_report[ridx].append(fidx.item()) # convert to int
+    
+    # Print statistics
+    print(f'Number of valid negative facts: {len(valid_idxs)}/{len(softmaxes)}')
+    print(f'Percentage of valid negative facts: {len(valid_idxs) / len(softmaxes) * 100:.2f}%')
+    # average number of negative facts per report
+    avg_num_negative_facts_per_report = np.mean([len(fidxs) for fidxs in negative_fact_idxs_per_report])
+    print(f'Average number of negative facts per report: {avg_num_negative_facts_per_report:.2f}')
+    
+    # Save output
+    output = {
+        'facts': unique_sentences,
+        'integrated_report_facts_jsonl_filepath': integrated_report_facts_jsonl_filepath,
+        'negative_fact_idxs_per_report': negative_fact_idxs_per_report,
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        folder_path=LARGE_FAST_CACHE_DIR,
+        prefix='mimiccxr_negative_facts_assigned_to_reports',
+        strings=[
+            f'len(ridx_fidx_pairs): {len(ridx_fidx_pairs)}',
+            f'max_negative_facts_per_report={max_negative_facts_per_report}',
+            f'mlp_nli_entailment_threshold={mlp_nli_entailment_threshold}',
+            f'len(valid_idxs): {len(valid_idxs)}',
+            integrated_report_facts_jsonl_filepath,
+            fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path,
+            mlp_nli_checkpoint_folder_path,
+        ],
+        force_hashing=True,
+    )
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
 
 def compute_BART_label_based_nli_predictions(
     integrated_report_facts_jsonl_filepath,
@@ -1515,6 +1685,7 @@ _shared_reports = None
 _shared_representative_fact_idxs_per_report = None
 _shared_representative_fact_idxs = None
 _shared_gpt4_nli_preds_per_report = None
+_shared_negative_fact_idxs_per_report = None
 
 def _get_pos_neg_facts_per_report_label_based__task(ridx):
     pos_facts = []
@@ -1558,6 +1729,30 @@ def _get_pos_neg_facts_per_report_fact_based__task(ridx):
             neg_facts.add(fidx)
         else:
             raise ValueError(f'Invalid label: {l}')
+        
+    return list(pos_facts), list(neg_facts)
+
+def _get_pos_neg_facts_per_report_fact_based_v2__task(ridx):
+    pos_facts = set()
+    neg_facts = set()
+    # Find all facts in the report
+    fact_idxs = [_shared_fact2idx[f] for f in _shared_integrated_report_facts[ridx]['facts']]
+    pos_facts.update(fact_idxs) # all facts in the report are true -> positive
+    # Facts annotated by GPT-4
+    for f, l in _shared_gpt4_nli_preds_per_report[ridx].items():
+        fidx = _shared_fact2idx[f]
+        if l == 0:
+            pos_facts.add(fidx)
+        elif l == 1 or l == 2:
+            neg_facts.add(fidx)
+        else:
+            raise ValueError(f'Invalid label: {l}')
+    for fidx in neg_facts:
+        assert fidx not in pos_facts # sanity check
+    # Negative facts
+    for fidx in _shared_negative_fact_idxs_per_report[ridx]:
+        if fidx not in pos_facts: # do not add negative facts that are already positive
+            neg_facts.add(fidx)
         
     return list(pos_facts), list(neg_facts)
 
@@ -1644,6 +1839,77 @@ def _get_pos_neg_facts_per_report_fact_based(data, gpt4_report_nli_input_output_
         pos_neg_facts_per_report = p.map(_get_pos_neg_facts_per_report_fact_based__task, range(n_reports))
 
     return pos_neg_facts_per_report, facts, embeddings
+
+def _get_pos_neg_facts_per_report_fact_based_v2(gpt4_report_nli_input_output_jsonl_filepaths,
+                                                mimiccxr_negative_facts_assigned_to_reports_filepath,
+                                                integrated_report_facts_jsonl_filepaths,
+                                                fact_embedding_model_name, fact_embedding_model_checkpoint_folder_path,
+                                                fact_embedding_batch_size, fact_embedding_num_workers,
+                                                num_processes=10):
+    assert gpt4_report_nli_input_output_jsonl_filepaths is not None
+    assert mimiccxr_negative_facts_assigned_to_reports_filepath is not None
+    assert integrated_report_facts_jsonl_filepaths is not None
+    assert fact_embedding_model_name is not None
+    assert fact_embedding_model_checkpoint_folder_path is not None
+    assert fact_embedding_batch_size is not None
+    assert fact_embedding_num_workers is not None
+
+    # Load the negative facts assigned to reports
+    print(f'Reading {mimiccxr_negative_facts_assigned_to_reports_filepath}...')
+    negative_facts_assigned_to_reports = load_pickle(mimiccxr_negative_facts_assigned_to_reports_filepath)
+    facts = negative_facts_assigned_to_reports['facts']
+    negative_fact_idxs_per_report = negative_facts_assigned_to_reports['negative_fact_idxs_per_report']
+
+    # Assign GPT-4 facts to reports
+    gpt4_nli_preds_per_report = _assign_gpt4_facts_to_reports(
+        gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+        integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+        allowed_facts=None,
+        save_path_prefix=None,
+        return_without_saving=True,
+    )
+    
+    # Collect GPT-4 facts
+    gpt4_facts = set()
+    for d in gpt4_nli_preds_per_report:
+        gpt4_facts.update(d.keys())
+    facts_set = set(facts)
+    gpt4_extract_facts = list(gpt4_facts - facts_set)
+    all_facts = facts + gpt4_extract_facts
+    fact2idx = {f: i for i, f in enumerate(all_facts)}
+    print(f'len(facts): {len(facts)}')
+    print(f'len(gpt4_extract_facts): {len(gpt4_extract_facts)}')
+    print(f'len(all_facts): {len(all_facts)}')
+
+    # Obtain embeddings for all facts
+    fact_encoder = CachedTextEmbeddingExtractor(
+        model_name=fact_embedding_model_name,
+        model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+        batch_size=fact_embedding_batch_size,
+        num_workers=fact_embedding_num_workers,
+        device='cuda',
+    )
+    embeddings = fact_encoder.compute_text_embeddings(all_facts)
+    print(f'embeddings.shape: {embeddings.shape}')
+
+    # Load integrated report facts
+    integrated_report_facts = get_cached_jsonl_file(integrated_report_facts_jsonl_filepaths[-1]) # only the last file is needed
+    
+    global _shared_integrated_report_facts
+    global _shared_gpt4_nli_preds_per_report
+    global _shared_fact2idx
+    global _shared_negative_fact_idxs_per_report
+    _shared_integrated_report_facts = integrated_report_facts
+    _shared_gpt4_nli_preds_per_report = gpt4_nli_preds_per_report
+    _shared_fact2idx = fact2idx
+    _shared_negative_fact_idxs_per_report = negative_fact_idxs_per_report
+
+    print_blue(f'Getting positive and negative facts per report with num_processes={num_processes}...')
+    n_reports = len(integrated_report_facts)
+    with Pool(num_processes) as p:
+        pos_neg_facts_per_report = p.map(_get_pos_neg_facts_per_report_fact_based_v2__task, range(n_reports))
+
+    return pos_neg_facts_per_report, all_facts, embeddings
 
 def export_dicom_id_to_positive_negative_facts(
     mode,
@@ -1740,18 +2006,171 @@ def export_dicom_id_to_positive_negative_facts(
         conflicting_fidxs = pos_fidxs & neg_fidxs
         if len(conflicting_fidxs) > 0:
             # there are conflicting facts
-            conflicting_fidxs = list(conflicting_fidxs)
-            conflicting_fidxs.sort()
+            conflicting_fidxs_list = list(conflicting_fidxs)
+            conflicting_fidxs_list.sort()
             ridxs_with_conflict.append({
                 'ridx': ridx,
-                'conflicting_fidxs': conflicting_fidxs,
+                'conflicting_fidxs': conflicting_fidxs_list,
             })
             # remove negative facts that are also positive
             neg_fidxs -= conflicting_fidxs
-            pos_neg_facts_per_report[ridx][1] = list(neg_fidxs)
+            pos_neg_facts_per_report[ridx] = (list(pos_fidxs), list(neg_fidxs))
 
     if len(ridxs_with_conflict) > 0:
         print_red(f'WARNING: {len(ridxs_with_conflict)} reports have conflicting positive and negative facts.', bold=True)
+
+    # Build dicom_id to pos/neg facts
+    detailed_metadata = load_mimiccxr_reports_detailed_metadata()
+    dicom_id_view_pos_pairs = detailed_metadata['dicom_id_view_pos_pairs']
+    assert len(dicom_id_view_pos_pairs) == n_reports
+    dicom_id_to_pos_neg_facts = {}
+    for ridx, pairs in enumerate(dicom_id_view_pos_pairs):
+        for dicom_id, _ in pairs:
+            dicom_id_to_pos_neg_facts[dicom_id] = pos_neg_facts_per_report[ridx]
+
+    # Save output
+    output = {
+        'facts': facts,
+        'embeddings': embeddings,
+        'dicom_id_to_pos_neg_facts': dicom_id_to_pos_neg_facts,
+        'ridxs_with_conflict': ridxs_with_conflict,
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        folder_path=LARGE_FAST_CACHE_DIR, prefix=prefix, strings=filepath_strings, force_hashing=True)
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
+def export_dicom_id_to_positive_negative_facts__improved_mlp_nli_based_negative_sampling(
+    mode,
+    mimiccxr_report_fact_nli_integrated_data_filepath,
+    gpt4_report_nli_input_output_jsonl_filepaths,
+    integrated_report_facts_jsonl_filepaths,
+    mimiccxr_negative_facts_assigned_to_reports_filepath,
+    fact_embedding_model_name,
+    fact_embedding_model_checkpoint_folder_path,
+    fact_embedding_batch_size,
+    fact_embedding_num_workers,
+):
+    assert mode in ['label_based', 'fact_based', 'all']
+
+    if mode == 'label_based':
+        assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        print(f'Reading {mimiccxr_report_fact_nli_integrated_data_filepath}...')
+        data = load_pickle(mimiccxr_report_fact_nli_integrated_data_filepath)
+        n_reports = len(data['reports'])
+        facts = data['label_based_facts']
+        embeddings = None
+        pos_neg_facts_per_report = _get_pos_neg_facts_per_report_label_based(data)
+        prefix = 'mimiccxr_dicom_id_to_label_based_pos_neg_facts'
+        filepath_strings = [mimiccxr_report_fact_nli_integrated_data_filepath]
+    elif mode == 'fact_based':
+        pos_neg_facts_per_report, facts, embeddings = _get_pos_neg_facts_per_report_fact_based_v2(
+            gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+            mimiccxr_negative_facts_assigned_to_reports_filepath=mimiccxr_negative_facts_assigned_to_reports_filepath,
+            integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+        )
+        prefix = 'mimiccxr_dicom_id_to_fact_based_pos_neg_facts'
+        filepath_strings = [
+            *gpt4_report_nli_input_output_jsonl_filepaths,
+            mimiccxr_negative_facts_assigned_to_reports_filepath,
+            *integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_checkpoint_folder_path,
+        ]
+        n_reports = len(pos_neg_facts_per_report)
+    elif mode == 'all':
+        assert mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        print(f'Reading {mimiccxr_report_fact_nli_integrated_data_filepath}...')
+        data = load_pickle(mimiccxr_report_fact_nli_integrated_data_filepath)
+        
+        n_reports = len(data['reports'])
+        facts1 = data['label_based_facts']
+        pos_neg_facts_per_report1 = _get_pos_neg_facts_per_report_label_based(data)
+        assert n_reports == len(pos_neg_facts_per_report1)
+
+        pos_neg_facts_per_report2, facts2, _ = _get_pos_neg_facts_per_report_fact_based_v2(
+            gpt4_report_nli_input_output_jsonl_filepaths=gpt4_report_nli_input_output_jsonl_filepaths,
+            mimiccxr_negative_facts_assigned_to_reports_filepath=mimiccxr_negative_facts_assigned_to_reports_filepath,
+            integrated_report_facts_jsonl_filepaths=integrated_report_facts_jsonl_filepaths,
+            fact_embedding_model_name=fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=fact_embedding_batch_size,
+            fact_embedding_num_workers=fact_embedding_num_workers,
+        )
+        assert n_reports == len(pos_neg_facts_per_report1)
+        
+        print_blue('Merging label-based and fact-based data...')
+        all_facts = list(set(facts1) | set(facts2))
+        all_facts.sort()
+        f2idx = {f: i for i, f in enumerate(all_facts)}
+        idx1_to_idx = [f2idx[f] for f in facts1]
+        idx2_to_idx = [f2idx[f] for f in facts2]
+        pos_neg_facts_per_report = [None] * n_reports
+        for ridx in tqdm(range(n_reports), total=n_reports, mininterval=2):
+            pos_fact_idxs1 = pos_neg_facts_per_report1[ridx][0]
+            neg_fact_idxs1 = pos_neg_facts_per_report1[ridx][1]
+            pos_fact_idxs1 = [idx1_to_idx[i] for i in pos_fact_idxs1]
+            neg_fact_idxs1 = [idx1_to_idx[i] for i in neg_fact_idxs1]
+            
+            pos_fact_idxs2 = pos_neg_facts_per_report2[ridx][0]
+            neg_fact_idxs2 = pos_neg_facts_per_report2[ridx][1]            
+            pos_fact_idxs2 = [idx2_to_idx[i] for i in pos_fact_idxs2]
+            neg_fact_idxs2 = [idx2_to_idx[i] for i in neg_fact_idxs2]
+            
+            pos_fact_idxs = set()
+            neg_fact_idxs = set()
+            pos_fact_idxs.update(pos_fact_idxs1)
+            pos_fact_idxs.update(pos_fact_idxs2)
+            neg_fact_idxs.update(neg_fact_idxs1)
+            neg_fact_idxs.update(neg_fact_idxs2)
+            pos_neg_facts_per_report[ridx] = (list(pos_fact_idxs), list(neg_fact_idxs))
+        prefix = 'mimiccxr_dicom_id_to_all_pos_neg_facts'
+        filepath_strings = [
+            mimiccxr_report_fact_nli_integrated_data_filepath,
+            *gpt4_report_nli_input_output_jsonl_filepaths,
+            *integrated_report_facts_jsonl_filepaths,
+            mimiccxr_negative_facts_assigned_to_reports_filepath,
+            fact_embedding_model_checkpoint_folder_path,
+        ]
+        facts = all_facts
+        embeddings = None
+
+    if embeddings is None:
+        fact_encoder = CachedTextEmbeddingExtractor(
+            model_name=fact_embedding_model_name,
+            model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            batch_size=fact_embedding_batch_size,
+            num_workers=fact_embedding_num_workers,
+            device='cuda',
+        )
+        embeddings = fact_encoder.compute_text_embeddings(facts)
+
+    # Detect conflicts
+    print_blue('Detecting conflicts...')
+    ridxs_with_conflict = []
+    for ridx in tqdm(range(n_reports), total=n_reports, mininterval=2):
+        pos_fidxs = set(pos_neg_facts_per_report[ridx][0])
+        neg_fidxs = set(pos_neg_facts_per_report[ridx][1])
+        conflicting_fidxs = pos_fidxs & neg_fidxs
+        if len(conflicting_fidxs) > 0:
+            # there are conflicting facts
+            conflicting_fidxs_list = list(conflicting_fidxs)
+            conflicting_fidxs_list.sort()
+            ridxs_with_conflict.append({
+                'ridx': ridx,
+                'conflicting_fidxs': conflicting_fidxs_list,
+            })
+            # remove negative facts that are also positive
+            neg_fidxs -= conflicting_fidxs
+            pos_neg_facts_per_report[ridx] = (list(pos_fidxs), list(neg_fidxs))
+
+    if len(ridxs_with_conflict) > 0:
+        total_conflicts = sum(len(x['conflicting_fidxs']) for x in ridxs_with_conflict)
+        print_red(f'WARNING: {len(ridxs_with_conflict)} reports have conflicting positive and negative facts ({total_conflicts} conflicts).', bold=True)
+                  
 
     # Build dicom_id to pos/neg facts
     detailed_metadata = load_mimiccxr_reports_detailed_metadata()
@@ -1926,6 +2345,9 @@ def main():
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
     parser.add_argument('--pos_neg_facts_mode', type=str, choices=['label_based', 'fact_based', 'all'])
     parser.add_argument('--dicom_id_to_pos_neg_facts_filepath', type=str)
+    parser.add_argument('--mlp_nli_entailment_threshold', type=float)
+    parser.add_argument('--max_negative_facts_per_report', type=int)
+    parser.add_argument('--mimiccxr_negative_facts_assigned_to_reports_filepath', type=str)
     args = parser.parse_args()
 
     if args.task == _Task.ASSIGN_GPT4_LABEL_BASED_FACTS_TO_REPORTS:
@@ -2137,6 +2559,50 @@ def main():
     elif args.task == _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__REPLACE_EMBEDDINGS:
         export_dicom_id_to_positive_negative_facts__replace_embeddings(
             dicom_id_to_pos_neg_facts_filepath=args.dicom_id_to_pos_neg_facts_filepath,
+            fact_embedding_model_name=args.fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=args.fact_embedding_batch_size,
+            fact_embedding_num_workers=args.fact_embedding_num_workers,
+        )
+    elif args.task == _Task.SAMPLE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI:
+        assert args.integrated_report_facts_jsonl_filepath is not None
+        assert args.fact_embedding_model_name is not None
+        assert args.fact_embedding_model_checkpoint_folder_path is not None
+        assert args.fact_embedding_batch_size is not None
+        assert args.fact_embedding_num_workers is not None
+        assert args.mlp_batch_size is not None
+        assert args.mlp_num_workers is not None
+        assert args.mlp_nli_checkpoint_folder_path is not None
+        assert args.mlp_nli_entailment_threshold is not None
+        assert args.num_kmeans_clusters is not None
+        assert args.max_negative_facts_per_report is not None
+        sample_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
+            integrated_report_facts_jsonl_filepath=args.integrated_report_facts_jsonl_filepath,
+            device=args.device,
+            fact_embedding_model_name=args.fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=args.fact_embedding_batch_size,
+            fact_embedding_num_workers=args.fact_embedding_num_workers,
+            mlp_batch_size=args.mlp_batch_size,
+            mlp_num_workers=args.mlp_num_workers,
+            mlp_nli_checkpoint_folder_path=args.mlp_nli_checkpoint_folder_path,
+            mlp_nli_entailment_threshold=args.mlp_nli_entailment_threshold,
+            num_clusters=args.num_kmeans_clusters,
+            max_negative_facts_per_report=args.max_negative_facts_per_report,
+        )
+    elif args.task == _Task.EXPORT_DICOM_ID_TO_POSITIVE_NEGATIVE_FACTS__IMPROVED_MLP_NLI_BASED_NEGATIVE_SAMPLING:
+        assert args.pos_neg_facts_mode is not None
+        assert args.mimiccxr_report_fact_nli_integrated_data_filepath is not None
+        assert args.gpt4_report_nli_input_output_jsonl_filepaths is not None
+        assert args.integrated_report_facts_jsonl_filepaths is not None
+        assert args.mimiccxr_negative_facts_assigned_to_reports_filepath is not None
+        assert args.fact_embedding_model_name is not None
+        export_dicom_id_to_positive_negative_facts__improved_mlp_nli_based_negative_sampling(
+            mode=args.pos_neg_facts_mode,
+            mimiccxr_report_fact_nli_integrated_data_filepath=args.mimiccxr_report_fact_nli_integrated_data_filepath,
+            gpt4_report_nli_input_output_jsonl_filepaths=args.gpt4_report_nli_input_output_jsonl_filepaths,
+            integrated_report_facts_jsonl_filepaths=args.integrated_report_facts_jsonl_filepaths,
+            mimiccxr_negative_facts_assigned_to_reports_filepath=args.mimiccxr_negative_facts_assigned_to_reports_filepath,
             fact_embedding_model_name=args.fact_embedding_model_name,
             fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
             fact_embedding_batch_size=args.fact_embedding_batch_size,

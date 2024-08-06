@@ -19,10 +19,11 @@ class CheXLocalizePhraseGroundingDataset(Dataset):
     def __getitem__(self, i):
         i = self.indices[i]
         image_path = self.image_paths[i]
-        image = self.image_transform(image_path)
         phrase_embeddings = self.phrase_embeddings
         phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
+        image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
+            image_path, phrase_grounding_masks, phrase_classification_labels)
         return {
             'i': image,
             'pe': phrase_embeddings,
