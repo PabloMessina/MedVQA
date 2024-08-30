@@ -5,6 +5,7 @@ import torch
 import time
 import numpy as np
 import pandas as pd
+import random
 from tqdm import tqdm
 from nltk.tokenize import wordpunct_tokenize
 from sklearn.metrics import accuracy_score, average_precision_score, f1_score, roc_auc_score
@@ -91,6 +92,7 @@ from medvqa.utils.metrics import best_threshold_and_f1_score, f1_between_dicts
 class _EvalModes:
     MIMICCXR_TEST_SET_LABEL_BASED = 'mimiccxr_test_set_label_based'
     MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'mimiccxr_test_set_label_based__template_based_report_gen'
+    MIMICCXR_TEST_SET_FACT_RANKING = 'mimiccxr_test_set_fact_ranking'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'interpret_cxr_test_public_label_based__template_based_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN = 'interpret_cxr_test_public_label_based__generate_jsons_for_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN = 'interpret_cxr_test_public_label_based__json_to_gpt_report_gen'
@@ -103,6 +105,10 @@ class _EvalModes:
     CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_1_dev_submission__ensemble'
     CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_2_dev_submission__ensemble'
     CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_3_dev_submission__ensemble'
+    CXRLT_2024_TASKS_1_2_3_TEST_SUBMISSION = 'cxrlt_2024_tasks_1_2_3_test_submission'
+    CXRLT_2024_TASK_1_TEST_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_1_test_submission__ensemble'
+    CXRLT_2024_TASK_2_TEST_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_2_test_submission__ensemble'
+    CXRLT_2024_TASK_3_TEST_SUBMISSION__ENSEMBLE = 'cxrlt_2024_task_3_test_submission__ensemble'
     CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA = 'cxrlt_2024_train_val_split_from_training_data'
     CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA__ENSEMBLE = 'cxrlt_2024_train_val_split_from_training_data__ensemble'
     CXRLT_2024_TRAIN_DEV_SPLIT_GPT4_SPARSE_CUSTOM_LABELS__ENSEMBLE = 'cxrlt_2024_train_dev_split_gpt4_sparse_custom_labels__ensemble'
@@ -112,6 +118,7 @@ class _EvalModes:
         return [
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED,
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
+            _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN,
@@ -124,6 +131,10 @@ class _EvalModes:
             _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE,
             _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE,
             _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE,
+            _EvalModes.CXRLT_2024_TASKS_1_2_3_TEST_SUBMISSION,
+            _EvalModes.CXRLT_2024_TASK_1_TEST_SUBMISSION__ENSEMBLE,
+            _EvalModes.CXRLT_2024_TASK_2_TEST_SUBMISSION__ENSEMBLE,
+            _EvalModes.CXRLT_2024_TASK_3_TEST_SUBMISSION__ENSEMBLE,
             _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA,
             _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA__ENSEMBLE,
             _EvalModes.CXRLT_2024_TRAIN_DEV_SPLIT_GPT4_SPARSE_CUSTOM_LABELS__ENSEMBLE,
@@ -135,6 +146,8 @@ def parse_args(args=None):
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--max_images_per_batch', type=int, default=30)
     parser.add_argument('--max_facts_per_image', type=int, default=20)
+    parser.add_argument('--image_batch_size', type=int, default=200)
+    parser.add_argument('--num_facts_per_report', type=int, default=1000)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--eval_mode', type=str, required=True, choices=_EvalModes.choices())
     parser.add_argument('--fact_embedding_model_name', type=str, default=None)
@@ -146,6 +159,7 @@ def parse_args(args=None):
     parser.add_argument('--chest_imagenome_label_names_filepath', type=str)
     parser.add_argument('--chest_imagenome_image_id_to_labels_filepath', type=str)
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
+    parser.add_argument('--mimiccxr_integrated_report_facts_filepath', type=str)
     parser.add_argument('--tune_thresholds', action='store_true')
     parser.add_argument('--max_processes_for_chexpert_labeler', type=int, default=14)
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str)
@@ -170,6 +184,9 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_task1_dev_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--cxrlt2024_task2_dev_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--cxrlt2024_task3_dev_submission_csv_paths', type=str, nargs='+', default=None)
+    parser.add_argument('--cxrlt2024_task1_test_submission_csv_paths', type=str, nargs='+', default=None)
+    parser.add_argument('--cxrlt2024_task2_test_submission_csv_paths', type=str, nargs='+', default=None)
+    parser.add_argument('--cxrlt2024_task3_test_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--ensemble_filepath', type=str, default=None)
 
     return parser.parse_args(args=args)
@@ -805,6 +822,85 @@ def _evaluate_interpret_cxr_test_public__generic_report_gen(
         to_save_kwargs=to_save_kwargs,
     )
 
+def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_folder_path, batch_size, num_workers, device):
+
+    # device
+    device = torch.device(device)
+
+    # Load checkpoint metadata
+    metadata = load_metadata(checkpoint_folder_path)
+    model_kwargs = metadata['model_kwargs']
+    val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+
+    # Create model
+    print('Creating instance of PhraseGrounder ...')
+    model = PhraseGrounder(**model_kwargs)
+    model = model.to(device)
+
+    # Load model from checkpoint
+    model_wrapper = ModelWrapper(model)
+    checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+    print('Loading model from checkpoint ...')
+    print('checkpoint_path =', checkpoint_path)
+    model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True)
+
+    # Create dataloader
+    print('Creating dataloader ...')
+    from medvqa.datasets.image_processing import ImageDataset
+    test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+    dataset = ImageDataset(image_paths=image_paths, image_transform=test_image_transform)
+    def _image_collate_batch_fn(batch):
+        images = [item['i'] for item in batch]
+        return {'i': torch.stack(images)}
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=_image_collate_batch_fn,
+    )
+
+    # Run inference
+    from medvqa.models.phrase_grounding.phrase_grounder import PhraseGroundingMode
+    
+    image_local_features = []
+    use_global_features = model.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER
+    if use_global_features:
+        image_global_features = []
+
+    print_blue('Running inference ...', bold=True)
+    model.eval()
+    with torch.no_grad():
+        for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
+            images = batch['i'].to(device)
+            model_output = model.compute_image_features(raw_images=images)
+            local_features = model_output['local_feat']
+            image_local_features.append(local_features.cpu())
+            if use_global_features:
+                global_features = model_output['global_feat']
+                image_global_features.append(global_features.cpu())
+
+    image_local_features = torch.cat(image_local_features, dim=0)
+    if use_global_features:
+        image_global_features = torch.cat(image_global_features, dim=0)
+
+    print('image_local_features.shape =', image_local_features.shape)
+    if use_global_features:
+        print('image_global_features.shape =', image_global_features.shape)
+
+    # Release memory
+    del model
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
+
+    # Return
+    return {
+        'image_local_features': image_local_features,
+        'image_global_features': image_global_features if use_global_features else None,
+    }
+    
+
 def _run_inference_for_label_based_fact_classification_on_images(
         image_paths, checkpoint_folder_path, model_kwargs, val_image_transform_kwargs,
         max_images_per_batch, max_facts_per_image, num_workers, device,
@@ -1136,6 +1232,8 @@ def _evaluate_model(
     val_image_transform_kwargs,
     max_images_per_batch,
     max_facts_per_image,
+    image_batch_size,
+    num_facts_per_report,
     num_workers,
     device,
     eval_mode,
@@ -1148,6 +1246,7 @@ def _evaluate_model(
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
+    mimiccxr_integrated_report_facts_filepath,
     tune_thresholds,
     max_processes_for_chexpert_labeler,
     background_findings_and_impression_per_report_filepath,
@@ -1172,6 +1271,9 @@ def _evaluate_model(
     cxrlt2024_task1_dev_submission_csv_paths,
     cxrlt2024_task2_dev_submission_csv_paths,
     cxrlt2024_task3_dev_submission_csv_paths,
+    cxrlt2024_task1_test_submission_csv_paths,
+    cxrlt2024_task2_test_submission_csv_paths,
+    cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
 ):
     count_print = CountPrinter()
@@ -1442,6 +1544,196 @@ def _evaluate_model(
                 max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
                 strings=strings_,
             )
+
+    elif eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
+
+        assert mimiccxr_integrated_report_facts_filepath is not None
+
+        # Load data
+        print_blue('Loading data ...', bold=True)
+        mimiccxr_integrated_report_facts = load_jsonl(mimiccxr_integrated_report_facts_filepath)
+        mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+        
+        # Collect all facts
+        print_blue('Collecting all facts ...', bold=True)
+        all_facts = set()
+        for x in mimiccxr_integrated_report_facts:
+            all_facts.update(x['facts'])
+        all_facts = sorted(list(all_facts))
+        print('len(all_facts) =', len(all_facts))
+
+        # Collect facts and images per report
+        print_blue('Collecting facts and images per report ...', bold=True)
+        ridx2facts = {}
+        ridx2image_paths = {}
+        for ridx, (part_id, subject_id, study_id, dicom_id_view_pos_pairs, split) in enumerate(zip(
+            mimiccxr_metadata['part_ids'], mimiccxr_metadata['subject_ids'], mimiccxr_metadata['study_ids'],
+            mimiccxr_metadata['dicom_id_view_pos_pairs'], mimiccxr_metadata['splits'],
+        )):
+            if split == 'test':
+                image_paths = []
+                for dicom_id, view_pos in dicom_id_view_pos_pairs:
+                    image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
+                    assert os.path.exists(image_path)
+                    image_paths.append((image_path, view_pos))
+                ridx2image_paths[ridx] = image_paths
+                facts = mimiccxr_integrated_report_facts[ridx]['facts']
+                ridx2facts[ridx] = facts
+        print('len(ridx2facts) =', len(ridx2facts))
+        print('len(ridx2image_paths) =', len(ridx2image_paths))
+
+        # First compute image features
+        print_blue('Computing image features ...', bold=True)
+        all_image_paths = []
+        for image_paths in ridx2image_paths.values():
+            all_image_paths.extend(ip for ip, _ in image_paths) # ignore view_pos
+        all_image_paths = list(set(all_image_paths))
+        print('len(all_image_paths) =', len(all_image_paths))
+        tmp = _run_inference_for_feature_extraction_from_images(
+            image_paths=all_image_paths,
+            checkpoint_folder_path=checkpoint_folder_path,
+            batch_size=image_batch_size,
+            num_workers=num_workers,
+            device=device,
+        )
+        image_local_features = tmp['image_local_features']
+        image_global_features = tmp['image_global_features']
+        print('image_local_features.shape =', image_local_features.shape)
+        print('image_global_features.shape =', image_global_features.shape)
+
+        # Then compute fact embeddings
+        print_blue('Computing fact embeddings ...', bold=True)
+        fact_encoder = CachedTextEmbeddingExtractor(
+            model_name=fact_embedding_model_name,
+            model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+            batch_size=fact_embedding_batch_size,
+            num_workers=fact_embedding_num_workers,
+            device=fact_embedding_device,
+        )
+        fact_embeddings = fact_encoder.compute_text_embeddings(all_facts)
+        print('fact_embeddings.shape =', fact_embeddings.shape)
+
+        # Load phrase grounding model
+        print_blue('Loading phrase grounding model ...', bold=True)
+
+        # Device
+        device = torch.device(device)
+
+        # Load checkpoint metadata
+        metadata = load_metadata(checkpoint_folder_path)
+        model_kwargs = metadata['model_kwargs']
+        val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+
+        # Create model
+        print('Creating instance of PhraseGrounder ...')
+        model = PhraseGrounder(**model_kwargs)
+        model = model.to(device)
+        model.eval() # set to eval mode
+
+        # Load model from checkpoint
+        model_wrapper = ModelWrapper(model)
+        checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+        print('Loading model from checkpoint ...')
+        print('checkpoint_path =', checkpoint_path)
+        model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True)
+
+        # For each report image, rank the report facts and a sample of all the other facts
+        print_blue('Ranking facts ...', bold=True)
+        fact2idx = {fact: i for i, fact in enumerate(all_facts)}
+        ip2idx = {ip: i for i, ip in enumerate(all_image_paths)}
+        ridxs = list(ridx2facts.keys())
+        skipped = 0
+        results = []
+        
+        for ridx in tqdm(ridxs, total=len(ridxs), mininterval=5):
+            facts = ridx2facts[ridx]
+            if len(facts) == 0:
+                skipped += 1
+                continue
+            
+            # Merge report facts with randomly sampled facts
+            fact_idxs = [fact2idx[fact] for fact in facts]
+            sampled_fact_idxs = random.sample(range(len(all_facts)), num_facts_per_report)
+            merged_fact_idxs = fact_idxs + sampled_fact_idxs
+            # remove duplicates keeping the order
+            merged_fact_idxs = list(dict.fromkeys(merged_fact_idxs))
+            # keep first num_facts_per_report
+            merged_fact_idxs = merged_fact_idxs[:num_facts_per_report]
+            assert merged_fact_idxs[:len(fact_idxs)] == fact_idxs # the first len(fact_idxs) should be the same
+            merged_fact_embeddings = fact_embeddings[merged_fact_idxs]
+            relevant_labels = np.zeros(num_facts_per_report, dtype=np.int8)
+            relevant_labels[:len(fact_idxs)] = 1
+
+            # Prepare merged fact embeddings tensor
+            merged_fact_embeddings_tensor = torch.tensor(merged_fact_embeddings, dtype=torch.float32)
+            merged_fact_embeddings_tensor = merged_fact_embeddings_tensor.to(device)
+
+            # For each image in the report, compute ranking
+            image_paths = ridx2image_paths[ridx]
+            image_idxs = [ip2idx[ip] for ip, _ in image_paths]
+            for j, image_idx in enumerate(image_idxs):
+                local_feat = image_local_features[image_idx] # (num_regions, local_feat_dim)
+                local_feat = local_feat.unsqueeze(0) # (1, num_regions, local_feat_dim)
+                if image_global_features is not None:
+                    global_feat = image_global_features[image_idx] # (global_feat_dim,)
+                    global_feat = global_feat.unsqueeze(0) # (1, global_feat_dim)
+                
+                with torch.no_grad():
+
+                    local_feat = local_feat.to(device)
+                    if image_global_features is not None:
+                        global_feat = global_feat.to(device)
+                    else:
+                        global_feat = None
+                    num_batches = num_facts_per_report // fact_embedding_batch_size
+                    if num_facts_per_report % fact_embedding_batch_size != 0:
+                        num_batches += 1
+                    logits = []
+                    for i in range(num_batches):
+                        start = i * fact_embedding_batch_size
+                        end = min(start + fact_embedding_batch_size, num_facts_per_report)
+                        assert start < end
+                        merged_fact_embeddings_ = merged_fact_embeddings_tensor[start:end]
+                        merged_fact_embeddings_ = merged_fact_embeddings_.unsqueeze(0) # (1, end-start, fact_embedding_dim)
+                        phrase_classifier_logits = model.forward_with_precomputed_image_features(
+                            local_feat=local_feat, global_feat=global_feat,
+                            phrase_embeddings=merged_fact_embeddings_,
+                        )['phrase_classifier_logits']
+                        logits.append(phrase_classifier_logits)
+                    logits = torch.cat(logits, dim=1) # (1, num_facts_per_report)
+                    probs = torch.sigmoid(logits)
+                    probs = probs.cpu().numpy().flatten()
+                    rocauc = roc_auc_score(relevant_labels, probs) # ROC AUC
+                    sorted_idxs = np.argsort(probs)[::-1]
+                    results.append({
+                        'ridx': ridx,
+                        'image_path': image_paths[j][0],
+                        'view_pos': image_paths[j][1],
+                        'rocauc': rocauc,
+                        'facts': facts,
+                        'fact_probs': probs[:len(fact_idxs)],
+                        'top100_facts': [all_facts[merged_fact_idxs[i]] for i in sorted_idxs[:100]],
+                        'top100_fact_probs': probs[sorted_idxs][:100],
+                    })
+
+        print('skipped =', skipped)
+        print('len(results) =', len(results))
+
+        print_magenta(f'Average ROC AUC = {np.mean([x["rocauc"] for x in results])}')
+
+        # Save results
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+        results_save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=results_folder_path,
+            prefix='mimiccxr_test_set_fact_ranking',
+            strings=[
+                f'num_facts_per_report={num_facts_per_report}',
+            ],
+            force_hashing=True,
+        )
+        print_blue('Saving results to', results_save_path, bold=True)
+        save_pickle(results, results_save_path)
+        print('Done!')
 
     elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN:
 
@@ -2745,6 +3037,116 @@ def _evaluate_model(
                 submission_df.to_csv(submission_csv_path, index=False)
                 print_blue(f'Saved task{i+1} dev submission CSV to {submission_csv_path}', bold=True)
 
+    elif eval_mode == _EvalModes.CXRLT_2024_TASKS_1_2_3_TEST_SUBMISSION:
+        
+        assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
+
+        assert (checkpoint_folder_path is None) != (ensemble_checkpoint_folder_paths is None) # exactly one should be provided
+        checkpoint_folder_paths = [checkpoint_folder_path] if checkpoint_folder_path is not None\
+              else ensemble_checkpoint_folder_paths
+
+        from medvqa.datasets.mimiccxr import (
+            MIMIC_CXR_LT_2024_TASK1_TEST_CSV_PATH,
+            MIMIC_CXR_LT_2024_TASK2_TEST_CSV_PATH,
+            MIMIC_CXR_LT_2024_TASK3_TEST_CSV_PATH,
+        )
+        task1_test_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TEST_CSV_PATH)
+        task2_test_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK2_TEST_CSV_PATH)
+        task3_test_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK3_TEST_CSV_PATH)
+        task1_dicom_ids = task1_test_df['dicom_id'].tolist()
+        task2_dicom_ids = task2_test_df['dicom_id'].tolist()
+        task3_dicom_ids = task3_test_df['dicom_id'].tolist()
+        all_dicom_ids = set(task1_dicom_ids + task2_dicom_ids + task3_dicom_ids)
+        all_dicom_ids = list(all_dicom_ids)
+        print(f'len(task1_dicom_ids) = {len(task1_dicom_ids)}')
+        print(f'len(task2_dicom_ids) = {len(task2_dicom_ids)}')
+        print(f'len(task3_dicom_ids) = {len(task3_dicom_ids)}')
+        print(f'len(all_dicom_ids) = {len(all_dicom_ids)}')
+        dicom_id_2_idx = {dicom_id: i for i, dicom_id in enumerate(all_dicom_ids)}
+        task1_idxs = [dicom_id_2_idx[dicom_id] for dicom_id in task1_dicom_ids]
+        task2_idxs = [dicom_id_2_idx[dicom_id] for dicom_id in task2_dicom_ids]
+        task3_idxs = [dicom_id_2_idx[dicom_id] for dicom_id in task3_dicom_ids]
+        all_image_paths = []
+        imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+        for dicom_id in all_dicom_ids:
+            part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+            all_image_paths.append(get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id))
+        
+        tmp = load_pickle(cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath)
+        facts = tmp['class_sentences']
+        fact_embeddings = tmp['class_sentence_embeddings']
+        fact2idx = {fact: i for i, fact in enumerate(facts)}
+
+        eval_classes_txt_paths = [
+            MIMIC_CXR_LT_2024_TASK1_EVAL_CLASSES_TXT_PATH,
+            MIMIC_CXR_LT_2024_TASK2_EVAL_CLASSES_TXT_PATH,
+            MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH,
+        ]
+
+        for idx, checkpoint_folder_path in enumerate(checkpoint_folder_paths):
+
+            print_bold("=" * 100)
+            tasks_string = ', '.join([f'task{i+1}' for i in range(len(eval_classes_txt_paths))])
+            print_bold(f'{idx+1}/{len(checkpoint_folder_paths)}:',
+                       f'Generating test submission CSVs for CXR-LT 2024 {tasks_string} using checkpoint at {checkpoint_folder_path}')
+            
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+            # Skip if all tasks have already been evaluated
+            skip = True
+            messages = []
+            for task_number in range(1, len(eval_classes_txt_paths) + 1): # task1, task2, task3
+                found = False
+                for filename in os.listdir(results_folder_path):
+                    if filename.startswith(f'cxrlt_2024_task{task_number}_test_submission_') and filename.endswith('.csv'):
+                        found = True
+                        # print_orange(f'NOTE: Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}', bold=True)
+                        messages.append(f'Found existing submission for task{task_number} at {os.path.join(results_folder_path, filename)}')
+                if not found:
+                    skip = False
+            if messages:
+                messages.sort(reverse=True)
+                for message in messages:
+                    print_orange(message, bold=True)
+            if skip:
+                print_magenta('NOTE: All tasks have already been evaluated. Skipping...', bold=True)
+                continue
+
+            metadata = load_metadata(checkpoint_folder_path)
+            model_kwargs = metadata['model_kwargs']
+            val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+        
+            probs_, all_image_paths_ = _run_inference_for_label_based_fact_classification_on_images(
+                image_paths=all_image_paths,
+                checkpoint_folder_path=checkpoint_folder_path,
+                model_kwargs=model_kwargs,
+                val_image_transform_kwargs=val_image_transform_kwargs,
+                max_images_per_batch=max_images_per_batch,
+                max_facts_per_image=max_facts_per_image,
+                num_workers=num_workers,
+                device=device,
+                fact_embeddings=fact_embeddings,
+            )
+            assert len(probs_) == len(all_image_paths_)
+            assert len(all_image_paths_) == len(all_image_paths) # make sure no images were skipped
+            new_ip2idx = { ip:i for i, ip in enumerate(all_image_paths_) }
+            old_order = [new_ip2idx[ip] for ip in all_image_paths]
+            probs = probs_[old_order] # reorder probs to match the original order
+
+            timestamp = get_timestamp()
+            for i, (dicom_ids, idxs, eval_classes_filepath) in enumerate(zip(
+                [task1_dicom_ids, task2_dicom_ids, task3_dicom_ids],
+                [task1_idxs, task2_idxs, task3_idxs],
+                eval_classes_txt_paths)):
+                class_names = read_lines_from_txt(eval_classes_filepath)
+                class_idxs = [fact2idx[CXRLT2024_CLASS_2_SENTENCE[x]] for x in class_names] # convert class names to factual sentences
+                submission_csv_path = os.path.join(results_folder_path, f'cxrlt_2024_task{i+1}_test_submission_{timestamp}.csv')
+                task_probs = probs[idxs][:, class_idxs]
+                submission_df = pd.DataFrame(task_probs, columns=class_names)
+                submission_df.insert(0, 'dicom_id', dicom_ids)
+                submission_df.to_csv(submission_csv_path, index=False)
+                print_blue(f'Saved task{i+1} test submission CSV to {submission_csv_path}', bold=True)
+
     elif eval_mode == _EvalModes.CXRLT_2024_TRAIN_VAL_SPLIT_FROM_TRAINING_DATA:
 
         assert cxrlt2024_official_training_labels_for_fact_classification_filepath is not None
@@ -2765,7 +3167,6 @@ def _evaluate_model(
         print(f'len(train_indices) = {len(train_indices)}')
 
         # Choose a subset of the train_indices containing positive examples for all classes
-        import random
         train_indices_subset = set()
         for i in range(len(class_names)):
             class_indices = np.where(train_labels[:, i] == 1)[0]
@@ -2866,7 +3267,6 @@ def _evaluate_model(
         print(f'len(train_indices) = {len(train_indices)}')
 
         # Choose a subset of the train_indices containing positive examples for all classes
-        import random
         train_indices_subset = set()
         for i in range(len(class_names)):
             class_indices = np.where(train_labels[:, i] == 1)[0]
@@ -3126,9 +3526,9 @@ def _evaluate_model(
             print_bold(f" ROCAUC: {np.mean(output['dev_rocauc']):.4f}")
             print_bold(f" F1: {np.mean(output['dev_f1']):.4f}")
 
-        for checkpoint_folder_path in ensemble_checkpoint_folder_paths:
+        for k, checkpoint_folder_path in enumerate(ensemble_checkpoint_folder_paths):
 
-            print_bold('-' * 100)
+            print_bold(f'--- Model {k+1}/{len(ensemble_checkpoint_folder_paths)} ---' + '-' * 100)
 
             # Check if results already exist
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
@@ -3236,8 +3636,8 @@ def _evaluate_model(
             labels_ = labels[:, None] # shape: (num_samples, 1)
             mloes = MultilabelOptimalEnsembleSearcher(probs=probs_i, gt=labels_, score_name='prc_auc')
             mloes.try_basic_weight_heuristics()
-            mloes.sample_weights(n_tries=400)
-            mloes.sample_weights_from_previous_ones(n_tries=400)
+            mloes.sample_weights(n_tries=1000)
+            mloes.sample_weights_from_previous_ones(n_tries=1000)
             output = mloes.compute_best_merged_probs_weights()
             wavg_merged_probs = output['merged_probs'][:, 0] # shape: (num_samples,)
             wavg_prcauc = prc_auc_score(labels, wavg_merged_probs)
@@ -3266,6 +3666,8 @@ def _evaluate_model(
                     'f1_threshold': wavg_threshold,
                 })
                 print_green(f'Best method: Weighted average (PRCAUC: {wavg_prcauc:.4f})', bold=True)
+            best_method_per_class[-1]['dev_pos_count'] = dev_pos_count[i]
+            best_method_per_class[-1]['dev_neg_count'] = dev_neg_count[i]
         
         # Final ensembling results
         print_blue('=' * 100, bold=True)
@@ -3300,23 +3702,48 @@ def _evaluate_model(
 
     elif (eval_mode == _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE or
           eval_mode == _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE or
-          eval_mode == _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE):
+          eval_mode == _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE or
+          eval_mode == _EvalModes.CXRLT_2024_TASK_1_TEST_SUBMISSION__ENSEMBLE or
+          eval_mode == _EvalModes.CXRLT_2024_TASK_2_TEST_SUBMISSION__ENSEMBLE or
+          eval_mode == _EvalModes.CXRLT_2024_TASK_3_TEST_SUBMISSION__ENSEMBLE):
+
         
         if eval_mode == _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE:
             assert cxrlt2024_task1_dev_submission_csv_paths is not None
             submission_csv_paths = cxrlt2024_task1_dev_submission_csv_paths
             class_names = CXRLT2024_TASK1_CLASSES
             task_number = 1
+            mode = 'dev'
         elif eval_mode == _EvalModes.CXRLT_2024_TASK_2_DEV_SUBMISSION__ENSEMBLE:
             assert cxrlt2024_task2_dev_submission_csv_paths is not None
             submission_csv_paths = cxrlt2024_task2_dev_submission_csv_paths
             class_names = CXRLT2024_TASK2_CLASSES
             task_number = 2
+            mode = 'dev'
         elif eval_mode == _EvalModes.CXRLT_2024_TASK_3_DEV_SUBMISSION__ENSEMBLE:
             assert cxrlt2024_task3_dev_submission_csv_paths is not None
             submission_csv_paths = cxrlt2024_task3_dev_submission_csv_paths
             class_names = CXRLT2024_TASK3_CLASSES
             task_number = 3
+            mode = 'dev'
+        elif eval_mode == _EvalModes.CXRLT_2024_TASK_1_TEST_SUBMISSION__ENSEMBLE:
+            assert cxrlt2024_task1_test_submission_csv_paths is not None
+            submission_csv_paths = cxrlt2024_task1_test_submission_csv_paths
+            class_names = CXRLT2024_TASK1_CLASSES
+            task_number = 1
+            mode = 'test'
+        elif eval_mode == _EvalModes.CXRLT_2024_TASK_2_TEST_SUBMISSION__ENSEMBLE:
+            assert cxrlt2024_task2_test_submission_csv_paths is not None
+            submission_csv_paths = cxrlt2024_task2_test_submission_csv_paths
+            class_names = CXRLT2024_TASK2_CLASSES
+            task_number = 2
+            mode = 'test'
+        elif eval_mode == _EvalModes.CXRLT_2024_TASK_3_TEST_SUBMISSION__ENSEMBLE:
+            assert cxrlt2024_task3_test_submission_csv_paths is not None
+            submission_csv_paths = cxrlt2024_task3_test_submission_csv_paths
+            class_names = CXRLT2024_TASK3_CLASSES
+            task_number = 3
+            mode = 'test'
         else: assert False # should not reach here
         
         assert len(submission_csv_paths) >= 2 # ensembling at least 2 models
@@ -3382,11 +3809,11 @@ def _evaluate_model(
         # Save results
         results_folder_path = get_results_folder_path(ensemble_checkpoint_folder_paths[0]) # use the first checkpoint folder
         timestamp = get_timestamp()
-        save_path = os.path.join(results_folder_path, f'cxrlt_2024_task{task_number}_dev_submission_ensemble_{timestamp}.csv')
+        save_path = os.path.join(results_folder_path, f'cxrlt_2024_task{task_number}_{mode}_submission_ensemble_{timestamp}.csv')
         submission_df = pd.DataFrame(final_probs, columns=class_names)
         submission_df.insert(0, 'dicom_id', dicom_ids)
         submission_df.to_csv(save_path, index=False)
-        print_blue(f'Saved task{task_number} dev submission ensemble CSV to {save_path}', bold=True)
+        print_blue(f'Saved task{task_number} {mode} submission ensemble CSV to {save_path}', bold=True)
 
     else:
         raise ValueError(f'Invalid eval_mode: {eval_mode}')
@@ -3716,6 +4143,8 @@ def evaluate(
     num_workers,
     max_images_per_batch,
     max_facts_per_image,
+    image_batch_size,
+    num_facts_per_report,
     device,
     eval_mode,
     fact_embedding_model_name,
@@ -3727,6 +4156,7 @@ def evaluate(
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
+    mimiccxr_integrated_report_facts_filepath,
     tune_thresholds,
     max_processes_for_chexpert_labeler,
     background_findings_and_impression_per_report_filepath,
@@ -3751,6 +4181,9 @@ def evaluate(
     cxrlt2024_task1_dev_submission_csv_paths,
     cxrlt2024_task2_dev_submission_csv_paths,
     cxrlt2024_task3_dev_submission_csv_paths,
+    cxrlt2024_task1_test_submission_csv_paths,
+    cxrlt2024_task2_test_submission_csv_paths,
+    cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
 ):
     print_blue('----- Evaluating model -----', bold=True)
@@ -3769,6 +4202,8 @@ def evaluate(
         val_image_transform_kwargs=val_image_transform_kwargs,
         max_images_per_batch=max_images_per_batch,
         max_facts_per_image=max_facts_per_image,
+        image_batch_size=image_batch_size,
+        num_facts_per_report=num_facts_per_report,
         num_workers=num_workers,
         device=device,
         eval_mode=eval_mode,
@@ -3781,6 +4216,7 @@ def evaluate(
         chest_imagenome_label_names_filepath=chest_imagenome_label_names_filepath,
         chest_imagenome_image_id_to_labels_filepath=chest_imagenome_image_id_to_labels_filepath,
         mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
+        mimiccxr_integrated_report_facts_filepath=mimiccxr_integrated_report_facts_filepath,
         tune_thresholds=tune_thresholds,
         max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
         background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
@@ -3805,6 +4241,9 @@ def evaluate(
         cxrlt2024_task1_dev_submission_csv_paths=cxrlt2024_task1_dev_submission_csv_paths,
         cxrlt2024_task2_dev_submission_csv_paths=cxrlt2024_task2_dev_submission_csv_paths,
         cxrlt2024_task3_dev_submission_csv_paths=cxrlt2024_task3_dev_submission_csv_paths,
+        cxrlt2024_task1_test_submission_csv_paths=cxrlt2024_task1_test_submission_csv_paths,
+        cxrlt2024_task2_test_submission_csv_paths=cxrlt2024_task2_test_submission_csv_paths,
+        cxrlt2024_task3_test_submission_csv_paths=cxrlt2024_task3_test_submission_csv_paths,
         ensemble_filepath=ensemble_filepath,
     )
 

@@ -29,7 +29,7 @@ from medvqa.models.vision.multilabel_classification import (
     MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2, MultilabelClassifier_v3,
 )
 from medvqa.utils.constants import (
-    CHEST_IMAGENOME_GENDERS,
+    CHEST_IMAGENOME_GENDERS,    
     CHEXPERT_LABELS,
     CHEXPERT_GENDERS,
     CHEXPERT_ORIENTATIONS,
@@ -60,6 +60,7 @@ class RawImageEncoding:
     VITMODEL_LARGE__HUGGINGFACE = 'vitmodel-huggingface-large'
     CONVNEXTMODEL__HUGGINGFACE = 'convnextmodel-huggingface'
     RAD_DINO__HUGGINGFACE = 'rad-dino-huggingface'
+    CXRMATE_RRG24_UNIFORMER__HUGGINGFACE = 'cxrmate-rrg24-uniformer-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
 
@@ -82,8 +83,8 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.VITMODEL__HUGGINGFACE,
         RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE,
         RawImageEncoding.RAD_DINO__HUGGINGFACE,
+        RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
     ]
-
 
 class MultiPurposeVisualModule(nn.Module):
 
@@ -221,6 +222,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.CLIP_RESNET__HUGGINGFACE,
             RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
             RawImageEncoding.RAD_DINO__HUGGINGFACE,
+            RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
         ]:
             assert huggingface_model_name is not None
         if raw_image_encoding in [
@@ -289,6 +291,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.RESNET__TORCHXRAYVISION,
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
             RawImageEncoding.YOLOV8,
+            RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
         ]:
             return 2 * image_local_feat_size
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
@@ -421,6 +424,10 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_rad_dino_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -674,6 +681,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
             img_str = HUGGINGFACE_RAD_DINO_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
+            img_str = HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -752,39 +761,19 @@ class MultiPurposeVisualModule(nn.Module):
         
         if raw_images is not None:
 
-            if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
-                # compute local features
+            use_default_method = False
+            if self.raw_image_encoding == RawImageEncoding.DENSENET_121 or \
+                    self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
                 local_feat_NxCxHxW = self.raw_image_encoder(raw_images)
-                batch_size = raw_images.size(0)
-                feat_size = local_feat_NxCxHxW.size(1)
-                if permute_and_flatten_local_feat:
-                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
-                # compute global features
-                if compute_global_features:
-                    aux = local_feat_NxCxHxW.view(batch_size, feat_size, -1)
-                    global_avg_pool = aux.mean(2)
-                    global_max_pool = aux.max(2)[0]
-                    global_list.append(global_avg_pool)
-                    global_list.append(global_max_pool)
-
+                use_default_method = True
             elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
-                # compute local features
                 local_feat_NxCxHxW = self.raw_image_encoder.features(raw_images)
-                batch_size = raw_images.size(0)
-                feat_size = local_feat_NxCxHxW.size(1)
-                if permute_and_flatten_local_feat:
-                    local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
-                # compute global features
-                if compute_global_features:
-                    aux = local_feat_NxCxHxW.view(batch_size, feat_size, -1)
-                    global_avg_pool = aux.mean(2)
-                    global_max_pool = aux.max(2)[0]
-                    global_list.append(global_avg_pool)
-                    global_list.append(global_max_pool)
-            
+                use_default_method = True
             elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
-                # compute local features
                 local_feat_NxCxHxW = self.raw_image_encoder.encode(raw_images)
+                use_default_method = True
+            if use_default_method:
+                # compute local features
                 batch_size = raw_images.size(0)
                 feat_size = local_feat_NxCxHxW.size(1)
                 if permute_and_flatten_local_feat:
@@ -1261,6 +1250,9 @@ _HUGGINGFACE_VITMODEL_VERSIONS = [
 _HUGGINGFACE_RAD_DINO_VERSIONS = [
     'microsoft/rad-dino',
 ]
+_HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS = [
+    'aehrc/cxrmate-rrg24',
+]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 CLIP_VERSION_2_IMAGE_MEAN_STD = {}
@@ -1297,6 +1289,10 @@ HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT = {
 
 HUGGINGFACE_RAD_DINO_NAMES_2_SHORT = {
     'microsoft/rad-dino': 'microsoft/rad-dino',
+}
+
+HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT = {
+    'aehrc/cxrmate-rrg24': 'aehrc/cxrmate-rrg24-uniformer',
 }
 
 DETECTRON2_YAML_2_SHORT = {
@@ -1414,6 +1410,14 @@ def create_huggingface_rad_dino_feature_extractor(rad_dino_version, pretrained_w
     assert rad_dino_version in _HUGGINGFACE_RAD_DINO_VERSIONS, f'Unknown Huggingface RadDINO version {rad_dino_version}' 
     model = AutoModel.from_pretrained(rad_dino_version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model
+
+def create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(version, pretrained_weights_path):
+    from transformers import AutoModel
+    assert version in _HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS, f'Unknown Huggingface CxRMate RRG24 Uniformer version {version}'
+    model = AutoModel.from_pretrained(version, trust_remote_code=True)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    model = model.encoder.uniformer # HACK to get the uniformer from the model
     return model
 
 def create_detectron2_model(

@@ -343,3 +343,160 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 # assert output['phrase_classifier_logits'].shape == (raw_images.shape[0], phrase_embeddings.shape[1])
 
         return output
+    
+    def compute_image_features(self, raw_images):
+        # Visual Component
+        output = super().forward(
+            raw_images=raw_images,
+            return_local_features=True,
+            return_global_features=self.use_global_features,
+            only_compute_features=True,
+        )
+        local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
+
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+            if self.apply_positional_encoding:
+                local_feat = local_feat + self.pe # apply positional encoding
+            assert local_feat.shape == (raw_images.shape[0], self.num_regions, self.image_local_feat_size)
+            return { 'local_feat': local_feat }
+        
+        elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER:
+            local_feat = self.image_proj(local_feat) # (batch_size, num_regions, transf_d_model)
+            return { 'local_feat': local_feat }
+
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+            global_feat = output['global_feat'] # (batch_size, global_feat_size)
+            global_feat = self.global_proj(global_feat) # (batch_size, visual_feature_proj_size)
+            if self.apply_positional_encoding:
+                local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
+                local_feat = self.pos_encoding(local_feat) # apply positional encoding
+                local_feat = local_feat.view(-1, self.num_regions, self.image_local_feat_size)
+            local_feat = self.local_proj(local_feat) # (batch_size, num_regions, visual_feature_proj_size)
+            return { 'local_feat': local_feat, 'global_feat': global_feat }
+        
+        else:
+            raise ValueError(f'Unknown phrase_grounding_mode: {self.phrase_grounding_mode}')
+        
+    def forward_with_precomputed_image_features(
+        self,
+        local_feat, # (batch_size, num_regions, image_local_feat_size)
+        phrase_embeddings, # (batch_size, K, phrase_embedding_size)
+        global_feat=None, # (batch_size, global_feat_size)
+        skip_phrase_classifier=False,
+    ): 
+        assert local_feat.ndim == 3
+        assert phrase_embeddings.ndim == 3
+        assert local_feat.shape[0] == phrase_embeddings.shape[0]
+        assert local_feat.shape[1] == self.num_regions
+        assert phrase_embeddings.shape[2] == self.phrase_embedding_size
+        if global_feat is not None:
+            assert global_feat.ndim == 2
+            assert global_feat.shape[0] == local_feat.shape[0]
+        
+        output = {}
+
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+
+            # Queries
+            q = self.q_proj(phrase_embeddings) # (batch_size, K, qkv_size)
+            # Keys and Values
+            k = self.k_proj(local_feat) # (batch_size, num_regions, qkv_size)
+            v = self.v_proj(local_feat) # (batch_size, num_regions, qkv_size)
+            # Attention
+            # attention = torch.matmul(q, k.transpose(1,2)) # (batch_size, K, num_regions)
+            attention = self.att_proj(q.unsqueeze(2) * k.unsqueeze(1)).squeeze(3) # (batch_size, K, num_regions)
+            sigmoid_attention = torch.sigmoid(attention) # (batch_size, K, num_regions)
+            # Weighted average
+            weighted_sum = torch.matmul(sigmoid_attention, v) # (batch_size, K, qkv_size)
+            weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-1, keepdim=True) + 1e-8) # (batch_size, K, qkv_size)
+            # Grounding vector
+            grounding_vector = self.W(weighted_avg) # (batch_size, K, phrase_embedding_size)
+            grounding_vector = torch.nn.functional.normalize(grounding_vector, p=2, dim=-1) # (batch_size, K, phrase_embedding_size)
+            # Phrase classifier
+            element_wise_mult = phrase_embeddings * grounding_vector # (batch_size, K, phrase_embedding_size)
+            if not skip_phrase_classifier:
+                phrase_classifier_input = torch.cat([phrase_embeddings, grounding_vector, element_wise_mult, sigmoid_attention], dim=-1)
+                phrase_classifier_logits = self.phrase_classifier_1(phrase_classifier_input)
+                phrase_classifier_logits = torch.relu(phrase_classifier_logits)
+                phrase_classifier_logits = self.phrase_classifier_2(phrase_classifier_logits)
+            # Phrase-grounding similarity
+            phrase_grounding_similarity = element_wise_mult.sum(dim=-1)
+            # Output
+            output['sigmoid_attention'] = sigmoid_attention
+            output['phrase_grounding_similarity'] = phrase_grounding_similarity
+            if not skip_phrase_classifier:
+                output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
+        
+        elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER:
+
+            batch_size, K, _ = phrase_embeddings.shape
+
+            X_phrase = self.phrase_proj(phrase_embeddings) # (batch_size, K, transf_d_model)
+            X_image = local_feat.unsqueeze(1).expand(-1, X_phrase.shape[1], -1, -1) # (batch_size, K, num_regions, transf_d_model)
+            X_phrase = X_phrase.unsqueeze(2) # (batch_size, K, 1, transf_d_model)
+            X = torch.cat([X_phrase, X_image], dim=2) # (batch_size, K, num_regions + 1, transf_d_model)
+            X = X.view(-1, self.num_regions + 1, self.transf_d_model) # (batch_size * K, num_regions + 1, transf_d_model)
+
+            if self.apply_positional_encoding:
+                X = self.pe(X)
+
+            X = self.transformer_encoder(X) # (batch_size * K, num_regions + 1, transf_d_model)
+
+            # Phrase grounding attention
+            image_representation = X[:, 1:, :] # (batch_size * K, num_regions, transf_d_model)
+            attention_logits = self.att_proj(image_representation) # (batch_size * K, num_regions, 1)
+            sigmoid_attention = torch.sigmoid(attention_logits) # (batch_size * K, num_regions, 1)
+            sigmoid_attention = sigmoid_attention.view(batch_size, K, self.num_regions) # (batch_size, K, num_regions)
+            
+            # Phrase classifier
+            # (use the first token as the phrase representation)
+            if not skip_phrase_classifier:
+                phrase_representation = X[:, 0, :] # (batch_size * K, transf_d_model)
+                phrase_classifier_logits = self.phrase_classifier(phrase_representation) # (batch_size * K, 1)
+                phrase_classifier_logits = phrase_classifier_logits.view(batch_size, K) # (batch_size, K)
+
+            # Output
+            output['sigmoid_attention'] = sigmoid_attention
+            if not skip_phrase_classifier:
+                output['phrase_classifier_logits'] = phrase_classifier_logits
+
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+            
+            assert global_feat is not None
+
+            # FiLM layers
+            num_facts = phrase_embeddings.shape[1] # K
+            global_feat = global_feat.unsqueeze(1).expand(-1, num_facts, -1) # (batch_size, K, visual_feature_proj_size)
+            global_feat = self.global_film(global_feat, phrase_embeddings) # (batch_size, K, visual_feature_proj_size)
+
+            local_feat = local_feat.unsqueeze(1).expand(-1, num_facts, -1, -1) # (batch_size, K, num_regions, visual_feature_proj_size)
+            phrase_embeddings_ = phrase_embeddings.unsqueeze(2).expand(-1, -1, self.num_regions, -1) # (batch_size, K, num_regions, phrase_embedding_size)
+            local_feat = self.local_film(local_feat, phrase_embeddings_) # (batch_size, K, num_regions, visual_feature_proj_size)
+
+            # Visual grounding
+            global_feat_ = global_feat.unsqueeze(2).expand(-1, -1, self.num_regions, -1) # (batch_size, K, num_regions, visual_feature_proj_size)
+            visual_grounding_input = torch.cat([global_feat_, local_feat], dim=-1) # (batch_size, K, num_regions, 2 * visual_feature_proj_size)
+            visual_grounding_logits = self.visual_grounding_layer_1(visual_grounding_input) # (batch_size, K, num_regions, visual_grounding_hidden_size)
+            visual_grounding_logits = torch.relu(visual_grounding_logits) # (batch_size, K, num_regions, visual_grounding_hidden_size)
+            visual_grounding_logits = self.visual_grounding_layer_2(visual_grounding_logits) # (batch_size, K, num_regions, 1)
+            sigmoid_attention = torch.sigmoid(visual_grounding_logits) # (batch_size, K, num_regions, 1)
+
+            # Weighted average of local features
+            weighted_sum = (sigmoid_attention * local_feat).sum(dim=-2) # (batch_size, K, visual_feature_proj_size)
+            weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-2) + 1e-8)  # (batch_size, K, visual_feature_proj_size)
+            sigmoid_attention = sigmoid_attention.squeeze(-1) # (batch_size, K, num_regions)
+
+            # Phrase classifier
+            if not skip_phrase_classifier:
+                mlp_input = torch.cat([phrase_embeddings, global_feat, weighted_avg, sigmoid_attention], dim=-1)
+                phrase_classifier_logits = self.classifier_mlp(mlp_input) # (batch_size, K, 1)
+
+            # Output
+            output['sigmoid_attention'] = sigmoid_attention
+            # assert sigmoid_attention.shape == (raw_images.shape[0], phrase_embeddings.shape[1], self.num_regions), \
+            #     f'sigmoid_attention.shape: {sigmoid_attention.shape}'
+            if not skip_phrase_classifier:
+                output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
+                # assert output['phrase_classifier_logits'].shape == (raw_images.shape[0], phrase_embeddings.shape[1])
+
+        return output
