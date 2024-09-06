@@ -135,6 +135,9 @@ def _evaluate_model(
         mimiccxr_trainer_kwargs['use_facts_for_test'] = False
         mimiccxr_trainer_kwargs['use_mscxr_for_train'] = False
         mimiccxr_trainer_kwargs['use_mscxr_for_test'] = eval_mscxr
+        mimiccxr_trainer_kwargs['use_cxrlt2024_challenge_split'] = False 
+        mimiccxr_trainer_kwargs['use_cxrlt2024_official_labels'] = False
+        mimiccxr_trainer_kwargs['use_cxrlt2024_custom_labels'] = False
         mimiccxr_trainer_kwargs['use_chest_imagenome_for_train'] = False
         mimiccxr_trainer_kwargs['use_chest_imagenome_gold_for_test'] = eval_chest_imagenome_gold
         if mscxr_phrase2embedding_filepath is not None:

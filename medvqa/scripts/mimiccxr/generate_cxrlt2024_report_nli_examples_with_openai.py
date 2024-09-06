@@ -404,6 +404,7 @@ def sample_queries_label_based(
         mimiccxr_background_findings_and_impression_per_report_filepath,
         already_processed_queries,
         specific_classes=None,
+        specific_dicom_ids_filepath=None,
         pos_weight=0.85, # 85% positive samples by default
     ):
     """
@@ -421,21 +422,35 @@ def sample_queries_label_based(
 
     assert split in ['train', 'dev']
 
-    if split == 'train':
-        train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
-        allowed_study_ids = train_df['study_id'].unique()
-        assert allowed_study_ids[0][0] == 's'
-        allowed_study_ids = set(int(s[1:]) for s in allowed_study_ids) # Remove 's' prefix
-    elif split == 'dev':
-        allowed_study_ids = set(metadata['study_ids'])
-        train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
-        for study_id in train_df['study_id'].unique():
-            study_id = int(study_id[1:]) # Remove 's' prefix
-            if study_id in allowed_study_ids:
-                allowed_study_ids.remove(study_id) # Remove study ID in the train set
-    else: assert False
-    
-    logger.info(f"Loaded {len(allowed_study_ids)} allowed study IDs from the {split} set")
+    if specific_dicom_ids_filepath is not None:
+        assert os.path.exists(specific_dicom_ids_filepath)
+        assert specific_dicom_ids_filepath.endswith('.csv')
+        specific_dicom_ids = pd.read_csv(specific_dicom_ids_filepath)['dicom_id'].values
+        logger.info(f"Loaded {len(specific_dicom_ids)} specific DICOM IDs")
+        specific_dicom_ids = set(specific_dicom_ids)
+        specific_study_ids = set()
+        for dicom_id_view_pos_pairs, study_id in zip(metadata['dicom_id_view_pos_pairs'], metadata['study_ids']):
+            for dicom_id, _ in dicom_id_view_pos_pairs:
+                if dicom_id in specific_dicom_ids:
+                    specific_study_ids.add(study_id)
+                
+        logger.info(f"Found {len(specific_study_ids)} specific study IDs")
+        allowed_study_ids = specific_study_ids # Only use specific study IDs
+    else:
+        if split == 'train':
+            train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+            allowed_study_ids = train_df['study_id'].unique()
+            assert allowed_study_ids[0][0] == 's'
+            allowed_study_ids = set(int(s[1:]) for s in allowed_study_ids) # Remove 's' prefix
+        elif split == 'dev':
+            allowed_study_ids = set(metadata['study_ids'])
+            train_df = pd.read_csv(MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH)
+            for study_id in train_df['study_id'].unique():
+                study_id = int(study_id[1:]) # Remove 's' prefix
+                if study_id in allowed_study_ids:
+                    allowed_study_ids.remove(study_id) # Remove study ID in the train set
+        else: assert False
+        logger.info(f"Loaded {len(allowed_study_ids)} allowed study IDs from the {split} set")
  
     sampled_queries = []
 
@@ -868,6 +883,7 @@ if __name__ == '__main__':
     parser.add_argument("--mimiccxr_background_findings_and_impression_per_report_filepath", type=str, default=None)
     parser.add_argument("--queries_to_skip_filepaths", type=str, nargs="+", default=None)
     parser.add_argument("--specific_classes", type=str, nargs="+", default=None)
+    parser.add_argument("--specific_dicom_ids_filepath", type=str, default=None)
     parser.add_argument("--pos_weight", type=float, default=0.85)
     
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
@@ -945,6 +961,7 @@ if __name__ == '__main__':
             mimiccxr_background_findings_and_impression_per_report_filepath=args.mimiccxr_background_findings_and_impression_per_report_filepath,
             already_processed_queries=already_processed,
             specific_classes=args.specific_classes,
+            specific_dicom_ids_filepath=args.specific_dicom_ids_filepath,
             pos_weight=args.pos_weight,
         )
 

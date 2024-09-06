@@ -3493,6 +3493,7 @@ def _evaluate_model(
         dicom_id_to_pos_neg_facts = tmp['dev'] # use dev set to tune the weights of the ensemble
         dicom_ids = list(dicom_id_to_pos_neg_facts.keys())
         dicom_ids.sort() # sort for reproducibility
+        print(f'len(dicom_ids) = {len(dicom_ids)}')
         
         # Adapt the data to a better format for ensembling
         class_to_labels = [[] for _ in range(len(facts))]

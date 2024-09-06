@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import copy
 import torch
 import torch.nn as nn
@@ -61,6 +62,7 @@ class RawImageEncoding:
     CONVNEXTMODEL__HUGGINGFACE = 'convnextmodel-huggingface'
     RAD_DINO__HUGGINGFACE = 'rad-dino-huggingface'
     CXRMATE_RRG24_UNIFORMER__HUGGINGFACE = 'cxrmate-rrg24-uniformer-huggingface'
+    SIGLIP_HUGGINGFACE = 'siglip-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
 
@@ -84,6 +86,7 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE,
         RawImageEncoding.RAD_DINO__HUGGINGFACE,
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+        RawImageEncoding.SIGLIP_HUGGINGFACE,
     ]
 
 class MultiPurposeVisualModule(nn.Module):
@@ -211,8 +214,8 @@ class MultiPurposeVisualModule(nn.Module):
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
-            assert int(np.sqrt(self.num_regions)) ** 2 == self.num_regions
-            self.num_regions_sqrt = int(np.sqrt(self.num_regions))
+            self.num_regions_sqrt = math.isqrt(self.num_regions)
+            assert self.num_regions_sqrt ** 2 == self.num_regions
         
         if raw_image_encoding in [
             RawImageEncoding.VITMODEL__HUGGINGFACE,
@@ -223,6 +226,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
             RawImageEncoding.RAD_DINO__HUGGINGFACE,
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+            RawImageEncoding.SIGLIP_HUGGINGFACE,
         ]:
             assert huggingface_model_name is not None
         if raw_image_encoding in [
@@ -312,6 +316,8 @@ class MultiPurposeVisualModule(nn.Module):
             return HUGGINGFACE_CONVNEXTMODEL_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
             return HUGGINGFACE_RAD_DINO_GLOBAL_FEAT_SIZE
+        if self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
+            return HUGGINGFACE_SIGLIP_GLOBAL_FEAT_SIZE[self.huggingface_model_name]
         raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
     def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder,
@@ -428,6 +434,10 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_huggingface_siglip_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -683,6 +693,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_RAD_DINO_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
             img_str = HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
+            img_str = HUGGINGFACE_SIGLIP_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -807,6 +819,12 @@ class MultiPurposeVisualModule(nn.Module):
                     self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
                 tmp = self.raw_image_encoder(raw_images)
                 global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state[:, 1:] # remove CLS token
+                if compute_global_features:
+                    global_list.append(global_feat)
+
+            elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
+                tmp = self.raw_image_encoder(raw_images)
+                global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state
                 if compute_global_features:
                     global_list.append(global_feat)
 
@@ -1253,6 +1271,10 @@ _HUGGINGFACE_RAD_DINO_VERSIONS = [
 _HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS = [
     'aehrc/cxrmate-rrg24',
 ]
+_HUGGINGFACE_SIGLIP_VERSIONS = [
+    'google/siglip-base-patch16-224',
+    'google/siglip-so400m-patch14-384',
+]
 
 CLIP_DEFAULT_IMAGE_MEAN_STD = ((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 CLIP_VERSION_2_IMAGE_MEAN_STD = {}
@@ -1293,6 +1315,11 @@ HUGGINGFACE_RAD_DINO_NAMES_2_SHORT = {
 
 HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT = {
     'aehrc/cxrmate-rrg24': 'aehrc/cxrmate-rrg24-uniformer',
+}
+
+HUGGINGFACE_SIGLIP_NAMES_2_SHORT = {
+    'google/siglip-base-patch16-224': 'google/siglip-base-p16-224',
+    'google/siglip-so400m-patch14-384': 'google/siglip-so400m-p14-384',
 }
 
 DETECTRON2_YAML_2_SHORT = {
@@ -1356,6 +1383,11 @@ HUGGINGFACE_VITMODEL_GLOBAL_FEAT_SIZE = 768
 HUGGINGFACE_VITMODEL_LARGE_GLOBAL_FEAT_SIZE = 1024
 HUGGINGFACE_CONVNEXTMODEL_GLOBAL_FEAT_SIZE = 768
 HUGGINGFACE_RAD_DINO_GLOBAL_FEAT_SIZE = 768
+HUGGINGFACE_SIGLIP_GLOBAL_FEAT_SIZE = {
+    'google/siglip-base-patch16-224': 768,
+    'google/siglip-so400m-patch14-384': 1152,
+}
+
 
 HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX = re.compile(r'\bpooler\b')
 
@@ -1401,7 +1433,7 @@ def create_huggingface_vitmodel_feature_extractor(vitmodel_version, pretrained_w
 
 def create_huggingface_convnextmodel_feature_extractor(convnextmodel_version, pretrained_weights_path):
     from transformers import ConvNextModel
-    model = ConvNextModel.from_pretrained(convnextmodel_version, use_auth_token=True)
+    model = ConvNextModel.from_pretrained(convnextmodel_version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 
@@ -1418,6 +1450,14 @@ def create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(version, pretra
     model = AutoModel.from_pretrained(version, trust_remote_code=True)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     model = model.encoder.uniformer # HACK to get the uniformer from the model
+    return model
+
+def create_huggingface_siglip_feature_extractor(version, pretrained_weights_path):
+    from transformers import AutoModel
+    assert version in _HUGGINGFACE_SIGLIP_VERSIONS, f'Unknown Huggingface SigLIP version {version}'
+    model = AutoModel.from_pretrained(version)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    model = model.vision_model # HACK to get the vision model from the model
     return model
 
 def create_detectron2_model(
