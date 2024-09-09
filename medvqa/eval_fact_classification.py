@@ -3707,7 +3707,6 @@ def _evaluate_model(
           eval_mode == _EvalModes.CXRLT_2024_TASK_1_TEST_SUBMISSION__ENSEMBLE or
           eval_mode == _EvalModes.CXRLT_2024_TASK_2_TEST_SUBMISSION__ENSEMBLE or
           eval_mode == _EvalModes.CXRLT_2024_TASK_3_TEST_SUBMISSION__ENSEMBLE):
-
         
         if eval_mode == _EvalModes.CXRLT_2024_TASK_1_DEV_SUBMISSION__ENSEMBLE:
             assert cxrlt2024_task1_dev_submission_csv_paths is not None
@@ -4138,6 +4137,181 @@ class ReportRetrievalVisualizer:
         print_bold('fact_embedding_f1:')
         print(self.metrics['fact_embedding_f1'][i])
 
+class CXRLT2024EnsemblePredictionsInspector:
+    def __init__(self, ensemble_filepath, predictions_filepaths,
+                 cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
+                 gpt4_queries_filepath, background_findings_and_impression_per_report_filepath):
+        # Load ensemble
+        self.ensemble = load_pickle(ensemble_filepath)
+        self.ensemble_class_names = self.ensemble['class_names']
+        self.ensemble_checkpoint_folder_paths = self.ensemble['ensemble_checkpoint_folder_paths']
+        best_method_per_class = self.ensemble['best_method_per_class']
+        
+        # Load predictions
+        self.predictions = []
+        self.prediction_filepaths = predictions_filepaths
+        for i, predictions_filepath in enumerate(predictions_filepaths):
+            results_folder_path = get_results_folder_path(self.ensemble_checkpoint_folder_paths[i])
+            assert predictions_filepath.startswith(results_folder_path), \
+                f'Expected predictions filepath to start with {results_folder_path}, but got {predictions_filepath}'
+            self.predictions.append(load_pickle(predictions_filepath))
+
+        # Load custom data
+        self.custom_data = load_pickle(cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath)
+        dev_custom_data = self.custom_data['dev']
+        class2dicom_ids = [[] for _ in range(len(self.ensemble_class_names))]
+        class2labels = [[] for _ in range(len(self.ensemble_class_names))]
+        for dicom_id, (neg_idxs, pos_idxs) in dev_custom_data.items():
+            for i in neg_idxs:
+                class2dicom_ids[i].append(dicom_id)
+                class2labels[i].append(0)
+            for i in pos_idxs:
+                class2dicom_ids[i].append(dicom_id)
+                class2labels[i].append(1)
+
+        # Load GPT-4 queries
+        self.queries = load_jsonl(gpt4_queries_filepath)
+
+        # Load metadata
+        self.metadata = load_mimiccxr_reports_detailed_metadata(background_findings_and_impression_per_report_filepath=
+                                                                background_findings_and_impression_per_report_filepath)
+
+        # Ensemble the predictions
+        print_bold('Ensembling predictions...')
+        ensemble_dicom_ids = self.predictions[0]['dev_dicom_ids']
+        self.ensemble_dicom_id_to_idx = {dicom_id: i for i, dicom_id in enumerate(ensemble_dicom_ids)}
+        num_images = len(ensemble_dicom_ids)
+        num_classes = len(self.ensemble_class_names)
+        final_probs = np.empty((num_images, num_classes), dtype=float)
+        probs_list = [x['dev_probs'] for x in self.predictions]
+        all_probs = np.stack(probs_list, axis=0) # shape: (num_models, num_images, num_classes)
+
+        self.class_to_metrics = []
+        self.class_to_pos_idxs = []
+        self.class_to_neg_idxs = []
+        self.class_to_pos_probs = []
+        self.class_to_neg_probs = []
+        
+        for i, class_name in enumerate(self.ensemble_class_names):
+            if best_method_per_class[i]['method'] == 'logistic_regression':
+                lr = best_method_per_class[i]['model']
+                final_probs[:, i] = lr.predict_proba(all_probs[:, :, i].T)[:, 1] # probability of positive class
+            else:
+                assert best_method_per_class[i]['method'] == 'weighted_average'
+                weights = best_method_per_class[i]['weights']
+                final_probs[:, i] = np.average(all_probs[:, :, i], axis=0, weights=weights)
+
+            collected_idxs = []
+            collected_probs = []
+            collected_labels = []
+            for dicom_id, label in zip(class2dicom_ids[i], class2labels[i]):
+                idx = self.ensemble_dicom_id_to_idx[dicom_id]
+                collected_idxs.append(idx)
+                collected_probs.append(final_probs[idx, i])
+                collected_labels.append(label)
+            collected_idxs = np.array(collected_idxs)
+            collected_probs = np.array(collected_probs)
+            collected_labels = np.array(collected_labels)
+            positive_idxs = collected_labels == 1
+            
+            pos_collected_indxs = collected_idxs[positive_idxs]
+            pos_collected_probs = collected_probs[positive_idxs]
+            descending_order = np.argsort(pos_collected_probs)[::-1]
+            pos_collected_indxs = pos_collected_indxs[descending_order]
+            pos_collected_probs = pos_collected_probs[descending_order]
+            self.class_to_pos_idxs.append(pos_collected_indxs)
+            self.class_to_pos_probs.append(pos_collected_probs)
+            
+            neg_collected_indxs = collected_idxs[~positive_idxs]
+            neg_collected_probs = collected_probs[~positive_idxs]
+            descending_order = np.argsort(neg_collected_probs)[::-1]
+            neg_collected_indxs = neg_collected_indxs[descending_order]
+            neg_collected_probs = neg_collected_probs[descending_order]
+            self.class_to_neg_idxs.append(neg_collected_indxs)
+            self.class_to_neg_probs.append(neg_collected_probs)
+
+            prcauc = prc_auc_score(collected_labels, collected_probs)
+            rocauc = roc_auc_score(collected_labels, collected_probs)
+            threshold, f1 = best_threshold_and_f1_score(collected_labels, collected_probs)
+            self.class_to_metrics.append({
+                'class_name': class_name,
+                'prcauc': prcauc,
+                'rocauc': rocauc,
+                'f1': f1,
+                'threshold': threshold,
+            })
+
+        self.final_probs = final_probs
+
+        # Sort by PRCAUC and print results
+        decreasing_order = np.argsort([x['prcauc'] for x in self.class_to_metrics])[::-1]
+        self.class_to_metrics = [self.class_to_metrics[i] for i in decreasing_order]
+        self.class_to_pos_idxs = [self.class_to_pos_idxs[i] for i in decreasing_order]
+        self.class_to_neg_idxs = [self.class_to_neg_idxs[i] for i in decreasing_order]
+        self.class_to_pos_probs = [self.class_to_pos_probs[i] for i in decreasing_order]
+        self.class_to_neg_probs = [self.class_to_neg_probs[i] for i in decreasing_order]
+        self.ensemble_class_name_to_idx = {x['class_name']: i for i, x in enumerate(self.class_to_metrics)}
+        self.all_probs = all_probs[:, :, decreasing_order]
+
+        # Print as a table
+        from tabulate import tabulate
+        print(tabulate([[x['class_name'], len(p), len(n), x['prcauc'], x['rocauc'], x['f1'], x['threshold']]\
+                         for (x, p, n) in zip(self.class_to_metrics, self.class_to_pos_idxs, self.class_to_neg_idxs)],
+                          headers=['Class', '#Pos', '#Neg', 'PRCAUC', 'ROCAUC', 'F1', 'Threshold'], tablefmt='orgtbl'))
+
+
+    def display_example(self, class_name, pos, idx):
+        class_idx = self.ensemble_class_name_to_idx[class_name]
+        assert pos in [True, False]
+        class_name = self.class_to_metrics[class_idx]['class_name']
+        if pos:
+            idxs = self.class_to_pos_idxs[class_idx]
+            probs = self.class_to_pos_probs[class_idx]
+        else:
+            idxs = self.class_to_neg_idxs[class_idx]
+            probs = self.class_to_neg_probs[class_idx]
+        i = idxs[idx]
+        prob = probs[idx]
+        dicom_id = self.predictions[0]['dev_dicom_ids'][i]
+        imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+        part_id, patient_id, study_id = imageId2PartPatientStudy[dicom_id]
+        image_path = get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id)
+        print_bold(f'Class: {class_name}, Positive: {pos}, Index: {idx}, Prob: {prob:.4f}, DICOM ID: {dicom_id}')
+        print(f'Image path: {image_path}')
+        plot_images([image_path])
+        print()
+        
+        print('-' * 100)
+        print_bold(f'Probability predicted by each model:')
+        for i, prob in enumerate(self.all_probs[:, i, class_idx]):
+            model_str = self.ensemble_checkpoint_folder_paths[i]
+            model_str = model_str[model_str.index('phrase_grounding'):]
+            print_bold(f'Model {i + 1}: {prob:.4f}', end=''); print(f' (from {model_str})')
+        
+        print('-' * 100)
+        print_bold('Ground truth report:')
+        dicom_id2ridx = get_imageId2reportId()
+        ridx = dicom_id2ridx[dicom_id]
+        report_filepath = self.metadata['filepaths'][ridx]
+        from medvqa.utils.files import read_txt
+        print(read_txt(report_filepath))
+        print()
+        print_bold('Ground truth image paths:')
+        dicom_id_view_pos_pairs = self.metadata['dicom_id_view_pos_pairs'][ridx]
+        image_paths = [get_mimiccxr_medium_image_path(part_id, patient_id, study_id, dicom_id) for dicom_id, _ in dicom_id_view_pos_pairs]
+        print(image_paths)
+        print()
+        plot_images(image_paths)
+
+        print('-' * 100)
+        print_bold('Relevant GPT4 queries:')
+        from medvqa.scripts.mimiccxr.generate_cxrlt2024_report_nli_examples_with_openai import _build_report
+        r = _build_report(self.metadata, ridx)
+        for q in self.queries:
+            if q['metadata']['query'][4:].startswith(r):
+                print(q)
+                print()
+        
 
 def evaluate(
     checkpoint_folder_path,
