@@ -119,11 +119,11 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
         if not train_has_only_nans:
             best_train_score, best_train_i = _agg_fn((a,i) for i,a in enumerate(train_scores))
             ax.hlines(best_train_score, epochs[0], epochs[-1], colors=('green',), linestyles='dashed',
-                    label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i}')
+                    label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i+1}')
         if not val_has_only_nans:
             best_val_score, best_val_i = _agg_fn((a,i) for i,a in enumerate(val_scores))
             ax.hlines(best_val_score, epochs[0], epochs[-1], colors=('red',), linestyles='dashed',
-                    label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i}')
+                    label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i+1}')
         ax.legend()
     
     plt.show()

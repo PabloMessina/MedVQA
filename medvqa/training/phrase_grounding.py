@@ -15,6 +15,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 binary_multilabel_classification_criterion,
                 generic_phrase_classifier_criterion,
                 contrastive_phrase_grounding_criterion,
+                global_image_phrase_contrastive_criterion,
                 threshold_criterion,
                 neg_area_prior,
                 gradient_accumulation_steps=1, # for gradient accumulation
@@ -41,6 +42,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 use_weighted_phrase_classifier_loss=False,
                 use_attention_regularization_loss=False,
                 use_contrastive_phrase_grounding_loss=False,
+                use_global_image_phrase_contrastive_loss=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -88,6 +90,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
 
             # Forward pass
@@ -97,6 +100,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
                 if use_contrastive_phrase_grounding_loss:
                     phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity'] # (batch_size, num_facts)
                 
                 # Compute losses
 
@@ -118,8 +123,20 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     else:
                         contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
                                                                                                 phrase_grounding_similarity_neg)
+                        
+                # 3. global image-phrase contrastive loss
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity_pos = global_alignment_similarity[pos_indices] # (num_positives)
+                    global_alignment_similarity_neg = global_alignment_similarity[neg_indices] # (num_negatives)
+                    global_alignment_similarity_pos = global_alignment_similarity_pos.view(-1)
+                    global_alignment_similarity_neg = global_alignment_similarity_neg.view(-1)
+                    if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                        global_alignment_contrastive_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                      global_alignment_similarity_neg)
 
-                # 3. attention regularization loss
+                # 4. attention regularization loss
                 if use_attention_regularization_loss:
                     areas = sigmoid_attention.mean(dim=-1)
                     areas_pos = areas[pos_indices]
@@ -139,6 +156,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(phrase_classifier_loss)
                     if use_contrastive_phrase_grounding_loss:
                         losses.append(contrastive_phrase_grounding_loss)
+                    if use_global_image_phrase_contrastive_loss:
+                        losses.append(global_alignment_contrastive_loss)
                     if use_attention_regularization_loss:
                         losses.append(attention_regularization_loss)
                     batch_loss = sum(losses)
@@ -158,6 +177,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['gt_labels'] = gt_labels.detach().view(-1)
         if use_contrastive_phrase_grounding_loss:
             output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_global_image_phrase_contrastive_loss:
+            output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
         if use_attention_regularization_loss:
             output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
@@ -178,6 +199,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
 
             # Forward pass
@@ -187,8 +209,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
                 if use_contrastive_phrase_grounding_loss:
                     phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity'] # (batch_size, num_facts)
 
-                if use_contrastive_phrase_grounding_loss or use_attention_regularization_loss:
+                if use_contrastive_phrase_grounding_loss or use_global_image_phrase_contrastive_loss or use_attention_regularization_loss:
                     pos_indices = phrase_classification_labels == 1
                     neg_indices = phrase_classification_labels == 0
 
@@ -209,8 +233,20 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     else:
                         contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
                                                                                                 phrase_grounding_similarity_neg)
+                        
+                # 3. global image-phrase contrastive loss
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity_pos = global_alignment_similarity[pos_indices] # (num_positives)
+                    global_alignment_similarity_neg = global_alignment_similarity[neg_indices] # (num_negatives)
+                    global_alignment_similarity_pos = global_alignment_similarity_pos.view(-1)
+                    global_alignment_similarity_neg = global_alignment_similarity_neg.view(-1)
+                    if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                        global_alignment_contrastive_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                      global_alignment_similarity_neg)
                 
-                # 3. attention regularization loss
+                # 4. attention regularization loss
                 if use_attention_regularization_loss:
                     areas = sigmoid_attention.mean(dim=-1)
                     areas_pos = areas[pos_indices]
@@ -230,6 +266,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(phrase_classifier_loss)
                     if use_contrastive_phrase_grounding_loss:
                         losses.append(contrastive_phrase_grounding_loss)
+                    if use_global_image_phrase_contrastive_loss:
+                        losses.append(global_alignment_contrastive_loss)
                     if use_attention_regularization_loss:
                         losses.append(attention_regularization_loss)
                     batch_loss = sum(losses)
@@ -249,6 +287,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['gt_labels'] = phrase_classification_labels.detach()
         if use_contrastive_phrase_grounding_loss:
             output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_global_image_phrase_contrastive_loss:
+            output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
         if use_attention_regularization_loss:
             output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
@@ -445,6 +485,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'vinbig_forward': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
             if using_yolov8 and yolov8_use_multiple_detection_layers:
                 model_kwargs['yolov8_detection_layer_index'] = vinbig_yolov8_index
@@ -464,6 +505,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     yolov8_features = model_output['yolov8_features']
                     if not training:
                         yolov8_predictions = model_output['yolov8_predictions']
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity']
                 
                 if training:
                     # Compute losses
@@ -507,6 +550,17 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                         vinbig_yolov8_loss /= batch_size
                         losses.append(vinbig_yolov8_loss)
 
+                    # 4. global image-phrase contrastive loss
+                    if use_global_image_phrase_contrastive_loss:
+                        global_alignment_similarity_pos = global_alignment_similarity[phrase_classification_labels == 1]
+                        global_alignment_similarity_neg = global_alignment_similarity[phrase_classification_labels == 0]
+                        if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                            global_alignment_contrastive_loss = torch.tensor(0.0, device=device)
+                        else:
+                            global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                          global_alignment_similarity_neg)
+                        losses.append(global_alignment_contrastive_loss)
+
                     if len(losses) > 0:
                         batch_loss = sum(losses)
                     else:
@@ -536,6 +590,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
                 output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
                 output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+            if use_global_image_phrase_contrastive_loss:
+                output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
         else:
             if using_yolov8:
                 # normalize yolov8 predictions
@@ -574,6 +630,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
 
             # Forward pass
@@ -581,6 +638,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity']
                 
                 if training:
                     # Compute losses
@@ -596,6 +655,17 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                                                                                     foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
+
+                    # 3. global image-phrase contrastive loss
+                    if use_global_image_phrase_contrastive_loss:
+                        global_alignment_similarity_pos = global_alignment_similarity[phrase_classification_labels == 1]
+                        global_alignment_similarity_neg = global_alignment_similarity[phrase_classification_labels == 0]
+                        if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                            global_alignment_contrastive_loss = torch.tensor(0.0, device=device)
+                        else:
+                            global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                          global_alignment_similarity_neg)
+                        losses.append(global_alignment_contrastive_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -617,6 +687,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['loss'] = batch_loss.detach()
         if training:
             output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+            if use_global_image_phrase_contrastive_loss:
+                output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
         output['attention_supervision_loss'] = attention_supervision_loss.detach()
         output['pred_mask'] = sigmoid_attention.detach()
         output['gt_mask'] = phrase_grounding_masks.detach()
@@ -648,6 +720,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
 
             # Forward pass
@@ -657,6 +730,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
                 if use_contrastive_phrase_grounding_loss:
                     phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity']
                 
                 # Compute losses
 
@@ -675,8 +750,20 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     else:
                         contrastive_phrase_grounding_loss = contrastive_phrase_grounding_criterion(phrase_grounding_similarity_pos,
                                                                                                 phrase_grounding_similarity_neg)
+                        
+                # 3. global image-phrase contrastive loss
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity_pos = global_alignment_similarity[pos_indices] # (num_positives)
+                    global_alignment_similarity_neg = global_alignment_similarity[neg_indices] # (num_negatives)
+                    global_alignment_similarity_pos = global_alignment_similarity_pos.view(-1)
+                    global_alignment_similarity_neg = global_alignment_similarity_neg.view(-1)
+                    if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                        global_alignment_contrastive_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                      global_alignment_similarity_neg)
 
-                # 3. attention regularization loss
+                # 4. attention regularization loss
                 if use_attention_regularization_loss:
                     areas = sigmoid_attention.mean(dim=-1)
                     areas_pos = areas[pos_indices]
@@ -696,6 +783,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(phrase_classifier_loss)
                     if use_contrastive_phrase_grounding_loss:
                         losses.append(contrastive_phrase_grounding_loss)
+                    if use_global_image_phrase_contrastive_loss:
+                        losses.append(global_alignment_contrastive_loss)
                     if use_attention_regularization_loss:
                         losses.append(attention_regularization_loss)
                     batch_loss = sum(losses)
@@ -715,6 +804,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['gt_labels'] = gt_labels.detach().view(-1)
         if use_contrastive_phrase_grounding_loss:
             output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
+        if use_global_image_phrase_contrastive_loss:
+            output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
         if use_attention_regularization_loss:
             output['attention_regularization_loss'] = attention_regularization_loss.detach()
 
@@ -743,6 +834,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
+                'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
 
             # Forward pass
@@ -750,6 +842,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity = model_output['global_alignment_similarity']
                 
                 # Compute losses
 
@@ -772,11 +866,25 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                         attention_regularization_loss_neg = (areas_neg - neg_area_prior).abs().mean()
                     attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
 
+                # 3. global image-phrase contrastive loss
+                if use_global_image_phrase_contrastive_loss:
+                    global_alignment_similarity_pos = global_alignment_similarity[pos_indices] # (num_positives)
+                    global_alignment_similarity_neg = global_alignment_similarity[neg_indices] # (num_negatives)
+                    global_alignment_similarity_pos = global_alignment_similarity_pos.view(-1)
+                    global_alignment_similarity_neg = global_alignment_similarity_neg.view(-1)
+                    if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
+                        global_alignment_contrastive_loss = torch.tensor(0.0, device=device) # no positives or negatives
+                    else:
+                        global_alignment_contrastive_loss = global_image_phrase_contrastive_criterion(global_alignment_similarity_pos,
+                                                                                                      global_alignment_similarity_neg)
+
                 if training:
                     losses = []
                     losses.append(phrase_classifier_loss)
                     if use_attention_regularization_loss:
                         losses.append(attention_regularization_loss)
+                    if use_global_image_phrase_contrastive_loss:
+                        losses.append(global_alignment_contrastive_loss)
                     batch_loss = sum(losses)
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
@@ -795,6 +903,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         output['phrase_indices'] = phrase_indices.flatten()
         if use_attention_regularization_loss:
             output['attention_regularization_loss'] = attention_regularization_loss.detach()
+        if use_global_image_phrase_contrastive_loss:
+            output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
 
         return output
     
@@ -845,6 +955,8 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                wbce_loss_weight=None,
                use_attention_regularization_loss=False,
                use_contrastive_phrase_grounding_loss=False,
+               use_global_image_phrase_contrastive_loss=False,
+               nt_xent_temperature=0.1,
             #    **unused_kwargs,
             ):
 
@@ -887,7 +999,10 @@ def get_engine(model, device, gradient_accumulation_steps=1,
     binary_multilabel_classification_criterion = get_binary_multilabel_loss(BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCBCE)
 
     # Contrastive phrase grounding loss
-    contrastive_phrase_grounding_criterion = NTXentLoss(temperature=0.1, device=device)
+    contrastive_phrase_grounding_criterion = NTXentLoss(temperature=nt_xent_temperature, device=device)
+
+    # Global image-phrase contrastive loss
+    global_image_phrase_contrastive_criterion = NTXentLoss(temperature=nt_xent_temperature, device=device)
 
     # Threshold loss
     threshold_criterion = ThresholdLoss(pos_area_prior)
@@ -914,6 +1029,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             binary_multilabel_classification_criterion=binary_multilabel_classification_criterion,
                             generic_phrase_classifier_criterion=generic_phrase_classifier_criterion,
                             contrastive_phrase_grounding_criterion=contrastive_phrase_grounding_criterion,
+                            global_image_phrase_contrastive_criterion=global_image_phrase_contrastive_criterion,
                             threshold_criterion=threshold_criterion,
                             neg_area_prior=neg_area_prior,
                             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -938,6 +1054,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             use_weighted_phrase_classifier_loss=use_weighted_phrase_classifier_loss,
                             use_attention_regularization_loss=use_attention_regularization_loss,
                             use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
+                            use_global_image_phrase_contrastive_loss=use_global_image_phrase_contrastive_loss,
                         )
     engine = Engine(step_fn)
     return engine

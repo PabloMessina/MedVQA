@@ -93,6 +93,7 @@ class _EvalModes:
     MIMICCXR_TEST_SET_LABEL_BASED = 'mimiccxr_test_set_label_based'
     MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'mimiccxr_test_set_label_based__template_based_report_gen'
     MIMICCXR_TEST_SET_FACT_RANKING = 'mimiccxr_test_set_fact_ranking'
+    MSCXR_FACT_RANKING = 'mscxr_fact_ranking'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'interpret_cxr_test_public_label_based__template_based_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN = 'interpret_cxr_test_public_label_based__generate_jsons_for_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN = 'interpret_cxr_test_public_label_based__json_to_gpt_report_gen'
@@ -119,6 +120,7 @@ class _EvalModes:
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED,
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING,
+            _EvalModes.MSCXR_FACT_RANKING,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__JSON_TO_GPT_REPORT_GEN,
@@ -188,6 +190,7 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_task2_test_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--cxrlt2024_task3_test_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--ensemble_filepath', type=str, default=None)
+    parser.add_argument('--rank_facts_using_global_alignment', action='store_true')
 
     return parser.parse_args(args=args)
 
@@ -822,7 +825,8 @@ def _evaluate_interpret_cxr_test_public__generic_report_gen(
         to_save_kwargs=to_save_kwargs,
     )
 
-def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_folder_path, batch_size, num_workers, device):
+def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_folder_path, batch_size, num_workers, device,
+                                                      extract_global_alignment_features=False):
 
     # device
     device = torch.device(device)
@@ -834,6 +838,8 @@ def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_fo
 
     # Create model
     print('Creating instance of PhraseGrounder ...')
+    if 'predict_global_alignment' not in model_kwargs: # backward compatibility
+        model_kwargs['predict_global_alignment'] = False
     model = PhraseGrounder(**model_kwargs)
     model = model.to(device)
 
@@ -863,30 +869,42 @@ def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_fo
     # Run inference
     from medvqa.models.phrase_grounding.phrase_grounder import PhraseGroundingMode
     
-    image_local_features = []
-    use_global_features = model.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER
-    if use_global_features:
+    if extract_global_alignment_features:
         image_global_features = []
+    else:
+        image_local_features = []
+        use_global_features = model.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER
+        if use_global_features:
+            image_global_features = []
 
     print_blue('Running inference ...', bold=True)
     model.eval()
     with torch.no_grad():
         for batch in tqdm(dataloader, total=len(dataloader), mininterval=2):
             images = batch['i'].to(device)
-            model_output = model.compute_image_features(raw_images=images)
-            local_features = model_output['local_feat']
-            image_local_features.append(local_features.cpu())
-            if use_global_features:
+            model_output = model.compute_image_features(raw_images=images,
+                                                        only_global_alignment_features=extract_global_alignment_features)
+            if extract_global_alignment_features:
                 global_features = model_output['global_feat']
                 image_global_features.append(global_features.cpu())
+            else:
+                local_features = model_output['local_feat']
+                image_local_features.append(local_features.cpu())
+                if use_global_features:
+                    global_features = model_output['global_feat']
+                    image_global_features.append(global_features.cpu())
 
-    image_local_features = torch.cat(image_local_features, dim=0)
-    if use_global_features:
+    if extract_global_alignment_features:
         image_global_features = torch.cat(image_global_features, dim=0)
-
-    print('image_local_features.shape =', image_local_features.shape)
-    if use_global_features:
         print('image_global_features.shape =', image_global_features.shape)
+    else:
+        image_local_features = torch.cat(image_local_features, dim=0)
+        if use_global_features:
+            image_global_features = torch.cat(image_global_features, dim=0)
+
+        print('image_local_features.shape =', image_local_features.shape)
+        if use_global_features:
+            print('image_global_features.shape =', image_global_features.shape)
 
     # Release memory
     del model
@@ -895,10 +913,15 @@ def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_fo
     gc.collect()
 
     # Return
-    return {
-        'image_local_features': image_local_features,
-        'image_global_features': image_global_features if use_global_features else None,
-    }
+    if extract_global_alignment_features:
+        return {
+            'image_global_features': image_global_features,
+        }
+    else:
+        return {
+            'image_local_features': image_local_features,
+            'image_global_features': image_global_features if use_global_features else None,
+        }
     
 
 def _run_inference_for_label_based_fact_classification_on_images(
@@ -1275,6 +1298,7 @@ def _evaluate_model(
     cxrlt2024_task2_test_submission_csv_paths,
     cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
+    rank_facts_using_global_alignment,
 ):
     count_print = CountPrinter()
 
@@ -1545,7 +1569,8 @@ def _evaluate_model(
                 strings=strings_,
             )
 
-    elif eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
+    elif eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING or\
+         eval_mode == _EvalModes.MSCXR_FACT_RANKING:
 
         assert mimiccxr_integrated_report_facts_filepath is not None
 
@@ -1562,6 +1587,12 @@ def _evaluate_model(
         all_facts = sorted(list(all_facts))
         print('len(all_facts) =', len(all_facts))
 
+        # Load MS-CXR dicom_ids
+        if eval_mode == _EvalModes.MSCXR_FACT_RANKING:
+            from medvqa.datasets.ms_cxr import MS_CXR_LOCAL_ALIGNMENT_CSV_PATH
+            df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+            mscxr_dicom_ids = set(df['dicom_id'])
+
         # Collect facts and images per report
         print_blue('Collecting facts and images per report ...', bold=True)
         ridx2facts = {}
@@ -1570,15 +1601,28 @@ def _evaluate_model(
             mimiccxr_metadata['part_ids'], mimiccxr_metadata['subject_ids'], mimiccxr_metadata['study_ids'],
             mimiccxr_metadata['dicom_id_view_pos_pairs'], mimiccxr_metadata['splits'],
         )):
-            if split == 'test':
-                image_paths = []
-                for dicom_id, view_pos in dicom_id_view_pos_pairs:
-                    image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
-                    assert os.path.exists(image_path)
-                    image_paths.append((image_path, view_pos))
-                ridx2image_paths[ridx] = image_paths
-                facts = mimiccxr_integrated_report_facts[ridx]['facts']
-                ridx2facts[ridx] = facts
+            if eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
+                if split == 'test':
+                    image_paths = []
+                    for dicom_id, view_pos in dicom_id_view_pos_pairs:
+                        image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
+                        assert os.path.exists(image_path)
+                        image_paths.append((image_path, view_pos))
+                    ridx2image_paths[ridx] = image_paths
+                    facts = mimiccxr_integrated_report_facts[ridx]['facts']
+                    ridx2facts[ridx] = facts
+            elif eval_mode == _EvalModes.MSCXR_FACT_RANKING:
+                if any(dicom_id in mscxr_dicom_ids for dicom_id, _ in dicom_id_view_pos_pairs):
+                    image_paths = []
+                    for dicom_id, view_pos in dicom_id_view_pos_pairs:
+                        image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
+                        assert os.path.exists(image_path)
+                        image_paths.append((image_path, view_pos))
+                    ridx2image_paths[ridx] = image_paths
+                    facts = mimiccxr_integrated_report_facts[ridx]['facts']                    
+                    ridx2facts[ridx] = facts
+            else: assert False
+
         print('len(ridx2facts) =', len(ridx2facts))
         print('len(ridx2image_paths) =', len(ridx2image_paths))
 
@@ -1595,11 +1639,16 @@ def _evaluate_model(
             batch_size=image_batch_size,
             num_workers=num_workers,
             device=device,
+            extract_global_alignment_features=rank_facts_using_global_alignment,
         )
-        image_local_features = tmp['image_local_features']
-        image_global_features = tmp['image_global_features']
-        print('image_local_features.shape =', image_local_features.shape)
-        print('image_global_features.shape =', image_global_features.shape)
+        if rank_facts_using_global_alignment:
+            image_global_features = tmp['image_global_features']
+            print('image_global_features.shape =', image_global_features.shape)
+        else:
+            image_local_features = tmp['image_local_features']
+            image_global_features = tmp['image_global_features']
+            print('image_local_features.shape =', image_local_features.shape)
+            print('image_global_features.shape =', image_global_features.shape)
 
         # Then compute fact embeddings
         print_blue('Computing fact embeddings ...', bold=True)
@@ -1672,22 +1721,32 @@ def _evaluate_model(
             image_paths = ridx2image_paths[ridx]
             image_idxs = [ip2idx[ip] for ip, _ in image_paths]
             for j, image_idx in enumerate(image_idxs):
-                local_feat = image_local_features[image_idx] # (num_regions, local_feat_dim)
-                local_feat = local_feat.unsqueeze(0) # (1, num_regions, local_feat_dim)
-                if image_global_features is not None:
+
+                if rank_facts_using_global_alignment:
                     global_feat = image_global_features[image_idx] # (global_feat_dim,)
                     global_feat = global_feat.unsqueeze(0) # (1, global_feat_dim)
+                else:
+                    local_feat = image_local_features[image_idx] # (num_regions, local_feat_dim)
+                    local_feat = local_feat.unsqueeze(0) # (1, num_regions, local_feat_dim)
+                    if image_global_features is not None:
+                        global_feat = image_global_features[image_idx] # (global_feat_dim,)
+                        global_feat = global_feat.unsqueeze(0) # (1, global_feat_dim)
                 
                 with torch.no_grad():
 
-                    local_feat = local_feat.to(device)
-                    if image_global_features is not None:
+                    if rank_facts_using_global_alignment:
                         global_feat = global_feat.to(device)
                     else:
-                        global_feat = None
+                        local_feat = local_feat.to(device)
+                        if image_global_features is not None:
+                            global_feat = global_feat.to(device)
+                        else:
+                            global_feat = None
+                    
                     num_batches = num_facts_per_report // fact_embedding_batch_size
                     if num_facts_per_report % fact_embedding_batch_size != 0:
                         num_batches += 1
+                    
                     logits = []
                     for i in range(num_batches):
                         start = i * fact_embedding_batch_size
@@ -1695,14 +1754,24 @@ def _evaluate_model(
                         assert start < end
                         merged_fact_embeddings_ = merged_fact_embeddings_tensor[start:end]
                         merged_fact_embeddings_ = merged_fact_embeddings_.unsqueeze(0) # (1, end-start, fact_embedding_dim)
-                        phrase_classifier_logits = model.forward_with_precomputed_image_features(
-                            local_feat=local_feat, global_feat=global_feat,
-                            phrase_embeddings=merged_fact_embeddings_,
-                        )['phrase_classifier_logits']
-                        logits.append(phrase_classifier_logits)
+                        if rank_facts_using_global_alignment:
+                            batch_logits = model.compute_global_alignment_similarity_with_precomputed_features(
+                                global_feat=global_feat,
+                                phrase_embeddings=merged_fact_embeddings_,
+                            )
+                        else:
+                            batch_logits = model.forward_with_precomputed_image_features(
+                                local_feat=local_feat, global_feat=global_feat,
+                                phrase_embeddings=merged_fact_embeddings_,
+                            )['phrase_classifier_logits']
+                        logits.append(batch_logits)
                     logits = torch.cat(logits, dim=1) # (1, num_facts_per_report)
-                    probs = torch.sigmoid(logits)
-                    probs = probs.cpu().numpy().flatten()
+                    logits = logits.squeeze(0) # (num_facts_per_report,)
+                    if rank_facts_using_global_alignment:
+                        probs = torch.sigmoid(logits / 0.1) # temperature scaling
+                    else:
+                        probs = torch.sigmoid(logits)
+                    probs = probs.cpu().numpy()
                     rocauc = roc_auc_score(relevant_labels, probs) # ROC AUC
                     sorted_idxs = np.argsort(probs)[::-1]
                     results.append({
@@ -1719,15 +1788,21 @@ def _evaluate_model(
         print('skipped =', skipped)
         print('len(results) =', len(results))
 
-        print_magenta(f'Average ROC AUC = {np.mean([x["rocauc"] for x in results])}')
+        print_magenta(f'Average ROC AUC = {np.mean([x["rocauc"] for x in results])}', bold=True)
 
         # Save results
+        if eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
+            prefix = 'mimiccxr_test_set_fact_ranking'
+        elif eval_mode == _EvalModes.MSCXR_FACT_RANKING:
+            prefix = 'mscxr_fact_ranking'
+        else: assert False
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         results_save_path = get_file_path_with_hashing_if_too_long(
             folder_path=results_folder_path,
-            prefix='mimiccxr_test_set_fact_ranking',
+            prefix=prefix,
             strings=[
                 f'num_facts_per_report={num_facts_per_report}',
+                f'rank_facts_using_global_alignment={rank_facts_using_global_alignment}',
             ],
             force_hashing=True,
         )
@@ -4360,6 +4435,7 @@ def evaluate(
     cxrlt2024_task2_test_submission_csv_paths,
     cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
+    rank_facts_using_global_alignment,
 ):
     print_blue('----- Evaluating model -----', bold=True)
 
@@ -4420,6 +4496,7 @@ def evaluate(
         cxrlt2024_task2_test_submission_csv_paths=cxrlt2024_task2_test_submission_csv_paths,
         cxrlt2024_task3_test_submission_csv_paths=cxrlt2024_task3_test_submission_csv_paths,
         ensemble_filepath=ensemble_filepath,
+        rank_facts_using_global_alignment=rank_facts_using_global_alignment,
     )
 
 if __name__ == '__main__':

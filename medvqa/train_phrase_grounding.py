@@ -91,6 +91,8 @@ def parse_args(args=None):
     parser.add_argument('--visual_feature_proj_size', type=int, default=None)
     parser.add_argument('--visual_grounding_hidden_size', type=int, default=None)
     parser.add_argument('--phrase_mlp_hidden_dims', nargs='+', type=int, default=None)
+    parser.add_argument('--predict_global_alignment', action='store_true', default=False)
+    parser.add_argument('--alignment_proj_size', type=int, default=None)
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -118,6 +120,7 @@ def parse_args(args=None):
     parser.add_argument('--cluster_and_label_weights_for_facts_filepath', type=str, default=None)
     parser.add_argument('--use_attention_regularization_loss', action='store_true', default=False)
     parser.add_argument('--use_contrastive_phrase_grounding_loss', action='store_true', default=False)
+    parser.add_argument('--nt_xent_temperature', type=float, default=0.1)
 
     # Dataset and dataloading arguments
     parser.add_argument('--num_train_workers', type=int, default=0, help='Number of workers for train dataloader')
@@ -248,6 +251,7 @@ def train_model(
     use_iuxray_for_test = iuxray_trainer_kwargs is not None and iuxray_trainer_kwargs.get('do_test', False)
     use_attention_regularization_loss = trainer_engine_kwargs['use_attention_regularization_loss']
     use_contrastive_phrase_grounding_loss = trainer_engine_kwargs['use_contrastive_phrase_grounding_loss']
+    use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']    
 
     # Sanity checks
     if use_chest_imagenome_gold_for_test:
@@ -597,6 +601,8 @@ def train_model(
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'mimfg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'mimfg_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'mimfg_gac_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mimfg_phrcls_loss')
             attach_condition_aware_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'mimfg_prc_auc', _cond_func)
         if in_val:
@@ -604,6 +610,8 @@ def train_model(
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'mimfg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'mimfg_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(validator_engine, 'global_alignment_contrastive_loss', _cond_func, 'mimfg_gac_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'mimfg_phrcls_loss')
             attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'mimfg_prc_auc', _cond_func)
         # for logging
@@ -611,6 +619,8 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_att_reg_loss', train=in_train, val=in_val)
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_cpg_loss', train=in_train, val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_gac_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_phrcls_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=in_train, val=in_val)
     
@@ -670,6 +680,8 @@ def train_model(
             attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'vbg_y8_dfl_loss')
         attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
         attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+        if use_global_alignment_contrastive_loss:
+            attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'vbg_gac_loss')
         if use_vinbig_for_test:
             if use_yolov8:
                 attach_condition_aware_vinbig_bbox_iou(
@@ -682,6 +694,8 @@ def train_model(
             metrics_to_print.append('vbg_y8_cls_loss')
             metrics_to_print.append('vbg_y8_dfl_loss')
         metrics_to_print.append('vbg_phrcls_loss')
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_gac_loss', train=True, val=False)
         if use_vinbig_for_test:
             if use_yolov8:
                 append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_y8_bbox_iou', train=False)
@@ -714,6 +728,8 @@ def train_model(
             attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'cl_segmask_iou', _cond_func)
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cl_phrcls_loss')
             attach_condition_aware_accuracy(trainer_engine, 'pred_labels', 'gt_labels', 'cl_phrase_acc', _cond_func)
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'cl_gac_loss')
         if in_val:
             attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'cl_att_sup_loss')
             attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'cl_segmask_iou', _cond_func)
@@ -723,6 +739,8 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_segmask_iou', train=in_train, val=in_val)
         metrics_to_print.append('cl_phrcls_loss')
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_phrase_acc', train=in_train, val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_gac_loss', train=in_train, val=False)
 
     if use_chexpert:
         _cond_func = lambda x: x['flag'] == 'chxp'
@@ -733,6 +751,8 @@ def train_model(
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'chxp_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'chxp_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'chxp_gac_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'chxp_phrcls_loss')
             attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', None, 'chxp_prc_auc', _cond_func)
         if in_val:
@@ -740,6 +760,8 @@ def train_model(
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'chxp_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'chxp_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(validator_engine, 'global_alignment_contrastive_loss', _cond_func, 'chxp_gac_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'chxp_phrcls_loss')
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None, 'chxp_prc_auc', _cond_func)
         # for logging
@@ -747,6 +769,8 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_att_reg_loss', train=in_train, val=in_val)
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_cpg_loss', train=in_train, val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_gac_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_phrcls_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_prc_auc', train=in_train, val=in_val)
 
@@ -759,6 +783,8 @@ def train_model(
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'iufg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(trainer_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'iufg_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'iufg_gac_loss')
             attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'iufg_phrcls_loss')
             attach_condition_aware_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'iufg_prc_auc', _cond_func)
         if in_val:
@@ -766,6 +792,8 @@ def train_model(
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'iufg_att_reg_loss')
             if use_contrastive_phrase_grounding_loss:                
                 attach_condition_aware_loss(validator_engine, 'contrastive_phrase_grounding_loss', _cond_func, 'iufg_cpg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(validator_engine, 'global_alignment_contrastive_loss', _cond_func, 'iufg_gac_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'iufg_phrcls_loss')
             attach_condition_aware_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'iufg_prc_auc', _cond_func)
         # for logging
@@ -773,6 +801,8 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_att_reg_loss', train=in_train, val=in_val)
         if use_contrastive_phrase_grounding_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_cpg_loss', train=in_train, val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_gac_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_phrcls_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_prc_auc', train=in_train, val=in_val)
 
@@ -784,6 +814,8 @@ def train_model(
         attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024c_phrcls_loss')
         attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', 'phrase_indices',
                                                       'cxrlt2024c_prc_auc', _cond_func)
+        if use_global_alignment_contrastive_loss:
+            attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'cxrlt2024c_gac_loss')
     
         # Validation
         in_val = not use_cxrlt2024_official_labels or mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training
@@ -793,9 +825,13 @@ def train_model(
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024c_phrcls_loss')
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', 'phrase_indices',
                                                         'cxrlt2024c_prc_auc', _cond_func)
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(validator_engine, 'global_alignment_contrastive_loss', _cond_func, 'cxrlt2024c_gac_loss')
         # for logging
         if use_attention_regularization_loss:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_att_reg_loss', val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_gac_loss', val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_phrcls_loss', val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_prc_auc', val=in_val)
 
@@ -804,6 +840,8 @@ def train_model(
         # Train
         if use_attention_regularization_loss:
             attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
+        if use_global_alignment_contrastive_loss:
+            attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'cxrlt2024o_gac_loss')
         attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
         attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'classifier_sigmoids', 'gt_labels', None,
                                                       'cxrlt2024o_prc_auc', _cond_func)
@@ -813,12 +851,16 @@ def train_model(
         if in_val:
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(validator_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(validator_engine, 'global_alignment_contrastive_loss', _cond_func, 'cxrlt2024o_gac_loss')
             attach_condition_aware_loss(validator_engine, 'phrase_classifier_loss', _cond_func, 'cxrlt2024o_phrcls_loss')
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'classifier_sigmoids', 'gt_labels', None,
                                                         'cxrlt2024o_prc_auc', _cond_func)
         # for logging
         if use_attention_regularization_loss:
             metrics_to_print.append('cxrlt2024o_att_reg_loss')
+        if use_global_alignment_contrastive_loss:
+            metrics_to_print.append('cxrlt2024o_gac_loss')
         metrics_to_print.append('cxrlt2024o_phrcls_loss')
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024o_prc_auc', val=in_val)
 
@@ -901,6 +943,8 @@ def train_from_scratch(
     visual_feature_proj_size,
     visual_grounding_hidden_size,
     phrase_mlp_hidden_dims,
+    predict_global_alignment,
+    alignment_proj_size,
     # Optimizer args
     optimizer_name,
     lr,
@@ -992,6 +1036,7 @@ def train_from_scratch(
     cluster_and_label_weights_for_facts_filepath,
     use_attention_regularization_loss,
     use_contrastive_phrase_grounding_loss,
+    nt_xent_temperature,
     # Variable traning args
     epochs,
     batches_per_epoch,
@@ -1055,6 +1100,8 @@ def train_from_scratch(
         # Aux tasks
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
+        predict_global_alignment=predict_global_alignment,
+        alignment_proj_size=alignment_proj_size,
         # Other
         apply_positional_encoding=not comes_with_positional_encoding(raw_image_encoding), # apply PE only if not comes with PE
         phrase_embedding_size=phrase_embedding_size,
@@ -1272,6 +1319,8 @@ def train_from_scratch(
         # other loss args
         use_attention_regularization_loss=use_attention_regularization_loss,
         use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
+        use_global_image_phrase_contrastive_loss=predict_global_alignment,
+        nt_xent_temperature=nt_xent_temperature,
     )
 
     validator_engine_kwargs = dict(
@@ -1287,6 +1336,8 @@ def train_from_scratch(
         # other loss args
         use_attention_regularization_loss=use_attention_regularization_loss,
         use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
+        use_global_image_phrase_contrastive_loss=predict_global_alignment,
+        nt_xent_temperature=nt_xent_temperature,
     )
 
     return train_model(

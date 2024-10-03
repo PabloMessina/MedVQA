@@ -42,6 +42,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             # Auxiliary tasks
             predict_bboxes_chest_imagenome,
             predict_bboxes_vinbig,
+            predict_global_alignment, # Align the global features with the phrase embeddings
             # Other
             apply_positional_encoding,
             phrase_embedding_size,
@@ -52,6 +53,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             phrase_grounding_mode=PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER,
             image_encoder_dropout_p=0,
             huggingface_model_name=None,
+            alignment_proj_size=None,
             # FiLM-based approach's hyperparameters
             visual_feature_proj_size=None,
             visual_grounding_hidden_size=None,
@@ -93,6 +95,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
         self.phrase_embedding_size = phrase_embedding_size
         self.phrase_grounding_mode = phrase_grounding_mode
         self.use_global_features = False # false by default, but can be set to true in the FiLM-based approach
+        self.predict_global_alignment = predict_global_alignment
+        self.alignment_proj_size = alignment_proj_size
+
+        if predict_global_alignment:
+            assert self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER, \
+                'predict_global_alignment is only supported in the FiLM-based approach'
 
         if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
             assert qkv_size is not None
@@ -172,12 +180,18 @@ class PhraseGrounder(MultiPurposeVisualModule):
                                       out_dim=1, # true or false (binary classification)
                                       hidden_dims=phrase_mlp_hidden_dims)
             self.use_global_features = True
+            
             # Init positional encoding
             self.apply_positional_encoding = apply_positional_encoding
             if self.apply_positional_encoding:
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
                 print_orange('Using positional encoding for local features')
 
+            # Init alignment projection layers
+            if predict_global_alignment:
+                assert alignment_proj_size is not None
+                self.global_vf_align_proj = nn.Linear(self.global_feat_size, alignment_proj_size)
+                self.phrase_emb_align_proj = nn.Linear(phrase_embedding_size, alignment_proj_size)
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {phrase_grounding_mode}')
 
@@ -205,6 +219,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         phrase_embeddings, # (batch_size, K, phrase_embedding_size)
         only_compute_features=False,
         skip_phrase_classifier=False,
+        compute_global_alignment=False,
         yolov8_detection_layer_index=None,
         mimiccxr_forward=False,
         vinbig_forward=False,
@@ -298,8 +313,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
 
         elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
 
-            global_feat = output['global_feat'] # (batch_size, global_feat_size)
-            global_feat = self.global_proj(global_feat) # (batch_size, visual_feature_proj_size)
+            orig_global_feat = output['global_feat'] # (batch_size, global_feat_size)
+            global_feat = self.global_proj(orig_global_feat) # (batch_size, visual_feature_proj_size)
             
             if self.apply_positional_encoding:
                 local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
@@ -334,17 +349,28 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 mlp_input = torch.cat([phrase_embeddings, global_feat, weighted_avg, sigmoid_attention], dim=-1)
                 phrase_classifier_logits = self.classifier_mlp(mlp_input) # (batch_size, K, 1)
 
+            # Global alignment
+            if compute_global_alignment:
+                assert self.predict_global_alignment
+                global_feat_align = self.global_vf_align_proj(orig_global_feat) # (batch_size, alignment_proj_size)
+                phrase_emb_align = self.phrase_emb_align_proj(phrase_embeddings) # (batch_size, K, alignment_proj_size)
+                # normalize
+                global_feat_align = torch.nn.functional.normalize(global_feat_align, p=2, dim=-1) # (batch_size, alignment_proj_size)
+                phrase_emb_align = torch.nn.functional.normalize(phrase_emb_align, p=2, dim=-1) # (batch_size, K, alignment_proj_size)
+                # cosine similarity
+                element_wise_mult = global_feat_align.unsqueeze(1) * phrase_emb_align # (batch_size, K, alignment_proj_size)
+                global_alignment_similarity = element_wise_mult.sum(dim=-1) # (batch_size, K)
+
             # Output
             output['sigmoid_attention'] = sigmoid_attention
-            # assert sigmoid_attention.shape == (raw_images.shape[0], phrase_embeddings.shape[1], self.num_regions), \
-            #     f'sigmoid_attention.shape: {sigmoid_attention.shape}'
             if not skip_phrase_classifier:
                 output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
-                # assert output['phrase_classifier_logits'].shape == (raw_images.shape[0], phrase_embeddings.shape[1])
+            if compute_global_alignment:
+                output['global_alignment_similarity'] = global_alignment_similarity
 
         return output
     
-    def compute_image_features(self, raw_images):
+    def compute_image_features(self, raw_images, only_global_alignment_features=False):
         # Visual Component
         output = super().forward(
             raw_images=raw_images,
@@ -352,6 +378,14 @@ class PhraseGrounder(MultiPurposeVisualModule):
             return_global_features=self.use_global_features,
             only_compute_features=True,
         )
+        
+        if only_global_alignment_features:
+            assert self.predict_global_alignment
+            global_feat = output['global_feat']
+            global_feat = self.global_vf_align_proj(global_feat) # (batch_size, alignment_proj_size)
+            global_feat = torch.nn.functional.normalize(global_feat, p=2, dim=-1) # (batch_size, alignment_proj_size)
+            return { 'global_feat': global_feat }
+
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
 
         if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
@@ -500,3 +534,21 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 # assert output['phrase_classifier_logits'].shape == (raw_images.shape[0], phrase_embeddings.shape[1])
 
         return output
+    
+    def compute_global_alignment_similarity_with_precomputed_features(
+        self,
+        global_feat, # (batch_size, alignment_proj_size) -> it's assumed to be already projected and normalized
+        phrase_embeddings, # (batch_size, K, phrase_embedding_size)
+    ):
+        assert global_feat.ndim == 2
+        assert phrase_embeddings.ndim == 3
+        assert global_feat.shape[0] == phrase_embeddings.shape[0]
+        assert global_feat.shape[1] == self.alignment_proj_size
+        assert phrase_embeddings.shape[2] == self.phrase_embedding_size
+
+        phrase_emb_align = self.phrase_emb_align_proj(phrase_embeddings) # (batch_size, K, alignment_proj_size)
+        phrase_emb_align = torch.nn.functional.normalize(phrase_emb_align, p=2, dim=-1) # (batch_size, K, alignment_proj_size)
+        # cosine similarity
+        element_wise_mult = global_feat.unsqueeze(1) * phrase_emb_align
+        global_alignment_similarity = element_wise_mult.sum(dim=-1)
+        return global_alignment_similarity # (batch_size, K)
