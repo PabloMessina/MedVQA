@@ -1,9 +1,8 @@
 import  os
 import argparse
-
 import torch
+import shlex
 
-from medvqa.datasets.chest_imagenome import get_chest_imagenome_gold_class_mask
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpertPhraseGroundingTrainer, CheXpertTrainingMode
 from medvqa.datasets.iuxray.iuxray_phrase_grounding_dataset_management import IUXRayPhraseGroundingTrainer
@@ -181,6 +180,7 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_official_training_labels_for_fact_classification_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true', default=False)
+    parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true', default=False)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -251,7 +251,9 @@ def train_model(
     use_iuxray_for_test = iuxray_trainer_kwargs is not None and iuxray_trainer_kwargs.get('do_test', False)
     use_attention_regularization_loss = trainer_engine_kwargs['use_attention_regularization_loss']
     use_contrastive_phrase_grounding_loss = trainer_engine_kwargs['use_contrastive_phrase_grounding_loss']
-    use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']    
+    use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']
+    do_visual_grounding_with_bbox_regression = trainer_engine_kwargs['do_visual_grounding_with_bbox_regression']
+
 
     # Sanity checks
     if use_chest_imagenome_gold_for_test:
@@ -624,38 +626,52 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_phrcls_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mimfg_prc_auc', train=in_train, val=in_val)
     
-    if use_chest_imagenome_for_train:
-        if use_yolov8: # TODO: eventually support other bbox predictors
-            _cond_func = lambda x: x['flag'] == 'cibg'
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'cibg_y8_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'cibg_y8_box_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'cibg_y8_cls_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'cibg_y8_dfl_loss')
-            if use_chest_imagenome_gold_for_test:
-                _gold_class_mask = get_chest_imagenome_gold_class_mask()
-                attach_condition_aware_chest_imagenome_bbox_iou(
-                    validator_engine, _cond_func, use_yolov8=True, class_mask=_gold_class_mask, metric_name='cibg_y8_bbox_iou')
-            # for logging
-            metrics_to_print.append('cibg_y8_loss')
-            metrics_to_print.append('cibg_y8_box_loss')
-            metrics_to_print.append('cibg_y8_cls_loss')
-            metrics_to_print.append('cibg_y8_dfl_loss')
-            if use_chest_imagenome_gold_for_test:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
+    # if use_chest_imagenome_for_train:
+        # if use_yolov8: # TODO: eventually support other bbox predictors
+        #     _cond_func = lambda x: x['flag'] == 'cibg'
+        #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'cibg_y8_loss')
+        #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'cibg_y8_box_loss')
+        #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'cibg_y8_cls_loss')
+        #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'cibg_y8_dfl_loss')
+        #     if use_chest_imagenome_gold_for_test:
+        #         _gold_class_mask = get_chest_imagenome_gold_class_mask()
+        #         attach_condition_aware_chest_imagenome_bbox_iou(
+        #             validator_engine, _cond_func, use_yolov8=True, class_mask=_gold_class_mask, metric_name='cibg_y8_bbox_iou')
+        #     # for logging
+        #     metrics_to_print.append('cibg_y8_loss')
+        #     metrics_to_print.append('cibg_y8_box_loss')
+        #     metrics_to_print.append('cibg_y8_cls_loss')
+        #     metrics_to_print.append('cibg_y8_dfl_loss')
+        #     if use_chest_imagenome_gold_for_test:
+        #         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
 
     if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
         _cond_func = lambda x: x['flag'] == 'cibg'
         in_train = use_chest_imagenome_for_train
         in_val = use_chest_imagenome_gold_for_test
         if in_train:
-            attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'cibg_att_sup_loss')
-            attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'cibg_segmask_iou', _cond_func)
+            if do_visual_grounding_with_bbox_regression:
+                attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'cibg_att_sup_loss')
+                attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'cibg_vgbbox_loss')
+            else:
+                attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'cibg_att_sup_loss')
+                attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'cibg_segmask_iou', _cond_func)
         if in_val:
-            attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'cibg_att_sup_loss')
-            attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'cibg_segmask_iou', _cond_func)
+            if do_visual_grounding_with_bbox_regression:
+                attach_condition_aware_chest_imagenome_bbox_iou(validator_engine, _cond_func, metric_name='cibg_bbox_iou')
+            else:
+                attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'cibg_att_sup_loss')
+                attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'cibg_segmask_iou', _cond_func)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_att_sup_loss', train=in_train, val=in_val)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_segmask_iou', train=in_train, val=in_val)
+        if do_visual_grounding_with_bbox_regression:
+            if in_train:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_vgbbox_loss', train=in_train, val=False)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_att_sup_loss', train=in_train, val=False)
+            if in_val:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_bbox_iou', train=False)
+        else:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_att_sup_loss', train=in_train, val=in_val)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_segmask_iou', train=in_train, val=in_val)
 
     if use_mscxr_for_train or use_mscxr_for_test:
         _cond_func = lambda x: x['flag'] == 'pg'
@@ -670,54 +686,49 @@ def train_model(
         # for logging
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pg_att_sup_loss', train=in_train, val=in_val)
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pg_segmask_iou', train=in_train, val=in_val)
-
-    if use_vinbig_for_train:
-        _cond_func = lambda x: x['flag'] == 'vbg'
-        if use_yolov8:
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'vbg_y8_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'vbg_y8_box_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'vbg_y8_cls_loss')
-            attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_DFL_LOSS, _cond_func, 'vbg_y8_dfl_loss')
-        attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
-        attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
-        if use_global_alignment_contrastive_loss:
-            attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'vbg_gac_loss')
-        if use_vinbig_for_test:
-            if use_yolov8:
-                attach_condition_aware_vinbig_bbox_iou(
-                    validator_engine, _cond_func, use_yolov8=True, metric_name='vbg_y8_bbox_iou')
-            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
-        # for logging
-        if use_yolov8:
-            metrics_to_print.append('vbg_y8_loss')
-            metrics_to_print.append('vbg_y8_box_loss')
-            metrics_to_print.append('vbg_y8_cls_loss')
-            metrics_to_print.append('vbg_y8_dfl_loss')
-        metrics_to_print.append('vbg_phrcls_loss')
-        if use_global_alignment_contrastive_loss:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_gac_loss', train=True, val=False)
-        if use_vinbig_for_test:
-            if use_yolov8:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_y8_bbox_iou', train=False)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=True, val=use_vinbig_for_test)
     
     if use_vinbig_for_train or use_vinbig_for_test:
         _cond_func = lambda x: x['flag'] == 'vbg'
         in_train = use_vinbig_for_train
         in_val = use_vinbig_for_test
+
         if in_train:
+            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
+            attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+            if use_global_alignment_contrastive_loss:
+                attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'vbg_gac_loss')
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'vbg_att_reg_loss')
-            attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-            attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
+            if do_visual_grounding_with_bbox_regression:
+                attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
+                attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
+            else:
+                attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
+                attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         if in_val:
-            attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-            attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
+            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+            if do_visual_grounding_with_bbox_regression:
+                attach_condition_aware_vinbig_bbox_iou(validator_engine, _cond_func, metric_name='vbg_bbox_iou')
+            else:
+                attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
+                attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         # for logging
-        if use_attention_regularization_loss:            
-            metrics_to_print.append('vbg_att_reg_loss')
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=in_val)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_segmask_iou', train=in_train, val=in_val)
+        if do_visual_grounding_with_bbox_regression:
+            if in_train:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgbbox_loss', train=in_train, val=False)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=False)
+            if in_val:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_bbox_iou', train=False)
+        else:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=in_val)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_segmask_iou', train=in_train, val=in_val)
+        if use_global_alignment_contrastive_loss:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_gac_loss', train=True, val=False)
+        if in_train:
+            metrics_to_print.append('vbg_phrcls_loss')
+            if use_attention_regularization_loss:
+                metrics_to_print.append('vbg_att_reg_loss')
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=True, val=in_val)
 
     if use_chexlocalize:
         _cond_func = lambda x: x['flag'] == 'cl'
@@ -1022,6 +1033,7 @@ def train_from_scratch(
     gradient_accumulation_steps,
     pos_area_prior,
     neg_area_prior,
+    do_visual_grounding_with_bbox_regression,
     # Loss weights
     attention_supervision_loss_weight,
     phrase_classifier_loss_weight,
@@ -1044,13 +1056,13 @@ def train_from_scratch(
     device,
     # Other args
     save,
-    debug = False,
+    debug=False,
 ):
     print_blue('----- Training model from scratch ------', bold=True)
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
-    use_bbox_aware_transform = use_yolov8
-    use_segmentation_mask_aware_transform = not use_yolov8 # for now, only yolov8 uses bbox-aware transform
+    use_bbox_aware_transform = use_yolov8 or do_visual_grounding_with_bbox_regression
+    use_segmentation_mask_aware_transform = not use_bbox_aware_transform
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
@@ -1209,7 +1221,9 @@ def train_from_scratch(
     
     if use_mimiccxr:
         x = image_size if type(image_size) is int else image_size[0]
-        if x > 256:
+        if x > 512:
+            source_image_size_mode = MIMICCXR_ImageSizeModes.ORIGINAL
+        elif x > 256:
             source_image_size_mode = MIMICCXR_ImageSizeModes.MEDIUM_512
         else:
             source_image_size_mode = MIMICCXR_ImageSizeModes.SMALL_256x256
@@ -1243,6 +1257,8 @@ def train_from_scratch(
             cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath,
             cxrlt2024_official_training_labels_for_fact_classification_filepath=cxrlt2024_official_training_labels_for_fact_classification_filepath,
             cxrlt2024_do_balanced_sampling=cxrlt2024_do_balanced_sampling,
+            do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+            data_augmentation_enabled=img_aug_mode is not None,
         )
     else:
         mimiccxr_trainer_kwargs = None
@@ -1253,10 +1269,10 @@ def train_from_scratch(
             use_training_set=use_vinbig_for_train,
             use_validation_set=use_vinbig_for_test,
             data_augmentation_enabled=img_aug_mode is not None,
-            use_yolov8=use_yolov8,
             mask_height=regions_height,
             mask_width=regions_width,
             phrase_embeddings_filepath=vinbig_phrase_embeddings_filepath,
+            do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
         )
     else:
         vinbig_trainer_kwargs = None
@@ -1298,7 +1314,6 @@ def train_from_scratch(
         iuxray_trainer_kwargs = None
 
     trainer_engine_kwargs = dict(
-        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
         gradient_accumulation_steps=gradient_accumulation_steps,
         use_amp=use_amp, training=True, validating=False, testing=False,
@@ -1321,10 +1336,10 @@ def train_from_scratch(
         use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
+        do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
     )
 
     validator_engine_kwargs = dict(
-        predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
         training=False, validating=True, testing=False,
         using_yolov8=use_yolov8,
@@ -1338,6 +1353,7 @@ def train_from_scratch(
         use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
+        do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
     )
 
     return train_model(
@@ -1385,10 +1401,10 @@ def resume_training(
     num_train_workers,
     num_val_workers,
     val_batch_size_factor,
-    device = 'GPU',
-    save = True,
-    override_lr = False,
-    debug = False,
+    device='GPU',
+    save=True,
+    override_lr=False,
+    debug=False,
     **unused_kwargs,
 ):
     print_blue('----- Resuming training ------', bold=True)
@@ -1455,7 +1471,8 @@ def resume_training(
                 override_lr=override_lr,
                 debug=debug)
 
-def debug_main(args):
+def debug_main(args_string):
+    args = shlex.split(args_string)
     args = parse_args(args)
     args = parsed_args_to_dict(args)
     if args['checkpoint_folder'] is not None:

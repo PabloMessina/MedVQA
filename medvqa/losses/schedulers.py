@@ -129,7 +129,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
 class CyclicExponentialLR(_LRScheduler):
 
-    def __init__(self, optimizer, gamma, steps_to_restart, initial_lr, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer, gamma, steps_to_restart, initial_lr, last_epoch=-1):
         self.gamma = gamma
         self.steps_to_restart = steps_to_restart
         self.steps = -1
@@ -137,7 +137,7 @@ class CyclicExponentialLR(_LRScheduler):
         print('self.steps_to_restart =', self.steps_to_restart)
         print('self.steps =', self.steps)
         print('self.initial_lr =', self.initial_lr)
-        super(CyclicExponentialLR, self).__init__(optimizer, last_epoch, verbose)
+        super(CyclicExponentialLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
 

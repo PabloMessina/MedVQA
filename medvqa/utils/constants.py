@@ -263,6 +263,8 @@ VINBIG_BBOX_NAMES = [
 ]
 assert all([l in VINBIG_LABELS for l in VINBIG_BBOX_NAMES])
 
+VINBIG_NUM_BBOX_CLASSES = len(VINBIG_BBOX_NAMES)
+
 VINBIG_LABEL2PHRASE = {
     'Aortic enlargement': 'aortic enlargement seen',
     'Atelectasis': 'atelectasis seen',

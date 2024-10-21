@@ -573,6 +573,49 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
     plt.show()
 
+def visualize_visual_grounding_as_bboxes(image_path, phrases, bboxes, figsize, max_cols=3):
+    from PIL import Image
+    import matplotlib.patches as patches
+    import textwrap
+
+    assert len(phrases) == len(bboxes), f'len(phrases)={len(phrases)} != len(bboxes)={len(bboxes)}, phrases={phrases}, bboxes={bboxes}'
+
+    # Create a grid of subplots
+    n_cols = min(len(phrases), max_cols)
+    n_rows = math.ceil(len(phrases) / n_cols)
+    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    assert ax.shape == (n_rows, n_cols)
+    
+    # Define wrap length for titles based on number of columns and the figure size
+    wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
+
+    # Image
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    width = image.size[0]
+    height = image.size[1]
+
+    # Bounding boxes: a yellow rectangle
+    for k in range(len(phrases)):
+        row = k // n_cols
+        col = k % n_cols
+        # show image in subplot
+        ax[row, col].imshow(image) # show image in subplot
+        for i in range(len(bboxes[k])):
+            x1, y1, x2, y2 = bboxes[k][i]
+            x1 *= width
+            y1 *= height
+            x2 *= width
+            y2 *= height
+            # draw bounding box rectangle
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
+            ax[row, col].add_patch(rect)
+         
+        wrapped_title = "\n".join(textwrap.wrap(phrases[k], wrap_length))
+        ax[row, col].set_title(wrapped_title)
+
+    plt.show()
+
 def visualize_image_and_polygons(image_path, polygons_list, polygon_names, figsize, title=None, as_segmentation=False, mask_resolution=None):
     from PIL import Image, ImageDraw
 

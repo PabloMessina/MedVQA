@@ -125,7 +125,6 @@ def get_image_transform(
             tf_normalize = T.Normalize(mean, std)
 
         if for_vinbig:
-            assert for_yolov8
             assert horizontal_flip_prob == 0
 
         def _default_transform(image_path, return_image_size=False):
@@ -216,7 +215,7 @@ def get_image_transform(
             print('    horizontal_flip_prob =', horizontal_flip_prob)
             print('    flip_image =', flip_image)
 
-            def transform_fn(image_path, bboxes, classes, albumentation_adapter, return_image_size):
+            def transform_fn(image_path, bboxes, classes, albumentation_adapter, return_image_size=False):
                 # randomly choose between default transform and augmented transform
                 if random.random() < default_prob:
                     if return_image_size:

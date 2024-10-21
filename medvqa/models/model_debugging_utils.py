@@ -1,7 +1,6 @@
 import os
 import numpy as np
-from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
-from medvqa.models.common import load_model_state_dict
+from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata, load_model_state_dict
 from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.logging import print_bold
@@ -944,3 +943,59 @@ class PhraseGroundingVisualizer:
                     attention_factor=attention_factor,
                     max_cols=3,
                 )
+
+    def visualize_phrase_grounding_bbox_mode(
+            self, phrases, image_path, mimiccxr_forward=False, vinbig_forward=False, subfigsize=(3, 3)):
+        
+        assert sum([mimiccxr_forward, vinbig_forward]) == 1
+
+        import torch
+
+        # Load image
+        print(f'image_path = {image_path}')
+        if mimiccxr_forward:
+            image_transform = self.mimiccxr_image_transform
+        elif vinbig_forward:
+            image_transform = self.vinbigdata_image_transform
+        else: assert False
+        image = image_transform(image_path)
+        print(f'image.shape = {image.shape}')
+
+        # Obtain text embeddings
+        print_bold('Obtain text embeddings')
+        text_embeddings = self.cached_text_embedding_extractor.compute_text_embeddings(phrases, update_cache_on_disk=False)
+        print(f'text_embeddings.shape = {text_embeddings.shape}')
+        
+        # Run phrase grounder in inference mode
+        print_bold('Run phrase grounder in inference mode')
+        with torch.set_grad_enabled(False):
+            self.phrase_grounder.eval()
+            print('self.phrase_grounder.training = ', self.phrase_grounder.training)
+            image = image.to(self.device)
+            print(f'image.shape = {image.shape}')
+            text_embeddings = torch.tensor(text_embeddings, dtype=torch.float32).to(self.device)
+            output = self.phrase_grounder(
+                raw_images=image.unsqueeze(0),
+                phrase_embeddings=text_embeddings.unsqueeze(0),
+                mimiccxr_forward=mimiccxr_forward,
+                vinbig_forward=vinbig_forward,
+                predict_bboxes=True,
+                apply_nms=True,
+            )
+            print(f'output.keys() = {output.keys()}')
+            predicted_bboxes = output['predicted_bboxes']
+            # print(f'predicted_bboxes = {predicted_bboxes}')
+
+        # Visualize bounding boxes
+        print_bold('Visualize bounding boxes')
+        from medvqa.evaluation.plots import visualize_visual_grounding_as_bboxes
+        n_rows = int(np.ceil(len(phrases) / 3))
+        n_cols = min(len(phrases), 3)
+        figsize = (subfigsize[0] * n_cols, subfigsize[1] * n_rows)
+        visualize_visual_grounding_as_bboxes(
+            image_path=image_path,
+            phrases=phrases,
+            bboxes=[x[0].cpu().numpy() if x is not None else [] for x in predicted_bboxes[0]],
+            figsize=figsize,
+            max_cols=3,
+        )

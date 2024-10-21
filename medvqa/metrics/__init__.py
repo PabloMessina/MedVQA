@@ -346,14 +346,17 @@ def attach_dataset_aware_chest_imagenome_bbox_iou(engine, allowed_dataset_ids, u
                                     allowed_dataset_ids=allowed_dataset_ids)
     met.attach(engine, MetricNames.CHESTIMAGENOMEBBOXIOU)
 
-def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, use_yolov8=True, class_mask=None, metric_name=None):
+def attach_condition_aware_chest_imagenome_bbox_iou(engine, condition_function, use_yolov8=False, class_mask=None, metric_name=None):
     if use_yolov8:
         met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
                                                                         'chest_imagenome_bbox_coords',
                                                                         'chest_imagenome_bbox_presence'),
                                 condition_function=condition_function, use_yolov8=True, class_mask=class_mask)
     else:
-        raise NotImplementedError
+        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('predicted_bboxes',
+                                                                        'chest_imagenome_bbox_coords',
+                                                                        'chest_imagenome_bbox_presence'),
+                                condition_function=condition_function, class_mask=class_mask)
     if metric_name is None:
         metric_name = MetricNames.CHESTIMAGENOMEBBOXIOU
     met.attach(engine, metric_name)
@@ -441,14 +444,17 @@ def attach_dataset_aware_vinbig_bbox_iou(engine, allowed_dataset_ids):
                             allowed_dataset_ids=allowed_dataset_ids, use_yolov8=True, for_vinbig=True)
     met.attach(engine, MetricNames.VINBIGBBOXIOU)
 
-def attach_condition_aware_vinbig_bbox_iou(engine, condition_function, use_yolov8=True, metric_name=None):
+def attach_condition_aware_vinbig_bbox_iou(engine, condition_function, use_yolov8=False, metric_name=None):
     if use_yolov8:
         met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
                                                                         'vinbig_bbox_coords',
                                                                         'vinbig_bbox_classes'),
                                 condition_function=condition_function, use_yolov8=True, for_vinbig=True)
     else:
-        raise NotImplementedError
+        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('predicted_bboxes',
+                                                                        'vinbig_bbox_coords',
+                                                                        'vinbig_bbox_classes'),
+                                condition_function=condition_function, for_vinbig=True)
     if metric_name is None:
         metric_name = MetricNames.VINBIGBBOXIOU
     met.attach(engine, metric_name)

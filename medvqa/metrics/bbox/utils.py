@@ -1,6 +1,34 @@
 import torch
 import numpy as np
 from multiprocessing import Pool
+from shapely.geometry import box as shapely_box
+from shapely.ops import unary_union
+
+_VALID_TYPES = [np.ndarray, list, torch.Tensor]
+
+def calculate_exact_iou_union(bboxes_A, bboxes_B):
+    assert type(bboxes_A) in _VALID_TYPES
+    assert type(bboxes_B) in _VALID_TYPES
+    
+    # bboxes_A: (N, 4) or (4,)
+    if (type(bboxes_A[0]) == list) or (bboxes_A.ndim == 2):
+        polygons_A = [shapely_box(*bbox) for bbox in bboxes_A]
+        union_A = unary_union(polygons_A)
+    else:
+        union_A = shapely_box(*bboxes_A)
+    
+    # bboxes_B: (N, 4) or (4,)
+    if (type(bboxes_B[0]) == list) or (bboxes_B.ndim == 2):
+        polygons_B = [shapely_box(*bbox) for bbox in bboxes_B]
+        union_B = unary_union(polygons_B)
+    else:
+        union_B = shapely_box(*bboxes_B)
+    
+    intersection = union_A.intersection(union_B)
+    inter_area = intersection.area
+    union_area = union_A.area + union_B.area - inter_area
+    iou = inter_area / union_area if union_area > 0 else 0.0
+    return iou
 
 def compute_iou(pred, gt):
     assert len(pred) == 4

@@ -2,10 +2,13 @@ import math
 import os
 import numpy as np
 import random
+import torch
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
+from medvqa.datasets.augmentation import ChestImagenomeAlbumentationAdapter
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
     get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices,
 )
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
@@ -129,20 +132,69 @@ class MIMICCXR_CXRLT2024_ClassificationDataset(Dataset):
             'pi': phrase_idxs,
             'pcl': phrase_classification_labels,
         }
+    
+def _create_target_tensors(bbox_coords, bbox_presence, feature_map_size):
+    """
+    Creates a target tensor for bounding boxes on a feature map.
+    
+    Args:
+        bbox_coords: A tensor of shape (N, 4) representing bounding box coordinates.
+        bbox_presence: A tensor of shape (N,) representing the presence of bounding boxes.
+        feature_map_size: Tuple (H, W) representing the size of the feature map.
+    
+    Returns:
+        A tensor of shape (N, H*W, 4) representing the target tensor with bounding box coordinates (x_min, y_min, x_max, y_max).
+        A tensor of shape (N, H*W) representing the target tensor with bounding box presence.
+    """
+    H, W = feature_map_size
+    N = len(bbox_coords)
+    target_coords = torch.zeros(N, H, W, 4)
+    target_presence = torch.zeros(N, H, W)
+    
+    for i in range(N):
+        if bbox_presence[i] == 0:
+            continue
+        x_min, y_min, x_max, y_max = bbox_coords[i]
+        x_min_scaled = math.floor(x_min * W)
+        y_min_scaled = math.floor(y_min * H)
+        x_max_scaled = math.ceil(x_max * W)
+        y_max_scaled = math.ceil(y_max * H)
+        target_coords[i, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled, :] = torch.tensor([x_min, y_min, x_max, y_max])
+        target_presence[i, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled] = 1
+
+    # Reshape target tensors
+    target_coords = target_coords.view(N, H*W, 4)
+    target_presence = target_presence.view(N, H*W)
+    
+    return target_coords, target_presence
 
 class MIMICCXR_BBoxGroundingDataset(Dataset):
 
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels,
-                 bbox_coords, bbox_presence, use_yolov8=False):
-        # assert use_yolov8 # TODO: add support for non-YOLOv8
+    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_classification_labels,
+                 predict_bboxes=False, num_bbox_classes=None, feature_map_size=None, bbox_coords=None, bbox_presence=None,
+                 phrase_grounding_masks=None, data_augmentation_enabled=False, for_training=True):
+        
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
-        self.phrase_grounding_masks = phrase_grounding_masks
         self.phrase_classification_labels = phrase_classification_labels
-        self.bbox_coords = bbox_coords
-        self.bbox_presence = bbox_presence
-        self.use_yolov8 = use_yolov8
+        self.predict_bboxes = predict_bboxes
+        self.data_augmentation_enabled = data_augmentation_enabled
+        self.for_training = for_training
+        if predict_bboxes:
+            assert num_bbox_classes is not None
+            assert feature_map_size is not None
+            assert bbox_coords is not None
+            assert bbox_presence is not None
+            self.num_bbox_classes = num_bbox_classes
+            self.feature_map_size = feature_map_size
+            self.bbox_coords = bbox_coords
+            self.bbox_presence = bbox_presence
+            if data_augmentation_enabled:
+                self.albumentation_adapter = ChestImagenomeAlbumentationAdapter(num_bbox_classes)
+        else:
+            assert phrase_grounding_masks is not None
+            self.phrase_grounding_masks = phrase_grounding_masks
 
     def __len__(self):
         return len(self.image_paths)
@@ -150,29 +202,46 @@ class MIMICCXR_BBoxGroundingDataset(Dataset):
     def __getitem__(self, i):
         image_path = self.image_paths[i]
         phrase_embeddings = self.phrase_embeddings
-        phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
-        bbox_coords = self.bbox_coords[i]
-        bbox_presence = self.bbox_presence[i]
-        if self.use_yolov8:
-            tmp = self.image_transform(image_path, return_image_size=True)
-            image, image_size_before, image_size_after = tmp
+        if self.predict_bboxes:
+            bbox_coords = self.bbox_coords[i]
+            bbox_presence = self.bbox_presence[i]
+            if self.data_augmentation_enabled:
+                image, bbox_coords, bbox_presence = self.image_transform(
+                    image_path=image_path,
+                    bboxes=bbox_coords,
+                    presence=bbox_presence,
+                    albumentation_adapter=self.albumentation_adapter,
+                )
+            else:
+                image = self.image_transform(image_path)
+            if self.for_training:
+                bbox_target_coords, bbox_target_presence = _create_target_tensors(bbox_coords, bbox_presence, self.feature_map_size)
+                return {
+                    'i': image,
+                    'pe': phrase_embeddings,
+                    'pcl': phrase_classification_labels,
+                    'btc': bbox_target_coords,
+                    'btp': bbox_target_presence,
+                }
+            else:
+                return {
+                    'i': image,
+                    'pe': phrase_embeddings,
+                    'pcl': phrase_classification_labels,
+                    'bc': bbox_coords,
+                    'bp': bbox_presence,
+                }
         else:
+            phrase_grounding_masks = self.phrase_grounding_masks[i]
             image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
                 image_path, phrase_grounding_masks, phrase_classification_labels)
-        output = {
-            'i': image,
-            'pe': phrase_embeddings,
-            'pgm': phrase_grounding_masks,
-            'pcl': phrase_classification_labels,
-            'bc': bbox_coords,
-            'bp': bbox_presence,
-        }
-        if self.use_yolov8:
-            output['im_file'] = image_path
-            output['ori_shape'] = image_size_before
-            output['resized_shape'] = image_size_after
-        return output
+            return {
+                'i': image,
+                'pe': phrase_embeddings,
+                'pgm': phrase_grounding_masks,
+                'pcl': phrase_classification_labels,
+            }
     
 def _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_presence):
     assert len(bbox_coords.shape) == 2
@@ -326,7 +395,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                 chest_imagenome_bbox_phrase_embeddings_filepath=None,
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 exclude_noisy_images=False,
-                use_yolov8=False,
                 balance_long_middle_short_tail=False,
                 long_middle_short_tail_thresholds=(0.02, 0.05),
                 report_fact_nli_integrated_data_filepath=None,
@@ -341,6 +409,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=None,
                 cxrlt2024_official_training_labels_for_fact_classification_filepath=None,
                 cxrlt2024_do_balanced_sampling=False,
+                do_visual_grounding_with_bbox_regression=False,
+                data_augmentation_enabled=False,
                 **unused_kwargs,
             ):
 
@@ -360,8 +430,6 @@ class MIMICCXR_PhraseGroundingTrainer:
         self.use_cxrlt2024_custom_labels = use_cxrlt2024_custom_labels
         self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
         self.use_all_cxrlt2024_official_labels_for_training = use_all_cxrlt2024_official_labels_for_training
-        
-        self.use_yolov8 = use_yolov8
 
         forbidden_train_dicom_ids = set()
 
@@ -1018,19 +1086,37 @@ class MIMICCXR_PhraseGroundingTrainer:
             phrase_grounding_masks = phrase_grounding_masks[:idx]
 
             # Create dataset and dataloader for training
-            self.train_chest_imagenome_dataset = MIMICCXR_BBoxGroundingDataset(
-                image_paths=image_paths, image_transform=train_image_transform,
-                phrase_embeddings=bbox_phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
-                phrase_classification_labels=chest_imagenome_bbox_presence, # use bbox_presence as classification labels
-                bbox_coords=chest_imagenome_bbox_coords, bbox_presence=chest_imagenome_bbox_presence,
-                use_yolov8=use_yolov8)
+            if do_visual_grounding_with_bbox_regression:
+                self.train_chest_imagenome_dataset = MIMICCXR_BBoxGroundingDataset(
+                    image_paths=image_paths,
+                    image_transform=train_image_transform,
+                    phrase_embeddings=bbox_phrase_embeddings,
+                    phrase_classification_labels=chest_imagenome_bbox_presence, # use bbox_presence as classification labels
+                    predict_bboxes=do_visual_grounding_with_bbox_regression,
+                    num_bbox_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                    feature_map_size=(mask_height, mask_width),
+                    bbox_coords=chest_imagenome_bbox_coords,
+                    bbox_presence=chest_imagenome_bbox_presence,
+                    data_augmentation_enabled=data_augmentation_enabled,
+                    for_training=True)
+            else:
+                self.train_chest_imagenome_dataset = MIMICCXR_BBoxGroundingDataset(
+                    image_paths=image_paths,
+                    image_transform=train_image_transform,
+                    phrase_embeddings=bbox_phrase_embeddings,
+                    phrase_classification_labels=chest_imagenome_bbox_presence, # use bbox_presence as classification labels
+                    predict_bboxes=do_visual_grounding_with_bbox_regression,
+                    phrase_grounding_masks=phrase_grounding_masks,
+                    data_augmentation_enabled=data_augmentation_enabled,
+                    for_training=True)
             batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) # at least 1 image per batch
             self.train_chest_imagenome_dataloader = DataLoader(
                 self.train_chest_imagenome_dataset,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=num_train_workers,
-                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(batch, training_mode=True),
+                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(
+                    batch, training_mode=True, do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
                 pin_memory=True,
             )
         
@@ -1084,12 +1170,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                     bbox_coords = bboxes['coords']
                     bbox_presence = bboxes['presence']
                     bbox_coords, bbox_presence = _clean_bbox_coords_and_presence(bbox_coords, bbox_presence)
+                    bbox_coords = bbox_coords[gold_pres_indices] # use only gold subset
+                    bbox_presence = bbox_presence[gold_pres_indices] # use only gold subset
                     chest_imagenome_bbox_coords[idx] = bbox_coords
                     chest_imagenome_bbox_presence[idx] = bbox_presence
-                    phrase_grounding_masks[idx] = _compute_mask_from_bounding_boxes(mask_height, mask_width,
-                                                                                    bbox_coords[gold_pres_indices], # use only gold subset
-                                                                                    bbox_presence[gold_pres_indices])
-                    phrase_classification_labels[idx] = bbox_presence[gold_pres_indices] # use bbox_presence as classification labels, use only gold subset
+                    phrase_grounding_masks[idx] = _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_presence)
+                    phrase_classification_labels[idx] = bbox_presence # use bbox_presence as classification labels, use only gold subset
                     idx += 1
 
             print(f'Total number of images: {idx}')
@@ -1100,21 +1186,41 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             # Sanity check
             for i in range(idx):
-                assert chest_imagenome_bbox_presence[i].shape[0] == chest_imagenome_bbox_coords[i].shape[0] == CHEST_IMAGENOME_NUM_BBOX_CLASSES,\
+                assert chest_imagenome_bbox_presence[i].shape[0] == chest_imagenome_bbox_coords[i].shape[0] == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,\
                     f'chest_imagenome_bbox_presence[{i}].shape[0] = {chest_imagenome_bbox_presence[i].shape[0]}, chest_imagenome_bbox_coords[{i}].shape[0] = {chest_imagenome_bbox_coords[i].shape[0]}'
 
             # Create dataset and dataloader for testing
-            self.test_chest_imagenome_gold_dataset = MIMICCXR_BBoxGroundingDataset(
-                image_paths=image_paths, image_transform=test_image_transform,
-                phrase_embeddings=bbox_phrase_embeddings, phrase_grounding_masks=phrase_grounding_masks,
-                phrase_classification_labels=phrase_classification_labels,
-                bbox_coords=chest_imagenome_bbox_coords, bbox_presence=chest_imagenome_bbox_presence, use_yolov8=use_yolov8)
+            if do_visual_grounding_with_bbox_regression:
+                self.test_chest_imagenome_gold_dataset = MIMICCXR_BBoxGroundingDataset(
+                    image_paths=image_paths,
+                    image_transform=test_image_transform,
+                    phrase_embeddings=bbox_phrase_embeddings,
+                    phrase_classification_labels=phrase_classification_labels,
+                    predict_bboxes=do_visual_grounding_with_bbox_regression,
+                    num_bbox_classes=CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+                    feature_map_size=(mask_height, mask_width),
+                    bbox_coords=chest_imagenome_bbox_coords,
+                    bbox_presence=chest_imagenome_bbox_presence,
+                    data_augmentation_enabled=False,
+                    for_training=False)
+            else:
+                self.test_chest_imagenome_gold_dataset = MIMICCXR_BBoxGroundingDataset(
+                    image_paths=image_paths,
+                    image_transform=test_image_transform,
+                    phrase_embeddings=bbox_phrase_embeddings,
+                    phrase_classification_labels=phrase_classification_labels,
+                    predict_bboxes=do_visual_grounding_with_bbox_regression,
+                    phrase_grounding_masks=phrase_grounding_masks,
+                    data_augmentation_enabled=False,
+                    for_training=False)
+            
             batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) * test_batch_size_factor)
             self.test_chest_imagenome_gold_dataloader = DataLoader(
                 self.test_chest_imagenome_gold_dataset,
                 batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_test_workers,
-                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(batch, training_mode=False),
+                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(
+                    batch, training_mode=False, do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
                 pin_memory=True,
             )

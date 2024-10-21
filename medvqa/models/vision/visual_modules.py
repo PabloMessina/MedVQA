@@ -99,7 +99,7 @@ class MultiPurposeVisualModule(nn.Module):
                 freeze_image_encoder=False,
                 only_compute_features=False,
                 image_encoder_pretrained_weights_path=None,
-                imagenet_pretrained=True,
+                imagenet_pretrained=False,
                 mlp_in_dim=None,
                 mlp_out_dim=None,
                 mlp_hidden_dims=None,
@@ -1199,15 +1199,16 @@ def create_densenet121_feature_extractor(
     print(f'   drop_rate: {drop_rate}')
     # Load pre-trained CNN weights
     if pretrained_weights_path:
-        densenet = models.densenet121(pretrained=False, drop_rate=drop_rate)
+        densenet = models.densenet121(drop_rate=drop_rate)
         pretrained_weights = torch.load(pretrained_weights_path, map_location='cuda')
         densenet.load_state_dict(pretrained_weights, strict=False)
         print("DenseNet121's pretrained weights loaded from", pretrained_weights_path)
     elif imagenet_pretrained:
-        densenet = models.densenet121(pretrained=True, drop_rate=drop_rate)
+        densenet = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1, drop_rate=drop_rate)
         print("DenseNet121's pretrained weights loaded from ImageNet")
     else:
-        densenet = models.densenet121(pretrained=False, drop_rate=drop_rate)
+        densenet = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT, drop_rate=drop_rate)
+        print("DenseNet121's default weights loaded")
     return densenet.features
 
 def create_torchxrayvision_densenet121_feature_extractor(weights_name):

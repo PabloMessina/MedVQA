@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision.ops import roi_align
+import torchvision.ops as ops
 
 class BBoxRegressorVersion:
     V1 = 'v1'
@@ -632,3 +633,51 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v6(nn.Module):
 
         # 4) Return the predicted bounding box coordinates, presence and multi-label classification scores
         return pred_bbox_coords, pred_bbox_presence, mlc_scores
+    
+class BoundingBoxRegressorSingleClass(nn.Module):
+    def __init__(self, local_feat_dim):
+        super().__init__()
+        print('BoundingBoxRegressorSingleClass')
+        print(f'  local_feat_dim: {local_feat_dim}')
+        self.local_feat_dim = local_feat_dim
+
+        # create layers for the bounding box regression
+        self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)
+        self.bbox_presence_fc = nn.Linear(local_feat_dim, 1)
+
+    def forward(self, local_features, predict_presence=True, predict_coords=True,
+                apply_nms=False, nms_threshold=0.3, conf_threshold=0.5):
+        if apply_nms:
+            assert predict_coords and predict_presence
+            bbox_coords = self.bbox_coords_fc(local_features)
+            bbox_presence = self.bbox_presence_fc(local_features) # (batch_size, num_classes, num_regions, 1)
+            bbox_presence_probs = torch.sigmoid(bbox_presence)
+            bbox_presence_probs = bbox_presence_probs.squeeze(-1) # (batch_size, num_classes, num_regions)
+            assert bbox_coords.ndim == 4 # (batch_size, num_classes, num_regions, 4)
+            assert bbox_coords.shape[-1] == 4
+            assert bbox_presence.ndim == 4
+            assert bbox_presence_probs.ndim == 3
+            output = [[None] * bbox_coords.size(1) for _ in range(bbox_coords.size(0))]
+            for i in range(bbox_coords.size(0)): # for each image in the batch
+                for j in range(bbox_coords.size(1)): # for each class
+                    coords = bbox_coords[i, j]
+                    presence = bbox_presence_probs[i, j]
+                    mask = presence > conf_threshold
+                    coords = coords[mask]
+                    presence = presence[mask]
+                    if coords.size(0) == 0:
+                        continue
+                    keep = ops.nms(coords, presence, nms_threshold)
+                    output[i][j] = (coords[keep], presence[keep])
+            return output, bbox_presence
+
+        if predict_coords:
+            bbox_coords = self.bbox_coords_fc(local_features) # (batch_size, num_classes, num_regions, 4)
+        if predict_presence:
+            bbox_presence = self.bbox_presence_fc(local_features) # (batch_size, num_classes, num_regions, 1)
+        if predict_coords and predict_presence:
+            return bbox_coords, bbox_presence
+        elif predict_coords:
+            return bbox_coords
+        elif predict_presence:
+            return bbox_presence

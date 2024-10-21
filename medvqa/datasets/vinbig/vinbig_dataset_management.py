@@ -2,6 +2,7 @@ import numpy as np
 import math
 import pandas as pd
 from PIL import Image
+import torch
 from torch.utils.data import Dataset, DataLoader
 
 from medvqa.datasets.vinbig import (
@@ -320,8 +321,8 @@ class VinBigVQADataset(Dataset):
 
 class _AlbumentationAdapter:
 
-    def __init__(self, num_bbox_classes):
-        self.num_bbox_classes = num_bbox_classes
+    def __init__(self):
+        pass
     
     def encode(self, bbox_coords, bbox_classes):
         albumentation_bbox_coords = []
@@ -473,27 +474,77 @@ class VinBig_MAE_Trainer(MAETrainerBase):
     
     def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
         return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
+
+def _create_target_tensors(bboxes, classes, num_classes, feature_map_size):
+    """
+    Creates a target tensor for bounding boxes on a feature map.
+    
+    Args:
+        bboxes: A tensor of shape (N, 4) representing bounding box coordinates.
+        classes: A tensor of shape (N,) representing bounding box classes.
+        num_classes: The number of classes.
+        feature_map_size: Tuple (H, W) representing the size of the feature map.
+    
+    Returns:
+        A tensor of shape (num_classes, H*W, 4) representing the target tensor with bounding box coordinates (x_min, y_min, x_max, y_max).
+        A tensor of shape (num_classes, H*W) representing the target tensor with bounding box presence.
+    """
+    H, W = feature_map_size
+    N = len(bboxes)
+    assert len(classes) == N
+    target_coords = torch.zeros(num_classes, H, W, 4)
+    target_presence = torch.zeros(num_classes, H, W)
+    
+    for i in range(N):
+        x_min, y_min, x_max, y_max = bboxes[i]
+        cls = classes[i]
+        x_min_scaled = math.floor(x_min * W)
+        y_min_scaled = math.floor(y_min * H)
+        x_max_scaled = math.ceil(x_max * W)
+        y_max_scaled = math.ceil(y_max * H)
+        target_coords[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled, :] = torch.tensor([x_min, y_min, x_max, y_max])
+        target_presence[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled] = 1
+
+    # Reshape target tensors
+    target_coords = target_coords.view(num_classes, H*W, 4)
+    target_presence = target_presence.view(num_classes, H*W)
+    
+    return target_coords, target_presence
     
 class VinBigBboxGroundingDataset(Dataset):
 
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_grounding_masks, phrase_classification_labels,
-                 bboxes, indices, use_yolov8=False, infinite=False, shuffle_indices=False):
+    def __init__(self, indices, image_paths, image_transform, phrase_embeddings, phrase_classification_labels, 
+                 predict_bboxes=False, num_bbox_classes=None, feature_map_size=None, bboxes=None, phrase_grounding_masks=None,
+                 infinite=False, shuffle_indices=False, data_augmentation_enabled=False, for_training=True):
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
-        self.phrase_grounding_masks = phrase_grounding_masks
         self.phrase_classification_labels = phrase_classification_labels
         self.phrase_classification_labels_with_bbox = phrase_classification_labels[:, :len(VINBIG_BBOX_NAMES)]
+        self.predict_bboxes = predict_bboxes
         self.bboxes = bboxes
-        self.use_yolov8 = use_yolov8
         self.indices = indices
         self.infinite = infinite
+        self.data_augmentation_enabled = data_augmentation_enabled
+        self.for_training = for_training
         if infinite:
             self._len = INFINITE_DATASET_LENGTH
         else:
             self._len = len(indices)
         if shuffle_indices:
             np.random.shuffle(self.indices)
+        if predict_bboxes:
+            assert num_bbox_classes is not None
+            assert feature_map_size is not None
+            assert bboxes is not None
+            self.num_bbox_classes = num_bbox_classes
+            self.feature_map_size = feature_map_size
+            self.bboxes = bboxes
+            if data_augmentation_enabled:
+                self.albumentation_adapter = _AlbumentationAdapter()
+        else:
+            assert phrase_grounding_masks is not None
+            self.phrase_grounding_masks = phrase_grounding_masks
 
     def __len__(self):
         return self._len
@@ -504,28 +555,40 @@ class VinBigBboxGroundingDataset(Dataset):
         i = self.indices[i]
         image_path = self.image_paths[i]
         phrase_embeddings = self.phrase_embeddings
-        phrase_grounding_masks = self.phrase_grounding_masks[i]
         phrase_classification_labels = self.phrase_classification_labels[i]
-        if self.use_yolov8:
-            tmp = self.image_transform(image_path, return_image_size=True)
-            image, image_size_before, image_size_after = tmp
+
+        if self.predict_bboxes:
             bboxes, classes = self.bboxes[i]
-            return {
-                'i': image,
-                'pe': phrase_embeddings,
-                'pgm': phrase_grounding_masks,
-                'pcl': phrase_classification_labels,
-                # for YOLOv8
-                'bboxes': bboxes,
-                'classes': classes,
-                'im_file': image_path,
-                'ori_shape': image_size_before,
-                'resized_shape': image_size_after,
-            }
+            if self.data_augmentation_enabled:
+                image, bboxes, classes = self.image_transform(
+                    image_path=image_path,
+                    bboxes=bboxes,
+                    classes=classes,
+                    albumentation_adapter=self.albumentation_adapter,
+                )
+            else:
+                image = self.image_transform(image_path)
+            if self.for_training:
+                bbox_target_coords, bbox_target_presence = _create_target_tensors(bboxes, classes, self.num_bbox_classes, self.feature_map_size)
+                return {
+                    'i': image,
+                    'pe': phrase_embeddings,
+                    'pcl': phrase_classification_labels,
+                    'btc': bbox_target_coords,
+                    'btp': bbox_target_presence,
+                }
+            else:
+                return {
+                    'i': image,
+                    'pe': phrase_embeddings,
+                    'pcl': phrase_classification_labels,
+                    'bboxes': bboxes,
+                    'classes': classes,
+                }
         else:
-            image, phrase_grounding_masks, _ = self.image_transform(
-                image_path, phrase_grounding_masks, self.phrase_classification_labels_with_bbox[i],
-            )
+            phrase_grounding_masks = self.phrase_grounding_masks[i]
+            image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
+                image_path, phrase_grounding_masks, phrase_classification_labels)
             return {
                 'i': image,
                 'pe': phrase_embeddings,
@@ -542,7 +605,9 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                  use_training_set=True, use_validation_set=True,
                  num_train_workers=None, num_val_workers=None,
                  train_image_transform=None, val_image_transform=None,
-                 data_augmentation_enabled=False, use_yolov8=False):
+                 data_augmentation_enabled=False,
+                 do_visual_grounding_with_bbox_regression=False,
+                 ):
         super().__init__(
             load_bouding_boxes=True,
         )
@@ -554,7 +619,6 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         self.training_data_mode = training_data_mode
         self.data_augmentation_enabled = data_augmentation_enabled
         self.use_validation_set = use_validation_set
-        self.use_yolov8 = use_yolov8
 
         print(f'Loding phrase_embeddings and phrases from {phrase_embeddings_filepath}...')
         tmp = get_cached_pickle_file(phrase_embeddings_filepath)
@@ -625,18 +689,36 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
             train_datasets = []
             train_weights = []
             for indices in grouped_indices:
-                dataset = VinBigBboxGroundingDataset(
-                    image_paths=self.image_paths,
-                    image_transform=self.train_image_transform,
-                    phrase_embeddings=phrase_embeddings,
-                    phrase_grounding_masks=self.phrase_grounding_masks,
-                    phrase_classification_labels=self.phrase_classification_labels,
-                    bboxes=self.bboxes,
-                    use_yolov8=self.use_yolov8,
-                    indices=indices,
-                    infinite=True,
-                    shuffle_indices=True,
-                )
+                if do_visual_grounding_with_bbox_regression:
+                    dataset = VinBigBboxGroundingDataset(
+                        indices=indices,
+                        image_paths=self.image_paths,
+                        image_transform=self.train_image_transform,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_classification_labels=self.phrase_classification_labels,
+                        predict_bboxes=True,
+                        num_bbox_classes=len(VINBIG_BBOX_NAMES),
+                        feature_map_size=(mask_height, mask_width),
+                        bboxes=self.bboxes,
+                        data_augmentation_enabled=self.data_augmentation_enabled,
+                        for_training=True,
+                        infinite=True,
+                        shuffle_indices=True,
+                    )
+                else:
+                    dataset = VinBigBboxGroundingDataset(
+                        indices=indices,
+                        image_paths=self.image_paths,
+                        image_transform=self.train_image_transform,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_classification_labels=self.phrase_classification_labels,
+                        predict_bboxes=False,
+                        phrase_grounding_masks=self.phrase_grounding_masks,
+                        data_augmentation_enabled=self.data_augmentation_enabled,
+                        for_training=True,
+                        infinite=True,
+                        shuffle_indices=True,
+                    )
                 weight = math.log2(len(indices)) ** 3
                 train_datasets.append(dataset)
                 train_weights.append(weight)
@@ -647,7 +729,9 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                                             batch_size=batch_size,
                                             shuffle=False,
                                             num_workers=num_train_workers,
-                                            collate_fn=lambda batch: collate_batch_fn(batch, training_mode=True),
+                                            collate_fn=lambda batch: collate_batch_fn(batch,
+                                                                                      training_mode=True,
+                                                                                      do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
                                             pin_memory=True)
         
         if use_validation_set:
@@ -656,20 +740,36 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
 
             print('Generating val dataset and dataloader')
             print(f'len(self.test_indices) = {len(self.test_indices)}')
-            self.val_dataset = VinBigBboxGroundingDataset(
-                image_paths=self.image_paths,
-                image_transform=self.val_image_transform,
-                phrase_embeddings=phrase_embeddings,
-                phrase_grounding_masks=self.phrase_grounding_masks,
-                phrase_classification_labels=self.phrase_classification_labels,
-                bboxes=self.bboxes,
-                use_yolov8=self.use_yolov8,
-                indices=self.test_indices,
-            )
+            if do_visual_grounding_with_bbox_regression:
+                self.val_dataset = VinBigBboxGroundingDataset(
+                    indices=self.test_indices,
+                    image_paths=self.image_paths,
+                    image_transform=self.val_image_transform,
+                    phrase_embeddings=phrase_embeddings,
+                    phrase_classification_labels=self.phrase_classification_labels,
+                    predict_bboxes=True,
+                    num_bbox_classes=len(VINBIG_BBOX_NAMES),
+                    feature_map_size=(mask_height, mask_width),
+                    bboxes=self.bboxes,
+                    for_training=False,
+                )
+            else:
+                self.val_dataset = VinBigBboxGroundingDataset(
+                    indices=self.test_indices,
+                    image_paths=self.image_paths,
+                    image_transform=self.val_image_transform,
+                    phrase_embeddings=phrase_embeddings,
+                    phrase_classification_labels=self.phrase_classification_labels,
+                    predict_bboxes=False,
+                    phrase_grounding_masks=self.phrase_grounding_masks,
+                    for_training=False,
+                )
             batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) * test_batch_size_factor)
             self.val_dataloader = DataLoader(self.val_dataset,
                                              batch_size=batch_size,
                                              shuffle=False,
                                              num_workers=num_val_workers,
-                                             collate_fn=lambda batch: collate_batch_fn(batch, training_mode=False),
+                                             collate_fn=lambda batch: collate_batch_fn(batch,
+                                                                                       training_mode=False,
+                                                                                       do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
                                              pin_memory=True)

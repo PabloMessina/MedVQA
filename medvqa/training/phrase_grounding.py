@@ -3,11 +3,13 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
 from medvqa.losses import BinaryMultiLabelClassificationLossNames, get_binary_multilabel_loss
+from medvqa.losses.custom_bbox_loss import compute_bbox_loss
 from medvqa.losses.nt_xent_loss import NTXentLoss
 from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.segmentation_loss import compute_balanced_segmentation_loss
 from medvqa.losses.threshold_loss import ThresholdLoss
-from medvqa.utils.constants import MetricNames
+from medvqa.losses.wbce import NegativePositiveBalancedBCELoss
+from medvqa.utils.constants import VINBIG_NUM_BBOX_CLASSES, MetricNames
 from medvqa.utils.logging import print_magenta
 
 def get_step_fn(model, optimizer, training, validating, testing, device,
@@ -16,14 +18,13 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 generic_phrase_classifier_criterion,
                 contrastive_phrase_grounding_criterion,
                 global_image_phrase_contrastive_criterion,
+                balanced_binary_cross_entropy_criterion,
                 threshold_criterion,
                 neg_area_prior,
                 gradient_accumulation_steps=1, # for gradient accumulation
                 max_grad_norm=None,
                 # automatic mixed precision
                 use_amp=False,
-                # chest imagenome dataset
-                predict_bboxes_chest_imagenome=False,
                 # vinbig dataset
                 predict_bboxes_vinbig=False,
                 # yolov8
@@ -43,6 +44,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 use_attention_regularization_loss=False,
                 use_contrastive_phrase_grounding_loss=False,
                 use_global_image_phrase_contrastive_loss=False,
+                # other args
+                do_visual_grounding_with_bbox_regression=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -364,19 +367,23 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         return output
     
     def step_fn__chest_imagenome_bbox_grounding(batch):
-        
-        # assert using_yolov8
 
         # Extract elements from batch
-        if using_yolov8:
-            images = batch['img'].to(device)
+        if do_visual_grounding_with_bbox_regression:
+            if training:
+                images = batch['i'].to(device)
+                phrase_embeddings = batch['pe'].to(device)
+                target_coords = batch['btc'].to(device) # (batch_size, num_boxes, num_regions, 4)
+                target_presence = batch['btp'].to(device) # (batch_size, num_boxes, num_regions)
+            else:
+                images = batch['i'].to(device)
+                phrase_embeddings = batch['pe'].to(device)
+                chest_imagenome_bbox_coords = batch['bc']
+                chest_imagenome_bbox_presence = batch['bp']
         else:
             images = batch['i'].to(device)
-        phrase_embeddings = batch['pe'].to(device)
-        phrase_grounding_masks = batch['pgm'].to(device)
-        if not training and using_yolov8:
-            chest_imagenome_bbox_coords = batch['bc']
-            chest_imagenome_bbox_presence = batch['bp']
+            phrase_embeddings = batch['pe'].to(device)
+            phrase_grounding_masks = batch['pgm'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -387,36 +394,40 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'mimiccxr_forward': True,
+                'predict_bboxes': do_visual_grounding_with_bbox_regression,
+                'apply_nms': not training, # apply NMS during validation/testing
             }
-            if using_yolov8 and yolov8_use_multiple_detection_layers:
-                model_kwargs['yolov8_detection_layer_index'] = mimiccxr_yolov8_index
+            # if using_yolov8 and yolov8_use_multiple_detection_layers:
+            #     model_kwargs['yolov8_detection_layer_index'] = mimiccxr_yolov8_index
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
-                if using_yolov8:
-                    yolov8_features = model_output['yolov8_features']
-                    if not training:
-                        yolov8_predictions = model_output['yolov8_predictions']
+                if do_visual_grounding_with_bbox_regression:
+                    if training:
+                        visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits']
+                        visual_grounding_binary_logits = model_output['visual_grounding_binary_logits']
+                    else:
+                        predicted_bboxes = model_output['predicted_bboxes']
                 
                 if training:
                     # Compute losses
                     losses = []
 
                     # 1. attention supervision loss
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
-                                                                                    foreground_loss_weight, background_loss_weight)
+                    if do_visual_grounding_with_bbox_regression:
+                        attention_supervision_loss = balanced_binary_cross_entropy_criterion(visual_grounding_binary_logits, target_presence)
+                    else:
+                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                        foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
 
-                    # 2. yolov8 loss
-                    if using_yolov8 and predict_bboxes_chest_imagenome:
-                        batch_size = images.shape[0]
-                        assert batch_size == yolov8_features[0].shape[0]
-                        chest_imagenome_yolov8_loss, yolov8_loss_items = mimiccxr_yolov8_criterion(yolov8_features, batch)
-                        chest_imagenome_yolov8_loss /= batch_size
-                        losses.append(chest_imagenome_yolov8_loss)
+                    # 2. visual grounding bbox regression loss
+                    if do_visual_grounding_with_bbox_regression:
+                        visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_coords, target_presence)
+                        losses.append(visual_grounding_bbox_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -428,53 +439,54 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
                 else:
 
-                    # Compute attention supervision loss for validation/testing
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
-                                                                                    foreground_loss_weight, background_loss_weight)
+                    if not do_visual_grounding_with_bbox_regression:
+                        # Compute attention supervision loss for validation/testing
+                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
+                                                                                        foreground_loss_weight, background_loss_weight)
 
         # Prepare output
         output = {}
 
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-        if training:
-            if using_yolov8:
-                output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
-                output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-                output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-                output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
-        else:
-            if using_yolov8:
-                # normalize yolov8 predictions
-                resized_shapes = batch['resized_shape']
-                assert len(resized_shapes) == len(yolov8_predictions)
-                for i in range(len(resized_shapes)):
-                    resized_shape = resized_shapes[i]
-                    pred = yolov8_predictions[i].detach().cpu()
-                    pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                    yolov8_predictions[i] = pred
-                output['yolov8_predictions'] = yolov8_predictions
+        if do_visual_grounding_with_bbox_regression:
+            if training:
+                output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
+                output['attention_supervision_loss'] = attention_supervision_loss.detach()
+            else:
+                output['predicted_bboxes'] = predicted_bboxes
                 output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords
                 output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence
-        output['attention_supervision_loss'] = attention_supervision_loss.detach()
-        output['pred_mask'] = sigmoid_attention.detach()
-        output['gt_mask'] = phrase_grounding_masks.detach()
+        else:
+            output['attention_supervision_loss'] = attention_supervision_loss.detach()
+            output['pred_mask'] = sigmoid_attention.detach()
+            output['gt_mask'] = phrase_grounding_masks.detach()
 
         return output
+    
+    
     
     def step_fn__vinbig_bbox_grounding(batch):
 
         # Extract elements from batch
-        phrase_embeddings = batch['pe'].to(device)
         phrase_classification_labels = batch['pcl'].to(device)
-        phrase_grounding_masks = batch['pgm'].to(device)
-        if using_yolov8:
-            images = batch['img'].to(device)
-            if not training:
+        if do_visual_grounding_with_bbox_regression:
+            if training:
+                images = batch['i'].to(device)
+                phrase_embeddings = batch['pe'].to(device)
+                target_coords = batch['btc'].to(device) # (batch_size, num_boxes, num_regions, 4)
+                target_presence = batch['btp'].to(device) # (batch_size, num_boxes, num_regions)
+                assert target_coords.shape[1] == VINBIG_NUM_BBOX_CLASSES
+                assert VINBIG_NUM_BBOX_CLASSES < phrase_classification_labels.shape[1] # some classes don't have bounding boxes
+            else:
+                images = batch['i'].to(device)
+                phrase_embeddings = batch['pe'].to(device)
                 vinbig_bbox_coords = batch['bboxes']
                 vinbig_bbox_classes = batch['classes']
         else:
             images = batch['i'].to(device)
+            phrase_embeddings = batch['pe'].to(device)
+            phrase_grounding_masks = batch['pgm'].to(device)
         
         with torch.set_grad_enabled(training):
 
@@ -485,28 +497,29 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
                 'vinbig_forward': True,
+                'predict_bboxes': do_visual_grounding_with_bbox_regression,
+                'apply_nms': not training, # apply NMS during validation/testing
                 'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
-            if using_yolov8 and yolov8_use_multiple_detection_layers:
-                model_kwargs['yolov8_detection_layer_index'] = vinbig_yolov8_index
+            # if using_yolov8 and yolov8_use_multiple_detection_layers:
+            #     model_kwargs['yolov8_detection_layer_index'] = vinbig_yolov8_index
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
-                assert sigmoid_attention.dim() == 3
-                n = phrase_grounding_masks.shape[1] # number of facts with masks
-                assert sigmoid_attention.shape[1] > n # NOTE: some facts don't have masks
-                sigmoid_attention_with_mask = sigmoid_attention[:, :n] # first n facts will be supervised with ground truth masks
-                if use_attention_regularization_loss:                    
-                    sigmoid_attention_without_mask = sigmoid_attention[:, n:] # remaining facts will be supervised with attention regularization loss
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
-                if using_yolov8:
-                    yolov8_features = model_output['yolov8_features']
-                    if not training:
-                        yolov8_predictions = model_output['yolov8_predictions']
-                if use_global_image_phrase_contrastive_loss:
-                    global_alignment_similarity = model_output['global_alignment_similarity']
+                if do_visual_grounding_with_bbox_regression:
+                    if training:
+                        visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits']
+                        visual_grounding_binary_logits = model_output['visual_grounding_binary_logits']
+                    else:
+                        predicted_bboxes = model_output['predicted_bboxes']
+                        assert len(predicted_bboxes[0]) > VINBIG_NUM_BBOX_CLASSES # some classes don't have bounding boxes
+                        predicted_bboxes = [x[:VINBIG_NUM_BBOX_CLASSES] for x in predicted_bboxes] # only first num_boxes classes have bounding boxes
+                else:
+                    assert sigmoid_attention.shape[1] > VINBIG_NUM_BBOX_CLASSES # some classes don't have bounding boxes
+                    sigmoid_attention_with_mask = sigmoid_attention[:, :VINBIG_NUM_BBOX_CLASSES]
                 
                 if training:
                     # Compute losses
@@ -518,15 +531,22 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     losses.append(phrase_classifier_loss)
 
                     # 2.1 attention supervision loss
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
-                                                                                    foreground_loss_weight, background_loss_weight)
+                    if do_visual_grounding_with_bbox_regression:
+                        assert visual_grounding_binary_logits.shape[1] > VINBIG_NUM_BBOX_CLASSES # only 22 out of 28 classes have bounding boxes
+                        visual_grounding_binary_logits = visual_grounding_binary_logits[:, :VINBIG_NUM_BBOX_CLASSES] # only first num_boxes classes have bounding boxes
+                        visual_grounding_binary_logits = visual_grounding_binary_logits.contiguous() # (batch_size, num_boxes, num_regions)
+                        attention_supervision_loss = balanced_binary_cross_entropy_criterion(visual_grounding_binary_logits, target_presence)
+                    else:
+                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
+                                                                                        foreground_loss_weight, background_loss_weight)
                     attention_supervision_loss *= attention_supervision_loss_weight # weight
                     losses.append(attention_supervision_loss)
                     
                     # 2.2 attention regularization loss
                     if use_attention_regularization_loss:
+                        sigmoid_attention_without_mask = sigmoid_attention[:, VINBIG_NUM_BBOX_CLASSES:]
                         areas = sigmoid_attention_without_mask.mean(dim=-1)
-                        labels_without_mask = phrase_classification_labels[:, n:]
+                        labels_without_mask = phrase_classification_labels[:, VINBIG_NUM_BBOX_CLASSES:]
                         pos_indices = labels_without_mask == 1
                         neg_indices = labels_without_mask == 0
                         areas_pos = areas[pos_indices]
@@ -542,16 +562,16 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                         attention_regularization_loss = attention_regularization_loss_pos + attention_regularization_loss_neg
                         losses.append(attention_regularization_loss)
 
-                    # 3. yolov8 loss
-                    if using_yolov8 and predict_bboxes_vinbig:
-                        batch_size = images.shape[0]
-                        assert batch_size == yolov8_features[0].shape[0]
-                        vinbig_yolov8_loss, yolov8_loss_items = vinbig_yolov8_criterion(yolov8_features, batch)
-                        vinbig_yolov8_loss /= batch_size
-                        losses.append(vinbig_yolov8_loss)
+                    # 3. visual grounding bbox regression loss
+                    if do_visual_grounding_with_bbox_regression:
+                        assert visual_grounding_bbox_logits.shape[1] > VINBIG_NUM_BBOX_CLASSES # only 22 out of 28 classes have bounding boxes
+                        visual_grounding_bbox_logits = visual_grounding_bbox_logits[:, :VINBIG_NUM_BBOX_CLASSES] # only first num_boxes classes have bounding boxes
+                        visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_coords, target_presence)
+                        losses.append(visual_grounding_bbox_loss)
 
                     # 4. global image-phrase contrastive loss
                     if use_global_image_phrase_contrastive_loss:
+                        global_alignment_similarity = model_output['global_alignment_similarity']
                         global_alignment_similarity_pos = global_alignment_similarity[phrase_classification_labels == 1]
                         global_alignment_similarity_neg = global_alignment_similarity[phrase_classification_labels == 0]
                         if len(global_alignment_similarity_pos) == 0 or len(global_alignment_similarity_neg) == 0:
@@ -571,9 +591,10 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
                 else:
                     
-                    # Compute attention supervision loss for validation/testing
-                    attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
-                                                                                    foreground_loss_weight, background_loss_weight)
+                    if not do_visual_grounding_with_bbox_regression:
+                        # Compute attention supervision loss for validation/testing
+                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention_with_mask, phrase_grounding_masks,
+                                                                                        foreground_loss_weight, background_loss_weight)
 
 
         # Prepare output
@@ -585,29 +606,20 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
             if use_attention_regularization_loss:
                 output['attention_regularization_loss'] = attention_regularization_loss.detach()
-            if using_yolov8:
-                output[MetricNames.YOLOV8_LOSS] = vinbig_yolov8_loss.detach()
-                output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-                output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-                output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
             if use_global_image_phrase_contrastive_loss:
                 output['global_alignment_contrastive_loss'] = global_alignment_contrastive_loss.detach()
-        else:
-            if using_yolov8:
-                # normalize yolov8 predictions
-                resized_shapes = batch['resized_shape']
-                assert len(resized_shapes) == len(yolov8_predictions)
-                for i in range(len(resized_shapes)):
-                    resized_shape = resized_shapes[i]
-                    pred = yolov8_predictions[i].detach().cpu()
-                    pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                    yolov8_predictions[i] = pred
-                output['yolov8_predictions'] = yolov8_predictions
+        if do_visual_grounding_with_bbox_regression:
+            if training:
+                output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
+                output['attention_supervision_loss'] = attention_supervision_loss.detach()
+            else:
+                output['predicted_bboxes'] = predicted_bboxes
                 output['vinbig_bbox_coords'] = vinbig_bbox_coords
                 output['vinbig_bbox_classes'] = vinbig_bbox_classes
-        output['attention_supervision_loss'] = attention_supervision_loss.detach()
-        output['pred_mask'] = sigmoid_attention_with_mask.detach()
-        output['gt_mask'] = phrase_grounding_masks.detach()
+        else:
+            output['attention_supervision_loss'] = attention_supervision_loss.detach()
+            output['pred_mask'] = sigmoid_attention_with_mask.detach()
+            output['gt_mask'] = phrase_grounding_masks.detach()
         output['pred_probs'] = phrase_classifier_logits.detach().sigmoid()
         output['gt_labels'] = phrase_classification_labels.detach()
 
@@ -937,7 +949,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 def get_engine(model, device, gradient_accumulation_steps=1,
                use_amp=False, training=False, validating=False,
                testing=False, optimizer=None,
-               predict_bboxes_chest_imagenome=False,
                predict_bboxes_vinbig=False,
                update_lr_batchwise=False, lr_scheduler=None,
                using_yolov8=False,
@@ -957,6 +968,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                use_contrastive_phrase_grounding_loss=False,
                use_global_image_phrase_contrastive_loss=False,
                nt_xent_temperature=0.1,
+               do_visual_grounding_with_bbox_regression=False,
             #    **unused_kwargs,
             ):
 
@@ -1007,6 +1019,9 @@ def get_engine(model, device, gradient_accumulation_steps=1,
     # Threshold loss
     threshold_criterion = ThresholdLoss(pos_area_prior)
 
+    # Balanced binary cross-entropy loss
+    balanced_binary_cross_entropy_criterion = NegativePositiveBalancedBCELoss()
+
     if training and using_yolov8:
         assert model_for_yolov8 is not None
         from ultralytics.yolo.utils.torch_utils import de_parallel
@@ -1030,12 +1045,11 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             generic_phrase_classifier_criterion=generic_phrase_classifier_criterion,
                             contrastive_phrase_grounding_criterion=contrastive_phrase_grounding_criterion,
                             global_image_phrase_contrastive_criterion=global_image_phrase_contrastive_criterion,
+                            balanced_binary_cross_entropy_criterion=balanced_binary_cross_entropy_criterion,
                             threshold_criterion=threshold_criterion,
                             neg_area_prior=neg_area_prior,
                             gradient_accumulation_steps=gradient_accumulation_steps,
                             max_grad_norm=max_grad_norm, use_amp=use_amp,
-                            # chest imagenome dataset
-                            predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
                             # vinbig dataset
                             predict_bboxes_vinbig=predict_bboxes_vinbig,
                             # yolov8
@@ -1055,6 +1069,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             use_attention_regularization_loss=use_attention_regularization_loss,
                             use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
                             use_global_image_phrase_contrastive_loss=use_global_image_phrase_contrastive_loss,
+                            do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
                         )
     engine = Engine(step_fn)
     return engine

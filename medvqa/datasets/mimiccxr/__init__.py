@@ -81,6 +81,7 @@ _cache = {}
 class MIMICCXR_ImageSizeModes:
     SMALL_256x256 = 'small_256x256'
     MEDIUM_512 = 'medium_512'
+    ORIGINAL = 'original'
 
 def get_mimiccxr_small_image_path(part_id, subject_id, study_id, dicom_id):
     return MIMICCXR_IMAGE_SMALL_PATH_TEMPLATE.format(part_id, subject_id, study_id, dicom_id)
@@ -99,6 +100,8 @@ def get_image_path_getter(image_size_mode, verbose=False):
         image_path_getter = get_mimiccxr_small_image_path
     elif image_size_mode == MIMICCXR_ImageSizeModes.MEDIUM_512:
         image_path_getter = get_mimiccxr_medium_image_path
+    elif image_size_mode == MIMICCXR_ImageSizeModes.ORIGINAL:
+        image_path_getter = get_mimiccxr_large_image_path
     else:
         raise ValueError(f'Unknown source image size mode: {image_size_mode}')
     if verbose:

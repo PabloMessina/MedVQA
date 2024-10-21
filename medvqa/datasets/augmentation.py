@@ -1,6 +1,7 @@
 import torchvision.transforms as T
 import cv2
 import albumentations as A
+import numpy as np
 
 _SPATIAL_TRANSFORMS = [
     'crop',
@@ -344,3 +345,47 @@ class ImageSegmentationMaskAugmentationTransforms:
             for spatial_tf in self._spatial_transforms:
                 output.append(A.Compose([spatial_tf, color_tf]))
         return output
+    
+class ChestImagenomeAlbumentationAdapter:
+
+    def __init__(self, num_bbox_classes):
+        self.num_bbox_classes = num_bbox_classes
+    
+    def encode(self, bbox_coords, bbox_presence=None):
+        assert len(bbox_coords.shape) == 2
+        albumentation_bbox_coords = []
+        for i in range(bbox_coords.shape[0]):
+            if bbox_presence is None or bbox_presence[i] == 1:
+                x_min = bbox_coords[i, 0]
+                y_min = bbox_coords[i, 1]
+                x_max = bbox_coords[i, 2]
+                y_max = bbox_coords[i, 3]
+                assert x_min <= x_max
+                assert y_min <= y_max
+                if x_min < x_max and y_min < y_max: # ignore invalid bboxes
+                    albumentation_bbox_coords.append([
+                        bbox_coords[i, 0],
+                        bbox_coords[i, 1],
+                        bbox_coords[i, 2],
+                        bbox_coords[i, 3],
+                        i, # category id
+                    ])
+        return albumentation_bbox_coords
+    
+    def decode(self, albumentation_bbox_coords, only_boxes=False):
+        bbox_coords = np.zeros((self.num_bbox_classes, 4), dtype=np.float32)
+        # set all bbox coordinates to [0, 0, 1, 1] by default
+        bbox_coords[:, 2] = 1
+        bbox_coords[:, 3] = 1        
+        if not only_boxes:
+            bbox_presence = np.zeros(self.num_bbox_classes, dtype=np.float32)
+        for bbox in albumentation_bbox_coords:
+            cls = bbox[4]
+            for i in range(4):
+                bbox_coords[cls, i] = bbox[i]
+            if not only_boxes:
+                bbox_presence[cls] = 1
+        if only_boxes:
+            return bbox_coords
+        else:
+            return bbox_coords, bbox_presence

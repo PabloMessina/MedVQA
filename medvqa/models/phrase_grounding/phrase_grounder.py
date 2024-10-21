@@ -4,6 +4,7 @@ from medvqa.models.FiLM_utils import LinearFiLM
 from medvqa.models.mlp import MLP
 from medvqa.models.nlp.positional_encoding import compute_2D_positional_encoding, PositionalEncoding
 from positional_encodings.torch_encodings import PositionalEncoding2D, Summer
+from medvqa.models.vision.bbox_regression import BoundingBoxRegressorSingleClass
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 from medvqa.utils.logging import print_orange
 
@@ -11,6 +12,7 @@ class PhraseGroundingMode:
     SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER = 'sigmoid_attention_plus_custom_classifier'
     TRANSFORMER_ENCODER = 'transformer_encoder'
     FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER = 'film_layers_plus_sigmoid_attention_and_custom_classifier'
+    FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION = 'film_layers_sigmoid_attention_custom_classifier_object_detection'
     
     @staticmethod
     def get_choices():
@@ -18,12 +20,14 @@ class PhraseGroundingMode:
             PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER,
             PhraseGroundingMode.TRANSFORMER_ENCODER,
             PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER,
+            PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION,
         ]
     
 _mode2shortname = {
     PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER: 'SigmoidAttention',
     PhraseGroundingMode.TRANSFORMER_ENCODER: 'TransformerEncoder',
     PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER: 'FiLM_SigmoidAttention',
+    PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION: 'FiLM_SigmoidAttention_ObjectDetection',
 }
 
 class PhraseGrounder(MultiPurposeVisualModule):
@@ -97,6 +101,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         self.use_global_features = False # false by default, but can be set to true in the FiLM-based approach
         self.predict_global_alignment = predict_global_alignment
         self.alignment_proj_size = alignment_proj_size
+        self.visual_feature_proj_size = visual_feature_proj_size
 
         if predict_global_alignment:
             assert self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER, \
@@ -192,6 +197,36 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 assert alignment_proj_size is not None
                 self.global_vf_align_proj = nn.Linear(self.global_feat_size, alignment_proj_size)
                 self.phrase_emb_align_proj = nn.Linear(phrase_embedding_size, alignment_proj_size)
+
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+            assert visual_feature_proj_size is not None
+            assert visual_grounding_hidden_size is not None
+            assert phrase_mlp_hidden_dims is not None
+            
+            self.global_film = LinearFiLM(self.global_feat_size, phrase_embedding_size)
+            self.local_film_1 = LinearFiLM(self.local_feat_size, phrase_embedding_size)
+            self.local_film_2 = LinearFiLM(self.local_feat_size, phrase_embedding_size)
+            self.visual_grounding_hidden_layer = nn.Linear(self.local_feat_size, visual_grounding_hidden_size)
+            self.visual_grounding_bbox_regressor = BoundingBoxRegressorSingleClass(local_feat_dim=visual_grounding_hidden_size)
+            self.classifier_mlp = MLP(in_dim=self.global_feat_size + self.local_feat_size + num_regions, # global, local, attention
+                                      out_dim=1, # true or false (binary classification)
+                                      activation=nn.GELU,
+                                      hidden_dims=phrase_mlp_hidden_dims)
+            self.gelu = nn.GELU()
+            self.use_global_features = True
+            
+            # Init positional encoding
+            self.apply_positional_encoding = apply_positional_encoding
+            if self.apply_positional_encoding:
+                self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
+                print_orange('Using positional encoding for local features')
+
+            # Init alignment projection layers
+            if predict_global_alignment:
+                assert alignment_proj_size is not None
+                self.global_vf_align_proj = nn.Linear(self.global_feat_size, alignment_proj_size)
+                self.phrase_emb_align_proj = nn.Linear(phrase_embedding_size, alignment_proj_size)
+                
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {phrase_grounding_mode}')
 
@@ -210,6 +245,11 @@ class PhraseGrounder(MultiPurposeVisualModule):
                     f'{self.phrase_embedding_size},{self.global_proj.out_features},{self.local_proj.out_features},'
                     f'{self.visual_grounding_layer_1.out_features},{self.visual_grounding_layer_2.out_features},'
                     f'{mlp_hidden_dims_str})')
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+            mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
+            return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
+                    f'{self.phrase_embedding_size},{self.visual_grounding_hidden_layer.out_features},'
+                    f'{self.visual_grounding_bbox_regressor.local_feat_dim},{mlp_hidden_dims_str})')
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {self.phrase_grounding_mode}')
 
@@ -224,6 +264,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
         mimiccxr_forward=False,
         vinbig_forward=False,
         return_normalized_average_v=False,
+        predict_bboxes=False,
+        apply_nms=False,
+        nms_threshold=0.3,
+        conf_threshold=0.6,
     ):  
         assert mimiccxr_forward or vinbig_forward or only_compute_features
         # Visual Component
@@ -363,6 +407,74 @@ class PhraseGrounder(MultiPurposeVisualModule):
 
             # Output
             output['sigmoid_attention'] = sigmoid_attention
+            if not skip_phrase_classifier:
+                output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
+            if compute_global_alignment:
+                output['global_alignment_similarity'] = global_alignment_similarity
+
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+
+            orig_global_feat = output['global_feat'] # (batch_size, global_feat_size)
+            
+            if self.apply_positional_encoding:
+                local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
+                local_feat = self.pos_encoding(local_feat) # apply positional encoding
+                local_feat = local_feat.view(-1, self.num_regions, self.image_local_feat_size)
+
+            # FiLM layer 1 (local features)
+            num_facts = phrase_embeddings.shape[1] # K
+            local_feat = local_feat.unsqueeze(1).expand(-1, num_facts, -1, -1) # (batch_size, K, num_regions, local_feat_size)
+            local_feat_before_film = local_feat # remember the local features before applying FiLM
+            phrase_embeddings_ = phrase_embeddings.unsqueeze(2).expand(-1, -1, self.num_regions, -1) # (batch_size, K, num_regions, phrase_embedding_size)
+            local_feat = self.local_film_1(local_feat, phrase_embeddings_) # (batch_size, K, num_regions, local_feat_size)
+
+            # Visual grounding
+            visual_grounding_logits = self.visual_grounding_hidden_layer(local_feat) # (batch_size, K, num_regions, visual_grounding_hidden_size)
+            visual_grounding_logits = self.gelu(visual_grounding_logits) # (batch_size, K, num_regions, visual_grounding_hidden_size)
+            if predict_bboxes:
+                if apply_nms:
+                    predicted_bboxes, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(
+                        visual_grounding_logits, apply_nms=apply_nms, nms_threshold=nms_threshold, conf_threshold=conf_threshold)
+                else:
+                    visual_grounding_bbox_logits, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(visual_grounding_logits)
+            else:
+                visual_grounding_binary_logits  = self.visual_grounding_bbox_regressor(visual_grounding_logits, predict_coords=False)
+            sigmoid_attention = torch.sigmoid(visual_grounding_binary_logits) # (batch_size, K, num_regions, 1)
+
+            # Weighted average of local features
+            weighted_sum = (sigmoid_attention * local_feat_before_film).sum(dim=-2) # (batch_size, K, local_feat_size)
+            weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-2) + 1e-8)  # (batch_size, K, local_feat_size)
+            sigmoid_attention = sigmoid_attention.squeeze(-1) # (batch_size, K, num_regions)
+
+            # Phrase classifier
+            if not skip_phrase_classifier:
+                global_feat = orig_global_feat.unsqueeze(1).expand(-1, num_facts, -1) # (batch_size, K, global_feat_size)
+                global_feat = self.global_film(global_feat, phrase_embeddings) # (batch_size, K, global_feat_size)
+
+                weighted_avg = self.local_film_2(weighted_avg, phrase_embeddings) # (batch_size, K, local_feat_size)
+                mlp_input = torch.cat([global_feat, weighted_avg, sigmoid_attention], dim=-1)
+                phrase_classifier_logits = self.classifier_mlp(mlp_input) # (batch_size, K, 1)
+
+            # Global alignment
+            if compute_global_alignment:
+                assert self.predict_global_alignment
+                global_feat_align = self.global_vf_align_proj(orig_global_feat) # (batch_size, alignment_proj_size)
+                phrase_emb_align = self.phrase_emb_align_proj(phrase_embeddings) # (batch_size, K, alignment_proj_size)
+                # normalize
+                global_feat_align = torch.nn.functional.normalize(global_feat_align, p=2, dim=-1) # (batch_size, alignment_proj_size)
+                phrase_emb_align = torch.nn.functional.normalize(phrase_emb_align, p=2, dim=-1) # (batch_size, K, alignment_proj_size)
+                # cosine similarity
+                element_wise_mult = global_feat_align.unsqueeze(1) * phrase_emb_align # (batch_size, K, alignment_proj_size)
+                global_alignment_similarity = element_wise_mult.sum(dim=-1) # (batch_size, K)
+
+            # Output
+            output['sigmoid_attention'] = sigmoid_attention # (batch_size, K, num_regions)
+            if predict_bboxes:
+                if apply_nms:
+                    output['predicted_bboxes'] = predicted_bboxes # (batch_size, K, list of bboxes)
+                else:
+                    output['visual_grounding_binary_logits'] = visual_grounding_binary_logits # (batch_size, K, num_regions, 1)
+                    output['visual_grounding_bbox_logits'] = visual_grounding_bbox_logits # (batch_size, K, num_regions, 4)
             if not skip_phrase_classifier:
                 output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
             if compute_global_alignment:
