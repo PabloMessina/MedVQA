@@ -1,6 +1,6 @@
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, DatasetAwareBboxMeanF1
-from medvqa.metrics.bbox.bbox_iou import ConditionAwareBboxIOU
+from medvqa.metrics.bbox.bbox_iou import ConditionAwareBboxIOU, ConditionAwareBboxIOUperClass
 from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
@@ -578,6 +578,18 @@ def attach_condition_aware_segmask_iou_per_class(engine, pred_field_name, gt_fie
         nc=nc,
         output_transform=_get_output_transform(pred_field_name, gt_field_name),
         condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
+
+# General purpose bbox IOU
+def attach_condition_aware_bbox_iou_per_class(engine, field_names, metric_name, nc, condition_function=lambda _: True,
+                                              **kwargs):
+    assert type(field_names) == tuple or type(field_names) == list
+    met = ConditionAwareBboxIOUperClass(
+        nc=nc,
+        output_transform=_get_output_transform(*field_names),
+        condition_function=condition_function,
+        **kwargs,
     )
     met.attach(engine, metric_name)
 

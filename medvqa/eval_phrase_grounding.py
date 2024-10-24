@@ -7,6 +7,7 @@ from ignite.handlers.timing import Timer
 from medvqa.datasets.chexlocalize import CHEXLOCALIZE_CLASS_NAMES
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
+from medvqa.metrics.bbox.utils import calculate_exact_iou_union
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
 from medvqa.utils.files import get_results_folder_path, save_pickle
 from medvqa.utils.handlers import (
@@ -34,6 +35,7 @@ from medvqa.utils.constants import (
 )
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
+    attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
     attach_condition_aware_segmask_iou,
     attach_condition_aware_segmask_iou_per_class,
@@ -67,10 +69,11 @@ def parse_args(args=None):
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
 
     # Evaluation arguments
-    parser.add_argument('--eval_chest_imagenome_gold', action='store_true', default=False)
-    parser.add_argument('--eval_mscxr', action='store_true', default=False)
-    parser.add_argument('--eval_chexlocalize', action='store_true', default=False)
-    parser.add_argument('--eval_vinbig', action='store_true', default=False)
+    parser.add_argument('--eval_chest_imagenome_gold', action='store_true')
+    parser.add_argument('--eval_mscxr', action='store_true')
+    parser.add_argument('--eval_chexlocalize', action='store_true')
+    parser.add_argument('--eval_vinbig', action='store_true')
+    parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
     
     return parser.parse_args(args=args)
 
@@ -93,11 +96,14 @@ def _evaluate_model(
     eval_vinbig,
     mscxr_phrase2embedding_filepath,
     device,
+    vinbig_use_training_indices_for_validation,
 ):
     count_print = CountPrinter()
     
     # Pull out some args from kwargs
     use_yolov8 = (mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_yolov8', False))
+    do_visual_grounding_with_bbox_regression = evaluation_engine_kwargs.get('do_visual_grounding_with_bbox_regression', False)
+    print(f'do_visual_grounding_with_bbox_regression = {do_visual_grounding_with_bbox_regression}')
 
     # Sanity checks
     assert sum([eval_chest_imagenome_gold, eval_mscxr, eval_chexlocalize, eval_vinbig]) > 0 # at least one dataset must be evaluated
@@ -179,6 +185,7 @@ def _evaluate_model(
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
             num_val_workers=num_workers,
+            use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
             **vinbig_trainer_kwargs,
         )
 
@@ -197,18 +204,32 @@ def _evaluate_model(
         if use_yolov8:
             _gold_class_mask = get_chest_imagenome_gold_class_mask()
             attach_condition_aware_chest_imagenome_bbox_iou(evaluation_engine, _cond_func, use_yolov8=True, class_mask=_gold_class_mask)
-        attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
-                                                      nc=CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+        if do_visual_grounding_with_bbox_regression:
+            attach_condition_aware_bbox_iou_per_class(evaluation_engine,
+                                                      field_names=['predicted_bboxes', 'chest_imagenome_bbox_coords', 'chest_imagenome_bbox_presence'],
+                                                      metric_name='bbox_iou', nc=CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
                                                       condition_function=_cond_func)
+        else:
+            attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
+                                                        nc=CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+                                                        condition_function=_cond_func)
         # Attach accumulators
-        attach_accumulator(evaluation_engine, 'pred_mask')
-        attach_accumulator(evaluation_engine, 'gt_mask')
+        if do_visual_grounding_with_bbox_regression:
+            attach_accumulator(evaluation_engine, 'predicted_bboxes')
+            attach_accumulator(evaluation_engine, 'chest_imagenome_bbox_coords')
+            attach_accumulator(evaluation_engine, 'chest_imagenome_bbox_presence')
+        else:
+            attach_accumulator(evaluation_engine, 'pred_mask')
+            attach_accumulator(evaluation_engine, 'gt_mask')
 
         # for logging
         metrics_to_print = []
         if use_yolov8:
             metrics_to_print.append(MetricNames.CHESTIMAGENOMEBBOXIOU)
-        metrics_to_print.append('segmask_iou')
+        if do_visual_grounding_with_bbox_regression:
+            metrics_to_print.append('bbox_iou')
+        else:
+            metrics_to_print.append('segmask_iou')
 
         # Timer
         timer = Timer()
@@ -235,8 +256,11 @@ def _evaluate_model(
             metric_name = MetricNames.CHESTIMAGENOMEBBOXIOU
             print(f'{metric_name}: {metrics[metric_name]}')
             print()
-        # 2) segmask iou
-        metric_name = 'segmask_iou'
+        # 2) bbox iou / segmask iou
+        if do_visual_grounding_with_bbox_regression:
+            metric_name = 'bbox_iou'
+        else:
+            metric_name = 'segmask_iou'
         print(f'{metric_name}:')
         from tabulate import tabulate
         table = []
@@ -248,33 +272,62 @@ def _evaluate_model(
         dataset = mimiccxr_trainer.test_chest_imagenome_gold_dataset
         image_paths = dataset.image_paths
         phrases = mimiccxr_trainer.test_chest_imagenome_gold_bbox_phrases
-        gt_masks = metrics['gt_mask']
-        pred_masks = metrics['pred_mask']
-        assert len(image_paths) == len(pred_masks) == len(gt_masks)
-        
-        print_blue('Saving metrics to file ...', bold=True)
-        results_folder_path = get_results_folder_path(checkpoint_folder_path)
-        save_path = os.path.join(results_folder_path, f'chest_imagenome_gold_metrics.pkl')
-        
-        output = dict(
-            image_paths=[],
-            phrases=[],
-            pred_masks=[],
-            gt_masks=[],
-            ious=[],
-            segmask_iou=metrics['segmask_iou'],
-        )
-        for i in range(len(image_paths)):
-            for j in range(len(pred_masks[i])):
-                intersection = torch.min(pred_masks[i][j], gt_masks[i][j]).sum()
-                union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
-                iou = intersection / union
-                iou = iou.item()
-                output['image_paths'].append(image_paths[i])
-                output['phrases'].append(phrases[j])
-                output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
-                output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
-                output['ious'].append(iou)
+
+        if do_visual_grounding_with_bbox_regression:
+            pred_bboxes = metrics['predicted_bboxes']
+            gt_bboxes = metrics['chest_imagenome_bbox_coords']
+            gt_presence = metrics['chest_imagenome_bbox_presence']
+            assert len(image_paths) == len(pred_bboxes) == len(gt_bboxes) == len(gt_presence)
+            print_blue('Saving metrics to file ...', bold=True)
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            save_path = os.path.join(results_folder_path, f'chest_imagenome_gold_metrics_bbox_regression.pkl')
+            output = dict(
+                image_paths=[],
+                phrases=[],
+                pred_bboxes=[],
+                gt_bboxes=[],
+                ious=[],
+                bbox_iou=metrics['bbox_iou'],
+            )
+            for i in range(len(image_paths)):
+                for j in range(len(pred_bboxes[i])):
+                    if gt_presence[i][j] == 1:
+                        if pred_bboxes[i][j] is None:
+                            iou = 0
+                        else:
+                            iou = calculate_exact_iou_union(pred_bboxes[i][j][0], gt_bboxes[i][j])
+                        output['image_paths'].append(image_paths[i])
+                        output['phrases'].append(phrases[j])
+                        output['pred_bboxes'].append(pred_bboxes[i][j][0].cpu().numpy() if pred_bboxes[i][j] is not None else None)
+                        output['gt_bboxes'].append(gt_bboxes[i][j].cpu().numpy())
+                        output['ious'].append(iou)
+        else:
+            gt_masks = metrics['gt_mask']
+            pred_masks = metrics['pred_mask']
+            assert len(image_paths) == len(pred_masks) == len(gt_masks)
+            print_blue('Saving metrics to file ...', bold=True)
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            save_path = os.path.join(results_folder_path, f'chest_imagenome_gold_metrics_segmask.pkl')
+            output = dict(
+                image_paths=[],
+                phrases=[],
+                pred_masks=[],
+                gt_masks=[],
+                ious=[],
+                segmask_iou=metrics['segmask_iou'],
+            )
+            for i in range(len(image_paths)):
+                for j in range(len(pred_masks[i])):
+                    intersection = torch.min(pred_masks[i][j], gt_masks[i][j]).sum()
+                    union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
+                    iou = intersection / union
+                    iou = iou.item()
+                    output['image_paths'].append(image_paths[i])
+                    output['phrases'].append(phrases[j])
+                    output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
+                    output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
+                    output['ious'].append(iou)
+
         print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
         save_pickle(output, save_path)
         print(f'Saved metrics to {save_path}')
@@ -476,15 +529,29 @@ def _evaluate_model(
         # Attach metrics
         metrics_to_print = []
         _cond_func = lambda x: x['flag'] == 'vbg'
-        attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
-                                                      nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func)
-        metrics_to_print.append('segmask_iou')
+        if do_visual_grounding_with_bbox_regression:
+            attach_condition_aware_bbox_iou_per_class(evaluation_engine,
+                                                      field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
+                                                      metric_name='bbox_iou', nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func,
+                                                      for_vinbig=True)
+            metrics_to_print.append('bbox_iou')
+        else:
+            attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
+                                                        nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func)
+            metrics_to_print.append('segmask_iou')
 
         # Attach accumulators
-        attach_accumulator(evaluation_engine, 'pred_mask')
-        attach_accumulator(evaluation_engine, 'gt_mask')
-        attach_accumulator(evaluation_engine, 'pred_probs')
-        attach_accumulator(evaluation_engine, 'gt_labels')
+        if do_visual_grounding_with_bbox_regression:
+            attach_accumulator(evaluation_engine, 'predicted_bboxes')
+            attach_accumulator(evaluation_engine, 'vinbig_bbox_coords')
+            attach_accumulator(evaluation_engine, 'vinbig_bbox_classes')
+            attach_accumulator(evaluation_engine, 'pred_probs')
+            attach_accumulator(evaluation_engine, 'gt_labels')
+        else:
+            attach_accumulator(evaluation_engine, 'pred_mask')
+            attach_accumulator(evaluation_engine, 'gt_mask')
+            attach_accumulator(evaluation_engine, 'pred_probs')
+            attach_accumulator(evaluation_engine, 'gt_labels')
 
         # Timer
         timer = Timer()
@@ -507,19 +574,20 @@ def _evaluate_model(
         print_blue('Final metrics:', bold=True)
         metrics = evaluation_engine.state.metrics
         # 1) segmask iou
-        metric_name = 'segmask_iou'
+        if do_visual_grounding_with_bbox_regression:
+            metric_name = 'bbox_iou'
+        else:
+            metric_name = 'segmask_iou'
         print(f'{metric_name}: {metrics[metric_name]}')
         # 2) PRC-AUC
         dataset = vinbig_trainer.val_dataset
         phrases = vinbig_trainer.phrases
         pred_probs = metrics['pred_probs']
-        pred_probs = torch.tensor(pred_probs).cpu().numpy()
-        assert pred_probs.ndim == 1
+        pred_probs = torch.stack(pred_probs).cpu().numpy()
+        assert pred_probs.ndim == 2
         gt_labels = metrics['gt_labels']
-        gt_labels = torch.tensor(gt_labels).cpu().numpy()
-        assert gt_labels.ndim == 1
-        pred_probs =  pred_probs.reshape(-1, len(phrases))
-        gt_labels = gt_labels.reshape(-1, len(phrases))
+        gt_labels = torch.stack(gt_labels).cpu().numpy()
+        assert gt_labels.ndim == 2
         assert pred_probs.shape == gt_labels.shape
         assert pred_probs.shape[0] == len(dataset)
         prc_auc_metrics = prc_auc_fn(pred_probs, gt_labels)
@@ -530,36 +598,78 @@ def _evaluate_model(
 
         # Save metrics to file
         image_paths = [dataset.image_paths[i] for i in dataset.indices]
-        gt_masks = metrics['gt_mask']
-        pred_masks = metrics['pred_mask']
-        assert len(image_paths) == len(pred_masks) == len(gt_masks),\
-             (f'len(image_paths) = {len(image_paths)}, len(pred_masks) = {len(pred_masks)}, len(gt_masks) = {len(gt_masks)}')
-        print_blue('Saving metrics to file ...', bold=True)
-        results_folder_path = get_results_folder_path(checkpoint_folder_path)
-        save_path = os.path.join(results_folder_path, f'vindrcxr_metrics.pkl')
-        output = dict(
-            image_paths=[],
-            phrases=[],
-            pred_masks=[],
-            gt_masks=[],
-            ious=[],
-            segmask_iou=metrics['segmask_iou'],
-            prc_auc=prc_auc_metrics,
-        )
-        for i in range(len(image_paths)):
-            for j in range(len(pred_masks[i])):
-                if gt_labels[i, j] == 1:
-                    intersection = torch.min(pred_masks[i][j], gt_masks[i][j]).sum()
-                    union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
-                    iou = intersection / union
-                    iou = iou.item()
-                    output['image_paths'].append(image_paths[i])
-                    output['phrases'].append(phrases[j])
-                    output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
-                    output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
-                    output['ious'].append(iou)
-                else:
-                    assert torch.all(gt_masks[i][j] == 0)
+
+        if do_visual_grounding_with_bbox_regression:
+            pred_bboxes = metrics['predicted_bboxes']
+            gt_bboxes = metrics['vinbig_bbox_coords']
+            gt_classes = metrics['vinbig_bbox_classes']
+            assert len(image_paths) == len(pred_bboxes) == len(gt_bboxes) == len(gt_classes),\
+                (f'len(image_paths) = {len(image_paths)}, len(pred_bboxes) = {len(pred_bboxes)}, len(gt_bboxes) = {len(gt_bboxes)}, len(gt_classes) = {len(gt_classes)}')
+            print_blue('Saving metrics to file ...', bold=True)
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            save_path = os.path.join(results_folder_path, f'vindrcxr_metrics(bbox_regression,{len(vinbig_trainer.val_dataset)}).pkl')
+            output = dict(
+                image_paths=[],
+                phrases=[],
+                pred_bboxes=[],
+                gt_bboxes=[],
+                ious=[],
+                bbox_iou=metrics['bbox_iou'],
+                prc_auc=prc_auc_metrics,
+            )
+            for i in range(len(image_paths)):
+                # Group ground truth coordinates by class
+                coords_per_class = [[] for _ in range(len(pred_bboxes[i]))]
+                for cls, coord in zip(gt_classes[i], gt_bboxes[i]):
+                    coords_per_class[cls].append(coord)
+                
+                # Calculate iou for each class
+                for cls in range(len(pred_bboxes[i])): # For each class
+                    if gt_labels[i, cls] == 1:
+                        assert len(coords_per_class[cls]) > 0
+                        if pred_bboxes[i][cls] is None:
+                            iou = 0
+                        else:
+                            iou = calculate_exact_iou_union(pred_bboxes[i][cls][0], coords_per_class[cls])
+                        output['image_paths'].append(image_paths[i])
+                        output['phrases'].append(phrases[cls])
+                        output['pred_bboxes'].append(pred_bboxes[i][cls][0].cpu().numpy() if pred_bboxes[i][cls] is not None else None)
+                        output['gt_bboxes'].append(coords_per_class[cls])
+                        output['ious'].append(iou)
+                    else:
+                        assert len(coords_per_class[cls]) == 0
+
+        else:
+            gt_masks = metrics['gt_mask']
+            pred_masks = metrics['pred_mask']
+            assert len(image_paths) == len(pred_masks) == len(gt_masks),\
+                (f'len(image_paths) = {len(image_paths)}, len(pred_masks) = {len(pred_masks)}, len(gt_masks) = {len(gt_masks)}')
+            print_blue('Saving metrics to file ...', bold=True)
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            save_path = os.path.join(results_folder_path, f'vindrcxr_metrics(segmask,{len(vinbig_trainer.val_dataset)}).pkl')
+            output = dict(
+                image_paths=[],
+                phrases=[],
+                pred_masks=[],
+                gt_masks=[],
+                ious=[],
+                segmask_iou=metrics['segmask_iou'],
+                prc_auc=prc_auc_metrics,
+            )
+            for i in range(len(image_paths)):
+                for j in range(len(pred_masks[i])):
+                    if gt_labels[i, j] == 1:
+                        intersection = torch.min(pred_masks[i][j], gt_masks[i][j]).sum()
+                        union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
+                        iou = intersection / union
+                        iou = iou.item()
+                        output['image_paths'].append(image_paths[i])
+                        output['phrases'].append(phrases[j])
+                        output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
+                        output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
+                        output['ious'].append(iou)
+                    else:
+                        assert torch.all(gt_masks[i][j] == 0)
 
         print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
         save_pickle(output, save_path)
@@ -577,6 +687,7 @@ def evaluate(
     eval_vinbig,
     mscxr_phrase2embedding_filepath,
     device,
+    vinbig_use_training_indices_for_validation,
 ):
     print_blue('----- Evaluating model -----', bold=True)
 
@@ -618,6 +729,7 @@ def evaluate(
                 eval_vinbig=eval_vinbig,
                 mscxr_phrase2embedding_filepath=mscxr_phrase2embedding_filepath,
                 device=device,
+                vinbig_use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
             )
 
 

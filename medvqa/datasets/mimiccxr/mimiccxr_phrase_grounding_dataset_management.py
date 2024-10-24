@@ -29,6 +29,7 @@ from medvqa.datasets.mimiccxr import (
     get_dicom_id_and_orientation_list,
     get_image_path_getter,
     get_imageId2PartPatientStudy,
+    get_mimiccxr_train_dicom_ids,
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.utils.constants import LABEL_BASED_FACTS
@@ -456,7 +457,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert cxrlt2024_multilabel_classifier_collate_batch_fn is not None
 
         if use_cxrlt2024_custom_labels:
-            assert use_cxrlt2024_challenge_split
+            # assert use_cxrlt2024_challenge_split
             assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
             assert cxrlt2024_image_phrase_classifier_collate_batch_fn is not None
 
@@ -472,7 +473,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         print(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
 
         # Create train and dev datasets for CXR-LT-2024 challenge
-        if use_cxrlt2024_challenge_split:
+        if use_cxrlt2024_challenge_split or self.use_cxrlt2024_custom_labels:
             print_magenta('Preparing CXR-LT-2024 challenge datasets and dataloaders for training/testing...', bold=True)
 
             imageId2PartPatientStudy = get_imageId2PartPatientStudy()
@@ -497,27 +498,55 @@ class MIMICCXR_PhraseGroundingTrainer:
 
                 train_indices = []
                 dev_indices = []
-                    
-                for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['train'].items():
-                    if dicom_id in forbidden_train_dicom_ids:
-                        continue
-                    assert dicom_id in cxrlt2024_train_dicom_ids
-                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    phrase_idxs[idx] = neg_idxs + pos_idxs
-                    phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
-                                                                        np.ones(len(pos_idxs), dtype=np.int64)])
-                    train_indices.append(idx)
-                    idx += 1
 
-                for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['dev'].items():
-                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    phrase_idxs[idx] = neg_idxs + pos_idxs
-                    phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
-                                                                        np.ones(len(pos_idxs), dtype=np.int64)])
-                    dev_indices.append(idx)
-                    idx += 1
+                if use_cxrlt2024_challenge_split:
+                    
+                    for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['train'].items():
+                        if dicom_id in forbidden_train_dicom_ids:
+                            continue
+                        assert dicom_id in cxrlt2024_train_dicom_ids
+                        part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        phrase_idxs[idx] = neg_idxs + pos_idxs
+                        phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                            np.ones(len(pos_idxs), dtype=np.int64)])
+                        train_indices.append(idx)
+                        idx += 1
+
+                    for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['dev'].items():
+                        part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        phrase_idxs[idx] = neg_idxs + pos_idxs
+                        phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                            np.ones(len(pos_idxs), dtype=np.int64)])
+                        dev_indices.append(idx)
+                        idx += 1
+
+                else:
+
+                    # Use MIMIC-CXR's original train/dev split by default
+                    print_orange('Using MIMIC-CXR\'s original train/dev split for CXR-LT-2024 challenge', bold=True)
+                    train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
+                    for key in ['train', 'dev']:
+                        for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts[key].items():
+                            if dicom_id in train_dicom_ids:
+                                if dicom_id in forbidden_train_dicom_ids:
+                                    continue
+                                part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                                image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                                phrase_idxs[idx] = neg_idxs + pos_idxs
+                                phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                                    np.ones(len(pos_idxs), dtype=np.int64)])
+                                train_indices.append(idx)
+                                idx += 1
+                            else:
+                                part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+                                image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                                phrase_idxs[idx] = neg_idxs + pos_idxs
+                                phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
+                                                                                    np.ones(len(pos_idxs), dtype=np.int64)])
+                                dev_indices.append(idx)
+                                idx += 1
 
                 print(f'Total number of images: {idx}')
                 image_paths = image_paths[:idx]

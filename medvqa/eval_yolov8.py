@@ -14,7 +14,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 )
 from medvqa.eval_yolov5 import _compute_bbox_metrics, _load_ground_truth, prepare_eval_data__chest_imagenome
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_to_pickle
+from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_pickle
 from medvqa.utils.logging import print_blue, print_bold
 
 class EvalDatasets:
@@ -44,14 +44,14 @@ def compute_and_save_bbox_metrics(pred_boxes, pred_classes, metadata, dicom_ids,
     # Save metrics
     save_path = os.path.join(results_folder_path,
         (f'{eval_dataset_name}__bbox_metrics({"decent" if decent_images_only else ""}).pkl'))
-    save_to_pickle(metrics, save_path)
+    save_pickle(metrics, save_path)
     print('Saved bbox metrics to: ', end='')
     print_bold(save_path)
     
     # Save additional info to be able to trace back original model and predictions
     save_path = os.path.join(results_folder_path,
         (f'{eval_dataset_name}__metadata({"decent" if decent_images_only else ""}).pkl'))
-    save_to_pickle(metadata, save_path)
+    save_pickle(metadata, save_path)
     print('Saved metadata to: ', end='')
     print_bold(save_path)
 
@@ -64,7 +64,7 @@ def compute_and_save_bbox_metrics(pred_boxes, pred_classes, metadata, dicom_ids,
             'pred_classes': pred_classes,
             'dicom_ids': dicom_ids,
         }
-        save_to_pickle(data, save_path)
+        save_pickle(data, save_path)
         print('Saved predictions to: ', end='')
         print_bold(save_path)
 

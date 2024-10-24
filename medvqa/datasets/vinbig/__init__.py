@@ -233,3 +233,30 @@ def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), v
             ax.add_patch(rect)
             ax.text(bbox[0], bbox[1], class_name, fontsize=10, bbox=dict(facecolor='white', alpha=0.3))
     plt.show()
+
+def compute_label_frequencies():
+
+    image_id_2_labels = load_labels()
+
+    # Train labels
+    df = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)
+    train_image_ids = df['image_id'].unique()
+    train_label_frequencies = np.zeros((len(VINBIG_LABELS),), np.int32)
+    for image_id in train_image_ids:
+        labels = image_id_2_labels[image_id]
+        train_label_frequencies += labels
+
+    # Test labels
+    df = pd.read_csv(VINBIG_IMAGE_LABELS_TEST_CSV_PATH)
+    test_image_ids = df['image_id'].unique()
+    test_label_frequencies = np.zeros((len(VINBIG_LABELS),), np.int32)
+    for image_id in test_image_ids:
+        labels = image_id_2_labels[image_id]
+        test_label_frequencies += labels
+
+    return {
+        'train': { VINBIG_LABELS[i]: train_label_frequencies[i] for i in range(len(VINBIG_LABELS)) },
+        'test': { VINBIG_LABELS[i]: test_label_frequencies[i] for i in range(len(VINBIG_LABELS)) }
+    }
+
+

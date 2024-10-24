@@ -18,10 +18,7 @@ from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, Phras
 from medvqa.models.vision.visual_modules import comes_with_positional_encoding
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
-from medvqa.utils.constants import (
-    DATASET_NAMES,
-    MetricNames,
-)
+from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
@@ -497,7 +494,7 @@ def train_model(
         _val_dataloaders.append(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)
         print(f'len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader) = {len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)}')
 
-    if use_cxrlt2024_challenge_split:
+    if use_cxrlt2024_challenge_split or use_cxrlt2024_custom_labels:
         assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
         wo = 0.5 * use_cxrlt2024_official_labels # 50% for official labels
         wc = 0.5 * use_cxrlt2024_custom_labels # 50% for custom labels

@@ -62,11 +62,8 @@ def load_jsonl(path):
         return [json.loads(line) for line in f]
 
 def load_pickle(path):
-    try:
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-    except FileNotFoundError:
-        return None
+    with open(path, 'rb') as f:
+        return pickle.load(f)
     
 def read_lines_from_txt(path):
     with open(path, 'r') as f:

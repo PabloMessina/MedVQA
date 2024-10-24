@@ -603,6 +603,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                  test_batch_size_factor=1,
                  training_data_mode=VinBigTrainingMode.ALL,
                  use_training_set=True, use_validation_set=True,
+                 use_training_indices_for_validation=False,
                  num_train_workers=None, num_val_workers=None,
                  train_image_transform=None, val_image_transform=None,
                  data_augmentation_enabled=False,
@@ -739,10 +740,14 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
             assert num_val_workers is not None
 
             print('Generating val dataset and dataloader')
-            print(f'len(self.test_indices) = {len(self.test_indices)}')
+            if use_training_indices_for_validation:
+                test_indices = self.train_indices
+            else:
+                test_indices = self.test_indices
+            print(f'len(test_indices) = {len(test_indices)}')
             if do_visual_grounding_with_bbox_regression:
                 self.val_dataset = VinBigBboxGroundingDataset(
-                    indices=self.test_indices,
+                    indices=test_indices,
                     image_paths=self.image_paths,
                     image_transform=self.val_image_transform,
                     phrase_embeddings=phrase_embeddings,
@@ -755,7 +760,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                 )
             else:
                 self.val_dataset = VinBigBboxGroundingDataset(
-                    indices=self.test_indices,
+                    indices=test_indices,
                     image_paths=self.image_paths,
                     image_transform=self.val_image_transform,
                     phrase_embeddings=phrase_embeddings,
