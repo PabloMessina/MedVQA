@@ -103,7 +103,9 @@ def _evaluate_model(
     # Pull out some args from kwargs
     use_yolov8 = (mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_yolov8', False))
     do_visual_grounding_with_bbox_regression = evaluation_engine_kwargs.get('do_visual_grounding_with_bbox_regression', False)
+    do_visual_grounding_with_segmentation = evaluation_engine_kwargs.get('do_visual_grounding_with_segmentation', False)
     print(f'do_visual_grounding_with_bbox_regression = {do_visual_grounding_with_bbox_regression}')
+    print(f'do_visual_grounding_with_segmentation = {do_visual_grounding_with_segmentation}')
 
     # Sanity checks
     assert sum([eval_chest_imagenome_gold, eval_mscxr, eval_chexlocalize, eval_vinbig]) > 0 # at least one dataset must be evaluated
@@ -122,7 +124,7 @@ def _evaluate_model(
     checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
     count_print('Loading model from checkpoint ...')
     print('checkpoint_path =', checkpoint_path)
-    model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True)
+    model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True, strict=False)
 
     # Create phrase grounding trainers
 
@@ -535,23 +537,21 @@ def _evaluate_model(
                                                       metric_name='bbox_iou', nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func,
                                                       for_vinbig=True)
             metrics_to_print.append('bbox_iou')
-        else:
+        elif do_visual_grounding_with_segmentation:
             attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
                                                         nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func)
             metrics_to_print.append('segmask_iou')
 
         # Attach accumulators
+        attach_accumulator(evaluation_engine, 'pred_probs')
+        attach_accumulator(evaluation_engine, 'gt_labels')
         if do_visual_grounding_with_bbox_regression:
             attach_accumulator(evaluation_engine, 'predicted_bboxes')
             attach_accumulator(evaluation_engine, 'vinbig_bbox_coords')
             attach_accumulator(evaluation_engine, 'vinbig_bbox_classes')
-            attach_accumulator(evaluation_engine, 'pred_probs')
-            attach_accumulator(evaluation_engine, 'gt_labels')
-        else:
+        elif do_visual_grounding_with_segmentation:
             attach_accumulator(evaluation_engine, 'pred_mask')
             attach_accumulator(evaluation_engine, 'gt_mask')
-            attach_accumulator(evaluation_engine, 'pred_probs')
-            attach_accumulator(evaluation_engine, 'gt_labels')
 
         # Timer
         timer = Timer()
@@ -576,9 +576,10 @@ def _evaluate_model(
         # 1) segmask iou
         if do_visual_grounding_with_bbox_regression:
             metric_name = 'bbox_iou'
-        else:
+            print(f'{metric_name}: {metrics[metric_name]}')
+        elif do_visual_grounding_with_segmentation:
             metric_name = 'segmask_iou'
-        print(f'{metric_name}: {metrics[metric_name]}')
+            print(f'{metric_name}: {metrics[metric_name]}')        
         # 2) PRC-AUC
         dataset = vinbig_trainer.val_dataset
         phrases = vinbig_trainer.phrases
@@ -639,7 +640,7 @@ def _evaluate_model(
                     else:
                         assert len(coords_per_class[cls]) == 0
 
-        else:
+        elif do_visual_grounding_with_segmentation:
             gt_masks = metrics['gt_mask']
             pred_masks = metrics['pred_mask']
             assert len(image_paths) == len(pred_masks) == len(gt_masks),\
@@ -671,9 +672,10 @@ def _evaluate_model(
                     else:
                         assert torch.all(gt_masks[i][j] == 0)
 
-        print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
-        save_pickle(output, save_path)
-        print(f'Saved metrics to {save_path}')
+        if do_visual_grounding_with_bbox_regression or do_visual_grounding_with_segmentation:
+            print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
+            save_pickle(output, save_path)
+            print(f'Saved metrics to {save_path}')
 
 def evaluate(
     checkpoint_folder_path,

@@ -58,11 +58,30 @@ def main():
         fact_embeddings = embedding_extractor.compute_text_embeddings(facts)
         phrase_embeddings = embedding_extractor.compute_text_embeddings(phrases)
         most_similar_facts = []
+        most_similar_fact_embeddings = []
+        most_similar_fact_similarities = []
         average_phrase_embeddings = np.zeros((len(phrases), phrase_embeddings.shape[1]), dtype=np.float32)
         for i in range(len(phrase_embeddings)):
             idxs = rank_vectors_by_dot_product(fact_embeddings, phrase_embeddings[i])
-            most_similar_facts.append([facts[idx] for idx in idxs[:args.top_k]])
-            average_phrase_embeddings[i] = np.mean(fact_embeddings[idxs[:args.top_k]], axis=0, dtype=np.float32)
+            top_k_idxs = idxs[:args.top_k]
+            top_k_similar_facts = [facts[idx] for idx in top_k_idxs]
+            top_k_similar_fact_embeddings = fact_embeddings[top_k_idxs]
+            top_k_similarities = np.dot(top_k_similar_fact_embeddings, phrase_embeddings[i])
+            for j in range(1, len(top_k_similarities)):
+                try:
+                    assert top_k_similarities[j] <= top_k_similarities[j-1]
+                except:
+                    print('top_k_similarities:', top_k_similarities)
+                    print('top_k_similar_fact_embeddings:', top_k_similar_fact_embeddings)
+                    print('phrase_embeddings[i]:', phrase_embeddings[i])
+                    print('top_k_similar_facts:', top_k_similar_facts)
+                    print('top_k_similarities[j]:', top_k_similarities[j])
+                    print('top_k_similarities[j-1]:', top_k_similarities[j-1])
+                    raise
+            most_similar_facts.append(top_k_similar_facts)
+            most_similar_fact_embeddings.append(top_k_similar_fact_embeddings)
+            most_similar_fact_similarities.append(top_k_similarities)
+            average_phrase_embeddings[i] = np.mean(top_k_similar_fact_embeddings, axis=0, dtype=np.float32)
         phrase_embeddings = average_phrase_embeddings
 
         # Define output to save
@@ -70,6 +89,8 @@ def main():
             'phrases': phrases,
             'phrase_embeddings': phrase_embeddings,
             'most_similar_facts': most_similar_facts,
+            'most_similar_fact_embeddings': most_similar_fact_embeddings,
+            'most_similar_fact_similarities': most_similar_fact_similarities,
         }
         save_path = get_file_path_with_hashing_if_too_long(
             folder_path=VINBIG_LARGE_FAST_CACHE_DIR,

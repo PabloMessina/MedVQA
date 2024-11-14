@@ -514,14 +514,16 @@ def _create_target_tensors(bboxes, classes, num_classes, feature_map_size):
 class VinBigBboxGroundingDataset(Dataset):
 
     def __init__(self, indices, image_paths, image_transform, phrase_embeddings, phrase_classification_labels, 
-                 predict_bboxes=False, num_bbox_classes=None, feature_map_size=None, bboxes=None, phrase_grounding_masks=None,
-                 infinite=False, shuffle_indices=False, data_augmentation_enabled=False, for_training=True):
+                 predict_bboxes=False, predict_masks=False, num_bbox_classes=None, feature_map_size=None, bboxes=None,
+                 phrase_grounding_masks=None, infinite=False, shuffle_indices=False, data_augmentation_enabled=False,
+                 for_training=True):
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.phrase_embeddings = phrase_embeddings
         self.phrase_classification_labels = phrase_classification_labels
         self.phrase_classification_labels_with_bbox = phrase_classification_labels[:, :len(VINBIG_BBOX_NAMES)]
         self.predict_bboxes = predict_bboxes
+        self.predict_masks = predict_masks
         self.bboxes = bboxes
         self.indices = indices
         self.infinite = infinite
@@ -542,7 +544,7 @@ class VinBigBboxGroundingDataset(Dataset):
             self.bboxes = bboxes
             if data_augmentation_enabled:
                 self.albumentation_adapter = _AlbumentationAdapter()
-        else:
+        elif predict_masks:
             assert phrase_grounding_masks is not None
             self.phrase_grounding_masks = phrase_grounding_masks
 
@@ -585,7 +587,7 @@ class VinBigBboxGroundingDataset(Dataset):
                     'bboxes': bboxes,
                     'classes': classes,
                 }
-        else:
+        elif self.predict_masks:
             phrase_grounding_masks = self.phrase_grounding_masks[i]
             image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
                 image_path, phrase_grounding_masks, phrase_classification_labels)
@@ -593,6 +595,13 @@ class VinBigBboxGroundingDataset(Dataset):
                 'i': image,
                 'pe': phrase_embeddings,
                 'pgm': phrase_grounding_masks,
+                'pcl': phrase_classification_labels,
+            }
+        else:
+            image = self.image_transform(image_path)
+            return {
+                'i': image,
+                'pe': phrase_embeddings,
                 'pcl': phrase_classification_labels,
             }
 
@@ -608,6 +617,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                  train_image_transform=None, val_image_transform=None,
                  data_augmentation_enabled=False,
                  do_visual_grounding_with_bbox_regression=False,
+                 do_visual_grounding_with_segmentation=False,
                  ):
         super().__init__(
             load_bouding_boxes=True,
@@ -630,7 +640,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         print(f'len(phrases) = {len(phrases)}')
         for phrase in phrases:
             print('\t', phrase)
-
+            
         print('Compute phrase grounding masks and labels')
         self.phrase_grounding_masks = [None] * len(self.bboxes)
         self.phrase_classification_labels = [None] * len(self.bboxes)
@@ -706,6 +716,20 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                         infinite=True,
                         shuffle_indices=True,
                     )
+                elif do_visual_grounding_with_segmentation:
+                    dataset = VinBigBboxGroundingDataset(
+                        indices=indices,
+                        image_paths=self.image_paths,
+                        image_transform=self.train_image_transform,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_classification_labels=self.phrase_classification_labels,
+                        predict_masks=True,
+                        phrase_grounding_masks=self.phrase_grounding_masks,
+                        data_augmentation_enabled=self.data_augmentation_enabled,
+                        for_training=True,
+                        infinite=True,
+                        shuffle_indices=True,
+                    )
                 else:
                     dataset = VinBigBboxGroundingDataset(
                         indices=indices,
@@ -713,8 +737,6 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                         image_transform=self.train_image_transform,
                         phrase_embeddings=phrase_embeddings,
                         phrase_classification_labels=self.phrase_classification_labels,
-                        predict_bboxes=False,
-                        phrase_grounding_masks=self.phrase_grounding_masks,
                         data_augmentation_enabled=self.data_augmentation_enabled,
                         for_training=True,
                         infinite=True,
@@ -732,7 +754,9 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                                             num_workers=num_train_workers,
                                             collate_fn=lambda batch: collate_batch_fn(batch,
                                                                                       training_mode=True,
-                                                                                      do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
+                                                                                      do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+                                                                                      do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
+                                                                                      ),
                                             pin_memory=True)
         
         if use_validation_set:
@@ -758,6 +782,17 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                     bboxes=self.bboxes,
                     for_training=False,
                 )
+            elif do_visual_grounding_with_segmentation:
+                self.val_dataset = VinBigBboxGroundingDataset(
+                    indices=test_indices,
+                    image_paths=self.image_paths,
+                    image_transform=self.val_image_transform,
+                    phrase_embeddings=phrase_embeddings,
+                    phrase_classification_labels=self.phrase_classification_labels,
+                    predict_masks=True,
+                    phrase_grounding_masks=self.phrase_grounding_masks,
+                    for_training=False,
+                )
             else:
                 self.val_dataset = VinBigBboxGroundingDataset(
                     indices=test_indices,
@@ -765,8 +800,6 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                     image_transform=self.val_image_transform,
                     phrase_embeddings=phrase_embeddings,
                     phrase_classification_labels=self.phrase_classification_labels,
-                    predict_bboxes=False,
-                    phrase_grounding_masks=self.phrase_grounding_masks,
                     for_training=False,
                 )
             batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(phrases)), 1) * test_batch_size_factor)
@@ -776,5 +809,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                                              num_workers=num_val_workers,
                                              collate_fn=lambda batch: collate_batch_fn(batch,
                                                                                        training_mode=False,
-                                                                                       do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
+                                                                                       do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+                                                                                       do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
+                                                                                       ),
                                              pin_memory=True)

@@ -15,7 +15,7 @@ from medvqa.losses.schedulers import create_lr_scheduler
 
 from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, PhraseGroundingMode
 
-from medvqa.models.vision.visual_modules import comes_with_positional_encoding
+from medvqa.models.vision.visual_modules import comes_with_positional_encoding, inject_mean_std_for_image_normalization
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
 from medvqa.utils.constants import DATASET_NAMES
@@ -178,6 +178,7 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_official_training_labels_for_fact_classification_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true', default=False)
     parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true', default=False)
+    parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true', default=False)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -237,7 +238,6 @@ def train_model(
     use_cxrlt2024_challenge_split = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_challenge_split', False)
     use_cxrlt2024_custom_labels = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_custom_labels', False)
     use_cxrlt2024_official_labels = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_official_labels', False)
-    use_yolov8 = model_kwargs['raw_image_encoding'] == RawImageEncoding.YOLOV8
     use_vinbig_for_train = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_training_set', False)
     use_vinbig_for_test = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_validation_set', False)
     use_chexlocalize_for_train = chexlocalize_trainer_kwargs is not None and chexlocalize_trainer_kwargs.get('use_training_set', False)
@@ -250,6 +250,7 @@ def train_model(
     use_contrastive_phrase_grounding_loss = trainer_engine_kwargs['use_contrastive_phrase_grounding_loss']
     use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']
     do_visual_grounding_with_bbox_regression = trainer_engine_kwargs['do_visual_grounding_with_bbox_regression']
+    do_visual_grounding_with_segmentation = trainer_engine_kwargs['do_visual_grounding_with_segmentation']
 
 
     # Sanity checks
@@ -699,14 +700,14 @@ def train_model(
             if do_visual_grounding_with_bbox_regression:
                 attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
                 attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
-            else:
+            elif do_visual_grounding_with_segmentation:
                 attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
                 attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         if in_val:
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
             if do_visual_grounding_with_bbox_regression:
                 attach_condition_aware_vinbig_bbox_iou(validator_engine, _cond_func, metric_name='vbg_bbox_iou')
-            else:
+            elif do_visual_grounding_with_segmentation:
                 attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
                 attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         # for logging
@@ -716,7 +717,7 @@ def train_model(
                 append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=False)
             if in_val:
                 append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_bbox_iou', train=False)
-        else:
+        elif do_visual_grounding_with_segmentation:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=in_val)
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_segmask_iou', train=in_train, val=in_val)
         if use_global_alignment_contrastive_loss:
@@ -1031,6 +1032,7 @@ def train_from_scratch(
     pos_area_prior,
     neg_area_prior,
     do_visual_grounding_with_bbox_regression,
+    do_visual_grounding_with_segmentation,
     # Loss weights
     attention_supervision_loss_weight,
     phrase_classifier_loss_weight,
@@ -1059,7 +1061,7 @@ def train_from_scratch(
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     use_bbox_aware_transform = use_yolov8 or do_visual_grounding_with_bbox_regression
-    use_segmentation_mask_aware_transform = not use_bbox_aware_transform
+    use_segmentation_mask_aware_transform = do_visual_grounding_with_segmentation
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
@@ -1158,12 +1160,13 @@ def train_from_scratch(
     _kwargs = dict(
         image_size=image_size,
         augmentation_mode=img_aug_mode,
-        use_bbox_aware_transform=use_bbox_aware_transform,
         for_yolov8=use_yolov8,
+        use_bbox_aware_transform=use_bbox_aware_transform,
         use_segmentation_mask_aware_transform=use_segmentation_mask_aware_transform,
         mask_height=regions_height, # for segmentation mask-aware transform
         mask_width=regions_width, # for segmentation mask-aware transform
     )
+    inject_mean_std_for_image_normalization(_kwargs, raw_image_encoding)
     if use_mimiccxr:
         train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = _kwargs.copy()
         val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
@@ -1270,6 +1273,7 @@ def train_from_scratch(
             mask_width=regions_width,
             phrase_embeddings_filepath=vinbig_phrase_embeddings_filepath,
             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+            do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
         )
     else:
         vinbig_trainer_kwargs = None
@@ -1311,7 +1315,6 @@ def train_from_scratch(
         iuxray_trainer_kwargs = None
 
     trainer_engine_kwargs = dict(
-        predict_bboxes_vinbig=predict_bboxes_vinbig,
         gradient_accumulation_steps=gradient_accumulation_steps,
         use_amp=use_amp, training=True, validating=False, testing=False,
         using_yolov8=use_yolov8,
@@ -1334,10 +1337,10 @@ def train_from_scratch(
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
         do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+        do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
     )
 
     validator_engine_kwargs = dict(
-        predict_bboxes_vinbig=predict_bboxes_vinbig,
         training=False, validating=True, testing=False,
         using_yolov8=use_yolov8,
         yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
@@ -1351,6 +1354,7 @@ def train_from_scratch(
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
         do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
+        do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
     )
 
     return train_model(

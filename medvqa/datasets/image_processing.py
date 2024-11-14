@@ -25,7 +25,7 @@ from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_pickle
 from medvqa.utils.hashing import hash_string
 from medvqa.datasets.augmentation import (
-    ImageAugmentationTransforms,
+    ImageAugmentedTransforms,
     ImageBboxAugmentationTransforms,
     ImageSegmentationMaskAugmentationTransforms,
 )
@@ -40,7 +40,6 @@ _AUGMENTATION_MODES = [
     'random-color',
     'random-spatial',
     'random-color-and-spatial',
-    'horizontal-flip',
 ]
 
 def get_image_transform(
@@ -50,7 +49,7 @@ def get_image_transform(
     mask_height=None,
     mask_width=None,
     augmentation_mode=None,
-    default_prob=0.4,
+    default_prob=0.35,
     use_clip_transform=False,
     clip_version=None,
     use_huggingface_vitmodel_transform=False,
@@ -68,11 +67,16 @@ def get_image_transform(
     assert 0 <= horizontal_flip_prob < 1
     assert 0 <= default_prob <= 1
 
+    print(f'  image_size = {image_size}')
+    print(f'  mean = {mean}')
+    print(f'  std = {std}')
+
     # Only one of the following can be true
     assert sum([use_clip_transform, use_huggingface_vitmodel_transform, use_torchxrayvision_transform,
                 use_bbox_aware_transform, use_segmentation_mask_aware_transform, use_detectron2_transform]) <= 1
 
     if use_clip_transform:
+        raise NotImplementedError('CLIP transform not implemented')
         assert clip_version is not None
         print(f'Using CLIP transform for version {clip_version}')
         # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
@@ -83,6 +87,7 @@ def get_image_transform(
         tf_normalize = T.Normalize(mean, std)
 
     elif use_huggingface_vitmodel_transform:
+        raise NotImplementedError('Huggingface ViT model transform not implemented')
         assert huggingface_vitmodel_name is not None
         print(f'Using Huggingface ViT model transform for {huggingface_vitmodel_name}')
         feature_extractor = ViTFeatureExtractor.from_pretrained(huggingface_vitmodel_name, use_auth_token=True)
@@ -114,116 +119,40 @@ def get_image_transform(
 
     elif use_bbox_aware_transform:
         print(f'  Using bounding box aware transforms')
-        tf_load_image = T.Lambda(lambda x: cv2.imread(x))
-        tf_bgr2rgb = T.Lambda(lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB))
-        tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
-        tf_hflip = T.Lambda(lambda x: cv2.flip(x, 1))
-        tf_totensor = T.ToTensor()
         if for_yolov8:
-            tf_normalize = T.Lambda(lambda x: x / 255) # just divide by 255
+            custom_norm = lambda x: x / 255.0 # just divide by 255
         else:
-            tf_normalize = T.Normalize(mean, std)
-
-        if for_vinbig:
-            assert horizontal_flip_prob == 0
-
-        def _default_transform(image_path, return_image_size=False):
-            image = tf_load_image(image_path)
-            if return_image_size:
-                size_before = image.shape[:2] # (H, W)
-            image = tf_bgr2rgb(image)
-            image = tf_resize(image)
-            if return_image_size:
-                size_after = image.shape[:2]
-            image = tf_totensor(image)
-            image = tf_normalize(image)
-            # assert len(image.shape) == 3 # (C, H, W)
-            if return_image_size:
-                return image, size_before, size_after
-            return image
+            custom_norm = None
+        image_augmented_transforms = ImageAugmentedTransforms(image_size, mean, std, custom_normalization_transform=custom_norm)
+        test_transform = image_augmented_transforms.get_test_transform(allow_returning_image_size=for_yolov8)
 
         if augmentation_mode is None: # no augmentation
             print('    Returning default transform (no augmentation)')
-            return _default_transform
-
-        if augmentation_mode == 'horizontal-flip':
-            assert horizontal_flip_prob > 0
-            print('    Returning horizontal flip transform')
-            def _transform(image_path, bboxes, presence, flipped_bboxes, flipped_presence, _, return_image_size=False):
-                image = tf_load_image(image_path)
-                if return_image_size:
-                    size_before = image.shape[:2]
-                image = tf_resize(image)
-                if return_image_size:
-                    size_after = image.shape[:2]
-                if random.random() < horizontal_flip_prob:
-                    image = tf_hflip(image)
-                    bboxes = flipped_bboxes
-                    presence = flipped_presence
-                image = tf_totensor(image)
-                image = tf_normalize(image)
-                if return_image_size:
-                    return image, bboxes, presence, size_before, size_after
-                return image, bboxes, presence
-            return _transform
-        
-        img_bbox_aug_transfoms = ImageBboxAugmentationTransforms(image_size)
-        if augmentation_mode == 'random-color':
-            aug_transforms = img_bbox_aug_transfoms.get_color_transforms_list()
-            aug_transforms_2 = img_bbox_aug_transfoms.get_color_transforms_list(additional_bboxes=['bboxes2'])
-        elif augmentation_mode == 'random-spatial':
-            aug_transforms = img_bbox_aug_transfoms.get_spatial_transforms_list()
-            aug_transforms_2 = img_bbox_aug_transfoms.get_spatial_transforms_list(additional_bboxes=['bboxes2'])
-        elif augmentation_mode == 'random-color-and-spatial':
-            aug_transforms = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list()
-            aug_transforms_2 = img_bbox_aug_transfoms.get_merged_spatial_color_transforms_list(additional_bboxes=['bboxes2'])
-        else:
-            raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
-
-        flip_image = 'spatial' in augmentation_mode and horizontal_flip_prob > 0        
-        # DEBUG = True
-        # DEBUG_COUNT = 0
+            return test_transform
 
         if for_vinbig:
             print('    for_vinbig: returning vinbig transform')
-            def _get_transform(tf_img_bbox_aug): # closure (needed to capture tf_img_bbox_aug)
-                def _transform(image_path, bboxes, classes, albumentation_adapter, return_image_size):
-                    image = tf_load_image(image_path)
-                    if return_image_size:
-                        size_before = image.shape[:2]
-                    image = tf_resize(image)
-                    if return_image_size:
-                        size_after = image.shape[:2]
-                    bboxes = albumentation_adapter.encode(bboxes, classes)
-                    augmented = tf_img_bbox_aug(image=image, bboxes=bboxes)
-                    image = augmented['image']
-                    image = tf_totensor(image)
-                    image = tf_normalize(image)
-                    # assert len(image.shape) == 3 # (C, H, W)
-                    bboxes = augmented['bboxes']
-                    bboxes, classes = albumentation_adapter.decode(bboxes)
-                    if return_image_size:
-                        return image, bboxes, classes, size_before, size_after
-                    return image, bboxes, classes
-                return _transform
-
-            _augmented_bbox_transforms = [_get_transform(tf) for tf in aug_transforms]
-            
-            print('    len(_augmented_bbox_transforms) =', len(_augmented_bbox_transforms))
             print('    augmentation_mode =', augmentation_mode)
             print('    default_prob =', default_prob)
-            print('    horizontal_flip_prob =', horizontal_flip_prob)
-            print('    flip_image =', flip_image)
+
+            if augmentation_mode == 'random-color':
+                train_transform = image_augmented_transforms.get_train_transform('color', bbox_aware=True, for_vinbig=True)
+            elif augmentation_mode == 'random-spatial':
+                train_transform = image_augmented_transforms.get_train_transform('spatial', bbox_aware=True, for_vinbig=True)
+            elif augmentation_mode == 'random-color-and-spatial':
+                train_transform = image_augmented_transforms.get_train_transform('both', bbox_aware=True, for_vinbig=True)
+            else:
+                raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
 
             def transform_fn(image_path, bboxes, classes, albumentation_adapter, return_image_size=False):
                 # randomly choose between default transform and augmented transform
                 if random.random() < default_prob:
                     if return_image_size:
-                        img, size_before, size_after = _default_transform(image_path, return_image_size=True)
+                        img, size_before, size_after = test_transform(image_path, return_image_size=True)
                         return img, bboxes, classes, size_before, size_after
-                    img = _default_transform(image_path)
+                    img = test_transform(image_path)
                     return img, bboxes, classes
-                return random.choice(_augmented_bbox_transforms)(
+                return train_transform(
                     image_path=image_path,
                     bboxes=bboxes,
                     classes=classes,
@@ -231,9 +160,11 @@ def get_image_transform(
                     return_image_size=return_image_size,
                 )
 
-            print(f'    Returning augmented transforms with mode {augmentation_mode}')
+            print(f'    Returning augmented transform with mode {augmentation_mode}')
             return transform_fn
         else:
+
+            raise NotImplementedError('bbox_aware_transform not implemented')
             def _get_transform(tf_img_bbox_aug, tf_img_bbox_aug_2): # closure (needed to capture tf_img_bbox_aug)
                 def _transform(image_path, bboxes=None, albumentation_adapter=None, presence=None,
                                 flipped_bboxes=None, flipped_presence=None,
@@ -333,6 +264,8 @@ def get_image_transform(
         
     elif use_segmentation_mask_aware_transform:
 
+        raise NotImplementedError('segmentation_mask_aware_transform not implemented')
+
         assert not for_yolov8 # not supported
         assert mask_height is not None
         assert mask_width is not None
@@ -386,7 +319,7 @@ def get_image_transform(
                     pos_idxs = np.arange(masks.shape[0]) # all masks are positive
                 else:
                     assert labels.ndim == 1 # (N,)
-                    assert masks.shape[0] == labels.shape[0] # same number of masks and labels
+                    assert masks.shape[0] <= labels.shape[0], f'masks.shape = {masks.shape}, labels.shape = {labels.shape}'
                     pos_idxs = np.where(labels == 1)[0] # positive masks
                 # resize positive masks
                 masks_to_augment = [cv2.resize(masks[i].reshape(mask_height, mask_width),
@@ -485,86 +418,36 @@ def get_image_transform(
         print(f'    Returning augmented transforms with mode {augmentation_mode}')
         return transform_fn
 
-    else:
-        print(f'Using standard transform')
-        # tf_load_image = T.Lambda(lambda x: Image.open(x).convert('RGB'))
-        tf_load_image = T.Lambda(lambda x: Image.fromarray(cv2.cvtColor(cv2.imread(x), cv2.COLOR_BGR2RGB)))
-        tf_resize = T.Resize(image_size)
-        # tf_resize = T.Lambda(lambda x: cv2.resize(x, image_size, interpolation=cv2.INTER_CUBIC))
-        tf_normalize = T.Normalize(mean, std)
-
-    if type(image_size) is int:
-        use_center_crop = True
-    if type(image_size) is list or type(image_size) is tuple:
-        use_center_crop = False
-        assert len(image_size) == 2
-    else: assert False
-
-    print(f'mean = {mean}, std = {std}, image_size = {image_size}, use_center_crop = {use_center_crop}')
+    else: # standard transform
+        print(f'Using standard transform (only images, no bounding boxes, no masks)')
+        print(f'mean = {mean}, std = {std}, image_size = {image_size}')
+        image_augmented_transforms = ImageAugmentedTransforms(image_size=image_size, mean=mean, std=std)
+        test_transform = image_augmented_transforms.get_test_transform()
+        
+        if augmentation_mode is None:
+            print('Returning transform without augmentation')
+            return lambda img, **unused: test_transform(img)
     
-    tf_totensor = T.ToTensor()
-    
-    if use_center_crop:
-        tf_ccrop = T.CenterCrop(image_size)
-        default_transform = T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_totensor, tf_normalize])
-    else:
-        default_transform = T.Compose([tf_load_image, tf_resize, tf_totensor, tf_normalize])
+        assert augmentation_mode in _AUGMENTATION_MODES, f'Unknown augmentation mode {augmentation_mode}'
 
-    if augmentation_mode is None:
-        print('Returning transform without augmentation')
-        return lambda img, **unused: default_transform(img)
-    
-    assert augmentation_mode in _AUGMENTATION_MODES, f'Unknown augmentation mode {augmentation_mode}'
-
-    image_aug_transforms = ImageAugmentationTransforms(image_size)
-
-    if augmentation_mode == 'random-color':
-        aug_transforms = image_aug_transforms.get_color_transforms()
-        if use_center_crop:
-            final_transforms = [
-                T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
-                for tf_aug in aug_transforms
-            ]
+        if augmentation_mode == 'random-color':
+            train_transform = image_augmented_transforms.get_train_transform('color')
+        elif augmentation_mode == 'random-spatial':
+            train_transform = image_augmented_transforms.get_train_transform('spatial')
+        elif augmentation_mode == 'random-color-and-spatial':
+            train_transform = image_augmented_transforms.get_train_transform('both')
         else:
-            final_transforms = [
-            T.Compose([tf_load_image, tf_resize, tf_aug, tf_totensor, tf_normalize])
-            for tf_aug in aug_transforms
-        ]
-    elif augmentation_mode == 'random-spatial':
-        aug_transforms = image_aug_transforms.get_spatial_transforms()
-        if use_center_crop:
-            final_transforms = [
-                T.Compose([tf_load_image, tf_resize, tf_ccrop, tf_aug, tf_totensor, tf_normalize])
-                for tf_aug in aug_transforms
-            ]
-        else:
-            final_transforms = [
-            T.Compose([tf_load_image, tf_resize, tf_aug, tf_totensor, tf_normalize])
-            for tf_aug in aug_transforms
-        ]
-    elif augmentation_mode == 'random-color-and-spatial':
-        spatial_transforms = image_aug_transforms.get_spatial_transforms()
-        color_transforms = image_aug_transforms.get_color_transforms()
-        final_transforms = []
-        for stf in spatial_transforms:
-            for ctf in color_transforms:
-                if use_center_crop:
-                    final_transforms.append(T.Compose([tf_load_image, tf_resize, tf_ccrop, stf, ctf, tf_totensor, tf_normalize]))
-                else:
-                    final_transforms.append(T.Compose([tf_load_image, tf_resize, stf, ctf, tf_totensor, tf_normalize]))
-    else:
-        assert False
+            raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
+        
+        print('default_prob =', default_prob)
 
-    print('len(final_transforms) =', len(final_transforms))
-    print('default_prob =', default_prob)
+        def transform_fn(img, **unused):
+            if random.random() < default_prob:
+                return test_transform(img) # no augmentation
+            return train_transform(img) # with augmentation
 
-    def transform_fn(img, **unused):
-        if random.random() < default_prob:
-            return default_transform(img)
-        return random.choice(final_transforms)(img)
-
-    print(f'Returning augmented transforms with mode {augmentation_mode}')
-    return transform_fn
+        print(f'Returning augmented transforms with mode {augmentation_mode}')
+        return transform_fn
 
 def get_pretrain_vit_mae_image_transform(feature_extractor):
     # Adapted from https://github.com/huggingface/transformers/blob/main/examples/pytorch/image-pretraining/run_mae.py#L299

@@ -89,6 +89,19 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.SIGLIP_HUGGINGFACE,
     ]
 
+def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
+    assert 'mean' not in kwargs
+    assert 'std' not in kwargs
+    if raw_image_encoding == RawImageEncoding.DENSENET_121:
+        kwargs['mean'] = [0.485, 0.456, 0.406]
+        kwargs['std'] = [0.229, 0.224, 0.225]
+    elif raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
+        kwargs['mean'] = [0.5307, 0.5307, 0.5307]
+        kwargs['std'] = [0.2583, 0.2583, 0.2583]
+    else:
+        raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
+
+
 class MultiPurposeVisualModule(nn.Module):
 
     def __init__(self,
@@ -1268,6 +1281,7 @@ _HUGGINGFACE_VITMODEL_VERSIONS = [
 ]
 _HUGGINGFACE_RAD_DINO_VERSIONS = [
     'microsoft/rad-dino',
+    'microsoft/rad-dino-maira-2',
 ]
 _HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS = [
     'aehrc/cxrmate-rrg24',
@@ -1312,6 +1326,7 @@ HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT = {
 
 HUGGINGFACE_RAD_DINO_NAMES_2_SHORT = {
     'microsoft/rad-dino': 'microsoft/rad-dino',
+    'microsoft/rad-dino-maira-2': 'microsoft/rad-dino-maira-2',
 }
 
 HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT = {

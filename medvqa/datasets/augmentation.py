@@ -3,78 +3,227 @@ import cv2
 import albumentations as A
 import numpy as np
 
-_SPATIAL_TRANSFORMS = [
-    'crop',
-    'translate',
-    'rotation',
-    'shear',
-]
+class CoarseDropoutWithoutBbox(A.CoarseDropout):
+    def apply_to_bbox(self, bbox, **params):
+        # Skip any transformation to bounding boxes
+        return bbox
 
-_COLOR_TRANSFORMS = [
-    'contrast-down',
-    'contrast-up',
-    'brightness-down',
-    'brightness-up',
-]
+class ImageAugmentedTransforms:
 
-class ImageAugmentationTransforms:
-
-    def __init__(self, image_size,
-                crop=0.8, translate=0.1, rotation=15, contrast=0.8, brightness=0.8,
-                shear=(10, 10)):
+    def __init__(self,
+                image_size,
+                mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                crop=0.8, p_crop=1.0,
+                shift_limit=0.1, scale_limit=0.1, rotate_limit=20, p_shift_scale_rotate=0.5,
+                contrast=0.2, brightness=0.2, saturation=0.2, hue=0.2, p_color_jitter=0.5,
+                p_coarse_dropout=0.5,
+                gaussian_noise_limit=(10, 50), p_gaussian_noise=0.2,
+                gaussian_blur_limit=(3, 5), p_gaussian_blur=0.2,
+                custom_normalization_transform=None):
         
         self._transform_fns = dict()
 
-        if crop is not None:
-            self._transform_fns['crop'] = T.RandomResizedCrop(
-                image_size,
-                scale=(crop, 1),
-            )
+        # Transformations:
 
-        if translate is not None:
-            self._transform_fns['translate'] = T.RandomAffine(
-                degrees=0,
-                translate=(translate, translate),
-            )
-
-        if shear is not None:
-            shear_x, shear_y = shear
-            self._transform_fns['shear'] = T.RandomAffine(
-                degrees=0,
-                shear=(-shear_x, shear_x, -shear_y, shear_y),
-            )
-
-        if rotation is not None:
-            self._transform_fns['rotation'] = T.RandomRotation(rotation)
-
-        if contrast is not None:
-            contrast_down_max = 0.9
-            self._transform_fns['contrast-down'] = T.ColorJitter(
-                contrast=(contrast_down_max - contrast, contrast_down_max),
-            )
-            contrast_up_min = 1.1
-            self._transform_fns['contrast-up'] = T.ColorJitter(
-                contrast=(contrast_up_min, contrast_up_min + contrast),
-            )
-
-        if brightness is not None:
-            brightness_down_max = 0.9
-            self._transform_fns['brightness-down'] = T.ColorJitter(
-                brightness=(brightness_down_max - brightness, brightness_down_max),
-            )
-            brightness_up_min = 1.1
-            self._transform_fns['brightness-up'] = T.ColorJitter(
-                brightness=(brightness_up_min, brightness_up_min + brightness),
-            )
+        # Always:
+        # 1. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # 2. Resize
         
-        self._spatial_transforms = [self._transform_fns[name] for name in _SPATIAL_TRANSFORMS]
-        self._color_transforms = [self._transform_fns[name] for name in _COLOR_TRANSFORMS]
+        # Spatial (optional):
+        # 1. Crop
+        # 2. Shift-Scale-Rotate
+        # 3. HorizontalFlip
+
+        # Color (optional):
+        # 1. CoarseDropout
+        # 2. ColorJitter
+        # 3. GaussNoise
+        # 4. GaussianBlur
+
+        # CLAHE
+        self._transform_fns['clahe-test'] = A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), always_apply=True) # apply always
+        self._transform_fns['clahe-train'] = A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), p=0.5) # apply with 50% probability
+
+        # Resize
+        if isinstance(image_size, int):
+            width = image_size
+            height = image_size
+        else:
+            assert len(image_size) == 2
+            width, height = image_size
+        self._transform_fns['resize'] = A.Resize(width=width, height=height, always_apply=True, interpolation=cv2.INTER_CUBIC)
+
+        # Spatial transforms
+
+        # 1. Crop
+        self._transform_fns['crop'] = A.RandomResizedCrop(
+            width=width,
+            height=height,
+            scale=(crop, 1),
+            interpolation=cv2.INTER_CUBIC,
+            p=p_crop,
+        )
+        
+        # 2. Shift-Scale-Rotate
+        self._transform_fns['shift-scale-rotate'] = A.ShiftScaleRotate(
+            shift_limit=shift_limit,
+            scale_limit=scale_limit,
+            rotate_limit=rotate_limit,
+            border_mode=cv2.BORDER_CONSTANT,
+            p=p_shift_scale_rotate,
+        )
+
+        # 3. HorizontalFlip
+        self._transform_fns['horizontal-flip'] = A.HorizontalFlip(p=0.5)
+
+        # Color transforms
+
+        # 1. CoarseDropout
+        self._transform_fns['coarse-dropout'] = CoarseDropoutWithoutBbox(
+            max_holes=8,
+            max_height=int(height * 0.05),
+            max_width=int(width * 0.05),
+            min_holes=4,
+            min_height=int(height * 0.01),
+            min_width=int(width * 0.01),
+            fill_value=0,
+            p=p_coarse_dropout,
+        )
+
+        # 2. ColorJitter
+        self._transform_fns['color-jitter'] = A.ColorJitter(
+            brightness=brightness,
+            contrast=contrast,
+            saturation=saturation,
+            hue=hue,
+            p=p_color_jitter,
+        )
+
+        # 3. GaussNoise
+        self._transform_fns['gauss-noise'] = A.GaussNoise(
+            var_limit=gaussian_noise_limit,
+            p=p_gaussian_noise,
+        )
+
+        # 4. GaussianBlur
+        self._transform_fns['gaussian-blur'] = A.GaussianBlur(
+            blur_limit=gaussian_blur_limit,
+            p=p_gaussian_blur,
+        )
+
+        # Other transforms
+        self._transform_fns['load_image'] = lambda x: cv2.imread(x)
+        self._transform_fns['bgr2rgb'] = lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
+        self._transform_fns['totensor'] = T.ToTensor()
+        if custom_normalization_transform is not None:
+            self._transform_fns['normalize'] = custom_normalization_transform
+        else:
+            self._transform_fns['normalize'] = T.Normalize(mean=mean, std=std) # default normalization
+
+    def get_test_transform(self, allow_returning_image_size=False):
+        tf_load_image = self._transform_fns['load_image']
+        tf_bgr2rgb = self._transform_fns['bgr2rgb']
+        tf_clahe_test = self._transform_fns['clahe-test']
+        tf_resize = self._transform_fns['resize']
+        tf_totensor = self._transform_fns['totensor']
+        tf_normalize = self._transform_fns['normalize']
+        if allow_returning_image_size:
+            def test_transform(image_path, return_image_size=False):
+                image = tf_load_image(image_path)
+                if return_image_size:
+                    size_before = image.shape[:2] # (H, W)
+                image = tf_bgr2rgb(image)
+                image = tf_clahe_test(image=image)['image']
+                image = tf_resize(image=image)['image']
+                if return_image_size:
+                    size_after = image.shape[:2] # (H, W)
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                if return_image_size:
+                    return image, size_before, size_after
+                return image
+        else:
+            def test_transform(image_path):
+                image = tf_load_image(image_path)
+                image = tf_bgr2rgb(image)
+                image = tf_clahe_test(image=image)['image']
+                image = tf_resize(image=image)['image']
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                return image
+        return test_transform
     
-    def get_spatial_transforms(self):
-        return self._spatial_transforms
-    
-    def get_color_transforms(self):
-        return self._color_transforms
+    def get_train_transform(self, mode, bbox_aware=False, for_vinbig=False):
+        tf_load_image = self._transform_fns['load_image']
+        tf_bgr2rgb = self._transform_fns['bgr2rgb']
+        tf_totensor = self._transform_fns['totensor']
+        tf_normalize = self._transform_fns['normalize']
+
+        if mode == 'color':
+            tf_alb = A.Compose([
+                self._transform_fns['clahe-train'],
+                self._transform_fns['resize'],
+                self._transform_fns['coarse-dropout'],
+                self._transform_fns['color-jitter'],
+                self._transform_fns['gauss-noise'],
+                self._transform_fns['gaussian-blur'],
+            ],
+            bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+        elif mode == 'spatial':
+            tf_alb = A.Compose([
+                self._transform_fns['clahe-train'],
+                self._transform_fns['crop'],
+                self._transform_fns['resize'],
+                self._transform_fns['shift-scale-rotate'],
+                self._transform_fns['horizontal-flip'],
+            ], bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+        elif mode == 'both':
+            tf_alb = A.Compose([
+                self._transform_fns['clahe-train'],
+                self._transform_fns['crop'],
+                self._transform_fns['resize'],
+                self._transform_fns['shift-scale-rotate'],
+                self._transform_fns['horizontal-flip'],
+                self._transform_fns['coarse-dropout'],
+                self._transform_fns['color-jitter'],
+                self._transform_fns['gauss-noise'],
+                self._transform_fns['gaussian-blur'],
+            ], bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+        else:
+            raise ValueError('Invalid mode: {}'.format(mode))
+        
+        if bbox_aware:
+            if for_vinbig:
+                print('get_train_transform(): Using bbox-aware transforms for VinBigData')
+                def train_transform(image_path, bboxes, classes, albumentation_adapter, return_image_size=False):
+                    image = tf_load_image(image_path)
+                    if return_image_size:
+                        size_before = image.shape[:2] # (H, W)
+                    image = tf_bgr2rgb(image)
+                    bboxes = albumentation_adapter.encode(bboxes, classes)
+                    augmented = tf_alb(image=image, bboxes=bboxes)
+                    image = augmented['image']
+                    if return_image_size:
+                        size_after = image.shape[:2] # (H, W)
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    bboxes = augmented['bboxes']
+                    bboxes, classes = albumentation_adapter.decode(bboxes)
+                    if return_image_size:
+                        return image, bboxes, classes, size_before, size_after
+                    return image, bboxes, classes
+            else:
+                raise NotImplementedError('bbox_aware=True is only supported for VinBigData')
+        else:
+            print('get_train_transform(): Using normal transforms')
+            def train_transform(image_path):
+                image = tf_load_image(image_path)
+                image = tf_bgr2rgb(image)
+                image = tf_alb(image=image)['image']
+                image = tf_totensor(image)
+                image = tf_normalize(image)
+                return image
+        return train_transform
 
 class SPATIAL_TRANSFORMS__BBOX:
     CROP = 'crop'

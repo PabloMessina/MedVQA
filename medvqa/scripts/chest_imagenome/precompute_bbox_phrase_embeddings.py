@@ -59,11 +59,16 @@ def main():
         anatomical_location_embeddings = embedding_extractor.compute_text_embeddings(anatomical_locations)
         bbox_phrase_embeddings = embedding_extractor.compute_text_embeddings(bbox_phrases)
         most_similar_anatomical_locations = []
+        most_similar_similarities = []
         average_phrase_embeddings = np.zeros((len(bbox_phrases), bbox_phrase_embeddings.shape[1]), dtype=np.float32)
         for i in range(len(bbox_phrase_embeddings)):
             idxs = rank_vectors_by_dot_product(anatomical_location_embeddings, bbox_phrase_embeddings[i])
-            most_similar_anatomical_locations.append([anatomical_locations[idx] for idx in idxs[:args.top_k]])
-            average_phrase_embeddings[i] = np.mean(anatomical_location_embeddings[idxs[:args.top_k]], axis=0, dtype=np.float32)
+            top_k_idxs = idxs[:args.top_k]
+            top_k_embeddings = anatomical_location_embeddings[top_k_idxs]
+            top_k_similarities = np.dot(top_k_embeddings, bbox_phrase_embeddings[i])
+            most_similar_anatomical_locations.append([anatomical_locations[idx] for idx in top_k_idxs])
+            most_similar_similarities.append(top_k_similarities)
+            average_phrase_embeddings[i] = np.mean(top_k_embeddings, axis=0, dtype=np.float32)            
         bbox_phrase_embeddings = average_phrase_embeddings
 
         # Define output to save
@@ -71,6 +76,7 @@ def main():
             'bbox_phrases': bbox_phrases,
             'bbox_phrase_embeddings': bbox_phrase_embeddings,
             'most_similar_anatomical_locations': most_similar_anatomical_locations,
+            'most_similar_similarities': most_similar_similarities,
         }
         save_path = get_file_path_with_hashing_if_too_long(
             folder_path=CHEST_IMAGENOME_LARGE_FAST_CACHE_DIR,
