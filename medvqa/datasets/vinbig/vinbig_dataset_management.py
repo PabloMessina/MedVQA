@@ -13,6 +13,7 @@ from medvqa.datasets.vinbig import (
     _merge_labels,
     compute_masks_and_binary_labels_from_bounding_boxes,
     get_medium_size_image_path,
+    get_original_image_path,
     load_labels,
     load_test_image_id_2_bboxes,
     load_train_image_id_2_bboxes,
@@ -33,9 +34,8 @@ class VinBigTrainingMode:
     TRAIN_ONLY = 'train'
     TEST_ONLY = 'test'
     ALL = 'all'
-
     @staticmethod
-    def get_choices():
+    def get_all():
         return [
             VinBigTrainingMode.TRAIN_ONLY,
             VinBigTrainingMode.TEST_ONLY,
@@ -45,7 +45,7 @@ class VinBigTrainingMode:
 class VinBigTrainerBase(LabelBasedVQAClass):
     
     def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None, load_bouding_boxes=False,
-                 class_id_offset=0, verbose=False):
+                 class_id_offset=0, verbose=False, use_original_image_size=False):
 
         # Load labels
         image_id_to_labels = load_labels()
@@ -56,7 +56,10 @@ class VinBigTrainerBase(LabelBasedVQAClass):
         self.labels = labels
 
         # Image paths
-        self.image_paths = [get_medium_size_image_path(img_id) for img_id in image_ids]
+        if use_original_image_size:
+            self.image_paths = [get_original_image_path(img_id) for img_id in image_ids]
+        else:
+            self.image_paths = [get_medium_size_image_path(img_id) for img_id in image_ids]
 
         # Train/test indices
         self.train_indices = list(range(N_IMAGES_TRAIN))
@@ -191,11 +194,12 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
         )
 
 class VinBig_VisualModuleTrainer(VinBigTrainerBase):
-    def __init__(self, train_image_transform, val_image_transform, batch_size, collate_batch_fn, num_workers,
-                training_data_mode=VinBigTrainingMode.ALL, use_validation_set=True,
+    def __init__(self, batch_size, collate_batch_fn, num_workers,
+                training_data_mode=VinBigTrainingMode.ALL, use_training_set=True, use_validation_set=True,
+                train_image_transform=None, val_image_transform=None,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
                 use_bounding_boxes=False, data_augmentation_enabled=False,
-                use_yolov8=False, class_id_offset=0,
+                use_yolov8=False, use_yolov11=False, class_id_offset=0,
         ):
         super().__init__(
             use_merged_findings=use_merged_findings,
@@ -210,8 +214,10 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
         self.training_data_mode = training_data_mode
         self.use_bounding_boxes = use_bounding_boxes
         self.data_augmentation_enabled = data_augmentation_enabled
+        self.use_training_set = use_training_set
         self.use_validation_set = use_validation_set
         self.use_yolov8 = use_yolov8
+        self.use_yolov11 = use_yolov11
         
         print('Generating train dataset and dataloader')
         if training_data_mode == VinBigTrainingMode.TRAIN_ONLY:
@@ -222,26 +228,29 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
             train_indices = self.train_indices + self.test_indices
         else: assert False, f'Unknown training_data_mode = {training_data_mode}'
         
-        self.train_dataset, self.train_dataloader = self._create_label_based_dataset_and_dataloader(
-            indices=train_indices,
-            labels=self.labels,
-            label_names=self.label_names,
-            templates=self.templates,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            collate_batch_fn=lambda batch: collate_batch_fn(batch, training_mode=True),
-            infinite=True,
-            min_pos_to_include=0,
-            log_weighting=True,
-            include_qa=False,
-            create_dataset_kwargs={
-                'transform': self.train_image_transform,
-                'data_augmentation_enabled': self.data_augmentation_enabled,
-            },
-        )
-        print(f'len(train_indices) = {len(train_indices)}')
+        if use_training_set:
+            assert train_image_transform is not None
+            self.train_dataset, self.train_dataloader = self._create_label_based_dataset_and_dataloader(
+                indices=train_indices,
+                labels=self.labels,
+                label_names=self.label_names,
+                templates=self.templates,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                collate_batch_fn=lambda batch: collate_batch_fn(batch, training_mode=True),
+                infinite=True,
+                min_pos_to_include=0,
+                log_weighting=True,
+                include_qa=False,
+                create_dataset_kwargs={
+                    'transform': self.train_image_transform,
+                    'data_augmentation_enabled': self.data_augmentation_enabled,
+                },
+            )
+            print(f'len(train_indices) = {len(train_indices)}')
         
         if use_validation_set:
+            assert val_image_transform is not None
             self.val_dataset = self._create_visual_dataset(self.test_indices, infinite=False,
                                                            transform=self.val_image_transform,
                                                            data_augmentation_enabled=False)
@@ -263,6 +272,7 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
             bboxes=self.bboxes,
             data_augmentation_enabled=data_augmentation_enabled,
             use_yolov8=self.use_yolov8,
+            use_yolov11=self.use_yolov11,
         )
 
 class VinBigVQADataset(Dataset):
@@ -360,7 +370,7 @@ class VinBigVisualDataset(Dataset):
     
     def __init__(
             self, image_paths, image_transform, labels, indices, suffle_indices=True, infinite=False,
-            use_bounding_boxes=False, bboxes=None, use_yolov8=False, data_augmentation_enabled=False,
+            use_bounding_boxes=False, bboxes=None, use_yolov8=False, use_yolov11=False, data_augmentation_enabled=False,
         ):
         self.image_paths = image_paths
         self.image_transform = image_transform
@@ -370,12 +380,13 @@ class VinBigVisualDataset(Dataset):
         self.use_bounding_boxes = use_bounding_boxes
         self.bboxes = bboxes
         self.use_yolov8 = use_yolov8
+        self.use_yolov11 = use_yolov11
         self.data_augmentation_enabled = data_augmentation_enabled
-        assert use_bounding_boxes == use_yolov8, 'use_bounding_boxes and use_yolov8 must be the same'
+        assert use_bounding_boxes == (use_yolov8 or use_yolov11), 'use_bounding_boxes must be True if use_yolov8 or use_yolov11 is True'
         if use_bounding_boxes:
             assert bboxes is not None
             if data_augmentation_enabled:
-                self.albumentation_adapter = _AlbumentationAdapter(len(VINBIG_BBOX_NAMES))
+                self.albumentation_adapter = _AlbumentationAdapter()
         
         if suffle_indices: np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
@@ -394,7 +405,6 @@ class VinBigVisualDataset(Dataset):
             l=self.labels[idx],
         )
         if self.use_bounding_boxes:
-            assert self.use_yolov8
             bboxes, classes = self.bboxes[idx]
             if self.data_augmentation_enabled:
                 tmp = self.image_transform(
@@ -413,7 +423,7 @@ class VinBigVisualDataset(Dataset):
             output['im_file'] = image_path
             output['ori_shape'] = image_size_before
             output['resized_shape'] = image_size_after
-            output['img'] = image
+            output['i'] = image
             output['bboxes'] = bboxes
             output['classes'] = classes
         else:

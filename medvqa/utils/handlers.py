@@ -238,21 +238,26 @@ def get_log_checkpoint_saved_handler(folder_path):
 
 class Accumulator():
 
-    def __init__(self, output_transform):
+    def __init__(self, output_transform, append_instead_of_extend=False):
         self._list = []
         self._output_transform = output_transform
+        self._append_instead_of_extend = append_instead_of_extend
     
     def reset(self):
         self._list.clear()
 
     def update(self, output):
-        self._list.extend(self._output_transform(output))
+        if self._append_instead_of_extend:
+            self._list.append(self._output_transform(output))
+        else:
+            self._list.extend(self._output_transform(output))
 
     def get_list(self):
         return self._list
 
-def attach_accumulator(engine, output_name):
-    accumulator = Accumulator(output_transform=operator.itemgetter(output_name))
+def attach_accumulator(engine, output_name, append_instead_of_extend=False):
+    accumulator = Accumulator(output_transform=operator.itemgetter(output_name),
+                              append_instead_of_extend=append_instead_of_extend)
     
     def epoch_started_handler(unused_engine):
         accumulator.reset()

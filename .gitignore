@@ -5,3 +5,4 @@ __tmp/
 .env
 .vscode
 *.pt
+*.jpg

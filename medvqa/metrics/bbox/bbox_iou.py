@@ -195,18 +195,25 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
             if self._use_yolov8:
                 yolov8_predictions, gt_coords, gt_classes = output
                 n = len(gt_classes)
-                for i in range(n):
+                for i in range(n): # For each image in the batch
+                    # Group ground truth coordinates by class
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls, box in zip(gt_classes[i], gt_coords[i]):
+                        gt_coords_per_class[cls].append(box)
+                    # Group predictions by class
+                    pred_coords_per_class = [[] for _ in range(self.nc)]
                     for j in range(len(yolov8_predictions[i])):
                         cls = yolov8_predictions[i][j, 5].int().item()
-                        max_iou = 0
-                        for k in range(len(gt_coords[i])):
-                            if gt_classes[i][k] == cls:
-                                iou = compute_iou(yolov8_predictions[i][j, :4], gt_coords[i][k])
-                                if iou > max_iou:
-                                    max_iou = iou
-                        self._acc_score[cls] += max_iou
-                        self._count[cls] += 1
+                        box = yolov8_predictions[i][j, :4]
+                        pred_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
+                        if len(gt_coords_per_class[cls]) > 0:
+                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            self._acc_score[cls] += iou
+                            self._count[cls] += 1
             else:
+                raise NotImplementedError('TODO: Implement self._use_yolov8=False')
                 predicted_bboxes, gt_coords, gt_classes = output
                 bs = len(gt_classes) # Batch size
                 assert bs > 0, f'bs={bs}'
@@ -234,19 +241,30 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
         else:
             if self._use_yolov8:
                 yolov8_predictions, gt_coords, gt_presence = output
+                
                 n = len(gt_presence)
-                for i in range(n):
+                for i in range(n): # For each image in the batch
+                    # Group ground truth coordinates by class
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls in range(self.nc):
+                        if gt_presence[i, cls] == 1:
+                            gt_coords_per_class[cls].append(gt_coords[i, cls])
+                    # Group predictions by class
+                    pred_coords_per_class = [[] for _ in range(self.nc)]
                     for j in range(len(yolov8_predictions[i])):
                         cls = yolov8_predictions[i][j, 5].int().item()
+                        box = yolov8_predictions[i][j, :4]
+                        pred_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
                         if self._class_mask is not None and self._class_mask[cls] == 0:
                             continue # Skip if class is masked
-                        if gt_presence[i][cls] == 1:
-                            iou = compute_iou(yolov8_predictions[i][j, :4], gt_coords[i, cls])
-                        else:
-                            iou = 0
-                        self._acc_score[cls] += iou
-                        self._count[cls] += 1
+                        if len(gt_coords_per_class[cls]) > 0:
+                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            self._acc_score[cls] += iou
+                            self._count[cls] += 1
             else:
+                raise NotImplementedError('TODO: Implement self._use_yolov8=False')
                 predicted_bboxes, gt_coords, gt_presence = output
                 bs = len(gt_presence)
                 n = len(gt_presence[0])
@@ -268,4 +286,4 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                             self._count[cls] += 1
 
     def compute(self):
-        return [self._acc_score[i] / self._count[i] for i in range(self.nc)]
+        return [self._acc_score[i] / self._count[i] if self._count[i] > 0 else 0 for i in range(self.nc)]

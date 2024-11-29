@@ -486,10 +486,14 @@ class MetricNames:
     MEDTAGS_LOSS = 'medtags_loss'
     GENDER_LOSS = 'gender_loss'
     GENDER_ACC = 'gender_acc'
-    YOLOV8_LOSS = 'yolov8_loss'
-    YOLOV8_BOX_LOSS = 'yolov8_box_loss'
-    YOLOV8_CLS_LOSS = 'yolov8_cls_loss'
-    YOLOV8_DFL_LOSS = 'yolov8_dfl_loss'
+    VINBIG_YOLOV8_LOSS = 'vinbig_yolov8_loss'
+    VINBIG_YOLOV8_BOX_LOSS = 'vinbig_yolov8_box_loss'
+    VINBIG_YOLOV8_CLS_LOSS = 'vinbig_yolov8_cls_loss'
+    VINBIG_YOLOV8_DFL_LOSS = 'vinbig_yolov8_dfl_loss'
+    VINBIG_YOLOV11_LOSS = 'vinbig_yolov11_loss'
+    VINBIG_YOLOV11_BOX_LOSS = 'vinbig_yolov11_box_loss'
+    VINBIG_YOLOV11_CLS_LOSS = 'vinbig_yolov11_cls_loss'
+    VINBIG_YOLOV11_DFL_LOSS = 'vinbig_yolov11_dfl_loss'
     REPORT_LOSS = 'report_loss'
     REPORT_LOSS_GT = 'report_loss_gt'
     LOCAL_FEATURE_COORDS_LOSS = 'local_feature_coords_loss'
@@ -587,10 +591,14 @@ METRIC2SHORT = {
     'qlabels_loss': 'ql_loss',
     'gender_loss': 'gloss',
     'gender_acc': 'gacc',
-    'yolov8_loss': 'y8_loss',
-    'yolov8_box_loss': 'y8box_loss',
-    'yolov8_cls_loss': 'y8cls_loss',
-    'yolov8_dfl_loss': 'y8dfl_loss',
+    'vinbig_yolov8_loss': 'vnb_y8_loss',
+    'vinbig_yolov8_box_loss': 'vnb_y8box_loss',
+    'vinbig_yolov8_cls_loss': 'vnb_y8cls_loss',
+    'vinbig_yolov8_dfl_loss': 'vnb_y8dfl_loss',
+    'vinbig_yolov11_loss': 'vnb_y11_loss',
+    'vinbig_yolov11_box_loss': 'vnb_y11box_loss',
+    'vinbig_yolov11_cls_loss': 'vnb_y11cls_loss',
+    'vinbig_yolov11_dfl_loss': 'vnb_y11dfl_loss',
     'local_feature_coords_loss': 'lfcoords_loss',
     'seq2seq_loss': 's2s_loss',
 }

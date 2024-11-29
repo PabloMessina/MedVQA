@@ -3,6 +3,8 @@ import random
 import subprocess
 import argparse
 from tqdm import tqdm
+from medvqa.datasets.vinbig import VINBIG_FAST_CACHE_DIR, VINBIG_LARGE_FAST_CACHE_DIR, VINBIG_ORIGINAL_IMAGES_FOLDER, VINBIG_YOLOV5_LABELS_DIR
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigTrainerBase
 from medvqa.utils.logging import print_blue
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
@@ -23,7 +25,7 @@ from medvqa.datasets.mimiccxr import (
     get_mimiccxr_medium_image_path,
 )
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.constants import DATASET_NAMES
+from medvqa.utils.constants import DATASET_NAMES, VINBIG_BBOX_NAMES, VINBIG_NUM_BBOX_CLASSES
 from medvqa.utils.common import (
     YOLOv5_PYTHON_PATH,
     YOLOv5_TRAIN_SCRIPT_PATH,
@@ -175,6 +177,102 @@ def prepare_train_val_test_data__chest_imagenome(decent_images_only=False, valid
             f.write(f'nc: {len(CHEST_IMAGENOME_BBOX_NAMES)}\n')
             f.write('names:\n')
             for i, name in enumerate(CHEST_IMAGENOME_BBOX_NAMES):
+                f.write(f'  {i}: {name}\n')
+
+    output = {
+        'train_images_txt_path': train_images_txt_path,
+        'val_images_txt_path': val_images_txt_path,
+        'test_images_txt_path': test_images_txt_path,
+        'yaml_config_path': yaml_config_path,
+    }
+    return output
+
+def prepare_train_val_test_data__vindrcxr(validation_only=False):
+    
+    train_images_txt_path  = os.path.join(VINBIG_FAST_CACHE_DIR, 'yolov5', 'images', f'train.txt')
+    val_images_txt_path    = os.path.join(VINBIG_FAST_CACHE_DIR, 'yolov5', 'images', f'val.txt')
+    test_images_txt_path   = os.path.join(VINBIG_FAST_CACHE_DIR, 'yolov5', 'images', f'test.txt')
+
+    vinbigdata = VinBigTrainerBase(load_bouding_boxes=True)
+
+    if os.path.exists(train_images_txt_path):
+        assert os.path.exists(val_images_txt_path)
+        assert os.path.exists(test_images_txt_path)
+        print(f'Found {train_images_txt_path}')
+        print(f'Found {val_images_txt_path}')
+        print(f'Found {test_images_txt_path}')
+    else:
+        os.makedirs(os.path.dirname(train_images_txt_path), exist_ok=True)
+        os.makedirs(os.path.dirname(val_images_txt_path), exist_ok=True)
+        os.makedirs(os.path.dirname(test_images_txt_path), exist_ok=True)
+        
+        train_indices, test_indices = vinbigdata.train_indices, vinbigdata.test_indices
+        val_indices = test_indices # there is no official validation set, so we use the test set as validation set
+
+        for txt_path, indices in [
+            (train_images_txt_path, train_indices),
+            (val_images_txt_path, val_indices),
+            (test_images_txt_path, test_indices),
+        ]:
+            print(f'Writing {len(indices)} images to {txt_path}')
+            with open(txt_path, 'w') as f:
+                for idx in indices:
+                    image_path = vinbigdata.image_paths[idx]
+                    assert os.path.exists(image_path)
+                    f.write(f'{image_path}\n')
+
+    if validation_only:
+        train_images_txt_path = val_images_txt_path
+        test_images_txt_path = val_images_txt_path
+    
+    if os.path.exists(VINBIG_YOLOV5_LABELS_DIR):
+        print(f'Found {VINBIG_YOLOV5_LABELS_DIR}')
+    else:
+        print(f'Writing {VINBIG_YOLOV5_LABELS_DIR}/*.txt')
+        os.makedirs(VINBIG_YOLOV5_LABELS_DIR, exist_ok=True)
+        for image_id, image_path in tqdm(zip(vinbigdata.image_ids, vinbigdata.image_paths)):
+            bboxes = vinbigdata.image_id_2_bboxes[image_id]
+            labels_path = image_path.replace(VINBIG_ORIGINAL_IMAGES_FOLDER, VINBIG_YOLOV5_LABELS_DIR).replace('.jpg', '.txt')
+            assert os.path.exists(image_path)
+            os.makedirs(os.path.dirname(labels_path), exist_ok=True)
+            bbox_list, class_list = bboxes           
+            with open(labels_path, 'w') as f:
+                for bbox, class_id in zip(bbox_list, class_list):
+                    x1, y1, x2, y2 = bbox
+                    x_mid = (x1 + x2) / 2
+                    y_mid = (y1 + y2) / 2
+                    w = x2 - x1
+                    h = y2 - y1
+                    assert 0 <= x_mid <= 1
+                    assert 0 <= y_mid <= 1
+                    assert 0 < w <= 1
+                    assert 0 < h <= 1
+                    f.write(f'{class_id} {x_mid} {y_mid} {w} {h}\n')
+
+    # Write YAML config file
+    strings = []
+    if validation_only:
+        strings.append('validation_only')
+    yaml_config_filename = f'config({",".join(strings)}).yaml' if len(strings) > 0 else 'config.yaml'
+    yaml_config_path = os.path.join(VINBIG_LARGE_FAST_CACHE_DIR, 'yolov5', yaml_config_filename)
+    if os.path.exists(yaml_config_path):
+        print(f'Found {yaml_config_path}')
+    else:
+        os.makedirs(os.path.dirname(yaml_config_path), exist_ok=True)
+        print(f'Writing {yaml_config_path}')
+        with open(yaml_config_path, 'w') as f:
+            f.write('# Train/val/test sets\n')
+            f.write(f'path: {VINBIG_FAST_CACHE_DIR}/yolov5\n')
+            f.write(f'train: images/{os.path.basename(train_images_txt_path)}\n')
+            f.write(f'val: images/{os.path.basename(val_images_txt_path)}\n')
+            f.write(f'test: images/{os.path.basename(test_images_txt_path)}\n')
+            f.write('\n# From image to labels\n')
+            f.write(f'source_pattern: {VINBIG_ORIGINAL_IMAGES_FOLDER}\n')
+            f.write(f'target_pattern: {VINBIG_YOLOV5_LABELS_DIR}\n')
+            f.write('\n# Classes\n')
+            f.write(f'nc: {VINBIG_NUM_BBOX_CLASSES}\n')
+            f.write('names:\n')
+            for i, name in enumerate(VINBIG_BBOX_NAMES):
                 f.write(f'  {i}: {name}\n')
 
     output = {

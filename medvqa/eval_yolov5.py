@@ -30,7 +30,7 @@ from medvqa.utils.common import (
     YOLOv5_RUNS_DETECT_DIR,
     parsed_args_to_dict,
 )
-from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, save_to_pickle
+from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, save_pickle
 from medvqa.utils.logging import print_blue, print_red, print_bold
 
 class EvalDatasets:
@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument('--print-inference-time', default=False, action='store_true')
     return parser.parse_args()
 
-def prepare_eval_data__chest_imagenome(eval_dataset_name, decent_images_only=False):
+def get_eval_image_paths_txt_filepath__chest_imagenome(eval_dataset_name, decent_images_only=False):
     eval_images_txt_path = os.path.join(CHEST_IMAGENOME_FAST_CACHE_DIR, 'yolov5', 'images', f'{eval_dataset_name}{"(decent_images_only)" if decent_images_only else ""}.txt')
     if os.path.exists(eval_images_txt_path):
         print(f'Found {eval_images_txt_path}')
@@ -192,14 +192,14 @@ def compute_and_save_bbox_metrics(model_predictions_folder, cmd_args, dicom_ids,
     # Save metrics
     save_path = os.path.join(results_folder_path,
         (f'{eval_dataset_name}__bbox_metrics({"decent" if decent_images_only else ""}).pkl'))
-    save_to_pickle(metrics, save_path)
+    save_pickle(metrics, save_path)
     print('Saved bbox metrics to: ', end='')
     print_bold(save_path)
     
     # Save additional info to be able to trace back original model and predictions
     save_path = os.path.join(results_folder_path,
         (f'{eval_dataset_name}__metadata({"decent" if decent_images_only else ""}).pkl'))
-    save_to_pickle({
+    save_pickle({
         'cmd_args': cmd_args,
         'model_predictions_folder': model_predictions_folder,
     }, save_path)
@@ -231,7 +231,7 @@ def eval_yolov5(
 
     # Prepare eval data for YOLOv5
     print_blue('\n1) Preparing eval data for YOLOv5', bold=True)
-    eval_images_txt_path = prepare_eval_data__chest_imagenome(
+    eval_images_txt_path = get_eval_image_paths_txt_filepath__chest_imagenome(
         eval_dataset_name=eval_dataset_name,
         decent_images_only=decent_images_only,
     )

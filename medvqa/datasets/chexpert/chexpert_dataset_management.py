@@ -37,9 +37,8 @@ class CheXpertTrainingMode:
     VAL_TEST = 'val_test'
     TEST = 'test'
     ALL = 'all'
-
     @staticmethod
-    def get_choices():
+    def get_all():
         return [
             CheXpertTrainingMode.TRAIN_VAL,
             CheXpertTrainingMode.VAL_TEST,

@@ -105,6 +105,8 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 idx2visfeatidx=None,
                 # yolov8
                 use_yolov8=False,
+                # yolov11
+                use_yolov11=False,
             ):
         self.indices = indices
         self.report_ids = report_ids
@@ -139,6 +141,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         self.flipped_gt_bbox_presence = flipped_gt_bbox_presence
         self.flipped_pred_bbox_coords = flipped_pred_bbox_coords
         self.use_yolov8 = use_yolov8
+        self.use_yolov11 = use_yolov11
 
         if self.pass_pred_bbox_coords_to_model:
             assert self.pred_bbox_coords is not None
@@ -177,6 +180,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
         idx = self.indices[i]
         rid = self.report_ids[idx]
         output = { 'idx': idx }
+        use_yolo = self.use_yolov8 or self.use_yolov11
         if self.include_image:
             # global _DEBUG
             image_path = self.image_paths[idx]
@@ -194,7 +198,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                             albumentation_adapter=self.albumentation_adapter,
                             flipped_bboxes=self.flipped_gt_bbox_coords[dicom_idx],
                             flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
-                            return_image_size=self.use_yolov8,
+                            return_image_size=use_yolo,
                         )
                     else:
                         tmp = self.image_transform(
@@ -202,15 +206,15 @@ class MIMICCXR_Visual_Dataset(Dataset):
                             bboxes=gt_bbox_coords,
                             presence=gt_bbox_presence,
                             albumentation_adapter=self.albumentation_adapter,
-                            return_image_size=self.use_yolov8,
+                            return_image_size=use_yolo,
                         )
-                    if self.use_yolov8:
+                    if use_yolo:
                         image, gt_bbox_coords, gt_bbox_presence, image_size_before, image_size_after = tmp
                     else:
                         image, gt_bbox_coords, gt_bbox_presence = tmp
                 else: # no data augmentation
-                    tmp = self.image_transform(image_path, return_image_size=self.use_yolov8)
-                    if self.use_yolov8:
+                    tmp = self.image_transform(image_path, return_image_size=use_yolo)
+                    if use_yolo:
                         image, image_size_before, image_size_after = tmp
                     else:
                         image = tmp
@@ -220,7 +224,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 # if _DEBUG:
                 #     print('Case 1: A and not B')
             elif not self.predict_bboxes_chest_imagenome and self.pass_pred_bbox_coords_to_model:
-                assert not self.use_yolov8
+                assert not use_yolo
                 dicom_idx = self.dicom_idxs[idx]
                 pred_bbox_coords = self.pred_bbox_coords[dicom_idx]
                 if self.data_augmentation_enabled:
@@ -258,7 +262,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                             flipped_presence=self.flipped_gt_bbox_presence[dicom_idx],
                             pred_bboxes=pred_bbox_coords,
                             flipped_pred_bboxes=self.flipped_pred_bbox_coords[dicom_idx],
-                            return_image_size=self.use_yolov8,
+                            return_image_size=use_yolo,
                         )
                     else:
                         tmp = self.image_transform(
@@ -267,15 +271,15 @@ class MIMICCXR_Visual_Dataset(Dataset):
                             presence=gt_bbox_presence,
                             albumentation_adapter=self.albumentation_adapter,
                             pred_bboxes=pred_bbox_coords,
-                            return_image_size=self.use_yolov8,
+                            return_image_size=use_yolo,
                         )
-                    if self.use_yolov8:
+                    if use_yolo:
                         image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords, image_size_before, image_size_after = tmp
                     else:
                         image, gt_bbox_coords, gt_bbox_presence, pred_bbox_coords = tmp
                 else:
-                    tmp = self.image_transform(image_path, return_image_size=self.use_yolov8)
-                    if self.use_yolov8:
+                    tmp = self.image_transform(image_path, return_image_size=use_yolo)
+                    if use_yolo:
                         image, image_size_before, image_size_after = tmp
                     else:
                         image = tmp
@@ -286,7 +290,7 @@ class MIMICCXR_Visual_Dataset(Dataset):
                 # if _DEBUG:
                 #     print('Case 3: A and B')
             else:
-                assert not self.use_yolov8
+                assert not use_yolo
                 image = self.image_transform(image_path)
                 # if _DEBUG:
                 #     print('Case 4: not A and not B')
@@ -308,13 +312,11 @@ class MIMICCXR_Visual_Dataset(Dataset):
             output['gender'] = self.genders[idx]
         if self.classify_chest_imagenome:
             output['chest_imagenome'] = self.chest_imagenome_labels[rid]
-        if self.use_yolov8:
+        if use_yolo:
             # We need to adapt the output a little bit to make it compatible with YOLOv8
             output['im_file'] = image_path
             output['ori_shape'] = image_size_before
             output['resized_shape'] = image_size_after
-            output['img'] = output['i']
-            del output['i']
         return output
 
 def _define_allowed_dicom_ids(view_mode, use_all_data, use_test_set, use_chest_imagenome_bbox_gold_set,
@@ -626,6 +628,7 @@ class MIMICCXR_VisualModuleTrainer:
                 pass_pred_bbox_coords_to_model=False,
                 use_gt_bboxes_as_pred=False,
                 use_yolov8=False,
+                use_yolov11=False,
                 **unused_kwargs,
             ):
 
@@ -653,6 +656,7 @@ class MIMICCXR_VisualModuleTrainer:
         self.use_detectron2 = use_detectron2
         self.use_anaxnet_bbox_subset = use_anaxnet_bbox_subset
         self.use_yolov8 = use_yolov8
+        self.use_yolov11 = use_yolov11
 
         if chest_imagenome_label_names_filename is not None:
             self.chest_imagenome_label_names = load_chest_imagenome_label_names(chest_imagenome_label_names_filename)
@@ -1019,6 +1023,7 @@ class MIMICCXR_VisualModuleTrainer:
             precomputed_visual_features=self.precomputed_visual_features,
             idx2visfeatidx=self.idx2visfeatidx,
             use_yolov8=self.use_yolov8,
+            use_yolov11=self.use_yolov11,
         )
     
     def _create_dataset_and_dataloader(self, indices, image_transform, collate_batch_fn, data_augmentation_enabled=False,

@@ -61,6 +61,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         # vinbig dataset
         vinbig_criterion=None,
         predict_bboxes_vinbig=False,
+        classify_labels_vinbig=False,
         # padchest dataset
         padchest_multilabel_criterion=None,
         padchest_singlelabel_criterion=None,
@@ -79,6 +80,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         using_yolov8=False,
         yolov8_criterion=None,
         yolov8_use_multiple_detection_layers=False,
+        # yolov11
+        using_yolov11=False,
+        apply_nms=True,
         # batchwise learning rate updates
         update_lr_batchwise=False,
         lr_scheduler=None,
@@ -114,13 +118,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             mimiccxr_yolov8_criterion = vinbig_yolov8_criterion = yolov8_criterion
 
     if predict_bboxes_vinbig:
-        assert using_yolov8
+        assert using_yolov8 or using_yolov11
 
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
     
-    _mimiccxr_dataset_ids = [MIMICCXR_DATASET_ID, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
-                             MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
+    using_yolo = using_yolov8 or using_yolov11
 
     if predict_bboxes_chest_imagenome:
         print('chest_imagenome_bbox_loss_weight: ', chest_imagenome_bbox_loss_weight)
@@ -195,8 +198,6 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     def step_fn__mimiccxr_iuxray(batch):
 
         # Extract elements from batch
-        idxs = batch['idx']
-        dataset_id = batch['dataset_id']        
         if include_image:
             if using_yolov8:
                 images = batch['img'].to(device)
@@ -214,7 +215,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     answers_start = answers[:, :-1]
                     answers_end = answers[:, 1:]
 
-        is_mimiccxr = dataset_id in _mimiccxr_dataset_ids
+        is_mimiccxr = (batch['flag'] == 'mimiccxr')
 
         findings_name = 'findings' if use_merged_findings else 'chexpert'
         
@@ -231,7 +232,7 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         if classify_chest_imagenome:
             chest_imagenome = batch['chest_imagenome'].to(device)
         if predict_bboxes_chest_imagenome:
-            if (using_yolov8 and not training) or not using_yolov8:
+            if (using_yolo and not training) or not using_yolo:
                 chest_imagenome_bbox_coords = batch['chest_imagenome_bbox_coords'].to(device)
                 chest_imagenome_bbox_presence = batch['chest_imagenome_bbox_presence'].to(device)
         if pass_pred_bbox_coords_as_input:
@@ -244,12 +245,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             # Prepare args for model forward
             model_kwargs = {                
                 'device': device,
-                'mode': 'train' if training else 'eval',
             }            
             if include_image:
                 model_kwargs['raw_images'] = images
-                # print(f'step_fn__mimiccxr_iuxray: images.shape: {images.shape}')
-                # assert len(images.shape) == 4
             if include_visual_features:
                 model_kwargs['visual_features'] = visual_features
             if is_mimiccxr:
@@ -261,6 +259,11 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 model_kwargs['refine_bbox_coords'] = predict_bboxes_chest_imagenome
             if is_mimiccxr and using_yolov8 and yolov8_use_multiple_detection_layers:
                 model_kwargs['yolov8_detection_layer_index'] = mimiccxr_yolov8_index
+            if using_yolov11:
+                model_kwargs['apply_nms'] = apply_nms
+                if predict_bboxes_chest_imagenome:
+                    model_kwargs['yolov11_detection_tasks'] = 'cig'
+                    model_kwargs['batch'] = batch
 
             if not use_visual_module_only:
                 model_kwargs['questions'] = questions
@@ -282,46 +285,50 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
-                
-                if classify_tags:
-                    pred_tags_logits = model_output['pred_tags']            
-                if classify_orientation:
-                    if is_mimiccxr:
-                        pred_orientation_logits = model_output['mimiccxr_pred_orientation']
-                    else:
-                        pred_orientation_logits = model_output['iuxray_pred_orientation']
-                if classify_chexpert:
-                    pred_chexpert_logits = model_output[f'pred_{findings_name}']
-                    pred_chexpert_probs = model_output[f'pred_{findings_name}_probs']
-                if classify_questions:
-                    pred_qlabels_logits = model_output['pred_qlabels']
-                if classify_gender:
-                    pred_gender_logits = model_output['pred_gender']
-                if classify_chest_imagenome:
-                    pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
-                    pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
-                    if valid_chest_imagenome_label_indices is not None:
-                        pred_chest_imagenome_logits = pred_chest_imagenome_logits[:, valid_chest_imagenome_label_indices]
-                        pred_chest_imagenome_probs = pred_chest_imagenome_probs[:, valid_chest_imagenome_label_indices]
-                if predict_bboxes_chest_imagenome:
-                    if using_yolov8:
-                        yolov8_features = model_output['yolov8_features']
-                        if not training:
-                            yolov8_predictions = model_output['yolov8_predictions']
-                    else:
-                        pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
-                        bs = pred_chest_imagenome_bbox_coords.size(0)
-                        pred_chest_imagenome_bbox_coords = pred_chest_imagenome_bbox_coords.view(bs, -1, 4)
-                        pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
 
-                if not use_visual_module_only:
-                    if training:
-                        pred_answer_logits = model_output['pred_answers']
-                    else:
-                        pred_answers = model_output['pred_answers']
-                    
-                    if verbose_question:
-                        pred_question_logits = model_output['pred_questions']
+                if using_yolov11:
+                    if predict_bboxes_chest_imagenome:
+                        detect_output = model_output['detection']['cig']
+                else:
+                    if classify_tags:
+                        pred_tags_logits = model_output['pred_tags']            
+                    if classify_orientation:
+                        if is_mimiccxr:
+                            pred_orientation_logits = model_output['mimiccxr_pred_orientation']
+                        else:
+                            pred_orientation_logits = model_output['iuxray_pred_orientation']
+                    if classify_chexpert:
+                        pred_chexpert_logits = model_output[f'pred_{findings_name}']
+                        pred_chexpert_probs = model_output[f'pred_{findings_name}_probs']
+                    if classify_questions:
+                        pred_qlabels_logits = model_output['pred_qlabels']
+                    if classify_gender:
+                        pred_gender_logits = model_output['pred_gender']
+                    if classify_chest_imagenome:
+                        pred_chest_imagenome_logits = model_output['pred_chest_imagenome']
+                        pred_chest_imagenome_probs = model_output['pred_chest_imagenome_probs']
+                        if valid_chest_imagenome_label_indices is not None:
+                            pred_chest_imagenome_logits = pred_chest_imagenome_logits[:, valid_chest_imagenome_label_indices]
+                            pred_chest_imagenome_probs = pred_chest_imagenome_probs[:, valid_chest_imagenome_label_indices]
+                    if predict_bboxes_chest_imagenome:
+                        if using_yolov8:
+                            yolov8_features = model_output['yolov8_features']
+                            if not training:
+                                yolov8_predictions = model_output['yolov8_predictions']
+                        else:
+                            pred_chest_imagenome_bbox_coords = model_output['pred_chest_imagenome_bbox_coords']
+                            bs = pred_chest_imagenome_bbox_coords.size(0)
+                            pred_chest_imagenome_bbox_coords = pred_chest_imagenome_bbox_coords.view(bs, -1, 4)
+                            pred_chest_imagenome_bbox_presence = model_output['pred_chest_imagenome_bbox_presence']
+
+                    if not use_visual_module_only:
+                        if training:
+                            pred_answer_logits = model_output['pred_answers']
+                        else:
+                            pred_answers = model_output['pred_answers']
+                        
+                        if verbose_question:
+                            pred_question_logits = model_output['pred_questions']
 
                 if training:
                     # Compute losses
@@ -351,9 +358,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         if using_yolov8:
                             batch_size = images.shape[0]
                             assert batch_size == yolov8_features[0].shape[0]
-                            chest_imagenome_yolov8_loss, yolov8_loss_items = mimiccxr_yolov8_criterion(yolov8_features, batch)
-                            chest_imagenome_yolov8_loss /= batch_size
-                            losses.append(chest_imagenome_yolov8_loss)
+                            yolov8_loss, yolov8_loss_items = mimiccxr_yolov8_criterion(yolov8_features, batch)
+                            yolov8_loss /= batch_size
+                            losses.append(yolov8_loss)
+                        elif using_yolov11:
+                            yolov11_loss = detect_output['loss']
+                            yolov11_loss_items = detect_output['loss_items']
+                            losses.append(yolov11_loss)
                         else:
                             chest_imagenome_bbox_coords_loss = chest_imagenome_bbox_coords_criterion(
                                 pred_chest_imagenome_bbox_coords, chest_imagenome_bbox_coords.float())
@@ -380,14 +391,10 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         batch_loss = None
 
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
 
         # Prepare output
-        output = {
-            'idxs': idxs,            
-            'dataset_id': dataset_id,
-        }
-
+        output = {}
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
         if classify_tags:
@@ -423,22 +430,38 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             if training:
                 output[MetricNames.CHEST_IMAGENOME_LABEL_LOSS] = chest_imagenome_loss.detach()
         if predict_bboxes_chest_imagenome:
-            if using_yolov8:
+            if using_yolov8 or using_yolov11:
                 if training:
-                    output[MetricNames.YOLOV8_LOSS] = chest_imagenome_yolov8_loss.detach()
-                    output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-                    output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-                    output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+                    if using_yolov8:
+                        output['yolov8_loss'] = yolov8_loss.detach()
+                        output['yolov8_box_loss'] = yolov8_loss_items[0]
+                        output['yolov8_cls_loss'] = yolov8_loss_items[1]
+                        output['yolov8_dfl_loss'] = yolov8_loss_items[2]
+                    else:
+                        output['yolov11_loss'] = yolov11_loss.detach()
+                        output['yolov11_box_loss'] = yolov11_loss_items[0]
+                        output['yolov11_cls_loss'] = yolov11_loss_items[1]
+                        output['yolov11_dfl_loss'] = yolov11_loss_items[2]
                 else:
                     # normalize yolov8 predictions
+                    if using_yolov8:
+                        predictions = yolov8_predictions
+                    else:
+                        predictions = detect_output
                     resized_shapes = batch['resized_shape']
-                    assert len(resized_shapes) == len(yolov8_predictions)
-                    for i in range(len(resized_shapes)):
-                        resized_shape = resized_shapes[i]
-                        pred = yolov8_predictions[i].detach().cpu()
-                        pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                        yolov8_predictions[i] = pred
-                    output['yolov8_predictions'] = yolov8_predictions
+                    assert len(resized_shapes) == len(predictions)
+                    if apply_nms: # the following only makes sense if NMS was already applied
+                        for i in range(len(resized_shapes)):
+                            resized_shape = resized_shapes[i]
+                            pred = predictions[i].detach().cpu()
+                            pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                            predictions[i] = pred
+                    else:
+                        output['resized_shape'] = batch['resized_shape']
+                    if using_yolov8:
+                        output['yolov8_predictions'] = predictions
+                    else:
+                        output['yolov11_predictions'] = predictions
                     output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords.detach().cpu()
                     output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence.detach().cpu()
             else:
@@ -614,14 +637,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
     def step_fn__vinbig(batch):
 
         # Extract elements from batch
-        idxs = batch['idx']
-        dataset_id = batch['dataset_id']
         vinbig_labels = batch['l'].to(device)
         if include_image:
-            if using_yolov8:
-                images = batch['img'].to(device)
-            else:
-                images = batch['i'].to(device)
+            images = batch['i'].to(device)
         if include_visual_features:
             visual_features = batch['vf'].to(device)
         if not use_visual_module_only:
@@ -634,7 +652,6 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         findings_name = 'findings' if use_merged_findings else 'vinbig'
 
         if predict_bboxes_vinbig:
-            assert using_yolov8
             if not training:
                 vinbig_bbox_coords = batch['bboxes']
                 vinbig_bbox_classes = batch['classes']
@@ -647,7 +664,6 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             model_kwargs = {
                 'vinbig_forward': True,
                 'device': device,
-                'mode': 'train' if training else 'eval',
             }
 
             if include_image:
@@ -656,6 +672,13 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 model_kwargs['visual_features'] = visual_features
             if using_yolov8 and yolov8_use_multiple_detection_layers:
                 model_kwargs['yolov8_detection_layer_index'] = vinbig_yolov8_index
+            if using_yolov11:
+                if classify_labels_vinbig:
+                    model_kwargs['yolov11_classification_tasks'] = 'vinbig'
+                if predict_bboxes_vinbig:
+                    model_kwargs['apply_nms'] = apply_nms
+                    model_kwargs['yolov11_detection_tasks'] = 'vinbig'
+                    model_kwargs['batch'] = batch
 
             if not use_visual_module_only:
                 model_kwargs['questions'] = questions
@@ -676,33 +699,48 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             with autocast(enabled=use_amp): # automatic mixed precision
 
                 model_output = model(**model_kwargs)
-                
-                pred_vinbig_logits = model_output[f'pred_{findings_name}']
-                pred_vinbig_probs = model_output[f'pred_{findings_name}_probs']
-                if predict_bboxes_vinbig:
-                    assert using_yolov8
-                    yolov8_features = model_output['yolov8_features']
-                    if not training:
-                        yolov8_predictions = model_output['yolov8_predictions']
 
-                if not use_visual_module_only:
-                    if training:
-                        pred_answer_logits = model_output['pred_answers']
-                    else:
-                        pred_answers = model_output['pred_answers']
+                if using_yolov11:
+                    if classify_labels_vinbig:
+                        pred_vinbig_logits = model_output['classification']['vinbig']
+                        pred_vinbig_probs = torch.sigmoid(pred_vinbig_logits)
+                    if predict_bboxes_vinbig:
+                        detect_output = model_output['detection']['vinbig']
+                else:
+                    pred_vinbig_logits = model_output[f'pred_{findings_name}']
+                    pred_vinbig_probs = model_output[f'pred_{findings_name}_probs']
+                    if predict_bboxes_vinbig:
+                        assert using_yolov8
+                        yolov8_features = model_output['yolov8_features']
+                        if not training:
+                            yolov8_predictions = model_output['yolov8_predictions']
+
+                    if not use_visual_module_only:
+                        if training:
+                            pred_answer_logits = model_output['pred_answers']
+                        else:
+                            pred_answers = model_output['pred_answers']
 
                 if training:
                     # Compute losses
-                    vinbig_label_loss = vinbig_criterion(pred_vinbig_logits, vinbig_labels.float())                    
-                    batch_loss = vinbig_label_loss
+                    batch_loss = 0
+                    
+                    if classify_labels_vinbig:
+                        vinbig_label_loss = vinbig_criterion(pred_vinbig_logits, vinbig_labels.float())                    
+                        batch_loss += vinbig_label_loss
                     
                     if predict_bboxes_vinbig:
-                        assert using_yolov8
-                        batch_size = images.shape[0]
-                        assert batch_size == yolov8_features[0].shape[0]
-                        vinbig_yolov8_loss, yolov8_loss_items = vinbig_yolov8_criterion(yolov8_features, batch)
-                        vinbig_yolov8_loss /= batch_size
-                        batch_loss += vinbig_yolov8_loss
+                        if using_yolov8:
+                            batch_size = images.shape[0]
+                            assert batch_size == yolov8_features[0].shape[0]
+                            yolov8_loss, yolov8_loss_items = vinbig_yolov8_criterion(yolov8_features, batch)
+                            yolov8_loss /= batch_size
+                            batch_loss += yolov8_loss
+                        elif using_yolov11:
+                            yolov11_loss = detect_output['loss']
+                            yolov11_loss_items = detect_output['loss_items']
+                            batch_loss += yolov11_loss
+                        else: assert False # Shoudn't happen
 
                     if not use_visual_module_only:
                         if shift_answer:
@@ -711,38 +749,52 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                             answer_loss = nlg_criterion(pred_answer_logits.reshape(-1, pred_answer_logits.shape[-1]), answers.view(-1))
                         batch_loss += answer_loss
                     # Backward pass + optimizer step if training
-                    gradient_accumulator.step(batch_loss)
+                    gradient_accumulator.step(batch_loss, model)
         
         # Prepare output
-        output = {
-            'idxs': idxs,
-            'dataset_id': dataset_id,
-        }            
+        output = {}
         if training:
             output['loss'] = batch_loss.detach()
         # vinbig labels
-        output[f'vinbig_labels'] = vinbig_labels.detach().cpu()
-        output[f'pred_vinbig_labels'] = (pred_vinbig_logits.detach() > 0).cpu()
-        output[f'pred_vinbig_probs'] = pred_vinbig_probs.detach().cpu()
-        if training:
-            output[f'vinbig_label_loss'] = vinbig_label_loss.detach()
-        if predict_bboxes_vinbig:
-            assert using_yolov8
+        if classify_labels_vinbig:
+            output[f'vinbig_labels'] = vinbig_labels.detach().cpu()
+            output[f'pred_vinbig_labels'] = (pred_vinbig_logits.detach() > 0).cpu()
+            output[f'pred_vinbig_probs'] = pred_vinbig_probs.detach().cpu()
             if training:
-                output[MetricNames.YOLOV8_LOSS] = vinbig_yolov8_loss.detach()
-                output[MetricNames.YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
-                output[MetricNames.YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
-                output[MetricNames.YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+                output[f'vinbig_label_loss'] = vinbig_label_loss.detach()
+        if predict_bboxes_vinbig:
+            assert using_yolov8 or using_yolov11
+            if training:
+                if using_yolov8:
+                    output[MetricNames.VINBIG_YOLOV8_LOSS] = yolov8_loss.detach()
+                    output[MetricNames.VINBIG_YOLOV8_BOX_LOSS] = yolov8_loss_items[0]
+                    output[MetricNames.VINBIG_YOLOV8_CLS_LOSS] = yolov8_loss_items[1]
+                    output[MetricNames.VINBIG_YOLOV8_DFL_LOSS] = yolov8_loss_items[2]
+                else:
+                    output[MetricNames.VINBIG_YOLOV11_LOSS] = yolov11_loss.detach()
+                    output[MetricNames.VINBIG_YOLOV11_BOX_LOSS] = yolov11_loss_items[0]
+                    output[MetricNames.VINBIG_YOLOV11_CLS_LOSS] = yolov11_loss_items[1]
+                    output[MetricNames.VINBIG_YOLOV11_DFL_LOSS] = yolov11_loss_items[2]
             else:
-                # normalize yolov8 predictions
+                # normalize predictions
+                if using_yolov8:
+                    predictions = yolov8_predictions
+                else:
+                    predictions = detect_output
                 resized_shapes = batch['resized_shape']
-                assert len(resized_shapes) == len(yolov8_predictions)
-                for i in range(len(resized_shapes)):
-                    resized_shape = resized_shapes[i]
-                    pred = yolov8_predictions[i].detach().cpu()
-                    pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                    yolov8_predictions[i] = pred
-                output['yolov8_predictions'] = yolov8_predictions
+                assert len(resized_shapes) == len(predictions)
+                if apply_nms: # the following only makes sense if NMS was already applied
+                    for i in range(len(resized_shapes)):
+                        resized_shape = resized_shapes[i]
+                        pred = predictions[i].detach().cpu()
+                        pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
+                        predictions[i] = pred
+                else:
+                    output['resized_shape'] = resized_shapes # needed for NMS
+                if using_yolov8:
+                    output['yolov8_predictions'] = predictions
+                else:
+                    output['yolov11_predictions'] = predictions
                 output['vinbig_bbox_coords'] = vinbig_bbox_coords
                 output['vinbig_bbox_classes'] = vinbig_bbox_classes
 
@@ -884,29 +936,22 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
             output['answers'] = tokenizer.clean_batch(answers.detach())                
 
         return output
-
-    _mim_iu_datasets = [MIMICCXR_DATASET_ID, IUXRAY_DATASET_ID,
-             MIMICCXR_DATASET_ID__CHEXPERT_MODE, IUXRAY_DATASET_ID__CHEXPERT_MODE,
-             MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]
-
-    _chexpert_cxr14_datsets = [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]
+    
+    flag_to_step_fn = {
+        'mimiccxr': step_fn__mimiccxr_iuxray,
+        'iuxray': step_fn__mimiccxr_iuxray,
+        'chexpert': step_fn__chexpert_cxr14,
+        'cxr14': step_fn__chexpert_cxr14,
+        'vinbig': step_fn__vinbig,
+        'padchest': step_fn__padchest,
+        'mim-cim-det2': step_fn__mimiccxr_chest_imagenome_detectron2,
+    }
     
     def step_fn(unused_engine, batch):
-        dataset_id = batch['dataset_id']
-        # print(f"step_fn(dataset_id={dataset_id})")
-        if dataset_id in _mim_iu_datasets:
-            output = step_fn__mimiccxr_iuxray(batch)
-        elif dataset_id in _chexpert_cxr14_datsets:
-            output = step_fn__chexpert_cxr14(batch)
-        elif dataset_id == VINBIG_DATASET_ID:
-            output = step_fn__vinbig(batch)
-        elif dataset_id == PADCHEST_DATASET_ID:
-            output = step_fn__padchest(batch)
-        elif dataset_id == MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE:
-            output = step_fn__mimiccxr_chest_imagenome_detectron2(batch)
-        else: assert False, f'Unknown dataset_id {dataset_id}'
-        # update learning rate batchwise
-        if update_lr_batchwise:
+        flag = batch['flag']
+        output = flag_to_step_fn[flag](batch)
+        output['flag'] = flag # propagate flag
+        if update_lr_batchwise: # update learning rate batchwise
             lr_scheduler.step()
         return output
     
@@ -923,7 +968,7 @@ def _get_dataset_masks(dataset_id, labels_remapper, n_labels, device):
 def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 classify_chexpert, classify_questions, classify_chest_imagenome,
                 predict_bboxes_chest_imagenome, pass_pred_bbox_coords_as_input,
-                predict_bboxes_vinbig,
+                predict_bboxes_vinbig, classify_labels_vinbig,
                 device,
                 tokenizer=None,
                 question_encoding=None,
@@ -953,6 +998,8 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                 using_yolov8=False,
                 yolov8_use_multiple_detection_layers=False,
                 model_for_yolov8=None,
+                using_yolov11=False,
+                apply_nms=True,
                 **unused_kwargs,
             ):
     
@@ -1109,6 +1156,7 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             # vinbig dataset
                             vinbig_criterion=vinbig_criterion,
                             predict_bboxes_vinbig=predict_bboxes_vinbig,
+                            classify_labels_vinbig=classify_labels_vinbig,
                             # padchest dataset
                             padchest_multilabel_criterion=padchest_multilabel_criterion,
                             padchest_singlelabel_criterion=padchest_singlelabel_criterion,
@@ -1127,6 +1175,9 @@ def get_engine(model, classify_tags, classify_orientation, classify_gender,
                             using_yolov8=using_yolov8,
                             yolov8_criterion=yolov8_criterion,
                             yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
+                            # yolov11
+                            using_yolov11=using_yolov11,
+                            apply_nms=apply_nms,
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,

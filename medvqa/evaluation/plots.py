@@ -450,38 +450,64 @@ def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10
     plt.title(title)
     plt.show()
 
-def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, class_names, figsize, format='xywh'):
+def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, pred_confs, gt_bbox_coords,
+                                             class_names, figsize, format='xywh'):
     from PIL import Image
     import matplotlib.patches as patches
-
-    fig, ax = plt.subplots(1, figsize=figsize)
+    
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=figsize) # 1 row, 2 columns (left: GT, right: Pred)
 
     # Image
     image = Image.open(image_path)
     image = image.convert('RGB')
     width = image.size[0]
     height = image.size[1]
-    ax.imshow(image)
+    ax[0].imshow(image)
+    ax[1].imshow(image)
 
-    # Predicted bounding boxes
-    for i in range(len(pred_classes)):
+    def _adapt_bbox_format(coords, format):
         if format == 'xywh':
-            x_mid = pred_coords[i, 0] * width
-            y_mid = pred_coords[i, 1] * height
-            w = pred_coords[i, 2] * width
-            h = pred_coords[i, 3] * height
+            x_mid = coords[0] * width
+            y_mid = coords[1] * height
+            w = coords[2] * width
+            h = coords[3] * height
             x1, y1, x2, y2 = x_mid - w / 2, y_mid - h / 2, x_mid + w / 2, y_mid + h / 2
         elif format == 'xyxy':
-            x1 = pred_coords[i, 0] * width
-            y1 = pred_coords[i, 1] * height
-            x2 = pred_coords[i, 2] * width
-            y2 = pred_coords[i, 3] * height
+            x1 = coords[0] * width
+            y1 = coords[1] * height
+            x2 = coords[2] * width
+            y2 = coords[3] * height
         else:
             raise ValueError(f'Unknown format {format}')
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=plt.cm.tab20(pred_classes[i] % 20), facecolor='none', linestyle='dashed')
-        ax.add_patch(rect)
-        ax.text(x1, y1-3, class_names[pred_classes[i]], fontsize=10, bbox=dict(facecolor='white', alpha=0.3, edgecolor='none', pad=0.1))
-    
+        return x1, y1, x2, y2
+
+    # Ground truth bounding boxes
+    for i in range(len(gt_bbox_coords)):
+        if gt_bbox_coords[i] is not None:
+            coords_list = gt_bbox_coords[i]
+            color = _COLORS[i % len(_COLORS)]
+            for coords in coords_list:
+                x1, y1, x2, y2 = _adapt_bbox_format(coords, format)
+                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=color, facecolor='none')
+                ax[0].add_patch(rect)
+                # ax[0].text(x1, y1-10, class_names[i], fontsize=12, bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))
+                ax[0].text(x1, y1-10, class_names[i], color=color, fontsize=12, backgroundcolor="black")
+
+    # Predicted bounding boxes
+    if len(pred_coords) > 0:
+        idxs = np.argsort(pred_confs)
+        for i in idxs:
+            x1, y1, x2, y2 = _adapt_bbox_format(pred_coords[i], format)
+            color = _COLORS[pred_classes[i] % len(_COLORS)]
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3,  edgecolor=color, facecolor='none')
+            ax[1].add_patch(rect)
+            ax[1].text(x1, y1-10, f'{class_names[pred_classes[i]]} ({pred_confs[i]:.2f})', color=color, fontsize=12, backgroundcolor="black")
+
+    # Set titles
+    ax[0].set_title('Ground Truth')
+    ax[1].set_title('Predictions')
+
+    # Show the plot
     plt.show()
 
 def visualize_attention_map(image_path, attention_map, figsize, title=None, attention_factor=1.0, bbox=None, draw_grid=False):

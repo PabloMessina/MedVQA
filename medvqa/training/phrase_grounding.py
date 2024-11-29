@@ -9,8 +9,8 @@ from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.segmentation_loss import compute_balanced_segmentation_loss
 from medvqa.losses.threshold_loss import ThresholdLoss
 from medvqa.losses.wbce import NegativePositiveBalancedBCELoss
-from medvqa.utils.constants import VINBIG_NUM_BBOX_CLASSES, MetricNames
-from medvqa.utils.logging import print_magenta
+from medvqa.utils.constants import VINBIG_NUM_BBOX_CLASSES
+from medvqa.utils.logging import print_magenta, print_orange
 
 def get_step_fn(model, optimizer, training, validating, testing, device,
                 mimiccxr_phrase_classifier_criterion,
@@ -45,6 +45,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 # other args
                 do_visual_grounding_with_bbox_regression=False,
                 do_visual_grounding_with_segmentation=False,
+                skip_nms=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -491,7 +492,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'phrase_embeddings': phrase_embeddings,
                 'vinbig_forward': True,
                 'predict_bboxes': do_visual_grounding_with_bbox_regression,
-                'apply_nms': do_visual_grounding_with_bbox_regression and not training, # apply NMS during validation/testing
+                'apply_nms': (do_visual_grounding_with_bbox_regression and not training) and not skip_nms, # apply NMS during validation/testing
                 'compute_global_alignment': use_global_image_phrase_contrastive_loss,
             }
             # if using_yolov8 and yolov8_use_multiple_detection_layers:
@@ -506,7 +507,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
                 
                 if do_visual_grounding_with_bbox_regression:
-                    if training:
+                    if training or skip_nms:
                         visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits']
                         visual_grounding_binary_logits = model_output['visual_grounding_binary_logits']
                     else:
@@ -611,7 +612,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
                 output['attention_supervision_loss'] = attention_supervision_loss.detach()
             else:
-                output['predicted_bboxes'] = predicted_bboxes
+                if skip_nms:
+                    output['pred_bbox_probs'] = visual_grounding_binary_logits[:, :VINBIG_NUM_BBOX_CLASSES].detach().sigmoid()
+                    output['pred_bbox_coords'] = visual_grounding_bbox_logits[:, :VINBIG_NUM_BBOX_CLASSES].detach()
+                else:
+                    output['predicted_bboxes'] = predicted_bboxes
                 output['vinbig_bbox_coords'] = vinbig_bbox_coords
                 output['vinbig_bbox_classes'] = vinbig_bbox_classes
         elif do_visual_grounding_with_segmentation:
@@ -967,8 +972,12 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                nt_xent_temperature=0.1,
                do_visual_grounding_with_bbox_regression=False,
                do_visual_grounding_with_segmentation=False,
-            #    **unused_kwargs,
+               skip_nms=False,
+               **unused_kwargs,
             ):
+    
+    if unused_kwargs:
+        print_orange(f'WARNING: unused_kwargs: {unused_kwargs}', bold=True)
 
     # Create multiple criterion objects
 
@@ -1067,6 +1076,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             use_global_image_phrase_contrastive_loss=use_global_image_phrase_contrastive_loss,
                             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
                             do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
+                            skip_nms=skip_nms,
                         )
     engine = Engine(step_fn)
     return engine

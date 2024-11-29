@@ -9,3 +9,8 @@ def freeze_parameters(model, ignore_name_regex=None):
             print(f"Skip freezing parameter: {name}")
             continue
         param.requires_grad = False
+
+def set_inplace_flag(module, inplace_value):
+    for submodule in module.modules():
+        if hasattr(submodule, 'inplace'):
+            submodule.inplace = inplace_value

@@ -339,7 +339,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         return_normalized_average_v=False,
         predict_bboxes=False,
         apply_nms=False,
-        nms_threshold=0.3,
+        iou_threshold=0.3,
         conf_threshold=0.6,
     ):  
         assert mimiccxr_forward or vinbig_forward or only_compute_features
@@ -426,7 +426,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 image_representation = image_representation.view(batch_size, K, self.num_regions, self.transf_d_model) # (batch_size, K, num_regions, transf_d_model)
                 if apply_nms:
                     predicted_bboxes, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(
-                        image_representation, apply_nms=apply_nms, nms_threshold=nms_threshold, conf_threshold=conf_threshold)
+                        image_representation, apply_nms=apply_nms, iou_threshold=iou_threshold, conf_threshold=conf_threshold)
                 else:
                     visual_grounding_bbox_logits, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(image_representation)
                 sigmoid_attention = torch.sigmoid(visual_grounding_binary_logits) # (batch_size, K, num_regions, 1)
@@ -531,7 +531,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if predict_bboxes:
                 if apply_nms:
                     predicted_bboxes, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(
-                        visual_grounding_logits, apply_nms=apply_nms, nms_threshold=nms_threshold, conf_threshold=conf_threshold)
+                        visual_grounding_logits, apply_nms=apply_nms, iou_threshold=iou_threshold, conf_threshold=conf_threshold)
                 else:
                     visual_grounding_bbox_logits, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(visual_grounding_logits)
             else:
@@ -633,7 +633,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 # Adaptive bbox regression
                 if apply_nms:
                     predicted_bboxes, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(
-                        local_attention_logits, apply_nms=apply_nms, nms_threshold=nms_threshold, conf_threshold=conf_threshold)
+                        local_attention_logits, apply_nms=apply_nms, iou_threshold=iou_threshold, conf_threshold=conf_threshold)
                 else:
                     visual_grounding_bbox_logits, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(local_attention_logits)
                 sigmoid_attention = torch.sigmoid(visual_grounding_binary_logits) # (batch_size, K, num_regions, 1)

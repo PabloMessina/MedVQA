@@ -29,6 +29,7 @@ from medvqa.models.vision.bbox_regression import (
 from medvqa.models.vision.multilabel_classification import (
     MLCVersion, MultilabelClassifier_v1, MultilabelClassifier_v2, MultilabelClassifier_v3,
 )
+
 from medvqa.utils.constants import (
     CHEST_IMAGENOME_GENDERS,    
     CHEXPERT_LABELS,
@@ -41,7 +42,7 @@ from medvqa.utils.constants import (
     VINBIG_BBOX_NAMES,
     VINBIG_LABELS,
 )
-from ultralytics.yolo.utils.ops import non_max_suppression
+from ultralytics.utils.ops import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
 import re
 
@@ -65,6 +66,7 @@ class RawImageEncoding:
     SIGLIP_HUGGINGFACE = 'siglip-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
+    YOLOV11_FOR_DET_MLC = 'yolov11-for-det-mlc'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -98,6 +100,12 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
     elif raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
         kwargs['mean'] = [0.5307, 0.5307, 0.5307]
         kwargs['std'] = [0.2583, 0.2583, 0.2583]
+    elif raw_image_encoding in [
+        RawImageEncoding.YOLOV8,
+        RawImageEncoding.YOLOV11_FOR_DET_MLC,
+    ]:
+        kwargs['mean'] = [0.0, 0.0, 0.0]
+        kwargs['std'] = [1.0, 1.0, 1.0]
     else:
         raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
 
@@ -113,9 +121,10 @@ class MultiPurposeVisualModule(nn.Module):
                 only_compute_features=False,
                 image_encoder_pretrained_weights_path=None,
                 imagenet_pretrained=False,
-                mlp_in_dim=None,
-                mlp_out_dim=None,
-                mlp_hidden_dims=None,
+                visual_features_mlp_in_dim=None,
+                visual_features_mlp_out_dim=None,
+                visual_features_mlp_hidden_dims=None,
+                classification_mlp_hidden_dims=None,
                 clip_version=None,
                 num_regions=None,
                 huggingface_model_name=None,
@@ -127,6 +136,11 @@ class MultiPurposeVisualModule(nn.Module):
                 yolov8_model_name_or_path=None,
                 yolov8_model_alias=None,
                 yolov8_use_one_detector_per_dataset=False,
+                yolov11_model_name_or_path=None,
+                yolov11_model_alias=None,
+                query_embed_size=None,
+                local_attention_hidden_size=None,
+                image_size=None,
                 image_encoder_dropout_p=0,
                 # Auxiliary tasks kwargs
                 use_mimiccxr=False,
@@ -162,6 +176,7 @@ class MultiPurposeVisualModule(nn.Module):
                 vinbig_mlc_hidden_size=None,
                 merge_findings=False,
                 n_findings=None,
+                device=None,
                 # Other kwargs
                 **unused_kwargs,
                 ): 
@@ -199,9 +214,10 @@ class MultiPurposeVisualModule(nn.Module):
         self.freeze_image_encoder = freeze_image_encoder
         self.only_compute_features = only_compute_features
         self.image_local_feat_size = image_local_feat_size
-        self.mlp_in_dim = mlp_in_dim
-        self.mlp_out_dim = mlp_out_dim
-        self.mlp_hidden_dims = mlp_hidden_dims
+        self.visual_features_mlp_in_dim = visual_features_mlp_in_dim
+        self.visual_features_mlp_out_dim = visual_features_mlp_out_dim
+        self.visual_features_mlp_hidden_dims = visual_features_mlp_hidden_dims
+        self.classification_mlp_hidden_dims = classification_mlp_hidden_dims
         self.chexpert_mlc_version = chexpert_mlc_version
         self.chexpert_mlc_hidden_size = chexpert_mlc_hidden_size
         self.predict_bboxes_chest_imagenome = predict_bboxes_chest_imagenome
@@ -219,11 +235,17 @@ class MultiPurposeVisualModule(nn.Module):
         self.yolov8_model_name_or_path = yolov8_model_name_or_path
         self.yolov8_model_alias = yolov8_model_alias
         self.yolov8_use_one_detector_per_dataset = yolov8_use_one_detector_per_dataset
+        self.yolov11_model_name_or_path = yolov11_model_name_or_path
+        self.yolov11_model_alias = yolov11_model_alias
         self.chest_imagenome_mlc_version = chest_imagenome_mlc_version
         self.chest_imagenome_mlc_hidden_size = chest_imagenome_mlc_hidden_size
         self.predict_bboxes_vinbig = predict_bboxes_vinbig
         self.vinbig_mlc_hidden_size = vinbig_mlc_hidden_size
         self.image_encoder_dropout_p = image_encoder_dropout_p
+        self.query_embed_size = query_embed_size
+        self.local_attention_hidden_size = local_attention_hidden_size
+        self.image_size = image_size
+        self.device = device
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -251,6 +273,9 @@ class MultiPurposeVisualModule(nn.Module):
         if raw_image_encoding == RawImageEncoding.YOLOV8:
             assert yolov8_model_name_or_path is not None
             assert yolov8_model_alias is not None
+        if raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+            assert yolov11_model_name_or_path is not None
+            assert yolov11_model_alias is not None
 
         if use_anaxnet_bbox_subset:
             assert predict_bboxes_chest_imagenome
@@ -267,8 +292,9 @@ class MultiPurposeVisualModule(nn.Module):
     def _init_visual_backbone(self):
         
         using_detectron2 = self.raw_image_encoding == RawImageEncoding.DETECTRON2
+        using_yolov11 = self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC
 
-        if not using_detectron2:
+        if not (using_detectron2 or using_yolov11):
             global_feat_size = 0
         
         if does_include_image(self.visual_input_mode):
@@ -287,14 +313,16 @@ class MultiPurposeVisualModule(nn.Module):
             self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
                                          self.imagenet_pretrained, model_name, self.freeze_image_encoder,
                                          self.image_encoder_dropout_p)
-            if not using_detectron2:
+            if not (using_detectron2 or using_yolov11):
                 global_feat_size += self._get_raw_image_encoder_global_feat_size(self.image_local_feat_size)
         
         if does_include_visual_features(self.visual_input_mode):
-            self._init_mlp_visual_feat_encoder(self.mlp_in_dim, self.mlp_out_dim, self.mlp_hidden_dims, self.freeze_image_encoder)
-            global_feat_size += self.mlp_out_dim
+            self._init_mlp_visual_feat_encoder(
+                self.visual_features_mlp_in_dim, self.visual_features_mlp_out_dim,
+                 self.visual_features_mlp_hidden_dims, self.freeze_image_encoder)
+            global_feat_size += self.visual_features_mlp_out_dim
         
-        if not using_detectron2:
+        if not (using_detectron2 or using_yolov11):
             assert global_feat_size > 0
             self.local_feat_size = self.image_local_feat_size
             self.global_feat_size = global_feat_size
@@ -435,6 +463,22 @@ class MultiPurposeVisualModule(nn.Module):
                 print(f'  num_bbox_classes: {offset}')
                 self.num_bbox_classes = offset
                 self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=offset, class_names=class_names)
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            assert self.predict_bboxes_chest_imagenome or self.predict_bboxes_vinbig
+            self.raw_image_encoder = create_yolov11_model_for_det_mlc(
+                predict_bboxes_chest_imagenome=self.predict_bboxes_chest_imagenome,
+                predict_bboxes_vinbig=self.predict_bboxes_vinbig,
+                predict_labels_vinbig=self.classify_labels_vinbig,
+                query_embed_size=self.query_embed_size,
+                mlp_hidden_dims=self.classification_mlp_hidden_dims,
+                local_attention_hidden_size=self.local_attention_hidden_size,
+                image_size=self.image_size,
+                model_name_or_path=self.yolov11_model_name_or_path,
+                model_alias=self.yolov11_model_alias,
+                device=self.device,
+            )
         elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
@@ -463,6 +507,10 @@ class MultiPurposeVisualModule(nn.Module):
         
         print('  Initializing auxiliary tasks')
         # Optional auxiliary tasks
+
+        if self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+            print('    Skipping auxiliary tasks initialization for YOLOV11_FOR_DET_MLC')
+            return
         
         # 1) medical tags classification
         if self.classify_tags:
@@ -700,6 +748,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = DETECTRON2_YAML_2_SHORT[self.detectron2_model_yaml]
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
             img_str = self.yolov8_model_alias
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+            img_str = str(self.raw_image_encoder)
         elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
             img_str = HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
@@ -737,9 +787,24 @@ class MultiPurposeVisualModule(nn.Module):
         return_global_features=False,
         skip_mlc=False,
         yolov8_detection_layer_index=None,
+        yolov11_classification_tasks=None,
+        yolov11_detection_tasks=None,
         only_compute_features=False,
+        apply_nms=True,
+        batch=None, # Used by YOLOv11_FOR_DET_MLC
         **unused_kwargs,
     ):
+        
+        # Forward pass for YOLOV11_FOR_DET_MLC
+        if self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+            assert yolov11_classification_tasks is not None or yolov11_detection_tasks is not None
+            return self.raw_image_encoder(
+                x=raw_images,
+                detection_task_names=yolov11_detection_tasks,
+                classification_task_names=yolov11_classification_tasks,
+                batch=batch,
+                apply_nms=apply_nms,
+            )
         
         only_compute_features = only_compute_features or self.only_compute_features
 
@@ -1707,4 +1772,65 @@ def create_yolov8_model_for_multiple_datasets(model_name_or_path, nc_list, class
     model.names = class_names_list[0]  # attach class names to model
     args = get_cfg(overrides={'model': model_name_or_path})
     model.args = args  # attach hyperparameters to model
+    return model
+
+def create_yolov11_model_for_det_mlc(
+        predict_bboxes_chest_imagenome,
+        predict_bboxes_vinbig,
+        predict_labels_vinbig,
+        # TODO: support more tasks
+        query_embed_size,
+        mlp_hidden_dims,
+        local_attention_hidden_size,
+        image_size,
+        model_name_or_path,
+        model_alias,
+        device,
+):
+    assert device is not None
+
+    from medvqa.models.vision.yolov11_modified import (
+        YOLOv11MultiClassifierDetector,
+        ClassificationTaskDescriptor,
+        DetectionTaskDescriptor,
+    )
+
+    classification_tasks = []
+    if predict_labels_vinbig:
+        classification_tasks.append(
+            ClassificationTaskDescriptor(
+                task_name='vinbig',
+                label_names=VINBIG_LABELS,
+                class_names=['absent', 'present'],
+            )
+        )
+
+    detection_tasks = []
+    if predict_bboxes_chest_imagenome:
+        detection_tasks.append(
+            DetectionTaskDescriptor(
+                task_name='cig',
+                class_names=CHEST_IMAGENOME_BBOX_NAMES,
+            )
+        )
+    if predict_bboxes_vinbig:
+        detection_tasks.append(
+            DetectionTaskDescriptor(
+                task_name='vinbig',
+                class_names=VINBIG_BBOX_NAMES,
+            )
+        )
+
+    model = YOLOv11MultiClassifierDetector(
+        classification_tasks=classification_tasks,
+        detection_tasks=detection_tasks,
+        query_embed_size=query_embed_size,
+        mlp_hidden_dims=mlp_hidden_dims,
+        local_attention_hidden_size=local_attention_hidden_size,
+        image_size=image_size,
+        model_name_or_path=model_name_or_path,
+        alias=model_alias,
+        device=device,
+    )
+
     return model

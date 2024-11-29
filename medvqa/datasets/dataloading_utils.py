@@ -303,11 +303,12 @@ def simple_yolov8_collate_batch_fn(batch):
     return batch_dict
 
 def get_vqa_collate_batch_fn(
-        dataset_id, verbose_question=True, one_hot_question_offset=None, one_hot_question_offsets=None,
+        flag, verbose_question=True, one_hot_question_offset=None, one_hot_question_offsets=None,
         include_image=True, include_visual_features=False, include_answer=True, use_visual_module_only=False,
         classify_tags=False, n_tags=None, classify_orientation=False, classify_gender=False,
         classify_chexpert=False, classify_questions=False, classify_chest_imagenome=False,
-        predict_bboxes_chest_imagenome=False, pass_pred_bbox_coords_as_input=False, use_yolov8=False,
+        predict_bboxes_chest_imagenome=False, pass_pred_bbox_coords_as_input=False,
+        use_yolov8=False, use_yolov11=False,
         predict_bboxes_vinbig=False,
     ):
 
@@ -317,21 +318,22 @@ def get_vqa_collate_batch_fn(
     if not use_visual_module_only:
         if not verbose_question:
             if one_hot_question_offset is None:
-                one_hot_question_offset = one_hot_question_offsets[str(dataset_id)]
-            print(f'get_vqa_collate_batch_fn(): dataset_id={dataset_id}, one_hot_question_offset={one_hot_question_offset}')  
+                one_hot_question_offset = one_hot_question_offsets[flag]
+            print(f'get_vqa_collate_batch_fn(): flag={flag}, one_hot_question_offset={one_hot_question_offset}')  
     
-    if dataset_id == MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE:
+    if flag == 'mim-cim-det2': # MIMIC-CXR + Chest ImaGenome + Detectron2
         def collate_batch_fn(batch):
             batch_dict = {
-                'dataset_id': dataset_id,
+                'flag': flag,
                 'batch': batch,
             }
             return batch_dict
         return collate_batch_fn
     
-    if dataset_id in [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID,
-                    IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
-                    MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]:
+    # if flag in [IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID,
+    #                 IUXRAY_DATASET_ID__CHEXPERT_MODE, MIMICCXR_DATASET_ID__CHEXPERT_MODE,
+    #                 MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE]:
+    if flag in ['iuxray', 'mimiccxr']:
         def collate_batch_fn(batch, training_mode=True):
             if not use_visual_module_only and verbose_question:
                 indexes = sorted(range(len(batch)), key=lambda i : len(batch[i]['q']), reverse=True)
@@ -339,15 +341,11 @@ def get_vqa_collate_batch_fn(
                 indexes = list(range(len(batch)))
             
             batch_dict = {}
-            batch_dict['dataset_id'] = dataset_id
+            batch_dict['flag'] = flag
             batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
             
             if include_image:
-                if use_yolov8:
-                    batch_dict['img'] = torch.stack([batch[i]['img'] for i in indexes])
-                else:
-                    batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
-                # print(f'collate_batch_fn(): batch_dict["i"].shape={batch_dict["i"].shape}')
+                batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
             if include_visual_features:
                 batch_dict['vf'] = torch.tensor([batch[i]['vf'] for i in indexes]).float()
             # Auxiliary tasks
@@ -364,7 +362,7 @@ def get_vqa_collate_batch_fn(
             if classify_chest_imagenome:
                 batch_dict['chest_imagenome'] = torch.tensor([batch[i]['chest_imagenome'] for i in indexes])
             if predict_bboxes_chest_imagenome:
-                if use_yolov8:
+                if use_yolov8 or use_yolov11:
                     if training_mode:
                         batch_dict['im_file'] = [batch[i]['im_file'] for i in indexes]
                         batch_dict['ori_shape'] = [batch[i]['ori_shape'] for i in indexes]
@@ -389,12 +387,15 @@ def get_vqa_collate_batch_fn(
                                     cls_list[count] = cls
                                     batch_idx_list[count] = i
                                     count += 1
-                        batch_dict['bboxes'] = torch.stack(bboxes_list[:count])
+                        bboxes_list = bboxes_list[:count]
+                        cls_list = cls_list[:count]
+                        batch_idx_list = batch_idx_list[:count]
+                        batch_dict['bboxes'] = torch.stack(bboxes_list) if count > 0 else torch.zeros((0, 4))
                         assert batch_dict['bboxes'].shape == (count, 4)
-                        batch_dict['cls'] = torch.tensor(cls_list[:count])
+                        batch_dict['cls'] = torch.tensor(cls_list)
                         batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
                         assert batch_dict['cls'].shape == (count, 1)
-                        batch_dict['batch_idx'] = torch.tensor(batch_idx_list[:count])
+                        batch_dict['batch_idx'] = torch.tensor(batch_idx_list)
                     else:
                         batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in indexes]
                         batch_dict['chest_imagenome_bbox_coords'] = torch.tensor([batch[i]['chest_imagenome_bbox_coords'] for i in indexes])
@@ -424,16 +425,17 @@ def get_vqa_collate_batch_fn(
 
             return batch_dict
 
-    elif dataset_id in [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]:        
+    # elif dataset_id in [CHEXPERT_DATASET_ID, CXR14_DATASET_ID]:
+    elif flag in ['chexpert', 'cxr14']:
         def collate_batch_fn(batch):            
             batch_dict = dict()
-            batch_dict['dataset_id'] = dataset_id
+            batch_dict['flag'] = flag
             batch_dict['idx'] = torch.tensor([x['idx'] for x in batch])
             if classify_orientation:
                 batch_dict['o'] = torch.tensor([x['o'] for x in batch])
             if classify_gender:
                 batch_dict['g'] = torch.tensor([x['g'] for x in batch])
-            if classify_chexpert or dataset_id == CXR14_DATASET_ID:
+            if classify_chexpert or flag == 'cxr14':
                 batch_dict['l'] = torch.tensor([x['l'] for x in batch])            
             if include_image:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -449,30 +451,26 @@ def get_vqa_collate_batch_fn(
                     )
             return batch_dict
 
-    elif dataset_id == VINBIG_DATASET_ID:
+    elif flag == 'vinbig':
         def collate_batch_fn(batch, training_mode):
-            indexes = list(range(len(batch)))        
             batch_dict = dict()
-            batch_dict['dataset_id'] = dataset_id
-            batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])            
-            batch_dict['l'] = torch.tensor([batch[i]['l'] for i in indexes])            
+            batch_dict['flag'] = flag
+            # batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in indexes])
+            batch_dict['l'] = torch.tensor(np.array([x['l'] for x in batch]))
             if include_image:
-                if use_yolov8:
-                    batch_dict['img'] = torch.stack([batch[i]['img'] for i in indexes])
-                else:
-                    batch_dict['i'] = torch.stack([batch[i]['i'] for i in indexes])
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
             if include_visual_features:
-                batch_dict['vf'] = torch.tensor([batch[i]['vf'] for i in indexes]).float()
+                batch_dict['vf'] = torch.tensor(np.array([x['vf'] for x in batch])).float()
             if predict_bboxes_vinbig:
-                assert use_yolov8
+                assert use_yolov8 or use_yolov11
                 if training_mode:
-                    batch_dict['im_file'] = [batch[i]['im_file'] for i in indexes]
-                    batch_dict['ori_shape'] = [batch[i]['ori_shape'] for i in indexes]
-                    batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in indexes]
+                    batch_dict['im_file'] = [x['im_file'] for x in batch]
+                    batch_dict['ori_shape'] = [x['ori_shape'] for x in batch]
+                    batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
                     bboxes_list, cls_list, batch_idx_list = [], [], []
-                    for i, idx in enumerate(indexes):
-                        bboxes = batch[idx]['bboxes']
-                        classes = batch[idx]['classes']
+                    for i in range(len(batch)):
+                        bboxes = batch[i]['bboxes']
+                        classes = batch[i]['classes']
                         for bbox, cls in zip(bboxes, classes):
                             # convert bbox from xyxy to x_c, y_c, w, h
                             bboxes_list.append(torch.tensor([
@@ -480,31 +478,31 @@ def get_vqa_collate_batch_fn(
                             ]))
                             cls_list.append(cls)
                             batch_idx_list.append(i)
-                    batch_dict['bboxes'] = torch.stack(bboxes_list)
+                    batch_dict['bboxes'] = torch.stack(bboxes_list) if len(bboxes_list) > 0 else torch.zeros((0, 4))
                     assert batch_dict['bboxes'].shape == (len(bboxes_list), 4)
                     batch_dict['cls'] = torch.tensor(cls_list)
                     batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
                     assert batch_dict['cls'].shape == (len(cls_list), 1)
                     batch_dict['batch_idx'] = torch.tensor(batch_idx_list)
                 else:
-                    batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in indexes]
-                    batch_dict['bboxes'] = [batch[i]['bboxes'] for i in indexes]
-                    batch_dict['classes'] = [batch[i]['classes'] for i in indexes]
+                    batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                    batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+                    batch_dict['classes'] = [x['classes'] for x in batch]
             if not use_visual_module_only:
-                batch_dict['q'] = torch.tensor([batch[i]['q'] + one_hot_question_offset for i in indexes])
+                batch_dict['q'] = torch.tensor([x['q'] + one_hot_question_offset for x in batch])
                 if include_answer:
                     batch_dict['a'] = nn.utils.rnn.pad_sequence(
-                        sequences = [torch.tensor(batch[i]['a']) for i in indexes],
+                        sequences = [torch.tensor(x['a']) for x in batch],
                         batch_first=True,
                         padding_value=0,
                     )
             return batch_dict
     
-    elif dataset_id == PADCHEST_DATASET_ID:            
+    elif flag == 'padchest':
         def collate_batch_fn(batch):
             batch_size = len(batch)
             batch_dict = dict()
-            batch_dict['dataset_id'] = dataset_id
+            batch_dict['flag'] = flag
             batch_dict['idx'] = torch.tensor([batch[i]['idx'] for i in range(batch_size)])
             batch_dict['l'] = torch.tensor([batch[i]['l'] for i in range(batch_size)])
             batch_dict['loc'] = torch.tensor([batch[i]['loc'] for i in range(batch_size)])
@@ -524,7 +522,7 @@ def get_vqa_collate_batch_fn(
                     )
             return batch_dict
     
-    else: assert False, f'Unknown dataset_id {dataset_id}'
+    else: assert False, f'Unknown flag {flag}'
 
     return collate_batch_fn
 

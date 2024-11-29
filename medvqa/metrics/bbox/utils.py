@@ -1,24 +1,32 @@
+from sklearn.metrics import average_precision_score
+import time
 import torch
 import numpy as np
+from torchvision.ops.boxes import nms
 from multiprocessing import Pool
 from shapely.geometry import box as shapely_box
 from shapely.ops import unary_union
 
+from medvqa.utils.logging import print_bold
+
 _VALID_TYPES = [np.ndarray, list, torch.Tensor]
 
 def calculate_exact_iou_union(bboxes_A, bboxes_B):
-    assert type(bboxes_A) in _VALID_TYPES
-    assert type(bboxes_B) in _VALID_TYPES
+    assert type(bboxes_A) in _VALID_TYPES, f"bboxes_A is of type {type(bboxes_A)}"
+    assert type(bboxes_B) in _VALID_TYPES, f"bboxes_B is of type {type(bboxes_B)}"
+
+    if len(bboxes_A) == 0 or len(bboxes_B) == 0:
+        return 0.0
     
     # bboxes_A: (N, 4) or (4,)
-    if (type(bboxes_A[0]) == list) or (bboxes_A.ndim == 2):
+    if type(bboxes_A[0]) in _VALID_TYPES:
         polygons_A = [shapely_box(*bbox) for bbox in bboxes_A]
         union_A = unary_union(polygons_A)
     else:
         union_A = shapely_box(*bboxes_A)
     
     # bboxes_B: (N, 4) or (4,)
-    if (type(bboxes_B[0]) == list) or (bboxes_B.ndim == 2):
+    if type(bboxes_B[0]) in _VALID_TYPES:
         polygons_B = [shapely_box(*bbox) for bbox in bboxes_B]
         union_B = unary_union(polygons_B)
     else:
@@ -110,6 +118,135 @@ def compute_mean_iou_per_class__yolov8(pred_boxes, pred_classes, gt_coords, gt_p
 
 def compute_mean_iou_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presences, valid_classes=None):
     return compute_mean_iou_per_class__detectron2(pred_boxes, pred_classes, None, gt_coords, gt_presences, valid_classes)
+
+def compute_mean_iou_per_class__yolov11(pred_boxes, pred_classes, gt_coords, valid_classes=None, compute_iou_per_sample=False,
+                                        compute_micro_average_iou=False, return_counts=False):
+    assert len(pred_boxes) == len(gt_coords)
+    assert len(pred_boxes) == len(pred_classes)
+    m = len(gt_coords[0]) # number of classes
+    n = len(gt_coords) # number of samples
+    class_ious = np.zeros((m,), dtype=np.float32)
+    class_counts = np.zeros((m,), dtype=np.int32)
+    if compute_iou_per_sample:
+        sample_ious = np.zeros((n,), dtype=np.float32)
+        sample_counts = np.zeros((n,), dtype=np.int32)
+    if compute_micro_average_iou:
+        micro_iou = 0
+        micro_count = 0
+    for i in range(n):
+        if pred_classes is None:
+            coords_per_class = pred_boxes[i]
+        else: # group boxes by class
+            coords_per_class = [[] for _ in range(m)]
+            assert len(pred_boxes[i]) == len(pred_classes[i])
+            for j in range(len(pred_boxes[i])):
+                coords_per_class[pred_classes[i][j]].append(pred_boxes[i][j])
+        for j in range(m):
+            if gt_coords[i][j] is not None and len(gt_coords[i][j]) > 0:
+                assert gt_coords[i][j].ndim == 2 # (N, 4)
+                iou = calculate_exact_iou_union(gt_coords[i][j], coords_per_class[j])
+                class_ious[j] += iou
+                class_counts[j] += 1
+                if compute_iou_per_sample:
+                    sample_ious[i] += iou
+                    sample_counts[i] += 1
+                if compute_micro_average_iou:
+                    micro_iou += iou
+                    micro_count += 1
+
+    for i in range(m):
+        if class_counts[i] > 0:
+            class_ious[i] /= class_counts[i]
+    if valid_classes is not None:
+        class_ious = class_ious[valid_classes]
+    output = { 'class_ious': class_ious }
+    if compute_iou_per_sample:
+        for i in range(n):
+            if sample_counts[i] > 0:
+                sample_ious[i] /= sample_counts[i]
+        output['sample_ious'] = sample_ious
+    if compute_micro_average_iou:
+        micro_iou /= micro_count
+        output['micro_iou'] = micro_iou
+    if return_counts:
+        output['class_counts'] = class_counts
+        if compute_iou_per_sample:
+            output['sample_counts'] = sample_counts
+    if len(output) == 1:
+        return output['class_ious']
+    return output
+
+def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_confs=None,
+                         adapted_pred_boxes=None, adapted_pred_confs=None, classifier_confs=None,
+                         valid_classes=None, iou_thresholds=[0.5], num_workers=5):
+    
+    m = len(gt_coords[0]) # number of classes
+    n = len(gt_coords) # number of samples
+    
+    if pred_boxes is not None:
+        assert pred_classes is not None
+        assert pred_confs is not None
+        assert len(pred_boxes) == len(gt_coords)
+        assert len(pred_boxes) == len(pred_classes)
+        assert len(pred_boxes) == len(pred_confs)
+
+        # Adapt pred_boxes and pred_confs
+        adapted_pred_boxes = [[None] * m for _ in range(n)]
+        adapted_pred_confs = np.zeros((n, m), dtype=np.float32)
+        counts = np.zeros((n, m), dtype=np.int32)
+        for i in range(n):
+            for j in range(len(pred_boxes[i])):
+                c = pred_classes[i][j]
+                if adapted_pred_boxes[i][c] is None:
+                    adapted_pred_boxes[i][c] = [pred_boxes[i][j]]
+                else:
+                    adapted_pred_boxes[i][c].append(pred_boxes[i][j])
+                adapted_pred_confs[i,c] += pred_confs[i][j] # sum confidences
+                counts[i,c] += 1
+        counts[counts == 0] = 1 # avoid division by zero
+        adapted_pred_confs /= counts
+        if classifier_confs is not None:
+            assert classifier_confs.shape == (n, m)
+            adapted_pred_confs += classifier_confs
+            adapted_pred_confs /= 2 # average
+    else:
+        assert adapted_pred_boxes is not None
+        assert adapted_pred_confs is not None
+        assert len(adapted_pred_boxes) == len(gt_coords)
+        assert len(adapted_pred_boxes) == len(adapted_pred_confs)
+
+    global _shared_pred_boxes, _shared_pred_confs, _shared_gt_coords
+    _shared_pred_boxes = adapted_pred_boxes
+    _shared_pred_confs = adapted_pred_confs
+    _shared_gt_coords = gt_coords
+    task_args = []
+    for iou_thr in iou_thresholds:
+        for c in range(m):
+            if valid_classes is not None and valid_classes[c] == 0:
+                continue
+            task_args.append((iou_thr, c, n))
+    with Pool(num_workers) as p:
+        aps = p.map(_compute_mAP__yolov11, task_args)
+    if valid_classes is not None:
+        aps = np.array(aps).reshape((len(iou_thresholds), np.sum(valid_classes)))
+    else:
+        aps = np.array(aps).reshape((len(iou_thresholds), m))
+    return aps
+
+def _compute_mAP__yolov11(task):
+    iou_thr, c, n = task
+    y_true = np.zeros((n,), dtype=np.int32)
+    y_scores = np.zeros((n,), dtype=np.float32)
+    for i in range(n):
+        if _shared_gt_coords[i][c] is not None and len(_shared_gt_coords[i][c]) > 0:
+            y_true[i] = 1
+        if _shared_pred_boxes[i][c] is not None:
+            if y_true[i]:
+                if calculate_exact_iou_union(_shared_pred_boxes[i][c], _shared_gt_coords[i][c]) >= iou_thr:
+                    y_scores[i] = _shared_pred_confs[i][c]
+            else:
+                y_scores[i] = _shared_pred_confs[i][c]
+    return average_precision_score(y_true, y_scores)
 
 def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
     assert len(pred_coords.shape) == 3
@@ -246,6 +383,7 @@ def compute_multiple_prf1_scores(pred_coords, pred_presences, gt_coords, gt_pres
 
 _shared_pred_boxes = None
 _shared_pred_classes = None
+_shared_pred_confs = None
 _shared_scores = None
 
 def _compute_score__detectron2(task, metric_fn):
@@ -401,3 +539,190 @@ def _compute_score__v2(task, metric_fn):
             if not match_found:
                 fn += 1
     return metric_fn(tp, fp, fn)
+
+
+def _nms_method1(bbox_coords, bbox_probs, conf_th, iou_th, max_det_per_class): # slower
+    coords_list = []
+    probs_list = []
+    classes_list = []
+    for j in range(bbox_coords.size(0)): # for each class
+        coords = bbox_coords[j] # (num_boxes, 4)
+        probs = bbox_probs[j] # (num_boxes,)
+        mask = probs > conf_th
+        coords = coords[mask]
+        probs = probs[mask]
+        if coords.size(0) == 0:
+            continue
+        if coords.size(0) > max_det_per_class:
+            probs, idxs = torch.topk(probs, max_det_per_class)
+            coords = coords[idxs]
+        keep = nms(coords, probs, iou_th)
+        coords_list.append(coords[keep].cpu().numpy())
+        probs_list.append(probs[keep].cpu().numpy())
+        classes_list.append(np.full_like(probs_list[-1], j, dtype=np.int32))
+    pred_boxes = np.concatenate(coords_list, axis=0) if len(coords_list) > 0 else np.empty((0, 4), dtype=np.float32)
+    pred_confs = np.concatenate(probs_list, axis=0) if len(probs_list) > 0 else np.empty((0,), dtype=np.float32)
+    pred_classes = np.concatenate(classes_list, axis=0) if len(classes_list) > 0 else np.empty((0,), dtype=np.int32)
+    return pred_boxes, pred_confs, pred_classes
+
+def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, max_det_per_class): # faster
+    
+    # Apply maximum detections per class
+    if bbox_coords.size(1) > max_det_per_class:
+        bbox_probs, idxs = torch.topk(bbox_probs, max_det_per_class, dim=1)
+        bbox_coords = torch.gather(bbox_coords, 1, idxs.unsqueeze(-1).expand(-1, -1, 4))
+        class_ids  = torch.gather(class_ids, 1, idxs)
+
+    # Apply confidence threshold
+    mask = bbox_probs > conf_th
+    bbox_coords = bbox_coords[mask]
+    bbox_probs = bbox_probs[mask]
+    class_ids = class_ids[mask]
+
+    # # Apply maximum detections
+    # if bbox_coords.size(0) > max_det:
+    #     bbox_probs, idxs = torch.topk(bbox_probs, max_det, dim=0)
+    #     bbox_coords = bbox_coords[idxs]
+    #     class_ids = class_ids[idxs]
+
+    # Apply NMS
+    if bbox_coords.size(0) > 0:
+        # assert -0.5 <= bbox_coords.min() and bbox_coords.max() <= 1.5, f"bbox_coords.min()={bbox_coords.min()}, bbox_coords.max()={bbox_coords.max()}"
+        shifted_bbox_coords = bbox_coords + class_ids.unsqueeze(-1).float() * 10.0
+        keep = nms(shifted_bbox_coords, bbox_probs, iou_th)
+        pred_boxes = bbox_coords[keep].cpu().numpy()
+        pred_confs = bbox_probs[keep].cpu().numpy()
+        pred_classes = class_ids[keep].cpu().numpy()
+    else:
+        pred_boxes = np.empty((0, 4), dtype=np.float32)
+        pred_confs = np.empty((0,), dtype=np.float32)
+        pred_classes = np.empty((0,), dtype=np.int32)
+        
+    return pred_boxes, pred_confs, pred_classes
+
+def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None, resized_shape_list=None,
+                                     pred_boxes_list=None, pred_confs_list=None, classifier_confs=None,
+                                     iou_thresholds=np.arange(0.05, 0.6, 0.05), conf_thresholds=np.arange(0.05, 0.5, 0.05),
+                                     max_det=100, max_det_per_class=20, verbose=True):
+    n = len(gt_coords_list)
+    use_yolo_predictions = yolo_predictions_list is not None
+    if use_yolo_predictions:
+        assert resized_shape_list is not None # needed to normalize the boxes from yolo predictions
+        assert pred_boxes_list is None
+        assert pred_confs_list is None
+    else:
+        assert pred_boxes_list is not None
+        assert pred_confs_list is not None
+        assert len(pred_boxes_list) == n
+        assert len(pred_confs_list) == n
+
+    import itertools
+
+    if verbose:
+        print_bold("Finding optimal conf and iou thresholds")
+
+    best_score = -1e9
+    best_iou_threshold = None
+    best_conf_threshold = None
+    best_pred_boxes_list = None
+    best_pred_classes_list = None
+    best_pred_confs_list = None
+    
+    if use_yolo_predictions:
+        
+        from ultralytics.utils.ops import non_max_suppression
+        
+        # Consider all pairs of conf_threshold and iou_threshold
+        for conf_th, iou_th in itertools.product(conf_thresholds, iou_thresholds):
+            start = time.time()
+            BIG_ENOUGH = 1000000
+            pred_boxes_list = [None] * BIG_ENOUGH
+            pred_confs_list = [None] * BIG_ENOUGH
+            pred_classes_list = [None] * BIG_ENOUGH
+            idx = 0
+            for yolo_predictions, resized_shapes in zip(yolo_predictions_list, resized_shape_list):
+                assert isinstance(yolo_predictions, torch.Tensor)
+                assert yolo_predictions.ndim == 3 # (batch_size, num_classes + 4, num_boxes)
+                yolo_predictions = yolo_predictions.detach().clone()
+                preds = non_max_suppression(yolo_predictions, conf_thres=conf_th, iou_thres=iou_th, max_det=max_det)
+                for pred, rs in zip(preds, resized_shapes):
+                    assert pred.ndim == 2 # (num_boxes, 6)
+                    assert pred.size(1) == 6
+                    assert len(rs) == 2 # (height, width)
+                    pred = pred.cpu().numpy()
+                    pred_boxes_list[idx] = pred[:, :4] / np.array([rs[1], rs[0], rs[1], rs[0]], dtype=np.float32)
+                    pred_confs_list[idx] = pred[:, 4]
+                    pred_classes_list[idx] = pred[:, 5].astype(int)
+                    idx += 1
+            pred_boxes_list = pred_boxes_list[:idx]
+            pred_confs_list = pred_confs_list[:idx]
+            pred_classes_list = pred_classes_list[:idx]
+            assert idx == n
+            # score = compute_mean_iou_per_class__yolov11(pred_boxes=pred_boxes_list,
+            #                                             pred_classes=pred_classes_list, gt_coords=gt_coords_list).mean()
+            time_before_map = time.time()
+            score = compute_mAP__yolov11(gt_coords=gt_coords_list, pred_boxes=pred_boxes_list, pred_classes=pred_classes_list,
+                                            pred_confs=pred_confs_list, classifier_confs=classifier_confs,
+                                            iou_thresholds=[0.05, 0.4], num_workers=1).mean()
+            time_after_map = time.time()
+            if verbose:
+                print(f"conf_th={conf_th}, iou_th={iou_th}, mAP={score} (time_input_processing={time_before_map - start}, time_map={time_after_map - time_before_map})")
+            if score > best_score:
+                best_score = score
+                best_iou_threshold = iou_th
+                best_conf_threshold = conf_th
+                best_pred_boxes_list = pred_boxes_list
+                best_pred_classes_list = pred_classes_list
+                best_pred_confs_list = pred_confs_list
+
+    else:
+
+        classes_tensor = None
+
+        # Consider all pairs of conf_threshold and iou_threshold
+        for conf_th, iou_th in itertools.product(conf_thresholds, iou_thresholds):
+            start = time.time()
+            pred_boxes_list_ = [None] * n
+            pred_confs_list_ = [None] * n
+            pred_classes_list_ = [None] * n
+            for i, (bbox_coords, bbox_probs) in enumerate(zip(pred_boxes_list, pred_confs_list)):
+
+                if classes_tensor is None:
+                    classes_tensor = torch.arange(bbox_coords.size(0), device=bbox_coords.device).unsqueeze(-1).expand(-1, bbox_coords.size(1)).contiguous()
+
+                class_ids = classes_tensor
+
+                assert bbox_coords.ndim == 3 # (num_classes, num_boxes, 4)
+                assert bbox_probs.ndim == 3 # (num_classes, num_boxes, 1)
+                bbox_probs = bbox_probs.squeeze(-1) # (num_classes, num_boxes)
+
+                pred_boxes, pred_confs, pred_classes = _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, max_det_per_class)
+                pred_boxes_list_[i] = pred_boxes
+                pred_confs_list_[i] = pred_confs
+                pred_classes_list_[i] = pred_classes
+
+            # score = compute_mean_iou_per_class__yolov11(pred_boxes=pred_boxes_list_,
+            #                                             pred_classes=pred_classes_list_, gt_coords=gt_coords_list).mean()
+            time_before_map = time.time()
+            score = compute_mAP__yolov11(gt_coords=gt_coords_list, pred_boxes=pred_boxes_list_, pred_classes=pred_classes_list_,
+                                         pred_confs=pred_confs_list_, classifier_confs=classifier_confs,
+                                         iou_thresholds=[0.05, 0.4], num_workers=1).mean()
+            time_after_map = time.time()
+            
+            if verbose:
+                print(f"conf_th={conf_th}, iou_th={iou_th}, mAP={score} (time_input_processing={time_before_map - start}, time_map={time_after_map - time_before_map})")
+            if score > best_score:
+                best_score = score
+                best_iou_threshold = iou_th
+                best_conf_threshold = conf_th
+                best_pred_boxes_list = pred_boxes_list_
+                best_pred_classes_list = pred_classes_list_
+                best_pred_confs_list = pred_confs_list_
+        
+    return {
+        'best_iou_threshold': best_iou_threshold,
+        'best_conf_threshold': best_conf_threshold,
+        'pred_boxes_list': best_pred_boxes_list,
+        'pred_classes_list': best_pred_classes_list,
+        'pred_confs_list': best_pred_confs_list
+    }

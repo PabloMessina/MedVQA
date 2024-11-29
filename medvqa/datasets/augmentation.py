@@ -129,27 +129,53 @@ class ImageAugmentedTransforms:
         tf_normalize = self._transform_fns['normalize']
         if allow_returning_image_size:
             def test_transform(image_path, return_image_size=False):
+                # print(image_path)
                 image = tf_load_image(image_path)
+                # print('after load_image')
+                # print(image)
                 if return_image_size:
                     size_before = image.shape[:2] # (H, W)
                 image = tf_bgr2rgb(image)
+                # print('after bgr2rgb')
+                # print(image)
                 image = tf_clahe_test(image=image)['image']
+                # print('after clahe_test')
+                # print(image)
                 image = tf_resize(image=image)['image']
+                # print('after resize')
+                # print(image)
                 if return_image_size:
                     size_after = image.shape[:2] # (H, W)
                 image = tf_totensor(image)
+                # print('after totensor')
+                # print(image)
                 image = tf_normalize(image)
+                # print('after normalize')
+                # print(image)
                 if return_image_size:
                     return image, size_before, size_after
                 return image
         else:
             def test_transform(image_path):
+                # print(image_path)
                 image = tf_load_image(image_path)
+                # print('after load_image')
+                # print(image)
                 image = tf_bgr2rgb(image)
+                # print('after bgr2rgb')
+                # print(image)
                 image = tf_clahe_test(image=image)['image']
+                # print('after clahe_test')
+                # print(image)
                 image = tf_resize(image=image)['image']
+                # print('after resize')
+                # print(image)
                 image = tf_totensor(image)
+                # print('after totensor')
+                # print(image)
                 image = tf_normalize(image)
+                # print('after normalize')
+                # print(image)
                 return image
         return test_transform
     
@@ -213,7 +239,24 @@ class ImageAugmentedTransforms:
                         return image, bboxes, classes, size_before, size_after
                     return image, bboxes, classes
             else:
-                raise NotImplementedError('bbox_aware=True is only supported for VinBigData')
+                # raise NotImplementedError('bbox_aware=True is only supported for VinBigData')
+                def train_transform(image_path, bboxes, presence, albumentation_adapter, return_image_size=False):
+                    image = tf_load_image(image_path)
+                    if return_image_size:
+                        size_before = image.shape[:2] # (H, W)
+                    image = tf_bgr2rgb(image)
+                    bboxes = albumentation_adapter.encode(bboxes, presence)
+                    augmented = tf_alb(image=image, bboxes=bboxes)
+                    image = augmented['image']
+                    if return_image_size:
+                        size_after = image.shape[:2] # (H, W)
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    bboxes = augmented['bboxes']
+                    bboxes, presence = albumentation_adapter.decode(bboxes)
+                    if return_image_size:
+                        return image, bboxes, presence, size_before, size_after
+                    return image, bboxes, presence
         else:
             print('get_train_transform(): Using normal transforms')
             def train_transform(image_path):

@@ -80,18 +80,25 @@ def run_common_boilerplate_code_and_start_training(
             save_metadata(checkpoint_folder_path,
                         **metadata_kwargs)
         # Pretrained weights
+        pretrained_checkpoint_path = model_kwargs.get('pretrained_checkpoint_path', None)
         pretrained_checkpoint_folder_path = model_kwargs.get('pretrained_checkpoint_folder_path', None)
         pretrained_checkpoint_folder_paths = model_kwargs.get('pretrained_checkpoint_folder_paths', None)
-        if pretrained_checkpoint_folder_path or pretrained_checkpoint_folder_paths:
+        if (pretrained_checkpoint_path or pretrained_checkpoint_folder_path or pretrained_checkpoint_folder_paths):
             if pretrained_checkpoint_folder_path:
                 pretrained_checkpoint_folder_paths = [pretrained_checkpoint_folder_path]
             count_print(f'Loading pretrained weights ...')
-            for pretrained_checkpoint_folder_path in pretrained_checkpoint_folder_paths:
-                pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
+            if pretrained_checkpoint_path:
                 print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
                 checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
                 load_model_state_dict(model_wrapper.model, checkpoint['model'])
-                print('Checkpoint successfully loaded!')    
+                print('Checkpoint successfully loaded!')
+            if pretrained_checkpoint_folder_paths:
+                for pretrained_checkpoint_folder_path in pretrained_checkpoint_folder_paths:
+                    pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
+                    print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
+                    checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
+                    load_model_state_dict(model_wrapper.model, checkpoint['model'])
+                    print('Checkpoint successfully loaded!')
     else: # resuming
         checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
         count_print('Loading model from checkpoint ...')
