@@ -8,6 +8,9 @@ class YOLOv11CustomLoss(v8DetectionLoss):
         """This is a modified version of YOLOv8's original constructor in order to explicitly
         receive the detection module, which is useful if one wants to have multiple detection modules
         for multiple tasks."""
+
+        print('From YOLOv11CustomLoss:')
+        print(f'device: {device}')
         
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         self.hyp = hyp # hyperparameters
@@ -22,12 +25,3 @@ class YOLOv11CustomLoss(v8DetectionLoss):
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(detect_module.reg_max).to(device)
         self.proj = torch.arange(detect_module.reg_max, dtype=torch.float, device=device)
-
-        # print('DEBUGGING: from YOLOv11CustomLoss')
-        # print('  stride:', self.stride)
-        # print('  nc:', self.nc)
-        # print('  no:', self.no)
-        # print('  reg_max:', self.reg_max)
-        # print('  device:', self.device)
-        # print('  use_dfl:', self.use_dfl)
-        # print('  hyp:', self.hyp)

@@ -47,6 +47,7 @@ def parse_args(args=None):
     # Dataset and dataloading arguments
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
+    parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
 
     # Evaluation arguments
     parser.add_argument('--eval_vinbig', action='store_true')
@@ -69,6 +70,7 @@ def _evaluate_model(
     batch_size,
     num_workers,
     eval_vinbig,
+    vinbig_use_training_indices_for_validation,
     device,
     optimize_thresholds,
     candidate_iou_thresholds,
@@ -111,6 +113,7 @@ def _evaluate_model(
             collate_batch_fn=get_vision_collate_batch_fn(**collate_batch_fn_kwargs['vinbig']),
             batch_size=batch_size,
             num_workers=num_workers,
+            use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
             **vinbig_trainer_kwargs,
         )
 
@@ -246,17 +249,23 @@ def _evaluate_model(
         print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
         print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
 
-        map_per_class = compute_mAP__yolov11(
+        res = compute_mAP__yolov11(
             pred_boxes=pred_boxes_list,
             pred_classes=pred_classes_list,
             pred_confs=pred_confs_list,
             gt_coords=gt_coords_list,
             iou_thresholds=map_iou_thresholds,
+            compute_micro_average=True,
         )
+        class_aps = res['class_aps']
+        micro_aps = res['micro_aps']
         
-        for iou_thresh, map_ in zip(map_iou_thresholds, map_per_class.mean(axis=1)):
+        for iou_thresh, map_ in zip(map_iou_thresholds, class_aps.mean(axis=1)):
             print_magenta(f'mAP@{iou_thresh}: {map_}', bold=True)
-        
+
+        for iou_thresh, ap in zip(map_iou_thresholds, micro_aps):
+            print_magenta(f'micro_AP@{iou_thresh}: {ap}', bold=True)
+            
         print_blue('Saving metrics to file ...', bold=True)
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         strings = [
@@ -277,7 +286,8 @@ def _evaluate_model(
             micro_iou=micro_iou,
             macro_iou=mean_iou,
             map_iou_thresholds=map_iou_thresholds,
-            map_per_class=map_per_class,
+            class_aps=class_aps,
+            micro_aps=micro_aps,
         )
         if optimize_thresholds:
             output['best_iou_threshold'] = best_iou_threshold
@@ -292,6 +302,7 @@ def evaluate(
     num_workers,
     batch_size,
     eval_vinbig,
+    vinbig_use_training_indices_for_validation,
     device,
     optimize_thresholds,
     candidate_iou_thresholds,
@@ -319,6 +330,7 @@ def evaluate(
                 batch_size=batch_size,
                 num_workers=num_workers,
                 eval_vinbig=eval_vinbig,
+                vinbig_use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
                 device=device,
                 optimize_thresholds=optimize_thresholds,
                 candidate_iou_thresholds=candidate_iou_thresholds,

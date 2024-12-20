@@ -1,8 +1,9 @@
 import os
 import numpy as np
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata, load_model_state_dict
-from medvqa.utils.constants import DATASET_NAMES
-from medvqa.utils.files import get_cached_pickle_file
+from medvqa.utils.constants import DATASET_NAMES, VINBIG_BBOX_NAMES
+from medvqa.utils.files import get_cached_pickle_file, load_pickle
 from medvqa.utils.logging import print_bold
 from medvqa.utils.math import rank_vectors_by_dot_product
 
@@ -998,4 +999,199 @@ class PhraseGroundingVisualizer:
             bboxes=[x[0].cpu().numpy() if x is not None else [] for x in predicted_bboxes[0]],
             figsize=figsize,
             max_cols=3,
+        )
+
+class YOLOv11Visualizer:
+    def __init__(self, model_checkpoint_folder_path: str, device: str = 'cuda', fact_conditioned: bool = False,
+                 vinbig_phrase_embeddings_filepath=None):
+
+        import torch
+
+        self.fact_conditioned = fact_conditioned
+
+        # device
+        self.device = torch.device('cuda' if torch.cuda.is_available() and device == 'cuda' else 'cpu')
+        print_bold('self.device = ', self.device)
+
+        # Load model
+        print_bold('Load model')
+        self.metadata = load_metadata(model_checkpoint_folder_path)
+        model_kwargs = self.metadata['model_kwargs']
+        if fact_conditioned:
+            from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
+            self.model = PhraseGrounder(**model_kwargs, device=self.device)
+        else:
+            from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
+            self.model = MultiPurposeVisualModule(**model_kwargs, device=self.device)
+        self.model = self.model.to(self.device)
+
+        # Load model weights
+        print_bold('Load model weights')
+        model_checkpoint_path = get_checkpoint_filepath(model_checkpoint_folder_path)
+        print('model_checkpoint_path = ', model_checkpoint_path)
+        checkpoint = torch.load(model_checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model'])
+
+        # Load image transform
+        print_bold('Load image transform')
+        from medvqa.datasets.image_processing import get_image_transform
+        self.image_transform_kwargs = self.metadata['val_image_transform_kwargs']
+        if DATASET_NAMES.MIMICCXR in self.image_transform_kwargs:
+            self.mimiccxr_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        if DATASET_NAMES.VINBIG in self.image_transform_kwargs:
+            self.vinbig_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.VINBIG])
+
+        # Ground truth bounding boxes
+        self._cig_image_id_2_gt_bboxes = None
+        self._vinbig_image_id_2_gt_bboxes = None
+
+        # Load VinBigData fact embeddings
+        if vinbig_phrase_embeddings_filepath is not None:
+            self.vinbig_phrase_embeddings = load_pickle(vinbig_phrase_embeddings_filepath)
+
+    @property
+    def cig_image_id_2_gt_bboxes(self):
+        if self._cig_image_id_2_gt_bboxes is None:
+            from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import load_chest_imagenome_silver_bboxes
+            self._cig_image_id_2_gt_bboxes = load_chest_imagenome_silver_bboxes()
+        return self._cig_image_id_2_gt_bboxes
+    
+    @property
+    def vinbig_image_id_2_gt_bboxes(self):
+        if self._vinbig_image_id_2_gt_bboxes is None:
+            from medvqa.datasets.vinbig.vinbig_dataset_management import load_train_image_id_2_bboxes, load_test_image_id_2_bboxes
+            train_image_id_2_bboxes = load_train_image_id_2_bboxes(for_training=True, normalize=True)
+            test_image_id_2_bboxes = load_test_image_id_2_bboxes(for_training=True, normalize=True)
+            self._vinbig_image_id_2_gt_bboxes = {**train_image_id_2_bboxes, **test_image_id_2_bboxes}
+        return self._vinbig_image_id_2_gt_bboxes
+
+    def visualize_yolov11_predictions(self, image_path: str, dataset_name: str,
+                 conf_thres: float = 0.5, iou_thres: float = 0.5, max_det: int = 100,
+                 figsize: tuple = (10, 10), format: str = 'xyxy', show_gt: bool = True):
+        
+        if not self.fact_conditioned:
+            assert dataset_name in self.model.raw_image_encoder.detect # make sure the model has a detection layer for the dataset
+        
+        if dataset_name == 'cig': # Chest ImaGenome
+            class_names = CHEST_IMAGENOME_BBOX_NAMES
+            image_transform = self.mimiccxr_image_transform
+            if self.fact_conditioned:
+                raise NotImplementedError
+        elif dataset_name == 'vinbig': # VinBigData
+            class_names = VINBIG_BBOX_NAMES
+            image_transform = self.vinbig_image_transform
+            if self.fact_conditioned:
+                assert self.vinbig_phrase_embeddings is not None
+                phrase_embeddings = self.vinbig_phrase_embeddings['phrase_embeddings']
+                phrases = self.vinbig_phrase_embeddings['phrases']
+                assert len(phrase_embeddings) == len(phrases)
+                assert len(phrases) > len(class_names) # only 22 out of 28 phrases have bounding boxes
+                phrases = phrases[:len(class_names)] # keep only phrases with bounding boxes
+                phrase_embeddings = phrase_embeddings[:len(class_names)]
+        else: assert False
+        
+        import torch
+
+        # Load image
+        image = image_transform(image_path)
+        print(f'image_path = {image_path}')
+        print(f'image.shape = {image.shape}')
+
+        # Run model in inference mode
+        print_bold('Run model in inference mode')
+        with torch.set_grad_enabled(False):
+            self.model.eval()
+            print('self.model.training = ', self.model.training)
+            image = image.to(self.device)
+            print(f'image.shape = {image.shape}')
+            if self.fact_conditioned:
+                phrase_embeddings = torch.tensor(phrase_embeddings, dtype=torch.float32).to(self.device)
+                phrase_embeddings = phrase_embeddings.unsqueeze(0) # add batch dimension (1, num_phrases, embedding_dim)
+                output = self.model(
+                    raw_images=image.unsqueeze(0),
+                    phrase_embeddings=phrase_embeddings,
+                    apply_nms=True,
+                    conf_threshold=conf_thres,
+                    iou_threshold=iou_thres,
+                    max_det=max_det,
+                )
+                print(f'output.keys() = {output.keys()}')
+                classification_logits = output['classification_logits']
+                detection = output['detection']
+                assert len(classification_logits) == 1
+                assert len(detection) == 1
+                classification_logits = classification_logits[0]
+                classification_probs = classification_logits.sigmoid().cpu().numpy()
+                sorted_indexes = classification_probs.argsort()[::-1]
+                print_bold('Classification probabilities:')
+                for i in sorted_indexes:
+                    print(f'\t{phrases[i]}: {classification_probs[i]:.4f}')
+                detection = detection[0]
+                assert len(detection) == len(class_names)
+                print_bold('Detection:')
+                print(detection)
+                pred_coords = []
+                pred_confs = []
+                pred_classes = []
+                for i in range(len(class_names)):
+                    if detection[i] is not None and len(detection[i]) > 0:
+                        detection_i = detection[i].cpu().numpy()
+                        pred_coords.append(detection_i[:, :4])
+                        pred_confs.append(detection_i[:, 4])
+                        assert np.all(detection_i[:, 5] == 0) # all detections should have class 0
+                        pred_classes.append(np.full(len(detection_i), i))
+                pred_coords = np.concatenate(pred_coords, axis=0) if len(pred_coords) > 0 else np.empty((0, 4))
+                pred_confs = np.concatenate(pred_confs) if len(pred_confs) > 0 else np.empty(0)
+                pred_classes = np.concatenate(pred_classes) if len(pred_classes) > 0 else np.empty(0)
+            else:
+                output = self.model(
+                    raw_images=image.unsqueeze(0),
+                    yolov11_detection_tasks=dataset_name,
+                    apply_nms=True,
+                    conf_thres=conf_thres,
+                    iou_thres=iou_thres,
+                    max_det=max_det,
+                )
+                print(f'output.keys() = {output.keys()}')
+                predictions = output['detection'][dataset_name]
+                assert len(predictions) == 1
+                predictions = predictions[0].cpu().numpy()
+                print(f'predictions.shape = {predictions.shape}')
+                pred_coords = predictions[:, :4]
+                pred_confs = predictions[:, 4]
+                pred_classes = predictions[:, 5].astype(int)
+
+        if show_gt:
+            # Obtain ground truth bounding boxes
+            if dataset_name == 'cig':
+                key = os.path.basename(image_path).split('.')[0] # e.g., 'b1b1aa2a-7e114d6d-0879953c-b69a25f6-e7d82b54'
+                out = self.cig_image_id_2_gt_bboxes[key]
+                coords, presence = out['coords'], out['presence']
+                coords = coords.reshape(-1, 4)
+                gt_bbox_coords = [[] for _ in class_names]
+                for class_id in range(len(class_names)):
+                    if presence[class_id] == 1:
+                        gt_bbox_coords[class_id].append(coords[class_id])
+            elif dataset_name == 'vinbig':
+                key = os.path.basename(image_path).split('.')[0] # e.g., '4f737958fc5a7d9805f4a94f70cfc5a2'
+                coords_list, class_list = self.vinbig_image_id_2_gt_bboxes[key]
+                gt_bbox_coords = [[] for _ in class_names]
+                for coords, class_id in zip(coords_list, class_list):
+                    gt_bbox_coords[class_id].append(coords)
+            else: assert False
+        else:
+            gt_bbox_coords = None
+
+        # Visualize bbox predictions
+        from medvqa.evaluation.plots import visualize_predicted_bounding_boxes__yolo
+        print_bold('Visualize bbox predictions')
+        visualize_predicted_bounding_boxes__yolo(
+            image_path=image_path,
+            pred_coords=pred_coords,
+            pred_confs=pred_confs,
+            pred_classes=pred_classes,
+            gt_bbox_coords=gt_bbox_coords,
+            class_names=class_names,
+            figsize=figsize,
+            format=format,
         )

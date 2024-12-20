@@ -307,7 +307,8 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
 
 def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, metric_aliases, title,
                                 figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
-                                sort_metrics=True, row_idx_to_sort_by=None, sort_methods=True, vertical=False):
+                                sort_metrics=True, row_idx_to_sort_by=None, sort_methods=True, vertical=False,
+                                bbox_to_anchor=None):
     n = len(dataframe_rows)
     assert n == len(method_aliases)
     assert n > 0
@@ -353,7 +354,11 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
         plt.ylabel('Score')
         plt.grid(axis='y')
         # plot legend above the plot
-        plt.legend(bbox_to_anchor=(0.5, 1.1), loc='lower center', borderaxespad=0.)
+        # plt.legend(bbox_to_anchor=(0.5, 1.1), loc='lower center', borderaxespad=0.)
+        if bbox_to_anchor is None:
+            plt.legend(loc='upper left')
+        else:
+            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='lower center', borderaxespad=0.)
     else:
         bar_height = 0.9 * metrics_axis_size / (n * m)
         for i in range(n):
@@ -369,7 +374,11 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
         plt.ylabel('Metric')
         plt.xlabel('Score')
         plt.grid(axis='x')
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+        # plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+        if bbox_to_anchor is None:
+            plt.legend(loc='upper left')
+        else:
+            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='upper left', borderaxespad=0.)
     plt.title(title)
     # Plot legend outside the plot
     # plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
@@ -450,20 +459,34 @@ def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10
     plt.title(title)
     plt.show()
 
-def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, pred_confs, gt_bbox_coords,
-                                             class_names, figsize, format='xywh'):
+def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, pred_confs,
+                                             class_names, figsize, format='xywh', gt_bbox_coords=None,
+                                             classes_to_highlight=None):
     from PIL import Image
     import matplotlib.patches as patches
+
+    print(f'image_path={image_path}')
+
+    show_gt = gt_bbox_coords is not None
+
+    if classes_to_highlight is not None:
+        assert isinstance(classes_to_highlight, list)
     
-    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=figsize) # 1 row, 2 columns (left: GT, right: Pred)
+    if show_gt:
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=figsize) # 1 row, 2 columns (left: GT, right: Pred)
+    else:
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize) # 1 row, 1 column
 
     # Image
     image = Image.open(image_path)
     image = image.convert('RGB')
     width = image.size[0]
     height = image.size[1]
-    ax[0].imshow(image)
-    ax[1].imshow(image)
+    if show_gt:
+        ax[0].imshow(image)
+        ax[1].imshow(image)
+    else:
+        ax.imshow(image)
 
     def _adapt_bbox_format(coords, format):
         if format == 'xywh':
@@ -480,32 +503,41 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
         else:
             raise ValueError(f'Unknown format {format}')
         return x1, y1, x2, y2
-
-    # Ground truth bounding boxes
-    for i in range(len(gt_bbox_coords)):
-        if gt_bbox_coords[i] is not None:
-            coords_list = gt_bbox_coords[i]
-            color = _COLORS[i % len(_COLORS)]
-            for coords in coords_list:
-                x1, y1, x2, y2 = _adapt_bbox_format(coords, format)
-                rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=color, facecolor='none')
-                ax[0].add_patch(rect)
-                # ax[0].text(x1, y1-10, class_names[i], fontsize=12, bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))
-                ax[0].text(x1, y1-10, class_names[i], color=color, fontsize=12, backgroundcolor="black")
+    
+    if show_gt:
+        # Ground truth bounding boxes
+        for i in range(len(gt_bbox_coords)):
+            if gt_bbox_coords[i] is not None:
+                coords_list = gt_bbox_coords[i]
+                color = _COLORS[i % len(_COLORS)]
+                for coords in coords_list:
+                    x1, y1, x2, y2 = _adapt_bbox_format(coords, format)
+                    alpha = 1.0 if (classes_to_highlight is None or class_names[i] in classes_to_highlight) else 0.4
+                    rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=color, facecolor='none', alpha=alpha)
+                    ax[0].add_patch(rect)
+                    ax[0].text(x1, y1-10, class_names[i], color=color, fontsize=12, backgroundcolor=(0, 0, 0, alpha), alpha=alpha)
 
     # Predicted bounding boxes
+    if show_gt:
+        pred_ax = ax[1]
+    else:
+        pred_ax = ax
     if len(pred_coords) > 0:
         idxs = np.argsort(pred_confs)
         for i in idxs:
             x1, y1, x2, y2 = _adapt_bbox_format(pred_coords[i], format)
             color = _COLORS[pred_classes[i] % len(_COLORS)]
-            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3,  edgecolor=color, facecolor='none')
-            ax[1].add_patch(rect)
-            ax[1].text(x1, y1-10, f'{class_names[pred_classes[i]]} ({pred_confs[i]:.2f})', color=color, fontsize=12, backgroundcolor="black")
+            alpha = 1.0 if (classes_to_highlight is None or class_names[pred_classes[i]] in classes_to_highlight) else 0.1
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=3, edgecolor=color, facecolor='none', alpha=alpha)
+            pred_ax.add_patch(rect)
+            pred_ax.text(x1, y1-10, f'{class_names[pred_classes[i]]} ({pred_confs[i]:.2f})', color=color, fontsize=12, backgroundcolor=(0, 0, 0, alpha), alpha=alpha)
 
     # Set titles
-    ax[0].set_title('Ground Truth')
-    ax[1].set_title('Predictions')
+    if show_gt:
+        ax[0].set_title('Ground Truth')
+        ax[1].set_title('Predictions')
+    else:
+        pred_ax.set_title('Predictions')
 
     # Show the plot
     plt.show()

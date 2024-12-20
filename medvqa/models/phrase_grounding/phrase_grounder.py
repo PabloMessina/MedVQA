@@ -5,7 +5,7 @@ from medvqa.models.FiLM_utils import LinearFiLM
 from medvqa.models.mlp import MLP
 from positional_encodings.torch_encodings import PositionalEncoding1D, PositionalEncoding2D, Summer
 from medvqa.models.vision.bbox_regression import BoundingBoxRegressorSingleClass
-from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
+from medvqa.models.vision.visual_modules import MultiPurposeVisualModule, RawImageEncoding
 from medvqa.utils.logging import print_orange
 
 class PhraseGroundingMode:
@@ -19,6 +19,7 @@ class PhraseGroundingMode:
     GLOBAL_POOLING_FILM_MLP__NO_GROUNDING = 'global_pooling_film_mlp__no_grounding'
     ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING = 'adaptive_film_based_pooling_mlp__no_grounding'
     ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION = 'adaptive_film_based_pooling_mlp_with_bbox_regression'
+    ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11 = 'adaptive_film_based_pooling_mlp_with_yolov11'
     
     @staticmethod
     def get_choices():
@@ -32,7 +33,8 @@ class PhraseGroundingMode:
             PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING,
             PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING,
             PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION,
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11,
         ]
     
 _mode2shortname = {
@@ -45,7 +47,8 @@ _mode2shortname = {
     PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING: 'GlobalPoolingConcatMLP',
     PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING: 'GlobalPoolingFiLMMLP',
     PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING: 'AdaptiveFiLM_MLP',
-    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION: 'AdaptiveFiLM_MLP_BBoxRegression'
+    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION: 'AdaptiveFiLM_MLP_BBoxRegression',
+    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11: 'AdaptiveFiLM_MLP_YOLOv11',
 }
 
 class PhraseGrounder(MultiPurposeVisualModule):
@@ -57,10 +60,13 @@ class PhraseGrounder(MultiPurposeVisualModule):
             freeze_image_encoder,
             image_local_feat_size,
             image_encoder_pretrained_weights_path,
+            image_size,
             num_regions,
             yolov8_model_name_or_path,
             yolov8_model_alias,
             yolov8_use_one_detector_per_dataset,
+            yolov11_model_name_or_path,
+            yolov11_model_alias,
             # Auxiliary tasks
             predict_bboxes_chest_imagenome,
             predict_bboxes_vinbig,
@@ -76,6 +82,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             image_encoder_dropout_p=0,
             huggingface_model_name=None,
             alignment_proj_size=None,
+            device=None,
             # FiLM-based approach's hyperparameters
             visual_feature_proj_size=None,
             visual_grounding_hidden_size=None,
@@ -94,6 +101,9 @@ class PhraseGrounder(MultiPurposeVisualModule):
         
         assert regions_width * regions_height == num_regions, f'width * height ({regions_width * regions_height}) != num_regions ({num_regions})'
 
+        if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+            assert raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED
+
         # Init MultiPurposeVisualModule components (for image encoder and auxiliary tasks)
         super().__init__(
             # Image Encoder kwargs
@@ -103,9 +113,16 @@ class PhraseGrounder(MultiPurposeVisualModule):
             image_local_feat_size=image_local_feat_size,
             image_encoder_pretrained_weights_path=image_encoder_pretrained_weights_path,
             image_encoder_dropout_p=image_encoder_dropout_p,
+            image_size=image_size,
             num_regions=num_regions,
             yolov8_model_name_or_path=yolov8_model_name_or_path,
             yolov8_model_alias=yolov8_model_alias,
+            yolov11_model_name_or_path=yolov11_model_name_or_path,
+            yolov11_model_alias=yolov11_model_alias,
+            query_embed_size=phrase_embedding_size,
+            local_attention_hidden_size=visual_grounding_hidden_size,
+            classification_mlp_hidden_dims=phrase_mlp_hidden_dims,
+            device=device,
             # Auxiliary tasks kwargs
             predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
             predict_bboxes_vinbig=predict_bboxes_vinbig,
@@ -283,7 +300,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 self.visual_grounding_bbox_regressor = BoundingBoxRegressorSingleClass(local_feat_dim=visual_grounding_hidden_size)
             else:
                 self.local_attention_final_layer = nn.Linear(visual_grounding_hidden_size, 1) # hidden size -> scalar (local attention score)
-                
+
+        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+            pass
+
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {phrase_grounding_mode}')
 
@@ -323,6 +343,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.local_attention_hidden_layer.out_features},'
                     f'{mlp_hidden_dims_str})')
+        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+            return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]})')
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {self.phrase_grounding_mode}')
 
@@ -339,10 +361,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
         return_normalized_average_v=False,
         predict_bboxes=False,
         apply_nms=False,
-        iou_threshold=0.3,
-        conf_threshold=0.6,
+        iou_threshold=0.1,
+        conf_threshold=0.1,
+        max_det=10, # for YOLOv11
+        batch=None, # for YOLOv11
+        use_first_n_facts_for_detection=None, # for YOLOv11
     ):  
-        assert mimiccxr_forward or vinbig_forward or only_compute_features
         # Visual Component
         output = super().forward(
             raw_images=raw_images,
@@ -352,7 +376,19 @@ class PhraseGrounder(MultiPurposeVisualModule):
             mimiccxr_forward=mimiccxr_forward,
             vinbig_forward=vinbig_forward,
             yolov8_detection_layer_index=yolov8_detection_layer_index,
+            # For YOLOv11 fact-conditioned
+            apply_nms=apply_nms,
+            conf_thres=conf_threshold,
+            iou_thres=iou_threshold,
+            max_det=max_det,
+            fact_embeddings=phrase_embeddings,
+            batch=batch,
+            use_first_n_facts_for_detection=use_first_n_facts_for_detection,
         )
+
+        if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+            return output # YOLOv11 fact-conditioned
+
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
 
         if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
@@ -652,7 +688,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             output['phrase_classifier_logits'] = phrase_classifier_logits
             if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
                 if apply_nms:
-                    output['predicted_bboxes'] = predicted_bboxes # (batch_size, K, list of bboxes)
+                    output['predicted_bboxes'] = predicted_bboxes # (batch_size, (coords, conf, class))
                 else:
                     output['visual_grounding_binary_logits'] = visual_grounding_binary_logits # (batch_size, K, num_regions, 1)
                     output['visual_grounding_bbox_logits'] = visual_grounding_bbox_logits # (batch_size, K, num_regions, 4)

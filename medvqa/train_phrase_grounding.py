@@ -18,16 +18,16 @@ from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, Phras
 from medvqa.models.vision.visual_modules import comes_with_positional_encoding, inject_mean_std_for_image_normalization
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
-from medvqa.utils.constants import DATASET_NAMES
+from medvqa.utils.constants import DATASET_NAMES, VINBIG_NUM_BBOX_CLASSES
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
+    attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
     attach_condition_aware_class_averaged_prc_auc,
     attach_condition_aware_loss,
     attach_condition_aware_prc_auc,
     attach_condition_aware_segmask_iou,
-    attach_condition_aware_vinbig_bbox_iou,
 )
 from medvqa.models.checkpoint import (
     load_metadata,
@@ -43,6 +43,7 @@ from medvqa.datasets.dataloading_utils import (
 from medvqa.metrics.utils import get_merge_metrics_fn
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging import CountPrinter, print_blue, print_orange
+from medvqa.utils.metrics import average_ignoring_nones_and_nans
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -89,6 +90,8 @@ def parse_args(args=None):
     parser.add_argument('--phrase_mlp_hidden_dims', nargs='+', type=int, default=None)
     parser.add_argument('--predict_global_alignment', action='store_true', default=False)
     parser.add_argument('--alignment_proj_size', type=int, default=None)
+    parser.add_argument('--yolov11_model_name_or_path', type=str, default=None)
+    parser.add_argument('--yolov11_model_alias', type=str, default=None)
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -193,9 +196,12 @@ _METRIC_WEIGHTS['cxrlt2024o_prc_auc'] = 5.0
 _METRIC_WEIGHTS['cxrlt2024c_prc_auc'] = 5.0
 
 def _metric_getter(metrics_dict, key):
+    metric = metrics_dict[key]
     if key.endswith('_loss'):
-        return 1 / (1 + metrics_dict[key]) # convert loss to score
-    return metrics_dict[key]
+        return 1 / (1 + metric) # convert loss to score
+    if isinstance(metric, list):
+        return average_ignoring_nones_and_nans(metric)
+    return metric
 
 def train_model(
     model_kwargs,
@@ -251,6 +257,8 @@ def train_model(
     use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']
     do_visual_grounding_with_bbox_regression = trainer_engine_kwargs['do_visual_grounding_with_bbox_regression']
     do_visual_grounding_with_segmentation = trainer_engine_kwargs['do_visual_grounding_with_segmentation']
+    use_yolo = model_kwargs['raw_image_encoding'] in [RawImageEncoding.YOLOV8,
+                                                      RawImageEncoding.YOLOV11_FACT_CONDITIONED]
 
 
     # Sanity checks
@@ -319,7 +327,7 @@ def train_model(
 
     # Create model
     count_print('Creating instance of PhraseGrounder ...')
-    model = PhraseGrounder(**model_kwargs)
+    model = PhraseGrounder(**model_kwargs, device=device)
     model = model.to(device)
 
     # Optimizer
@@ -698,23 +706,44 @@ def train_model(
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'vbg_att_reg_loss')
             if do_visual_grounding_with_bbox_regression:
-                attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-                attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
+                if use_yolo:
+                    attach_condition_aware_loss(trainer_engine, 'yolo_loss', _cond_func, 'vbg_yolo_loss')
+                    attach_condition_aware_loss(trainer_engine, 'yolo_box_loss', _cond_func, 'vbg_yolo_box_loss')
+                    attach_condition_aware_loss(trainer_engine, 'yolo_cls_loss', _cond_func, 'vbg_yolo_cls_loss')
+                    attach_condition_aware_loss(trainer_engine, 'yolo_dfl_loss', _cond_func , 'vbg_yolo_dfl_loss')
+                else:
+                    attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
+                    attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
             elif do_visual_grounding_with_segmentation:
                 attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
                 attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         if in_val:
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
             if do_visual_grounding_with_bbox_regression:
-                attach_condition_aware_vinbig_bbox_iou(validator_engine, _cond_func, metric_name='vbg_bbox_iou')
+                if use_yolo:
+                    attach_condition_aware_bbox_iou_per_class(validator_engine,
+                                                        field_names=['yolo_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
+                                                        metric_name='vbg_bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        for_vinbig=True, use_fact_conditioned_yolo=True)
+                else:
+                    attach_condition_aware_bbox_iou_per_class(validator_engine,
+                                                        field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
+                                                        metric_name='vbg_bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        for_vinbig=True)
             elif do_visual_grounding_with_segmentation:
                 attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
                 attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         # for logging
         if do_visual_grounding_with_bbox_regression:
             if in_train:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgbbox_loss', train=in_train, val=False)
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=False)
+                if use_yolo:
+                    metrics_to_print.append('vbg_yolo_loss')
+                    metrics_to_print.append('vbg_yolo_box_loss')
+                    metrics_to_print.append('vbg_yolo_cls_loss')
+                    metrics_to_print.append('vbg_yolo_dfl_loss')
+                else:
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgbbox_loss', train=in_train, val=False)
+                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=False)
             if in_val:
                 append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_bbox_iou', train=False)
         elif do_visual_grounding_with_segmentation:
@@ -938,6 +967,8 @@ def train_from_scratch(
     pretrained_checkpoint_folder_paths,
     yolov8_model_name_or_path,
     yolov8_model_alias,
+    yolov11_model_name_or_path,
+    yolov11_model_alias,
     phrase_embedding_size,
     regions_width,
     regions_height,
@@ -1060,6 +1091,8 @@ def train_from_scratch(
     print_blue('----- Training model from scratch ------', bold=True)
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
+    use_yolov11 = raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED
+    use_yolo = use_yolov8 or use_yolov11
     use_bbox_aware_transform = use_yolov8 or do_visual_grounding_with_bbox_regression
     use_segmentation_mask_aware_transform = do_visual_grounding_with_segmentation
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
@@ -1105,9 +1138,12 @@ def train_from_scratch(
         yolov8_model_name_or_path=yolov8_model_name_or_path,
         yolov8_model_alias=yolov8_model_alias,
         yolov8_use_one_detector_per_dataset=(predict_bboxes_chest_imagenome and predict_bboxes_vinbig),
+        yolov11_model_name_or_path=yolov11_model_name_or_path,
+        yolov11_model_alias=yolov11_model_alias,
         visual_feature_proj_size=visual_feature_proj_size,
         visual_grounding_hidden_size=visual_grounding_hidden_size,
         phrase_mlp_hidden_dims=phrase_mlp_hidden_dims,
+        image_size=image_size if isinstance(image_size, int) else image_size[0],
         # Aux tasks
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
@@ -1161,6 +1197,7 @@ def train_from_scratch(
         image_size=image_size,
         augmentation_mode=img_aug_mode,
         for_yolov8=use_yolov8,
+        for_yolov11=use_yolov11,
         use_bbox_aware_transform=use_bbox_aware_transform,
         use_segmentation_mask_aware_transform=use_segmentation_mask_aware_transform,
         mask_height=regions_height, # for segmentation mask-aware transform
@@ -1191,7 +1228,7 @@ def train_from_scratch(
     
     # Collate batch functions
     _kwargs = dict(
-        use_yolov8=use_yolov8,
+        use_yolo=use_yolo,
     )
     collate_batch_fn_kwargs = {}
     if use_mimiccxr:
@@ -1274,6 +1311,7 @@ def train_from_scratch(
             phrase_embeddings_filepath=vinbig_phrase_embeddings_filepath,
             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
             do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
+            for_yolo=use_yolo,
         )
     else:
         vinbig_trainer_kwargs = None
@@ -1318,6 +1356,7 @@ def train_from_scratch(
         gradient_accumulation_steps=gradient_accumulation_steps,
         use_amp=use_amp, training=True, validating=False, testing=False,
         using_yolov8=use_yolov8,
+        using_yolov11=use_yolov11,
         yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
         pos_area_prior=pos_area_prior,
         neg_area_prior=neg_area_prior,
@@ -1343,6 +1382,7 @@ def train_from_scratch(
     validator_engine_kwargs = dict(
         training=False, validating=True, testing=False,
         using_yolov8=use_yolov8,
+        using_yolov11=use_yolov11,
         yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
         binary_multilabel_classif_loss_name=binary_multilabel_classif_loss_name,
         focal_loss_weight=focal_loss_weight,

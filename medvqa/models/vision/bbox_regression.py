@@ -644,6 +644,7 @@ class BoundingBoxRegressorSingleClass(nn.Module):
         # create layers for the bounding box regression
         self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)
         self.bbox_presence_fc = nn.Linear(local_feat_dim, 1)
+        self.class_ids = None
 
     def forward(self, local_features, predict_presence=True, predict_coords=True,
                 apply_nms=False, iou_threshold=0.3, conf_threshold=0.5, max_det_per_class=20):
@@ -657,21 +658,34 @@ class BoundingBoxRegressorSingleClass(nn.Module):
             assert bbox_coords.shape[-1] == 4
             assert bbox_presence.ndim == 4
             assert bbox_presence_probs.ndim == 3
-            output = [[None] * bbox_coords.size(1) for _ in range(bbox_coords.size(0))]
+            if self.class_ids is None:
+                num_classes = bbox_coords.size(1)
+                num_regions = bbox_coords.size(2)
+                self.class_ids = torch.arange(num_classes, device=bbox_coords.device).unsqueeze(-1).expand(-1, num_regions).contiguous()
+            output = [None] * bbox_coords.size(0)
             for i in range(bbox_coords.size(0)): # for each image in the batch
-                for j in range(bbox_coords.size(1)): # for each class
-                    coords = bbox_coords[i, j] # (num_regions, 4)
-                    presence = bbox_presence_probs[i, j] # (num_regions)
-                    mask = presence > conf_threshold
-                    coords = coords[mask]
-                    presence = presence[mask]
-                    if coords.size(0) == 0:
-                        continue
-                    if coords.size(0) > max_det_per_class:
-                        presence, idxs = torch.topk(presence, max_det_per_class)
-                        coords = coords[idxs]
-                    keep = ops.nms(coords, presence, iou_threshold)
-                    output[i][j] = (coords[keep], presence[keep])
+                bbox_coords_i = bbox_coords[i] # (num_classes, num_regions, 4)
+                bbox_probs_i = bbox_presence_probs[i] # (num_classes, num_regions)
+                class_ids_i = self.class_ids # (num_classes, num_regions)
+                # Apply maximum detections per class
+                if bbox_coords_i.size(1) > max_det_per_class:
+                    bbox_probs_i, idxs = torch.topk(bbox_probs_i, max_det_per_class, dim=1) # (num_classes, max_det_per_class)
+                    bbox_coords_i = torch.gather(bbox_coords_i, 1, idxs.unsqueeze(-1).expand(-1, -1, 4)) # (num_classes, max_det_per_class, 4)
+                    class_ids_i  = torch.gather(class_ids_i, 1, idxs) # (num_classes, max_det_per_class)
+                # Apply confidence threshold
+                mask = bbox_probs_i > conf_threshold
+                bbox_coords_i = bbox_coords_i[mask] # (num_detections, 4)
+                bbox_probs_i = bbox_probs_i[mask] # (num_detections)
+                class_ids_i = class_ids_i[mask] # (num_detections)
+                # Apply NMS
+                if bbox_coords_i.size(0) > 0:
+                    shifted_bbox_coords = bbox_coords_i + class_ids_i.unsqueeze(-1).float() * 10.0
+                    keep = ops.nms(shifted_bbox_coords, bbox_probs_i, iou_threshold)
+                    bbox_coords_i = bbox_coords_i[keep]
+                    bbox_probs_i = bbox_probs_i[keep]
+                    class_ids_i = class_ids_i[keep]
+                output[i] = (bbox_coords_i, bbox_probs_i, class_ids_i)
+                
             return output, bbox_presence
 
         if predict_coords:

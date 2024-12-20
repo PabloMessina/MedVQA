@@ -178,7 +178,7 @@ def compute_mean_iou_per_class__yolov11(pred_boxes, pred_classes, gt_coords, val
 
 def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_confs=None,
                          adapted_pred_boxes=None, adapted_pred_confs=None, classifier_confs=None,
-                         valid_classes=None, iou_thresholds=[0.5], num_workers=5):
+                         valid_classes=None, iou_thresholds=[0.5], num_workers=5, compute_micro_average=False):
     
     m = len(gt_coords[0]) # number of classes
     n = len(gt_coords) # number of samples
@@ -219,6 +219,7 @@ def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_con
     _shared_pred_boxes = adapted_pred_boxes
     _shared_pred_confs = adapted_pred_confs
     _shared_gt_coords = gt_coords
+
     task_args = []
     for iou_thr in iou_thresholds:
         for c in range(m):
@@ -226,14 +227,26 @@ def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_con
                 continue
             task_args.append((iou_thr, c, n))
     with Pool(num_workers) as p:
-        aps = p.map(_compute_mAP__yolov11, task_args)
+        aps = p.map(_compute_ap__yolov11, task_args)
     if valid_classes is not None:
         aps = np.array(aps).reshape((len(iou_thresholds), np.sum(valid_classes)))
     else:
         aps = np.array(aps).reshape((len(iou_thresholds), m))
+
+    if compute_micro_average:
+        task_args = [(iou_thr, n, m) for iou_thr in iou_thresholds]
+        with Pool(num_workers) as p:
+            micro_aps = p.map(_compute_ap_micro__yolov11, task_args)
+        micro_aps = np.array(micro_aps)
+
+        return {
+            'class_aps': aps,
+            'micro_aps': micro_aps,
+        }
+
     return aps
 
-def _compute_mAP__yolov11(task):
+def _compute_ap__yolov11(task):
     iou_thr, c, n = task
     y_true = np.zeros((n,), dtype=np.int32)
     y_scores = np.zeros((n,), dtype=np.float32)
@@ -247,6 +260,22 @@ def _compute_mAP__yolov11(task):
             else:
                 y_scores[i] = _shared_pred_confs[i][c]
     return average_precision_score(y_true, y_scores)
+
+def _compute_ap_micro__yolov11(task):
+    iou_thr, num_samples, num_classes = task
+    y_true = np.zeros((num_samples, num_classes), dtype=np.int32)
+    y_scores = np.zeros((num_samples, num_classes), dtype=np.float32)
+    for i in range(num_samples):
+        for j in range(num_classes):
+            if _shared_gt_coords[i][j] is not None and len(_shared_gt_coords[i][j]) > 0:
+                y_true[i, j] = 1
+            if _shared_pred_boxes[i][j] is not None:
+                if y_true[i, j]:
+                    if calculate_exact_iou_union(_shared_pred_boxes[i][j], _shared_gt_coords[i][j]) >= iou_thr:
+                        y_scores[i, j] = _shared_pred_confs[i][j]
+                else:
+                    y_scores[i, j] = _shared_pred_confs[i][j]
+    return average_precision_score(y_true.ravel(), y_scores.ravel()) # micro average
 
 def compute_mae_per_class(pred_coords, gt_coords, gt_presences):
     assert len(pred_coords.shape) == 3
@@ -579,15 +608,8 @@ def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, max_det_pe
     bbox_probs = bbox_probs[mask]
     class_ids = class_ids[mask]
 
-    # # Apply maximum detections
-    # if bbox_coords.size(0) > max_det:
-    #     bbox_probs, idxs = torch.topk(bbox_probs, max_det, dim=0)
-    #     bbox_coords = bbox_coords[idxs]
-    #     class_ids = class_ids[idxs]
-
     # Apply NMS
     if bbox_coords.size(0) > 0:
-        # assert -0.5 <= bbox_coords.min() and bbox_coords.max() <= 1.5, f"bbox_coords.min()={bbox_coords.min()}, bbox_coords.max()={bbox_coords.max()}"
         shifted_bbox_coords = bbox_coords + class_ids.unsqueeze(-1).float() * 10.0
         keep = nms(shifted_bbox_coords, bbox_probs, iou_th)
         pred_boxes = bbox_coords[keep].cpu().numpy()
@@ -600,10 +622,10 @@ def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, max_det_pe
         
     return pred_boxes, pred_confs, pred_classes
 
-def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None, resized_shape_list=None,
-                                     pred_boxes_list=None, pred_confs_list=None, classifier_confs=None,
+def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None, is_fact_conditioned_yolo=False,
+                                     resized_shape_list=None, pred_boxes_list=None, pred_confs_list=None, classifier_confs=None,
                                      iou_thresholds=np.arange(0.05, 0.6, 0.05), conf_thresholds=np.arange(0.05, 0.5, 0.05),
-                                     max_det=100, max_det_per_class=20, verbose=True):
+                                     max_det=100, max_det_per_class=20, num_classes=None, verbose=True):
     n = len(gt_coords_list)
     use_yolo_predictions = yolo_predictions_list is not None
     if use_yolo_predictions:
@@ -615,6 +637,8 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
         assert pred_confs_list is not None
         assert len(pred_boxes_list) == n
         assert len(pred_confs_list) == n
+    if is_fact_conditioned_yolo:
+        assert num_classes is not None
 
     import itertools
 
@@ -640,20 +664,47 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
             pred_confs_list = [None] * BIG_ENOUGH
             pred_classes_list = [None] * BIG_ENOUGH
             idx = 0
-            for yolo_predictions, resized_shapes in zip(yolo_predictions_list, resized_shape_list):
-                assert isinstance(yolo_predictions, torch.Tensor)
-                assert yolo_predictions.ndim == 3 # (batch_size, num_classes + 4, num_boxes)
-                yolo_predictions = yolo_predictions.detach().clone()
-                preds = non_max_suppression(yolo_predictions, conf_thres=conf_th, iou_thres=iou_th, max_det=max_det)
-                for pred, rs in zip(preds, resized_shapes):
-                    assert pred.ndim == 2 # (num_boxes, 6)
-                    assert pred.size(1) == 6
-                    assert len(rs) == 2 # (height, width)
-                    pred = pred.cpu().numpy()
-                    pred_boxes_list[idx] = pred[:, :4] / np.array([rs[1], rs[0], rs[1], rs[0]], dtype=np.float32)
-                    pred_confs_list[idx] = pred[:, 4]
-                    pred_classes_list[idx] = pred[:, 5].astype(int)
-                    idx += 1
+            if is_fact_conditioned_yolo:
+                for yolo_predictions, resized_shapes in zip(yolo_predictions_list, resized_shape_list):
+                    assert yolo_predictions.ndim == 3, yolo_predictions.shape # (batch_size * num_classes, 1 + 4, num_boxes)
+                    yolo_predictions = yolo_predictions.detach().clone()
+                    preds = non_max_suppression(yolo_predictions, conf_thres=conf_th, iou_thres=iou_th, max_det=max_det)
+                    assert isinstance(preds, list) and len(preds) % num_classes == 0
+                    batch_size = len(preds) // num_classes
+                    assert batch_size == len(resized_shapes)
+                    for i  in range(batch_size):
+                        preds_i = preds[i*num_classes:(i+1)*num_classes]
+                        rs = resized_shapes[i]
+                        boxes_list = []
+                        confs_list = []
+                        classes_list = []
+                        for j in range(num_classes):
+                            pred = preds_i[j]
+                            assert pred.ndim == 2 # (num_boxes, 6)
+                            assert pred.size(1) == 6
+                            pred = pred.cpu().numpy()
+                            boxes_list.append(pred[:, :4] / np.array([rs[1], rs[0], rs[1], rs[0]], dtype=np.float32))
+                            confs_list.append(pred[:, 4])
+                            classes_list.append(np.full_like(pred[:, 5], j, dtype=np.int32))
+                        pred_boxes_list[idx] = np.concatenate(boxes_list, axis=0)
+                        pred_confs_list[idx] = np.concatenate(confs_list, axis=0)
+                        pred_classes_list[idx] = np.concatenate(classes_list, axis=0)
+                        idx += 1
+            else:
+                for yolo_predictions, resized_shapes in zip(yolo_predictions_list, resized_shape_list):
+                    assert isinstance(yolo_predictions, torch.Tensor)
+                    assert yolo_predictions.ndim == 3 # (batch_size, num_classes + 4, num_boxes)
+                    yolo_predictions = yolo_predictions.detach().clone()
+                    preds = non_max_suppression(yolo_predictions, conf_thres=conf_th, iou_thres=iou_th, max_det=max_det)
+                    for pred, rs in zip(preds, resized_shapes):
+                        assert pred.ndim == 2 # (num_boxes, 6)
+                        assert pred.size(1) == 6
+                        assert len(rs) == 2 # (height, width)
+                        pred = pred.cpu().numpy()
+                        pred_boxes_list[idx] = pred[:, :4] / np.array([rs[1], rs[0], rs[1], rs[0]], dtype=np.float32)
+                        pred_confs_list[idx] = pred[:, 4]
+                        pred_classes_list[idx] = pred[:, 5].astype(int)
+                        idx += 1
             pred_boxes_list = pred_boxes_list[:idx]
             pred_confs_list = pred_confs_list[:idx]
             pred_classes_list = pred_classes_list[:idx]

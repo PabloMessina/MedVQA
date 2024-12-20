@@ -63,10 +63,13 @@ class RawImageEncoding:
     CONVNEXTMODEL__HUGGINGFACE = 'convnextmodel-huggingface'
     RAD_DINO__HUGGINGFACE = 'rad-dino-huggingface'
     CXRMATE_RRG24_UNIFORMER__HUGGINGFACE = 'cxrmate-rrg24-uniformer-huggingface'
+    UNIFORMER_BASE_TL_384__HUGGINGFACE = 'uniformer-base-tl-384-huggingface'
     SIGLIP_HUGGINGFACE = 'siglip-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
     YOLOV11_FOR_DET_MLC = 'yolov11-for-det-mlc'
+    YOLOV11_FACT_CONDITIONED = 'yolov11-fact-conditioned'
+    YOLOV11_FEATURE_EXTRACTOR = 'yolov11-feature-extractor'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -88,13 +91,18 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE,
         RawImageEncoding.RAD_DINO__HUGGINGFACE,
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+        RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         RawImageEncoding.SIGLIP_HUGGINGFACE,
     ]
 
 def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
     assert 'mean' not in kwargs
     assert 'std' not in kwargs
-    if raw_image_encoding == RawImageEncoding.DENSENET_121:
+    if raw_image_encoding in [
+        RawImageEncoding.DENSENET_121,
+        RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
+        RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+    ]:
         kwargs['mean'] = [0.485, 0.456, 0.406]
         kwargs['std'] = [0.229, 0.224, 0.225]
     elif raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
@@ -103,6 +111,8 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
     elif raw_image_encoding in [
         RawImageEncoding.YOLOV8,
         RawImageEncoding.YOLOV11_FOR_DET_MLC,
+        RawImageEncoding.YOLOV11_FACT_CONDITIONED,
+        RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR,
     ]:
         kwargs['mean'] = [0.0, 0.0, 0.0]
         kwargs['std'] = [1.0, 1.0, 1.0]
@@ -261,6 +271,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
             RawImageEncoding.RAD_DINO__HUGGINGFACE,
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+            RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
             RawImageEncoding.SIGLIP_HUGGINGFACE,
         ]:
             assert huggingface_model_name is not None
@@ -273,7 +284,11 @@ class MultiPurposeVisualModule(nn.Module):
         if raw_image_encoding == RawImageEncoding.YOLOV8:
             assert yolov8_model_name_or_path is not None
             assert yolov8_model_alias is not None
-        if raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+        if raw_image_encoding in [
+            RawImageEncoding.YOLOV11_FOR_DET_MLC,
+            RawImageEncoding.YOLOV11_FACT_CONDITIONED,
+            RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR,
+        ]:
             assert yolov11_model_name_or_path is not None
             assert yolov11_model_alias is not None
 
@@ -290,11 +305,14 @@ class MultiPurposeVisualModule(nn.Module):
         self._init_auxiliary_tasks()
 
     def _init_visual_backbone(self):
-        
-        using_detectron2 = self.raw_image_encoding == RawImageEncoding.DETECTRON2
-        using_yolov11 = self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC
 
-        if not (using_detectron2 or using_yolov11):
+        skip_local_global = self.raw_image_encoding in [
+            RawImageEncoding.DETECTRON2,
+            RawImageEncoding.YOLOV11_FOR_DET_MLC,
+            RawImageEncoding.YOLOV11_FACT_CONDITIONED,
+        ]
+
+        if not skip_local_global:
             global_feat_size = 0
         
         if does_include_image(self.visual_input_mode):
@@ -313,7 +331,7 @@ class MultiPurposeVisualModule(nn.Module):
             self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
                                          self.imagenet_pretrained, model_name, self.freeze_image_encoder,
                                          self.image_encoder_dropout_p)
-            if not (using_detectron2 or using_yolov11):
+            if not skip_local_global:
                 global_feat_size += self._get_raw_image_encoder_global_feat_size(self.image_local_feat_size)
         
         if does_include_visual_features(self.visual_input_mode):
@@ -322,7 +340,7 @@ class MultiPurposeVisualModule(nn.Module):
                  self.visual_features_mlp_hidden_dims, self.freeze_image_encoder)
             global_feat_size += self.visual_features_mlp_out_dim
         
-        if not (using_detectron2 or using_yolov11):
+        if not skip_local_global:
             assert global_feat_size > 0
             self.local_feat_size = self.image_local_feat_size
             self.global_feat_size = global_feat_size
@@ -336,7 +354,9 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.RESNET__TORCHXRAYVISION,
             RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION,
             RawImageEncoding.YOLOV8,
+            RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR,
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+            RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         ]:
             return 2 * image_local_feat_size
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
@@ -479,6 +499,27 @@ class MultiPurposeVisualModule(nn.Module):
                 model_alias=self.yolov11_model_alias,
                 device=self.device,
             )
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_yolov11_fact_conditioned(
+                fact_embed_size=self.query_embed_size,
+                mlp_hidden_dims=self.classification_mlp_hidden_dims,
+                local_attention_hidden_size=self.local_attention_hidden_size,
+                image_size=self.image_size,
+                model_name_or_path=self.yolov11_model_name_or_path,
+                yolo_alias=self.yolov11_model_alias,
+                device=self.device,
+                yolov11_pretrained_weights_path=pretrained_weights_path,
+            )
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_yolov11_feature_extractor(
+                model_name_or_path=self.yolov11_model_name_or_path,
+                yolo_alias=self.yolov11_model_alias,
+                yolov11_pretrained_weights_path=pretrained_weights_path,
+            )
         elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
@@ -491,6 +532,10 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_uniformer_base_tl_384_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
@@ -508,8 +553,11 @@ class MultiPurposeVisualModule(nn.Module):
         print('  Initializing auxiliary tasks')
         # Optional auxiliary tasks
 
-        if self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
-            print('    Skipping auxiliary tasks initialization for YOLOV11_FOR_DET_MLC')
+        if self.raw_image_encoding in [
+            RawImageEncoding.YOLOV11_FOR_DET_MLC,
+            RawImageEncoding.YOLOV11_FACT_CONDITIONED,
+        ]:
+            print('    Skipping auxiliary tasks initialization for YOLOv11 models')
             return
         
         # 1) medical tags classification
@@ -748,7 +796,9 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = DETECTRON2_YAML_2_SHORT[self.detectron2_model_yaml]
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
             img_str = self.yolov8_model_alias
-        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
+        elif self.raw_image_encoding in [RawImageEncoding.YOLOV11_FOR_DET_MLC,
+                                            RawImageEncoding.YOLOV11_FACT_CONDITIONED,
+                                            RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR]:
             img_str = str(self.raw_image_encoder)
         elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
             img_str = HUGGINGFACE_CONVNEXTMODEL_NAMES_2_SHORT[self.huggingface_model_name]
@@ -756,6 +806,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_RAD_DINO_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
             img_str = HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE:
+            img_str = HUGGINGFACE_UNIFORMER_BASE_TL_384_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
             img_str = HUGGINGFACE_SIGLIP_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
@@ -792,18 +844,46 @@ class MultiPurposeVisualModule(nn.Module):
         only_compute_features=False,
         apply_nms=True,
         batch=None, # Used by YOLOv11_FOR_DET_MLC
+        conf_thres=None, # Used by YOLOv11_FOR_DET_MLC
+        iou_thres=None, # Used by YOLOv11_FOR_DET_MLC
+        max_det=None, # Used by YOLOv11_FOR_DET_MLC
+        fact_embeddings=None, # Used by YOLOv11_FACT_CONDITIONED
+        use_first_n_facts_for_detection=None, # Used by YOLOv11_FACT_CONDITIONED
         **unused_kwargs,
-    ):
-        
+    ):  
         # Forward pass for YOLOV11_FOR_DET_MLC
         if self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
             assert yolov11_classification_tasks is not None or yolov11_detection_tasks is not None
+            if apply_nms:
+                assert conf_thres is not None
+                assert iou_thres is not None
+                assert max_det is not None
             return self.raw_image_encoder(
                 x=raw_images,
                 detection_task_names=yolov11_detection_tasks,
                 classification_task_names=yolov11_classification_tasks,
                 batch=batch,
                 apply_nms=apply_nms,
+                conf_thres=conf_thres,
+                iou_thres=iou_thres,
+                max_det=max_det,
+            )
+        # Forward pass for YOLOV11_FACT_CONDITIONED
+        elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED:
+            assert fact_embeddings is not None
+            if apply_nms:
+                assert conf_thres is not None
+                assert iou_thres is not None
+                assert max_det is not None
+            return self.raw_image_encoder(
+                images=raw_images,
+                fact_embeddings=fact_embeddings,
+                batch=batch,
+                apply_nms=apply_nms,
+                conf_thres=conf_thres,
+                iou_thres=iou_thres,
+                max_det=max_det,
+                use_first_n_facts_for_detection=use_first_n_facts_for_detection,
             )
         
         only_compute_features = only_compute_features or self.only_compute_features
@@ -862,6 +942,9 @@ class MultiPurposeVisualModule(nn.Module):
             elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
                 local_feat_NxCxHxW = self.raw_image_encoder.encode(raw_images)
                 use_default_method = True
+            elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR:
+                local_feat_NxCxHxW = self.raw_image_encoder(raw_images)[-1] # take the last layer out of the list
+                use_default_method = True
             if use_default_method:
                 # compute local features
                 batch_size = raw_images.size(0)
@@ -915,6 +998,15 @@ class MultiPurposeVisualModule(nn.Module):
                     local_feat_NxRxC = local_feat_NxCxHxW.permute(0,2,3,1).view(batch_size, -1, feat_size)
                 if compute_global_features:
                     global_list.append(global_feat)
+
+            elif self.raw_image_encoding == RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE:
+                tmp = self.raw_image_encoder(raw_images)
+                local_feat_NxRxC = tmp.last_hidden_state
+                if compute_global_features:
+                    global_avg_pool = local_feat_NxRxC.mean(1)
+                    global_max_pool = local_feat_NxRxC.max(1)[0]
+                    global_list.append(global_avg_pool)
+                    global_list.append(global_max_pool)
 
             elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
                 batch_size = raw_images.size(0)
@@ -1351,6 +1443,9 @@ _HUGGINGFACE_RAD_DINO_VERSIONS = [
 _HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS = [
     'aehrc/cxrmate-rrg24',
 ]
+_HUGGINGFACE_UNIFORMER_BASE_TL_384_VERSIONS = [
+    'aehrc/uniformer_base_tl_384',
+]
 _HUGGINGFACE_SIGLIP_VERSIONS = [
     'google/siglip-base-patch16-224',
     'google/siglip-so400m-patch14-384',
@@ -1396,6 +1491,10 @@ HUGGINGFACE_RAD_DINO_NAMES_2_SHORT = {
 
 HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_NAMES_2_SHORT = {
     'aehrc/cxrmate-rrg24': 'aehrc/cxrmate-rrg24-uniformer',
+}
+
+HUGGINGFACE_UNIFORMER_BASE_TL_384_NAMES_2_SHORT = {
+    'aehrc/uniformer_base_tl_384': 'aehrc/uniformer-base-tl-384',
 }
 
 HUGGINGFACE_SIGLIP_NAMES_2_SHORT = {
@@ -1472,10 +1571,12 @@ HUGGINGFACE_SIGLIP_GLOBAL_FEAT_SIZE = {
 
 HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX = re.compile(r'\bpooler\b')
 
-def _load_pretrained_model_state_dict(model, pretrained_weights_path):
+def _load_pretrained_model_state_dict(model, pretrained_weights_path, key_adaptation_fn=None):
     data = torch.load(pretrained_weights_path)
     if 'model' in data: data = data['model']
     if 'state_dict' in data: data = data['state_dict']
+    if key_adaptation_fn:
+        data = {key_adaptation_fn(k): v for k, v in data.items()}
     load_model_state_dict(model, data)
     print(f'Pre-trained weights successfully loaded from {pretrained_weights_path}')
 
@@ -1531,6 +1632,13 @@ def create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(version, pretra
     model = AutoModel.from_pretrained(version, trust_remote_code=True)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     model = model.encoder.uniformer # HACK to get the uniformer from the model
+    return model
+
+def create_uniformer_base_tl_384_feature_extractor(version, pretrained_weights_path):
+    from transformers import AutoModel
+    assert version in _HUGGINGFACE_UNIFORMER_BASE_TL_384_VERSIONS, f'Unknown Huggingface Uniformer Base TL 384 version {version}'
+    model = AutoModel.from_pretrained(version, trust_remote_code=True)
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 
 def create_huggingface_siglip_feature_extractor(version, pretrained_weights_path):
@@ -1833,4 +1941,50 @@ def create_yolov11_model_for_det_mlc(
         device=device,
     )
 
+    return model
+
+def create_yolov11_fact_conditioned(
+        fact_embed_size,
+        mlp_hidden_dims,
+        local_attention_hidden_size,
+        image_size,
+        model_name_or_path,
+        yolo_alias,
+        device,
+        yolov11_pretrained_weights_path=None,
+):
+    from medvqa.models.vision.yolov11_modified import YOLOv11FactConditionedClassifierDetector
+    model = YOLOv11FactConditionedClassifierDetector(
+        fact_embed_size=fact_embed_size,
+        mlp_hidden_dims=mlp_hidden_dims,
+        local_attention_hidden_size=local_attention_hidden_size,
+        image_size=image_size,
+        model_name_or_path=model_name_or_path,
+        yolo_alias=yolo_alias,
+        device=device,
+    )
+    if yolov11_pretrained_weights_path:
+        def _key_adaptation_fn(k):
+            if k.startswith('raw_image_encoder.'):
+                return k[len('raw_image_encoder.'):]
+            return k
+        _load_pretrained_model_state_dict(model, yolov11_pretrained_weights_path, key_adaptation_fn=_key_adaptation_fn)
+    return model
+
+def create_yolov11_feature_extractor(
+        model_name_or_path,
+        yolo_alias,
+        yolov11_pretrained_weights_path=None,
+):
+    from medvqa.models.vision.yolov11_modified import YOLOv11FeatureExtractor
+    model = YOLOv11FeatureExtractor(
+        model_name_or_path=model_name_or_path,
+        yolo_alias=yolo_alias,
+    )
+    if yolov11_pretrained_weights_path:
+        def _key_adaptation_fn(k):
+            if k.startswith('raw_image_encoder.'):
+                return k[len('raw_image_encoder.'):]
+            return k
+        _load_pretrained_model_state_dict(model, yolov11_pretrained_weights_path, key_adaptation_fn=_key_adaptation_fn)
     return model

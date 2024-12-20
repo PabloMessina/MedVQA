@@ -43,7 +43,7 @@ from medvqa.metrics.nlp.cider import ConditionAwareCiderD, DatasetAwareCiderD
 from medvqa.metrics.nlp.exact_match import DatasetAwareExactMatch
 from medvqa.metrics.segmentation.segmentation_iou import ConditionAwareSegmaskIOU, ConditionAwareSegmaskIOUperClass
 
-from medvqa.utils.constants import VINBIG_BBOX_NAMES, MetricNames
+from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_NUM_BBOX_CLASSES, MetricNames
 
 def _get_output_transform(*keys, class_indices=None):
     if class_indices is None:
@@ -446,15 +446,19 @@ def attach_dataset_aware_vinbig_bbox_iou(engine, allowed_dataset_ids):
 
 def attach_condition_aware_vinbig_bbox_iou(engine, condition_function, use_yolov8=False, metric_name=None):
     if use_yolov8:
-        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('yolov8_predictions',
-                                                                        'vinbig_bbox_coords',
-                                                                        'vinbig_bbox_classes'),
-                                condition_function=condition_function, use_yolov8=True, for_vinbig=True)
+        met = ConditionAwareBboxIOU(
+            nc=VINBIG_NUM_BBOX_CLASSES,
+            output_transform=_get_output_transform('yolov8_predictions',
+                                                   'vinbig_bbox_coords',
+                                                   'vinbig_bbox_classes'),
+            condition_function=condition_function, use_yolov8=True, for_vinbig=True)
     else:
-        met = ConditionAwareBboxIOU(output_transform=_get_output_transform('predicted_bboxes',
-                                                                        'vinbig_bbox_coords',
-                                                                        'vinbig_bbox_classes'),
-                                condition_function=condition_function, for_vinbig=True)
+        met = ConditionAwareBboxIOU(
+            nc=VINBIG_NUM_BBOX_CLASSES,
+            output_transform=_get_output_transform('predicted_bboxes',
+                                                   'vinbig_bbox_coords',
+                                                   'vinbig_bbox_classes'),
+            condition_function=condition_function, for_vinbig=True)
     if metric_name is None:
         metric_name = MetricNames.VINBIGBBOXIOU
     met.attach(engine, metric_name)

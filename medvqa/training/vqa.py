@@ -443,21 +443,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                         output['yolov11_cls_loss'] = yolov11_loss_items[1]
                         output['yolov11_dfl_loss'] = yolov11_loss_items[2]
                 else:
-                    # normalize yolov8 predictions
                     if using_yolov8:
                         predictions = yolov8_predictions
                     else:
                         predictions = detect_output
-                    resized_shapes = batch['resized_shape']
-                    assert len(resized_shapes) == len(predictions)
-                    if apply_nms: # the following only makes sense if NMS was already applied
-                        for i in range(len(resized_shapes)):
-                            resized_shape = resized_shapes[i]
-                            pred = predictions[i].detach().cpu()
-                            pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                            predictions[i] = pred
-                    else:
-                        output['resized_shape'] = batch['resized_shape']
+                    if not apply_nms:
+                        output['resized_shape'] = batch['resized_shape'] # needed for NMS later
                     if using_yolov8:
                         output['yolov8_predictions'] = predictions
                     else:
@@ -776,21 +767,12 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                     output[MetricNames.VINBIG_YOLOV11_CLS_LOSS] = yolov11_loss_items[1]
                     output[MetricNames.VINBIG_YOLOV11_DFL_LOSS] = yolov11_loss_items[2]
             else:
-                # normalize predictions
                 if using_yolov8:
                     predictions = yolov8_predictions
                 else:
                     predictions = detect_output
-                resized_shapes = batch['resized_shape']
-                assert len(resized_shapes) == len(predictions)
-                if apply_nms: # the following only makes sense if NMS was already applied
-                    for i in range(len(resized_shapes)):
-                        resized_shape = resized_shapes[i]
-                        pred = predictions[i].detach().cpu()
-                        pred[:, :4] /= torch.tensor([resized_shape[1], resized_shape[0], resized_shape[1], resized_shape[0]], dtype=torch.float32)
-                        predictions[i] = pred
-                else:
-                    output['resized_shape'] = resized_shapes # needed for NMS
+                if not apply_nms:
+                    output['resized_shape'] = batch['resized_shape'] # needed for NMS later
                 if using_yolov8:
                     output['yolov8_predictions'] = predictions
                 else:

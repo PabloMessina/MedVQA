@@ -14,14 +14,10 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CXR14_DATASET_ID,
     CHEXPERT_DATASET_ID,
-    IUXRAY_DATASET_ID__CHEXPERT_MODE,
     MIMICCXR_DATASET_ID,
     IUXRAY_DATASET_ID,
-    MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE,
-    MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE,
-    MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
-    PADCHEST_DATASET_ID,    
+    VINBIG_NUM_BBOX_CLASSES,
 )
 from medvqa.utils.logging import print_bold, print_orange, print_red
 
@@ -1084,7 +1080,7 @@ def get_image2report_collate_batch_fn(dataset_id, include_report=True, use_visua
     else: assert False, f'Unknown dataset_id {dataset_id}'
     return collate_batch_fn
 
-def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_yolov8=False):
+def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_yolo=False):
     if flag == 'mimfg': # mimiccxr fact grounding
         def collate_batch_fn(batch):
             # We expect:
@@ -1093,7 +1089,7 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             # - 'pw': phrase weights (for classification, optional)
             # - 'l': labels
             batch_dict = dict(flag=flag)
-            if use_yolov8:
+            if use_yolo:
                 batch_dict['img'] = torch.stack([x['i'] for x in batch])
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -1109,7 +1105,7 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             # - 'pe': phrase embeddings
             # - 'l': labels
             batch_dict = dict(flag=flag)
-            if use_yolov8:
+            if use_yolo:
                 batch_dict['img'] = torch.stack([x['i'] for x in batch])
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -1123,7 +1119,7 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             # - 'pe': phrase embeddings
             # - 'pgm': phrase grounding masks
             batch_dict = dict(flag=flag)
-            if use_yolov8:
+            if use_yolo:
                 batch_dict['img'] = torch.stack([x['i'] for x in batch])
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
@@ -1184,7 +1180,16 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
                              do_visual_grounding_with_segmentation=False):
             # We expect:
             # if visual grounding with bbox regression:
-            #   if training_mode:
+            #   if use_yolo:
+            #     - 'i': images
+            #     - 'pe': phrase embeddings
+            #     - 'pcl': phrase classification labels
+            #     - 'im_file': image file
+            #     - 'ori_shape': original image shape
+            #     - 'resized_shape': resized image shape
+            #     - 'bboxes': bounding boxes coordinates
+            #     - 'classes': bounding boxes classes
+            #   elif training_mode:
             #     - 'i': images
             #     - 'pe': phrase embeddings
             #     - 'pcl': phrase classification labels
@@ -1207,18 +1212,56 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             #   - 'pcl': phrase classification labels
             batch_dict = dict(flag=flag)
             if do_visual_grounding_with_bbox_regression:
-                if training_mode:
+                if use_yolo:
                     batch_dict['i'] = torch.stack([x['i'] for x in batch])
                     batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
                     batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
-                    batch_dict['btc'] = torch.stack([x['btc'] for x in batch])
-                    batch_dict['btp'] = torch.stack([x['btp'] for x in batch])
+                    # ---- YOLO specific stuff ----
+                    # NOTE: when doing phrase grounding with YOLO, each phrase corresponds to a single class.
+                    # Therefore, we need to simulate a single-class detection problem even though VinDr-CXR has
+                    # 22 classes. We can simulate this by treating each phrase as a separate instance, which means
+                    # that the batch size will be multiplied by the number of phrases in the batch (i.e., x 22)
+                    if training_mode:
+                        batch_size = len(batch)
+                        batch_dict['im_file'] = [batch[i]['im_file'] for i in range(batch_size) for _ in range(VINBIG_NUM_BBOX_CLASSES)]
+                        batch_dict['ori_shape'] = [batch[i]['ori_shape'] for i in range(batch_size) for _ in range(VINBIG_NUM_BBOX_CLASSES)]
+                        batch_dict['resized_shape'] = [batch[i]['resized_shape'] for i in range(batch_size) for _ in range(VINBIG_NUM_BBOX_CLASSES)]
+                        bboxes_list, cls_list, batch_idx_list = [], [], []
+                        for i in range(batch_size):
+                            bboxes = batch[i]['bboxes']
+                            classes = batch[i]['classes']
+                            for bbox, cls in zip(bboxes, classes):
+                                # convert bbox from xyxy to x_c, y_c, w, h
+                                bboxes_list.append(torch.tensor([
+                                    (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2, bbox[2] - bbox[0], bbox[3] - bbox[1],
+                                ]))
+                                # cls_list.append(cls)
+                                # batch_idx_list.append(i)
+                                cls_list.append(0) # treat each phrase as a separate instance
+                                batch_idx_list.append(i * VINBIG_NUM_BBOX_CLASSES + cls) # treat each phrase as a separate instance
+                        batch_dict['bboxes'] = torch.stack(bboxes_list) if len(bboxes_list) > 0 else torch.zeros((0, 4))
+                        assert batch_dict['bboxes'].shape == (len(bboxes_list), 4)
+                        batch_dict['cls'] = torch.tensor(cls_list)
+                        batch_dict['cls'] = batch_dict['cls'].view(-1, 1)
+                        assert batch_dict['cls'].shape == (len(cls_list), 1)
+                        batch_dict['batch_idx'] = torch.tensor(batch_idx_list)
+                    else:
+                        batch_dict['resized_shape'] = [x['resized_shape'] for x in batch]
+                        batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+                        batch_dict['classes'] = [x['classes'] for x in batch]
                 else:
-                    batch_dict['i'] = torch.stack([x['i'] for x in batch])
-                    batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
-                    batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
-                    batch_dict['bboxes'] = [x['bboxes'] for x in batch]
-                    batch_dict['classes'] = [x['classes'] for x in batch]
+                    if training_mode:
+                        batch_dict['i'] = torch.stack([x['i'] for x in batch])
+                        batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+                        batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+                        batch_dict['btc'] = torch.stack([x['btc'] for x in batch])
+                        batch_dict['btp'] = torch.stack([x['btp'] for x in batch])
+                    else:
+                        batch_dict['i'] = torch.stack([x['i'] for x in batch])
+                        batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+                        batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+                        batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+                        batch_dict['classes'] = [x['classes'] for x in batch]
             elif do_visual_grounding_with_segmentation:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
                 batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))

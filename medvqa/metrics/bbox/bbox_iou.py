@@ -77,10 +77,11 @@ class DatasetAwareBboxIOU(DatasetAwareMetric):
 
 class ConditionAwareBboxIOU(ConditionAwareMetric):
 
-    def __init__(self, output_transform, condition_function=lambda _: True, use_yolov8=False, for_vinbig=False, class_mask=None):
+    def __init__(self, nc, output_transform, condition_function=lambda _: True, use_yolov8=False, for_vinbig=False, class_mask=None):
         super().__init__(output_transform, condition_function)
         self._acc_score = 0
         self._count = 0
+        self.nc = nc
         self._use_yolov8 = use_yolov8
         self._for_vinbig = for_vinbig
         self._class_mask = class_mask
@@ -93,42 +94,45 @@ class ConditionAwareBboxIOU(ConditionAwareMetric):
         if self._for_vinbig:
             if self._use_yolov8:
                 yolov8_predictions, gt_coords, gt_classes = output
-                n = len(gt_classes)
-                for i in range(n):
+                bs = len(gt_classes) # Batch size
+                for i in range(bs): # For each image in the batch
+                    # Group ground truth coordinates by class
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls, box in zip(gt_classes[i], gt_coords[i]):
+                        gt_coords_per_class[cls].append(box)
+                    # Group predictions by class
+                    pred_coords_per_class = [[] for _ in range(self.nc)]
                     for j in range(len(yolov8_predictions[i])):
                         cls = yolov8_predictions[i][j, 5].int().item()
-                        max_iou = 0
-                        for k in range(len(gt_coords[i])):
-                            if gt_classes[i][k] == cls:
-                                iou = compute_iou(yolov8_predictions[i][j, :4], gt_coords[i][k])
-                                if iou > max_iou:
-                                    max_iou = iou
-                        self._acc_score += max_iou
-                        self._count += 1
+                        box = yolov8_predictions[i][j, :4]
+                        pred_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
+                        if len(gt_coords_per_class[cls]) > 0:
+                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            self._acc_score += iou
+                            self._count += 1
             else:
                 predicted_bboxes, gt_coords, gt_classes = output
                 bs = len(gt_classes) # Batch size
-                assert bs > 0, f'bs={bs}'
-                assert len(predicted_bboxes) == bs, f'len(predicted_bboxes)={len(predicted_bboxes)}, bs={bs}'
-                assert len(gt_coords) == bs, f'len(gt_coords)={len(gt_coords)}, bs={bs}'
-                for i in range(bs):
+                for i in range(bs): # For each image in the batch
                     # Group ground truth coordinates by class
-                    coords_per_class = [[] for _ in range(len(predicted_bboxes[i]))]
-                    for cls, coord in zip(gt_classes[i], gt_coords[i]):
-                        coords_per_class[cls].append(coord)
-
-                    for cls in range(len(predicted_bboxes[i])): # For each class
-                        if self._class_mask is not None and self._class_mask[cls] == 0:
-                            continue # Skip if class is masked
-                        if len(coords_per_class[cls]) > 0:
-                            if predicted_bboxes[i][cls] is None:
-                                iou = 0
-                            else:
-                                iou = calculate_exact_iou_union(predicted_bboxes[i][cls][0], coords_per_class[cls])
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls, box in zip(gt_classes[i], gt_coords[i]):
+                        gt_coords_per_class[cls].append(box)
+                    # Group predictions by class
+                    pred_coords_per_class = [[] for _ in range(self.nc)]
+                    coords = predicted_bboxes[i][0].detach()
+                    classes = predicted_bboxes[i][2].detach()
+                    for j in range(len(coords)):
+                        cls = classes[j].item()
+                        box = coords[j]
+                        pred_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
+                        if len(gt_coords_per_class[cls]) > 0:
+                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score += iou
-                            self._count += 1
-                        elif predicted_bboxes[i][cls] is not None:
-                            self._acc_score += 0
                             self._count += 1
         else:
             if self._use_yolov8:
@@ -177,12 +181,14 @@ class ConditionAwareBboxIOU(ConditionAwareMetric):
 
 class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
 
-    def __init__(self, nc, output_transform, condition_function=lambda _: True, use_yolov8=False, for_vinbig=False, class_mask=None):
+    def __init__(self, nc, output_transform, condition_function=lambda _: True,
+                 use_yolov8=False, use_fact_conditioned_yolo=False, for_vinbig=False, class_mask=None):
         super().__init__(output_transform, condition_function)
         self._acc_score = [0] * nc
         self._count = [0] * nc
         self.nc = nc
         self._use_yolov8 = use_yolov8
+        self._use_fact_conditioned_yolo = use_fact_conditioned_yolo
         self._for_vinbig = for_vinbig
         self._class_mask = class_mask
 
@@ -194,8 +200,8 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
         if self._for_vinbig:
             if self._use_yolov8:
                 yolov8_predictions, gt_coords, gt_classes = output
-                n = len(gt_classes)
-                for i in range(n): # For each image in the batch
+                bs = len(gt_classes) # Batch size
+                for i in range(bs): # For each image in the batch
                     # Group ground truth coordinates by class
                     gt_coords_per_class = [[] for _ in range(self.nc)]
                     for cls, box in zip(gt_classes[i], gt_coords[i]):
@@ -212,31 +218,45 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                             iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
-            else:
-                raise NotImplementedError('TODO: Implement self._use_yolov8=False')
-                predicted_bboxes, gt_coords, gt_classes = output
+            elif self._use_fact_conditioned_yolo:
+                yolo_predictions, gt_coords, gt_classes = output
+                assert isinstance(yolo_predictions, list)
                 bs = len(gt_classes) # Batch size
-                assert bs > 0, f'bs={bs}'
-                assert len(predicted_bboxes) == bs, f'len(predicted_bboxes)={len(predicted_bboxes)}, bs={bs}'
-                assert len(gt_coords) == bs, f'len(gt_coords)={len(gt_coords)}, bs={bs}'
-                for i in range(bs):
+                for i in range(bs): # For each image in the batch
+                    assert isinstance(yolo_predictions[i], list)
+                    assert len(yolo_predictions[i]) == self.nc, f'len(yolo_predictions[i])={len(yolo_predictions[i])}, self.nc={self.nc}' # One prediction per class
                     # Group ground truth coordinates by class
-                    coords_per_class = [[] for _ in range(len(predicted_bboxes[i]))]
-                    for cls, coord in zip(gt_classes[i], gt_coords[i]):
-                        coords_per_class[cls].append(coord)
-
-                    for cls in range(len(predicted_bboxes[i])): # For each class
-                        if self._class_mask is not None and self._class_mask[cls] == 0:
-                            continue # Skip if class is masked
-                        if len(coords_per_class[cls]) > 0:
-                            if predicted_bboxes[i][cls] is None:
-                                iou = 0
-                            else:
-                                iou = calculate_exact_iou_union(predicted_bboxes[i][cls][0], coords_per_class[cls])
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls, box in zip(gt_classes[i], gt_coords[i]):
+                        gt_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
+                        if len(gt_coords_per_class[cls]) > 0:
+                            pred_coords = yolo_predictions[i][cls][:, :4] # Extract coordinates
+                            iou = calculate_exact_iou_union(pred_coords, gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
-                        elif predicted_bboxes[i][cls] is not None:
-                            # self._acc_score[cls] += 0
+            else:
+                predicted_bboxes, gt_coords, gt_classes = output
+                bs = len(gt_classes) # Batch size
+                for i in range(bs): # For each image in the batch
+                    # Group ground truth coordinates by class
+                    gt_coords_per_class = [[] for _ in range(self.nc)]
+                    for cls, box in zip(gt_classes[i], gt_coords[i]):
+                        gt_coords_per_class[cls].append(box)
+                    # Group predictions by class
+                    pred_coords_per_class = [[] for _ in range(self.nc)]
+                    coords = predicted_bboxes[i][0].detach()
+                    classes = predicted_bboxes[i][2].detach()
+                    for j in range(len(coords)):
+                        cls = classes[j].item()
+                        box = coords[j]
+                        pred_coords_per_class[cls].append(box)
+                    # Compute IOU for each class present in the image
+                    for cls in range(self.nc):
+                        if len(gt_coords_per_class[cls]) > 0:
+                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            self._acc_score[cls] += iou
                             self._count[cls] += 1
         else:
             if self._use_yolov8:

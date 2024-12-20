@@ -10,6 +10,7 @@ from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXloc
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
 from medvqa.metrics.bbox.utils import calculate_exact_iou_union, compute_mAP__yolov11, compute_mean_iou_per_class__yolov11, find_optimal_conf_iou_thresholds
 from medvqa.metrics.classification.prc_auc import prc_auc_fn
+from medvqa.models.vision.visual_modules import RawImageEncoding
 from medvqa.utils.files import get_results_folder_path, save_pickle
 from medvqa.utils.handlers import (
     attach_accumulator,
@@ -69,18 +70,17 @@ def parse_args(args=None):
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
+    parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
 
     # Evaluation arguments
     parser.add_argument('--eval_chest_imagenome_gold', action='store_true')
     parser.add_argument('--eval_mscxr', action='store_true')
     parser.add_argument('--eval_chexlocalize', action='store_true')
     parser.add_argument('--eval_vinbig', action='store_true')
-    parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
     parser.add_argument('--optimize_thresholds', action='store_true')
     parser.add_argument('--candidate_iou_thresholds', type=float, nargs='+', default=None)
     parser.add_argument('--candidate_conf_thresholds', type=float, nargs='+', default=None)
-    parser.add_argument('--map_iou_thresholds', type=float, nargs='+', default=[0., 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5])
-    parser.add_argument('--max_det', type=int, default=50)
+    parser.add_argument('--map_iou_thresholds', type=float, nargs='+', default=[0., 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
     parser.add_argument('--use_classifier_confs_for_map', action='store_true', help='Use classifier confidences for mAP computation')
 
@@ -111,7 +111,6 @@ def _evaluate_model(
     candidate_iou_thresholds,
     candidate_conf_thresholds,
     map_iou_thresholds,
-    max_det,
     use_amp,
     use_classifier_confs_for_map,
 ):
@@ -119,6 +118,7 @@ def _evaluate_model(
     
     # Pull out some args from kwargs
     use_yolov8 = (mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_yolov8', False))
+    use_fact_conditioned_yolo = model_kwargs['raw_image_encoding'] == RawImageEncoding.YOLOV11_FACT_CONDITIONED
     do_visual_grounding_with_bbox_regression = evaluation_engine_kwargs.get('do_visual_grounding_with_bbox_regression', False)
     do_visual_grounding_with_segmentation = evaluation_engine_kwargs.get('do_visual_grounding_with_segmentation', False)
     print(f'do_visual_grounding_with_bbox_regression = {do_visual_grounding_with_bbox_regression}')
@@ -551,13 +551,19 @@ def _evaluate_model(
         # Attach metrics
         metrics_to_print = []
         _cond_func = lambda x: x['flag'] == 'vbg'
-        # if do_visual_grounding_with_bbox_regression:
-        #     if not optimize_thresholds:
-        #         attach_condition_aware_bbox_iou_per_class(evaluation_engine,
-        #                                                 field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-        #                                                 metric_name='bbox_iou', nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func,
-        #                                                 for_vinbig=True)
-        #         metrics_to_print.append('bbox_iou')
+        if do_visual_grounding_with_bbox_regression:
+            if not optimize_thresholds:
+                if use_fact_conditioned_yolo:
+                    attach_condition_aware_bbox_iou_per_class(evaluation_engine,
+                                                        field_names=['yolo_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
+                                                        metric_name='bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        for_vinbig=True, use_fact_conditioned_yolo=True)
+                else:
+                    attach_condition_aware_bbox_iou_per_class(evaluation_engine,
+                                                            field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
+                                                            metric_name='bbox_iou', nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func,
+                                                            for_vinbig=True)
+                metrics_to_print.append('bbox_iou')
         if do_visual_grounding_with_segmentation:
             attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
                                                         nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func)
@@ -567,11 +573,18 @@ def _evaluate_model(
         attach_accumulator(evaluation_engine, 'pred_probs')
         attach_accumulator(evaluation_engine, 'gt_labels')
         if do_visual_grounding_with_bbox_regression:
-            if optimize_thresholds:
-                attach_accumulator(evaluation_engine, 'pred_bbox_probs')
-                attach_accumulator(evaluation_engine, 'pred_bbox_coords')
+            if use_fact_conditioned_yolo:
+                if optimize_thresholds:
+                    attach_accumulator(evaluation_engine, 'yolo_predictions', append_instead_of_extend=True)
+                    attach_accumulator(evaluation_engine, 'resized_shape', append_instead_of_extend=True)
+                else:
+                    attach_accumulator(evaluation_engine, 'yolo_predictions')
             else:
-                attach_accumulator(evaluation_engine, 'predicted_bboxes')
+                if optimize_thresholds:
+                    attach_accumulator(evaluation_engine, 'pred_bbox_probs')
+                    attach_accumulator(evaluation_engine, 'pred_bbox_coords')
+                else:
+                    attach_accumulator(evaluation_engine, 'predicted_bboxes')
             attach_accumulator(evaluation_engine, 'vinbig_bbox_coords')
             attach_accumulator(evaluation_engine, 'vinbig_bbox_classes')
         elif do_visual_grounding_with_segmentation:
@@ -598,15 +611,15 @@ def _evaluate_model(
         # Print final metrics
         print_blue('Final metrics:', bold=True)
         metrics = evaluation_engine.state.metrics
-        # # 1) bbox iou
-        # if do_visual_grounding_with_bbox_regression:
-        #     if not optimize_thresholds:
-        #         metric_name = 'bbox_iou'
-        #         print(f'{metric_name}: {metrics[metric_name]}')
+        # 1) bbox iou
+        if do_visual_grounding_with_bbox_regression:
+            if not optimize_thresholds:
+                metric_name = 'bbox_iou'
+                print(f'{metric_name}: {metrics[metric_name]}')
         # 1) segmask iou
         if do_visual_grounding_with_segmentation:
             metric_name = 'segmask_iou'
-            print(f'{metric_name}: {metrics[metric_name]}')        
+            print(f'{metric_name}: {metrics[metric_name]}')
         # 2) PRC-AUC
         dataset = vinbig_trainer.val_dataset
         phrases = vinbig_trainer.phrases
@@ -656,25 +669,36 @@ def _evaluate_model(
             if optimize_thresholds:
                 assert candidate_iou_thresholds is not None
                 assert candidate_conf_thresholds is not None
-                assert max_det is not None
-                pred_bbox_probs = metrics['pred_bbox_probs']
-                pred_bbox_coords = metrics['pred_bbox_coords']
-                num_regions = pred_bbox_probs[0].shape[1]
                 num_classes = VINBIG_NUM_BBOX_CLASSES
-                assert pred_bbox_probs[0].ndim == 3 # (num_classes, num_regions, 1)
-                assert pred_bbox_coords[0].ndim == 3 # (num_classes, num_regions, 4)
-                assert pred_bbox_probs[0].shape == (num_classes, num_regions, 1)
-                assert pred_bbox_coords[0].shape == (num_classes, num_regions, 4)
-                out = find_optimal_conf_iou_thresholds(
-                    gt_coords_list=gt_coords_list,
-                    pred_boxes_list=pred_bbox_coords,
-                    pred_confs_list=pred_bbox_probs,
-                    iou_thresholds=candidate_iou_thresholds,
-                    conf_thresholds=candidate_conf_thresholds,
-                    classifier_confs=classifier_confs,
-                    max_det=max_det,
-                    verbose=True,
-                )
+                if use_fact_conditioned_yolo:
+                    out = find_optimal_conf_iou_thresholds(
+                        gt_coords_list=gt_coords_list,
+                        yolo_predictions_list=metrics['yolo_predictions'],
+                        resized_shape_list=metrics['resized_shape'],
+                        is_fact_conditioned_yolo=True,
+                        iou_thresholds=candidate_iou_thresholds,
+                        conf_thresholds=candidate_conf_thresholds,
+                        classifier_confs=classifier_confs,
+                        num_classes=num_classes,
+                        verbose=True,
+                    )
+                else:
+                    pred_bbox_probs = metrics['pred_bbox_probs']
+                    pred_bbox_coords = metrics['pred_bbox_coords']
+                    num_regions = pred_bbox_probs[0].shape[1]
+                    assert pred_bbox_probs[0].ndim == 3 # (num_classes, num_regions, 1)
+                    assert pred_bbox_coords[0].ndim == 3 # (num_classes, num_regions, 4)
+                    assert pred_bbox_probs[0].shape == (num_classes, num_regions, 1)
+                    assert pred_bbox_coords[0].shape == (num_classes, num_regions, 4)
+                    out = find_optimal_conf_iou_thresholds(
+                        gt_coords_list=gt_coords_list,
+                        pred_boxes_list=pred_bbox_coords,
+                        pred_confs_list=pred_bbox_probs,
+                        iou_thresholds=candidate_iou_thresholds,
+                        conf_thresholds=candidate_conf_thresholds,
+                        classifier_confs=classifier_confs,
+                        verbose=True,
+                    )
                 best_iou_threshold = out['best_iou_threshold']
                 best_conf_threshold = out['best_conf_threshold']
                 pred_boxes_list = out['pred_boxes_list']
@@ -682,25 +706,36 @@ def _evaluate_model(
                 pred_confs_list = out['pred_confs_list']
 
             else:
-                pred_bboxes = metrics['predicted_bboxes']
-                assert len(image_paths) == len(pred_bboxes)
-                pred_boxes_list = []
-                pred_classes_list = []
-                pred_confs_list = []
-                _empty_boxes = np.empty((0, 4))
-                _empty_confs = np.empty((0,))
-                for preds in pred_bboxes:
-                    boxes = []
-                    confs = []
-                    classes = []
-                    for i, pred in enumerate(preds):
-                        if pred is not None:
-                            boxes.append(pred[0].cpu().numpy())
-                            classes.extend([i] * len(pred[0]))
-                            confs.append(pred[1].cpu().numpy())
-                    pred_boxes_list.append(np.concatenate(boxes) if len(boxes) > 0 else _empty_boxes)
-                    pred_confs_list.append(np.concatenate(confs) if len(confs) > 0 else _empty_confs)
-                    pred_classes_list.append(np.array(classes, dtype=np.int64))
+                if use_fact_conditioned_yolo:
+                    pred_bboxes = metrics['yolo_predictions']
+                    assert len(image_paths) == len(pred_bboxes)
+                    pred_boxes_list = []
+                    pred_confs_list = []
+                    pred_classes_list = []
+                    for preds in pred_bboxes:
+                        assert len(preds) == VINBIG_NUM_BBOX_CLASSES
+                        boxes = []
+                        confs = []
+                        classes = []
+                        for i, pred in enumerate(preds):
+                            pred = pred.cpu().numpy()
+                            boxes.append(pred[:, :4])
+                            confs.append(pred[:, 4])
+                            classes.append(np.full((len(pred),), i))
+                        pred_boxes_list.append(np.concatenate(boxes, axis=0))
+                        pred_confs_list.append(np.concatenate(confs, axis=0))
+                        pred_classes_list.append(np.concatenate(classes, axis=0))
+                else:
+                    pred_bboxes = metrics['predicted_bboxes']
+                    assert len(image_paths) == len(pred_bboxes)
+                    pred_boxes_list = []
+                    pred_confs_list = []
+                    pred_classes_list = []
+                    for preds in pred_bboxes:
+                        assert len(preds) == 3 # (boxes, confs, classes)
+                        pred_boxes_list.append(preds[0].cpu().numpy())
+                        pred_confs_list.append(preds[1].cpu().numpy())
+                        pred_classes_list.append(preds[2].cpu().numpy())
 
             # Compute metrics
             tmp = compute_mean_iou_per_class__yolov11(
@@ -731,17 +766,23 @@ def _evaluate_model(
             print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
             print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
 
-            map_per_class = compute_mAP__yolov11(
+            tmp = compute_mAP__yolov11(
                 pred_boxes=pred_boxes_list,
                 pred_classes=pred_classes_list,
                 pred_confs=pred_confs_list,
                 classifier_confs=classifier_confs,
                 gt_coords=gt_coords_list,
                 iou_thresholds=map_iou_thresholds,
+                compute_micro_average=True,
             )
+            class_aps = tmp['class_aps']
+            micro_aps = tmp['micro_aps']
             
-            for iou_thresh, map_ in zip(map_iou_thresholds, map_per_class.mean(axis=1)):
+            for iou_thresh, map_ in zip(map_iou_thresholds, class_aps.mean(axis=1)):
                 print_magenta(f'mAP@{iou_thresh}: {map_}', bold=True)
+
+            for iou_thresh, ap in zip(map_iou_thresholds, micro_aps):
+                print_magenta(f'micro_AP@{iou_thresh}: {ap}', bold=True)
             
             print_blue('Saving metrics to file ...', bold=True)
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
@@ -750,7 +791,7 @@ def _evaluate_model(
                 f'{len(vinbig_trainer.val_dataset)}',
             ]
             if optimize_thresholds:
-                strings.append(f'opt_thr({best_iou_threshold:.2f},{best_conf_threshold:.2f},{max_det})')
+                strings.append(f'opt_thr({best_iou_threshold:.2f},{best_conf_threshold:.2f})')
             if use_classifier_confs_for_map:
                 strings.append('use_classifier_confs')
             save_path = os.path.join(results_folder_path, f'vindrcxr_metrics({",".join(strings)}).pkl')
@@ -766,13 +807,13 @@ def _evaluate_model(
                 micro_iou=micro_iou,
                 macro_iou=mean_iou,
                 map_iou_thresholds=map_iou_thresholds,
-                map_per_class=map_per_class,
+                class_aps=class_aps,
+                micro_aps=micro_aps,
                 prc_auc=prc_auc_metrics,
             )
             if optimize_thresholds:
                 output['best_iou_threshold'] = best_iou_threshold
                 output['best_conf_threshold'] = best_conf_threshold
-                output['max_det'] = max_det
 
         elif do_visual_grounding_with_segmentation:
             gt_masks = metrics['gt_mask']
@@ -829,7 +870,6 @@ def evaluate(
     candidate_iou_thresholds,
     candidate_conf_thresholds,
     map_iou_thresholds,
-    max_det,
     use_amp,
     use_classifier_confs_for_map,
 ):
@@ -878,7 +918,6 @@ def evaluate(
                 candidate_iou_thresholds=candidate_iou_thresholds,
                 candidate_conf_thresholds=candidate_conf_thresholds,
                 map_iou_thresholds=map_iou_thresholds,
-                max_det=max_det,
                 use_amp=use_amp,
                 use_classifier_confs_for_map=use_classifier_confs_for_map,
             )
