@@ -999,4 +999,5 @@ if __name__ == '__main__':
         use_batch_api=args.use_batch_api,
         batch_description=args.batch_description,
         batch_input_file_id=args.batch_input_file_id,
+        delete_api_requests_and_responses=not args.not_delete_api_requests_and_responses,
     )

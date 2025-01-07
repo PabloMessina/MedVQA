@@ -57,6 +57,7 @@ class Seq2SeqTaskNames:
     SENTENCE_TO_FACTS = 'sentence2facts'
     BACKGROUND_TO_FACTS = 'background2facts'
     FACT_TO_METADATA = 'fact2metadata'
+    FACT_TO_METADATA_V2 = 'fact2metadata_v2'
     FACT_TO_COMPARISON = 'fact2comparison'
     SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS = 'sentence2chestimagenome_observations'
     SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS = 'sentence2chestimagenome_anatomical_locations'
@@ -71,6 +72,7 @@ class Seq2SeqTaskNames:
             Seq2SeqTaskNames.SENTENCE_TO_FACTS,
             Seq2SeqTaskNames.BACKGROUND_TO_FACTS,
             Seq2SeqTaskNames.FACT_TO_METADATA,
+            Seq2SeqTaskNames.FACT_TO_METADATA_V2,
             Seq2SeqTaskNames.FACT_TO_COMPARISON,
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS,
             Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS,
@@ -85,6 +87,7 @@ Task2Prefix = {
     Seq2SeqTaskNames.SENTENCE_TO_FACTS: 'S2F',
     Seq2SeqTaskNames.BACKGROUND_TO_FACTS: 'B2F',
     Seq2SeqTaskNames.FACT_TO_METADATA: 'F2M',
+    Seq2SeqTaskNames.FACT_TO_METADATA_V2: 'F2MV2',
     Seq2SeqTaskNames.FACT_TO_COMPARISON: 'F2C',
     Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_OBSERVATIONS: 'S2CO',
     Seq2SeqTaskNames.SENTENCE_TO_CHEST_IMAGENOME_ANATOMICAL_LOCATIONS: 'S2CA',
@@ -442,6 +445,36 @@ def _prepare_fact_to_metadata_data(input_output_jsonl_filepaths, apply_task_pref
                 if al: medical_sentences.add(al)
                 if do: medical_sentences.add(do)
                 if so: medical_sentences.add(so)
+                
+    if apply_task_prefix:
+        input_texts = [f'F2M: {x}' for x in input_texts]
+    if verbose:
+        # Print random example
+        print_bold('Input/output example:')
+        _print_random_input_output_pair(input_texts, output_texts)
+    return input_texts, output_texts
+
+def _prepare_fact_to_metadata_v2_data(input_output_jsonl_filepaths, apply_task_prefix=False, medical_sentences=None, verbose=True):
+    assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
+    input_texts = []
+    output_texts = []
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in input_output_jsonl:
+            fact = input_output['metadata']['query']
+            metadata = input_output['parsed_response']
+            input_text = fact
+            output_text = json.dumps(metadata)
+            input_texts.append(input_text)
+            output_texts.append(output_text)
+            if medical_sentences is not None:
+                medical_sentences.add(input_text)
+                al = metadata['anatomical_location']
+                go = metadata['general_observation']
+                if al: medical_sentences.add(al)
+                if go: medical_sentences.add(go)
                 
     if apply_task_prefix:
         input_texts = [f'F2M: {x}' for x in input_texts]
@@ -2125,6 +2158,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         sentence_to_facts_input_output_jsonl_filepaths=None,
                                         background_to_facts_input_output_jsonl_filepaths=None,
                                         fact_to_metadata_input_output_jsonl_filepaths=None,
+                                        fact_to_metadata_v2_input_output_jsonl_filepaths=None,
                                         integrated_facts_metadata_jsonl_filepath=None,
                                         paraphrased_inputs_jsonl_filepaths=None,
                                         chest_imagenome_phrases2labels_filepath=None,
@@ -2186,6 +2220,10 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
     elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA:
         input_texts, output_texts = _prepare_fact_to_metadata_data(fact_to_metadata_input_output_jsonl_filepaths)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+
+    elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA_V2:
+        input_texts, output_texts = _prepare_fact_to_metadata_v2_data(fact_to_metadata_v2_input_output_jsonl_filepaths)
         train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
     
     elif task_name == Seq2SeqTaskNames.REPORT_TO_SENTENCES:
@@ -2291,6 +2329,12 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
             elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA:
                 input_texts, output_texts = _prepare_fact_to_metadata_data(fact_to_metadata_input_output_jsonl_filepaths,
+                                                                            apply_task_prefix=True, medical_sentences=medical_sentences)
+                train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                             include_val=include_val)
+                
+            elif task_name == Seq2SeqTaskNames.FACT_TO_METADATA_V2:
+                input_texts, output_texts = _prepare_fact_to_metadata_v2_data(fact_to_metadata_v2_input_output_jsonl_filepaths,
                                                                             apply_task_prefix=True, medical_sentences=medical_sentences)
                 train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
                                                                              include_val=include_val)
@@ -2427,6 +2471,7 @@ class Seq2SeqTrainer():
                  chest_imagenome_phrases2labels_filepath=None,
                  sentence_to_facts_input_output_jsonl_filepaths=None,
                  fact_to_metadata_input_output_jsonl_filepaths=None,
+                 fact_to_metadata_v2_input_output_jsonl_filepaths=None,
                  fact_to_comparison_input_output_jsonl_filepaths=None,
                  chest_imagenome_obs_input_output_jsonl_filepaths=None,
                  chest_imagenome_anatloc_input_output_jsonl_filepaths=None,
@@ -2469,6 +2514,7 @@ class Seq2SeqTrainer():
             chest_imagenome_phrases2labels_filepath=chest_imagenome_phrases2labels_filepath,
             sentence_to_facts_input_output_jsonl_filepaths=sentence_to_facts_input_output_jsonl_filepaths,
             fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
+            fact_to_metadata_v2_input_output_jsonl_filepaths=fact_to_metadata_v2_input_output_jsonl_filepaths,
             fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
             chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
             chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,

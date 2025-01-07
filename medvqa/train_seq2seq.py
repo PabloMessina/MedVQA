@@ -9,7 +9,7 @@ from ignite.handlers.timing import Timer
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import Seq2SeqTaskNames, Seq2SeqTrainer
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
-from medvqa.models.common import load_model_state_dict
+from medvqa.models.checkpoint import load_model_state_dict
 from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
 
 from medvqa.training.utils import append_metric_name
@@ -97,6 +97,7 @@ def parse_args(args=None):
                         help='Path to pickle file with chest imagenome phrases to labels mapping')
     parser.add_argument('--sentence_to_facts_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--fact_to_metadata_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--fact_to_metadata_v2_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--fact_to_comparison_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_obs_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--chest_imagenome_anatloc_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
@@ -349,6 +350,7 @@ def train_from_scratch(
     chest_imagenome_phrases2labels_filepath,
     sentence_to_facts_input_output_jsonl_filepaths,
     fact_to_metadata_input_output_jsonl_filepaths,
+    fact_to_metadata_v2_input_output_jsonl_filepaths,
     fact_to_comparison_input_output_jsonl_filepaths,
     chest_imagenome_obs_input_output_jsonl_filepaths,
     chest_imagenome_anatloc_input_output_jsonl_filepaths,
@@ -442,6 +444,7 @@ def train_from_scratch(
         sentence_to_facts_input_output_jsonl_filepaths=sentence_to_facts_input_output_jsonl_filepaths,
         fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
         fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
+        fact_to_metadata_v2_input_output_jsonl_filepaths=fact_to_metadata_v2_input_output_jsonl_filepaths,
         chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
         chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,

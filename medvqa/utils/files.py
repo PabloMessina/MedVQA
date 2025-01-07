@@ -228,3 +228,16 @@ def print_file_size(filepath):
     size_mb = size_kb / 1024
     size_gb = size_mb / 1024
     print(f'File size: {size} bytes ({size_kb:.2f} KB, {size_mb:.2f} MB, {size_gb:.2f} GB)')
+
+def load_regex_from_files(txt_filepaths):
+    if type(txt_filepaths) == str:
+        txt_filepaths = [txt_filepaths]
+    import re
+    pattern = ''
+    for txt_filepath in txt_filepaths:
+        with open(txt_filepath, 'r') as f:
+            for line in f.readlines():
+                if len(pattern) > 0:
+                    pattern += '|'
+                pattern += f'({line.strip()})'
+    return re.compile(pattern, re.IGNORECASE)

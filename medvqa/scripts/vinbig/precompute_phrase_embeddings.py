@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, required=True, choices=SupportedHuggingfaceMedicalBERTModels.get_all())
     parser.add_argument('--model_checkpoint_folder_path', type=str, required=True)
-    parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU'])
+    parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--average_top_k_most_similar', action='store_true')
     parser.add_argument('--top_k', type=int, default=10)
     parser.add_argument('--integrated_fact_metadata_filepath', type=str, default=None)

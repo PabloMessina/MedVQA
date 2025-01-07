@@ -209,7 +209,7 @@ def get_original_image_path(image_id):
 def get_medium_size_image_path(image_id):
     return os.path.join(VINBIG_512x512_IMAGES_FOLDER, f'{image_id}.jpg')
 
-def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), verbose=False):
+def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), denormalize=False, verbose=False):
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     from PIL import Image
@@ -219,6 +219,8 @@ def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), v
     image = Image.open(image_path)
     image = image.convert('RGB')
     ax.imshow(image)
+    if denormalize:
+        w, h = get_image_size(image_path)
     class_names = list(bbox_dict.keys())
     class_names.sort()
     for i, class_name in enumerate(class_names):
@@ -227,6 +229,8 @@ def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), v
             print(f'{i}: {class_name}')
             print(bbox_list)
         for bbox in bbox_list:
+            if denormalize:
+                bbox = [bbox[0] * w, bbox[1] * h, bbox[2] * w, bbox[3] * h]
             rect = patches.Rectangle(
                 (bbox[0], bbox[1]), bbox[2] - bbox[0], bbox[3] - bbox[1],
                 linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none'

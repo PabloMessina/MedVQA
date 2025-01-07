@@ -12,7 +12,7 @@ def compute_bbox_loss(pred_bbox_logits, gt_bbox_coords, gt_bbox_presence):
 
     total_presence = torch.sum(gt_bbox_presence)
     if total_presence == 0:
-        return 0 # no bbox present in any image
+        return torch.tensor(0.0, device=pred_bbox_logits.device) # no bbox present in any image
 
     # L1 loss for bbox coordinates
     bbox_loss = torch.nn.functional.l1_loss(pred_bbox_logits, gt_bbox_coords, reduction='none')

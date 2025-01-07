@@ -131,19 +131,10 @@ class ReportFactsDisplayer:
                     facts.append(f)
                     break
         return facts
-    
-def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_filepaths, extraction_methods,
-                                remove_consecutive_repeated_words=True):
 
-    assert type(preprocessed_reports_filepath) == str
-    assert type(extracted_facts_filepaths) == list
-    assert len(extracted_facts_filepaths) > 0
-    assert all(type(fp) == str for fp in extracted_facts_filepaths)
-    assert len(extracted_facts_filepaths) == len(extraction_methods)
-
-    assert os.path.exists(preprocessed_reports_filepath)
-    print(f'Loading preprocessed reports from {preprocessed_reports_filepath}...')
-    preprocessed_reports = load_json(preprocessed_reports_filepath)
+def _get_sentence2facts(
+        extracted_facts_filepaths, extraction_methods,
+        remove_consecutive_repeated_words=True):
 
     sentence2facts = {}
     sentence_facts_rows = []
@@ -178,6 +169,24 @@ def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_f
             })
     if duplicate_count > 0:
         print_orange(f'Warning: {duplicate_count} sentences with extracted facts are duplicated in the extracted facts files', bold=True)
+
+    return sentence2facts, sentence_facts_rows
+    
+def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_filepaths, extraction_methods,
+                                remove_consecutive_repeated_words=True):
+
+    assert type(preprocessed_reports_filepath) == str
+    assert type(extracted_facts_filepaths) == list
+    assert len(extracted_facts_filepaths) > 0
+    assert all(type(fp) == str for fp in extracted_facts_filepaths)
+    assert len(extracted_facts_filepaths) == len(extraction_methods)
+    assert os.path.exists(preprocessed_reports_filepath)    
+    
+    print('Integrating sentences and facts...')
+    sentence2facts, sentence_facts_rows = _get_sentence2facts(extracted_facts_filepaths, extraction_methods, remove_consecutive_repeated_words)
+
+    print(f'Loading preprocessed reports from {preprocessed_reports_filepath}...')
+    preprocessed_reports = load_json(preprocessed_reports_filepath)
 
     print('Integrating reports and facts...')
     report_facts_rows = [None] * len(preprocessed_reports)
@@ -237,36 +246,7 @@ def integrate_reports_facts_and_metadata(
     preprocessed_reports = load_json(preprocessed_reports_filepath)
 
     print('Integrating sentences and facts...')
-    sentence2facts = {}
-    sentence_facts_rows = []
-    for extracted_facts_filepath, extraction_method in zip(extracted_facts_filepaths, fact_extraction_methods):
-        assert os.path.exists(extracted_facts_filepath)
-        print(f'Loading extracted facts from {extracted_facts_filepath}...')
-        extracted_facts = load_jsonl(extracted_facts_filepath)
-        for x in tqdm(extracted_facts, total=len(extracted_facts), mininterval=2):
-            try:
-                try:
-                    metadata = x['metadata']
-                    try:
-                        s = x['metadata']['query']
-                    except KeyError:
-                        s = x['metadata']['sentence'] # backward compatibility
-                    fs = x['parsed_response']
-                except KeyError:
-                    s = x['sentence']
-                    fs = x['extracted_facts']
-            except KeyError:
-                print(f'KeyError: {x}')
-                raise
-            assert s not in sentence2facts
-            if remove_consecutive_repeated_words:
-                fs = [remove_consecutive_repeated_words_from_text(f) for f in fs]
-            sentence2facts[s] = fs
-            sentence_facts_rows.append({
-                'sentence': s,
-                'facts': fs,
-                'extraction_method': extraction_method
-            })
+    sentence2facts, sentence_facts_rows = _get_sentence2facts(extracted_facts_filepaths, fact_extraction_methods, remove_consecutive_repeated_words)
 
     print('Integrating facts and metadata...')
     fact2metadata = {}

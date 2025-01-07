@@ -30,6 +30,7 @@ _ALLOWED_GPT_CHAT_MODELS = (
     "gpt-4-0613",
     "gpt-4-1106-preview",
     "gpt-4o",
+    "gpt-4o-mini",
 )
 
 GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|I apologize|Sure|I'd be happy|do you need)\b")

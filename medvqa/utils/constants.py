@@ -952,3 +952,488 @@ _unique = set()
 for x in LABEL_BASED_FACTS__CHEST_IMAGENOME_2_SHORT.values():
     assert x not in _unique, x
     _unique.add(x)
+
+
+MULTIDATASET_UNIFIED_CLASSES = [
+    # ==================================================    
+    # From VinDr-CXR
+    # ==================================================
+    
+    'aortic enlargement',
+    'atelectasis',
+    'calcification',
+    'cardiomegaly',
+    'clavicle fracture',
+    'consolidation',
+    'edema',
+    'emphysema',
+    'enlarged pulmonary artery',
+    'interstitial lung disease',
+    'infiltration',
+    'lung opacity',
+    'lung cavity',
+    'lung cyst',
+    'mediastinal shift',
+    'nodule/mass',
+    'pleural effusion',
+    'pleural thickening',
+    'pneumothorax',
+    'pulmonary fibrosis',
+    'rib fracture',
+    'copd',
+    'lung tumor',
+    'pneumonia',
+    'tuberculosis',
+    
+    # ==================================================
+    # From MICCAI CXR-LT 2024
+    # ==================================================
+
+    'adenopathy',
+    'atelectasis',
+    'azygos lobe',
+    'calcification of the aorta',
+    'cardiomegaly',
+    'clavicle fracture',
+    'consolidation',
+    'edema',
+    'emphysema',
+    'enlarged cardiomediastinum',
+    'fibrosis',
+    'fissure',
+    'fracture',
+    'granuloma',
+    'hernia',
+    'hydropneumothorax',
+    'infarction',
+    'infiltration',
+    'kyphosis',
+    'lobar atelectasis',
+    'lung lesion',
+    'lung opacity',
+    'mass',
+    'nodule',
+    'pleural effusion',
+    'pleural abnormalities',
+    'pleural thickening',
+    'pneumomediastinum',
+    'pneumonia',
+    'pneumoperitoneum',
+    'pneumothorax',
+    'pulmonary hypertension',
+    'rib fracture',
+    'round atelectasis',
+    'subcutaneous emphysema',
+    'support devices',
+    'tortuous aorta',
+    'tuberculosis',
+    'bulla',
+    'cardiomyopathy',
+    'hilar abnormalities',
+    'osteopenia',
+    'scoliosis',
+
+    # ==================================================
+    # From Chest ImaGenome
+    # ==================================================
+
+    # lowlungvolumes,breast/nippleshadows,skin fold
+    # lungopacity, airspaceopacity, consolidation, infiltration, at
+    # electasis, linear/patchyatelectasis, lobar/segmental collapse,
+    #  pulmonaryedema/hazyopacity,vascularcongestion,vascular
+    #  redistribution, increasedreticularmarkings/ildpattern, pleu
+    # raleffusion,costophrenicangleblunting,pleural/parenchymal
+    #  scarring,bronchiectasis,enlargedcardiacsilhouette,mediasti
+    # naldisplacement,mediastinalwidening,enlargedhilum, tor
+    # tuousaorta,vascularcalcification,pneumomediastinum,pneu
+    # mothorax,hydropneumothorax,lunglesion,mass/nodule(not
+    #  otherwisespecified),multiplemasses/nodules,calcifiednod
+    # ule,superiormediastinalmass/enlargement,ribfracture,clav
+    # iclefracture, spinal fracture, hyperaeration, cyst/bullae, ele
+    # vatedhemidiaphragm,diaphragmaticeventration(benign),sub
+    # diaphragmaticair, subcutaneousair,hernia, scoliosis, spinal
+    #  degenerativechanges,shoulderosteoarthritis,bonelesion
+    # pneumonia,fluidoverload/heartfailure,copd/emphysema,gran
+    # ulomatousdisease,interstitiallungdisease,goiter,lungcancer,
+    #  aspiration,alveolarhemorrhage,pericardialeffusion
+    #     chesttube,mediastinaldrain,pigtailcatheter,endotrachealtube,
+    #  tracheostomytube, picc, ij line, chestport, subclavianline,
+    #  swan-ganzcatheter,intra-aorticballoonpump,enterictube
+    #     sternotomywires, cabggrafts, aorticgraft/repair, prosthetic
+    #  valve,cardiacpacerandwires
+
+    'low lung volumes',
+    'breast/nipple shadows',
+    'skin fold',
+    'lung opacity',
+    'airspace opacity',
+    'consolidation',
+    'infiltration',
+    'atelectasis',
+    'linear/patchy atelectasis',
+    'lobar/segmental collapse',
+    'pulmonary edema/hazy opacity',
+    'vascular congestion',
+    'vascular redistribution',
+    'increased reticular markings/ild pattern',
+    'pleural effusion',
+    'costophrenic angle blunting',
+    'pleural/parenchymal scarring',
+    'bronchiectasis',
+    'enlarged cardiac silhouette',
+    'mediastinal displacement',
+    'mediastinal widening',
+    'enlarged hilum',
+    'tortuous aorta',
+    'vascular calcification',
+    'pneumomediastinum',
+    'pneumothorax',
+    'hydropneumothorax',
+    'lung lesion',
+    'nodule/mass',
+    'calcified nodule',
+    'superior mediastinal mass/enlargement',
+    'rib fracture',
+    'clavicle fracture',
+    'spinal fracture',
+    'hyperaeration',
+    'cyst/bullae',
+    'elevated hemidiaphragm',
+    'diaphragmatic eventration',
+    'subdiaphragmatic air',
+    'subcutaneous air',
+    'hernia',
+    'scoliosis',
+    'spinal degenerative changes',
+    'shoulder osteoarthritis',
+    'bone lesion',
+    'pneumonia',
+    'fluid overload/heart failure',
+    'copd/emphysema',
+    'granulomatous disease',
+    'interstitial lung disease',
+    'goiter',
+    'lung cancer',
+    'aspiration',
+    'alveolar hemorrhage',
+    'pericardial effusion',
+    'chest tube',
+    'mediastinal drain',
+    'pigtail catheter',
+    'endotracheal tube',
+    'tracheostomy tube',
+    'picc',
+    'ij line',
+    'chest port',
+    'subclavian line',
+    'swan-ganz catheter',
+    'intra-aortic balloon pump',
+    'enteric tube',
+    'sternotomy wires',
+    'cabg grafts',
+    'aortic graft/repair',
+    'prosthetic valve',
+    'cardiac pacer and wires',
+
+    # ==================================================
+    # From X-Raydar (https://www.x-raydar.info/ontology)
+    # ==================================================
+
+    'parenchymal opacification',
+    'consolidation',
+    'lung consolidation',
+    'airspace consolidation',
+    'parenchymal consolidation',
+    'peri-hilar opacification',
+    'batwing shadowing',
+    'airspace opacification',
+    'airspace shadowing',
+    'airspace changes',
+    'alveolar shadowing',
+    'shadowing',
+    'ill-defined density',
+    'changes of pulmonary edema',
+
+    # Interstitial opacification | Fibrosis
+    # Reticular pattern | Reticulonodular pattern | Interlobular septal thickening | Idiopathic pulmonary fibrosis | Honeycombing | Interstitium
+    # Interstitial shadowing; interstitial nodularity; increased interstitial markings; increased lung markings;
+    # increased parenchymal lung markings; increased markings; fibrosis; reticular shadowing or opacification; fibrotic change; reticular changes;
+    # reticular density; reticular shadow; reticulation; reticular pattern; reticular interstitial pattern; septal thickening; Kerley B lines; septal lines; opacification with septal line
+    'interstitial opacification',
+    'fibrosis',
+    'reticular pattern',
+    'reticulonodular pattern',
+    'interlobular septal thickening',
+    'idiopathic pulmonary fibrosis',
+    'honeycombing',
+    'interstitial shadowing',
+    'interstitial nodularity',
+    'increased interstitial markings',
+    'increased lung markings',
+    'increased parenchymal lung markings',
+    'increased markings',
+    'reticular shadowing',
+    'reticular opacification',
+    'fibrotic change',
+    'reticular changes',
+    'reticular density',
+    'reticular shadow',
+    'reticulation',
+    'reticular interstitial pattern',
+    'septal thickening',
+    'kerley b lines',
+    'septal lines',
+    'opacification with septal line',
+
+    # Ground glass opacity; ground glass change; ground glass shadowing; ground glass density
+    'ground glass opacity',
+    'ground glass change',
+    'ground glass shadowing',
+    'ground glass density',
+
+    # Parenchymal mass or nodule; Lung mass; pulmonary mass; parenchymal mass; lung malignancy; primary lung malignancy; lung metastases;
+    #  pulmonary metastases; lung nodule; pulmonary nodule; parenchymal nodule; lung opacity; pulmonary opacity; parenchymal opacity
+    'parenchymal mass or nodule',
+    'lung mass',
+    'pulmonary mass',
+    'parenchymal mass',
+    'lung malignancy',
+    'primary lung malignancy',
+    'lung metastases',
+    'pulmonary metastases',
+    'lung nodule',
+    'pulmonary nodule',
+    'parenchymal nodule',
+    'lung opacity',
+    'pulmonary opacity',
+    'parenchymal opacity',
+
+    # Cavitation; cavity; cavitating lesion
+    'cavitation',
+    'cavity',
+    'cavitating lesion',
+
+    # Bulla; bullae; lung lucencies
+    'bulla',
+    'bullae',
+    'lung lucencies',
+
+    # Emphysema; emphysematous change; bullous emphysema
+    'emphysema',
+    'emphysematous change',
+    'bullous emphysema',
+
+    # Hyperexpanded lungs; hyperexpansion; hyperinflation; large lung volume; chest hyperinflated
+    'hyperexpanded lungs',
+    'hyperexpansion',
+    'hyperinflation',
+    'large lung volume',
+    'chest hyperinflated',
+
+    # Bronchial changes	Bronchiole | Bronchiectasis | Bronchiolectasis
+    # Bronchiectasis; bronchial wall thickening; peribronchial thickening
+    'bronchial changes',
+    'bronchiectasis',
+    'bronchiolectasis',
+    'bronchial wall thickening',
+    'peribronchial thickening',
+
+    # Lung/lobe collapse; decreased lung volume; small volume lungs; decreased lung size; specific signs e.g. sail sign; golden s sign
+    'lung/lobe collapse',
+    'decreased lung volume',
+    'small volume lungs',
+    'decreased lung size',
+    'sail sign',
+    'golden s sign',
+
+    # Atelectasis; atelectatic change; atelectatic bands; liner atelectasis; subsegmental atelectasis; atelectatic findings
+    'atelectasis',
+    'atelectatic change',
+    'atelectatic bands',
+    'liner atelectasis',
+    'subsegmental atelectasis',
+    'atelectatic findings',
+
+    # Apical thickening; apical interstitial change; apical fibrosis
+    'apical thickening',
+    'apical interstitial change',
+    'apical fibrosis',
+
+    # Pulmonary blood flow redistribution	Pulmonary blood flow redistribution	Upper lobe diversion;
+    # prominent upper lobe pulmonary vessels/vasculature; dilated/enlarged upper lobe vessels; enlarged pulmonary veins/vessels
+    'pulmonary blood flow redistribution',
+    'upper lobe diversion',
+    'prominent upper lobe pulmonary vessels/vasculature',
+    'dilated/enlarged upper lobe vessels',
+    'enlarged pulmonary veins/vessels',
+
+    # Pneumomediastinum	Pneumomediastinum	Air in medistinum
+    'pneumomediastinum',
+    'air in mediastinum',
+
+    # Mediastinum, displaced	Mediastinal compartments	Mediastinal shift; displaced mediastinum; cardiomediastinum displaced
+    'mediastinal shift',
+    'displaced mediastinum',
+    'cardiomediastinum displaced',
+
+    # Mediastinum, widened	Mediastinal compartments	Widening of the mediastinum; mediastinal widening
+    'widening of the mediastinum',
+    'mediastinal widening',
+
+    # Hilum, changes | Paratracheal, changes	Hilum, lymphadenopathy | Paratracheal stripe, right	Enlargement of hilum; hilar enlargement; prominent hila; hilar prominence; hilum prominent; prominence of hilum; vascular prominence at hilum; bulky hilum; hilum/hilar bulky; hilar adenopathy; hilar lymphadenopathy; hilar lymph node enlargement; hilar mass; hilar calcification; Paratracheal adenopathy/lymphadenopathy; paratracheal soft tissue/ opacification; widening of paratracheal stripe
+    'lymphadenopathy',
+    'enlargement of hilum',
+    'hilar enlargement',
+    'prominent hila',
+    'hilar prominence',
+    'hilum prominent',
+    'prominence of hilum',
+    'vascular prominence at hilum',
+    'bulky hilum',
+    'hilum/hilar bulky',
+    'hilar adenopathy',
+    'hilar lymphadenopathy',
+    'hilar lymph node enlargement',
+    'hilar mass',
+    'hilar calcification',
+    'paratracheal adenopathy',
+    'paratracheal lymphadenopathy',
+    'paratracheal soft tissue',
+    'paratracheal opacification',
+    'widening of paratracheal stripe',
+
+    # Pneumothorax; tension pneumothorax
+    'pneumothorax',
+    'tension pneumothorax',
+
+    # Pleural effusion, effusion; pleural fluid; fluid in major/minor fissure; blunting of costophrenic angle; costophrenic angle attenuated
+    'pleural effusion',
+    'effusion',
+    'pleural fluid',
+    'fluid in major fissure',
+    'fluid in minor fissure',
+    'blunting of costophrenic angle',
+    'costophrenic angle attenuated',
+
+    # Calcified pleural plaques; pleural plaques; pleurally based changes; pleural thickening; parietal pleural thickening;
+    # pleural reaction; pleural shadowing/shadow; pleural density; pleural scarring; pleural lesion
+    'calcified pleural plaques',
+    'pleural plaques',
+    'pleurally based changes',
+    'pleural thickening',
+    'parietal pleural thickening',
+    'pleural reaction',
+    'pleural shadowing',
+    'pleural shadow',
+    'pleural density',
+    'pleural scarring',
+    'pleural lesion',
+
+    # Elevation of hemidiaphragm; hemidiaphragm elevated; hemidiaphragmatic hump; eventration of diaphragm; tenting of hemidiaphragm
+    'elevation of hemidiaphragm',
+    'hemidiaphragm elevated',
+    'hemidiaphragmatic hump',
+    'eventration of diaphragm',
+    'tenting of hemidiaphragm',
+
+    # Cardiomegaly, heart enlarged, cardiac enlargement; cardiac silhouette enlarged; heart shadow enlarged; large heart; large heart shadow
+    'cardiomegaly',
+    'heart enlarged',
+    'cardiac enlargement',
+    'cardiac silhouette enlarged',
+    'heart shadow enlarged',
+    'large heart',
+    'large heart shadow',
+
+    # Cardiac calcification	Calcification Heart	Calcification of the coronary artery/vessels; cardiac valve; cardiac wall; or cardiac aneurysm
+    'cardiac calcification',
+    'calcification of the coronary artery',
+    'calcification of the coronary vessels',
+    'calcification of the cardiac valve',
+    'calcification of the cardiac wall',
+    'cardiac aneurysm',
+
+    # Dextrocardia; situs inversus
+    'dextrocardia',
+    'situs inversus',
+
+    # Calcification of the aorta
+    'calcification of the aorta',
+
+    # Aortic tortuosity	Tortuous Aorta	Unfolding of the thoracic/descending aorta; unfolded (thoracic) aorta
+    'aortic tortuosity',
+    'tortuous aorta',
+    'unfolding of the thoracic aorta',
+    'unfolding of the descending aorta',
+    'unfolded thoracic aorta',
+
+    # Rib fracture; step in rib
+    'rib fracture',
+    'step in rib',
+
+    # Clavicle fracture; clavicular fracture
+    'clavicle fracture',
+    'clavicular fracture',
+
+    # Bone, lesion	Bone-forming neoplasm	Bone metastasis; bone metastases
+    'bone lesion',
+    'bone-forming neoplasm',
+    'bone metastasis',
+    'bone metastases',
+
+    # Scoliosis; kyphoscoliosis; kyphosis
+    'scoliosis',
+    'kyphoscoliosis',
+    'kyphosis',
+
+    # Mass next/adjacent to spine; paraspinal density
+    'mass next to spine',
+    'mass adjacent to spine',
+    'paraspinal density',
+    'paraspinal mass',
+
+    # Subcutaneous emphysema; surgical emphysema
+    'subcutaneous emphysema',
+    'surgical emphysema',
+
+    # Soft tissue abnormality: breast, subcutaneous or cutaneous tissue, supraclavicular fossae, chest wall, cervical area, upper limb; axillary mass; axillary adenopathy / lymphadenopathy; enlarged lymph node
+    'soft tissue abnormality',
+    'breast abnormality',
+    'subcutaneous tissue abnormality',
+    'cutaneous tissue abnormality',
+    'supraclavicular fossa tissue abnormality',
+    'chest wall tissue abnormality',
+    'cervical area tissue abnormality',
+    'upper limb tissue abnormality',
+    'axillary mass',
+    'axillary adenopathy',
+    'axillary lymphadenopathy',
+    'enlarged lymph node',
+
+    # Dilatation/dilated bowel loops; dilated loop bowel; prominent small bowel loops; prominent gas shadow; prominent bowel/loops of bowel; distended stomach / gastric bubble; distended gas filled viscus; dilated viscus
+    'dilatation of bowel loops',
+    'dilated loop bowel',
+    'prominent small bowel loops',
+    'prominent gas shadow',
+    'prominent bowel',
+    'prominent loops of bowel',
+    'distended stomach',
+    'distended gastric bubble',
+    'distended gas filled viscus',
+
+    # Pneumoperitoneum
+    'pneumoperitoneum',
+
+    # Hiatus hernia
+    'hernia',
+    'hiatus hernia',
+
+    # Granuloma; pectus deformity; lobectomy; anatomical variant
+    'granuloma',
+    'pectus deformity',
+    'lobectomy',
+]
+# Ensure no duplicates
+MULTIDATASET_UNIFIED_CLASSES = list(set(MULTIDATASET_UNIFIED_CLASSES))
+# Ensure sorted
+MULTIDATASET_UNIFIED_CLASSES.sort()

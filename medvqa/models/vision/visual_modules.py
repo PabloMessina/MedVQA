@@ -70,6 +70,7 @@ class RawImageEncoding:
     YOLOV11_FOR_DET_MLC = 'yolov11-for-det-mlc'
     YOLOV11_FACT_CONDITIONED = 'yolov11-fact-conditioned'
     YOLOV11_FEATURE_EXTRACTOR = 'yolov11-feature-extractor'
+    MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE = 'medsam-feature-extractor-huggingface'
 
 class VisualInputMode:
     RAW_IMAGE = 'raw-image'
@@ -93,6 +94,7 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
         RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         RawImageEncoding.SIGLIP_HUGGINGFACE,
+        RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
     ]
 
 def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
@@ -102,6 +104,7 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
         RawImageEncoding.DENSENET_121,
         RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
+        RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
     ]:
         kwargs['mean'] = [0.485, 0.456, 0.406]
         kwargs['std'] = [0.229, 0.224, 0.225]
@@ -273,6 +276,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
             RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
             RawImageEncoding.SIGLIP_HUGGINGFACE,
+            RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
         ]:
             assert huggingface_model_name is not None
         if raw_image_encoding in [
@@ -357,6 +361,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR,
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
             RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
+            RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
         ]:
             return 2 * image_local_feat_size
         if self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
@@ -540,6 +545,10 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
             self.raw_image_encoder = create_huggingface_siglip_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE:
+            if dropout_p:
+                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+            self.raw_image_encoder = create_huggingface_medsam_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
@@ -810,6 +819,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_UNIFORMER_BASE_TL_384_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
             img_str = HUGGINGFACE_SIGLIP_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE:
+            img_str = HUGGINGFACE_MEDSAM_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -944,6 +955,9 @@ class MultiPurposeVisualModule(nn.Module):
                 use_default_method = True
             elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR:
                 local_feat_NxCxHxW = self.raw_image_encoder(raw_images)[-1] # take the last layer out of the list
+                use_default_method = True
+            elif self.raw_image_encoding == RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE:
+                local_feat_NxCxHxW = self.raw_image_encoder(raw_images).last_hidden_state
                 use_default_method = True
             if use_default_method:
                 # compute local features
@@ -1502,6 +1516,10 @@ HUGGINGFACE_SIGLIP_NAMES_2_SHORT = {
     'google/siglip-so400m-patch14-384': 'google/siglip-so400m-p14-384',
 }
 
+HUGGINGFACE_MEDSAM_NAMES_2_SHORT = {
+    'wanglab/medsam-vit-base': 'wanglab/medsam-vit-base',
+}
+
 DETECTRON2_YAML_2_SHORT = {
     'COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml': 'D2-CocoDet-faster-rcnn-R-50-FPN-3x',
     'COCO-Detection/retinanet_R_50_FPN_1x.yaml': 'D2-CocoDet-retinanet-R-50-FPN-1x',
@@ -1647,6 +1665,13 @@ def create_huggingface_siglip_feature_extractor(version, pretrained_weights_path
     model = AutoModel.from_pretrained(version)
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     model = model.vision_model # HACK to get the vision model from the model
+    return model
+
+def create_huggingface_medsam_feature_extractor(version, pretrained_weights_path):
+    from transformers import SamModel
+    model = SamModel.from_pretrained(version)
+    model = model.vision_encoder # HACK to get the vision encoder from the model
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 
 def create_detectron2_model(

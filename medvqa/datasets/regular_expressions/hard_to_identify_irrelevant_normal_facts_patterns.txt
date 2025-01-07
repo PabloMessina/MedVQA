@@ -1,0 +1,37 @@
+\bnurse\b
+\bdictation
+\be-?mail
+\byour\b
+\bquestions?\b
+\bdid not eat
+\bby dr\b
+\binvok
+\bphone\b
+\btelephone\b
+\bdashboard
+\?$
+^\.$
+technologist
+\bsubmitted
+radiologist
+\bphysician
+\binstitution\b
+\bdementia
+\bemergency\b
+\bdepartment\b
+\bcough
+\brunny nose
+\bsore throat
+\baddended
+\bnotification
+\bto document\b
+\bresident\b
+\bon call\b
+\bnot tailored
+\bhospital
+\balcohol
+consultation
+communicated
+\bdated\b
+\brecommend
+^no (?!.*\b(interval|change|improvement|progression|regression|resolution|enlargement|worsening|deterioration|decline))

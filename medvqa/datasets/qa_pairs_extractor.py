@@ -7,7 +7,7 @@ from nltk.tokenize import sent_tokenize
 from nltk.corpus import stopwords
 
 from medvqa.utils.common import SOURCE_DIR
-from medvqa.utils.files import load_json, read_lines_from_txt
+from medvqa.utils.files import load_json, load_regex_from_files, read_lines_from_txt
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 
 REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
@@ -61,14 +61,8 @@ class QuestionAnswerExtractor:
         self.medterms_regex = self._load_medical_terms_regex()
     
     def _load_regex_from_files(self, files):
-        pattern = ''
-        for file in files:
-            with open(os.path.join(REGULAR_EXPRESSIONS_FOLDER, file)) as f:
-                for line in f.readlines():
-                    if len(pattern) > 0:
-                        pattern += '|'
-                    pattern += f'({line.strip()})'
-        return re.compile(pattern, re.IGNORECASE)
+        file_paths = [os.path.join(REGULAR_EXPRESSIONS_FOLDER, file) for file in files]
+        return load_regex_from_files(file_paths)
 
     def _load_medical_terms_regex(self):
         medical_terms = read_lines_from_txt(MEDICAL_TERMS_PATH)

@@ -294,7 +294,7 @@ def generate_text_with_llama3(system_instructions, user_input_texts, model_id="m
     return generated_texts
 
 class CachedTextEmbeddingExtractor:
-    def __init__(self, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
+    def __init__(self, model_name, device='cuda', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
                  average_token_embeddings=False):
         assert model_name in SupportedHuggingfaceMedicalBERTModels.get_all()
         if average_token_embeddings:
