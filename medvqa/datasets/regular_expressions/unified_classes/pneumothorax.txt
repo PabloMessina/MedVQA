@@ -1,0 +1,9 @@
+deep sulcus sign
+pnemothorax
+pneumothorax
+pneumothroax
+pneumothoraces
+pnuemothorax
+\bptx\b
+\b(air|gas)\b.*\b(pleura|subpulmonic)
+\b(pleura|subpulmonic).*\b(air|gas)\b

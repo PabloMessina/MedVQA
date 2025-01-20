@@ -16,7 +16,7 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
-from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
+from medvqa.datasets.mimiccxr.report_utils import concatenate_facts, concatenate_report_parts
 from medvqa.datasets.nli import (
     ANLI_V1_DATASET_DIR,
     MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH,
@@ -54,6 +54,7 @@ _ALLOWED_COMPARISONS = set([
 
 class Seq2SeqTaskNames:
     REPORT_TO_SENTENCES = 'report2sentences'
+    REPORT_TO_NEGATIVE_FACTS = 'report2negative_facts'
     SENTENCE_TO_FACTS = 'sentence2facts'
     BACKGROUND_TO_FACTS = 'background2facts'
     FACT_TO_METADATA = 'fact2metadata'
@@ -69,6 +70,7 @@ class Seq2SeqTaskNames:
     def get_all():
         return [
             Seq2SeqTaskNames.REPORT_TO_SENTENCES,
+            Seq2SeqTaskNames.REPORT_TO_NEGATIVE_FACTS,
             Seq2SeqTaskNames.SENTENCE_TO_FACTS,
             Seq2SeqTaskNames.BACKGROUND_TO_FACTS,
             Seq2SeqTaskNames.FACT_TO_METADATA,
@@ -84,6 +86,7 @@ class Seq2SeqTaskNames:
 
 Task2Prefix = {
     Seq2SeqTaskNames.REPORT_TO_SENTENCES: 'R2S',
+    Seq2SeqTaskNames.REPORT_TO_NEGATIVE_FACTS: 'R2NF',
     Seq2SeqTaskNames.SENTENCE_TO_FACTS: 'S2F',
     Seq2SeqTaskNames.BACKGROUND_TO_FACTS: 'B2F',
     Seq2SeqTaskNames.FACT_TO_METADATA: 'F2M',
@@ -115,7 +118,9 @@ class Seq2SeqDataset(Dataset):
         if self.infinite:
             i = i % len(self.indices)
         idx = self.indices[i]
-        output = { 'input_text': self.input_texts[idx], 'output_text': self.output_texts[idx] }
+        input_text = self.input_texts[idx]
+        output_text = self.output_texts[idx]
+        output = { 'input_text': input_text, 'output_text': output_text }
         return output
     
 def _print_input_output_pair(input_text, output_text):
@@ -361,6 +366,228 @@ def _prepare_reports_to_sentences_data(input_output_jsonl_filepaths, apply_task_
         print_bold('Input/output example:')
         _print_random_input_output_pair(input_texts, output_texts)
     return input_texts, output_texts
+
+class _RandomizedReportToNegativeFactsDataset(Dataset):
+    def __init__(self, abnormal_sentences, normal_sentence_to_negative_facts, apply_task_prefix=False,
+                 max_num_sentences=16, dataset_size=None):
+        self.abnormal_sentences = abnormal_sentences
+        self.normal_sentences = list(normal_sentence_to_negative_facts.keys())
+        self.negative_facts = list(normal_sentence_to_negative_facts.values())
+        self.normal_idxs = list(range(len(self.normal_sentences)))
+        self.apply_task_prefix = apply_task_prefix
+        self.max_num_sentences = max_num_sentences
+        if dataset_size is not None:
+            self._len = dataset_size
+        else:
+            self._len = INFINITE_DATASET_LENGTH
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i, verbose=False):
+        mode = random.randint(1, 3) # 1: fully abnormal, 2: fully normal, 3: mixed
+        if verbose:
+            print(f'mode: {mode}')
+        if mode == 1: # fully abnormal
+            num_sentences = random.randint(1, self.max_num_sentences)
+            sentences = random.sample(self.abnormal_sentences, num_sentences)
+            input_text = concatenate_facts(sentences)
+            output_text = "{}" # empty object
+        elif mode == 2: # fully normal
+            num_sentences = random.randint(1, self.max_num_sentences)
+            idxs = random.sample(self.normal_idxs, num_sentences)
+            sentences = [self.normal_sentences[i] for i in idxs]
+            negative_facts = [self.negative_facts[i] if len(self.negative_facts[i]) <= 2 else random.sample(self.negative_facts[i], 2) for i in idxs]
+            input_text = concatenate_facts(sentences)
+            output_object = {s: nf for s, nf in zip(sentences, negative_facts)}
+            output_text = json.dumps(output_object)
+        elif mode == 3: # mixed
+            num_sentences = random.randint(2, self.max_num_sentences)
+            num_abnormal_sentences = random.randint(1, num_sentences - 1)
+            num_normal_sentences = num_sentences - num_abnormal_sentences
+            abnormal_sentences = random.sample(self.abnormal_sentences, num_abnormal_sentences)
+            idxs = random.sample(self.normal_idxs, num_normal_sentences)
+            normal_sentences = [self.normal_sentences[i] for i in idxs]
+            normal_negative_facts = [self.negative_facts[i] if len(self.negative_facts[i]) <= 2 else random.sample(self.negative_facts[i], 2) for i in idxs]
+            sentences = normal_sentences + abnormal_sentences
+            rank = list(range(len(sentences)))
+            random.shuffle(rank)
+            normal_idxs = list(range(len(normal_sentences)))
+            normal_idxs.sort(key=lambda i: rank[i])
+            sentences_ = [None] * len(sentences)
+            for i, r in enumerate(rank):
+                sentences_[r] = sentences[i]
+            input_text = concatenate_facts(sentences_)
+            output_object = {normal_sentences[i]: normal_negative_facts[i] for i in normal_idxs}
+            output_text = json.dumps(output_object)
+        else:
+            raise ValueError(f'Unknown mode {mode}')
+        if self.apply_task_prefix:
+            input_text = f'R2NF: {input_text}'
+        return { 'input_text': input_text, 'output_text': output_text }
+    
+class _ShuffledReportToNegativeFactsDataset(Dataset):
+    def __init__(self, indices, input_sentences, input_texts, output_texts, infinite=False, shuffle=False,
+                 apply_task_prefix=False):
+        assert len(input_sentences) == len(input_texts)
+        assert len(input_sentences) == len(output_texts)
+        self.input_sentences = input_sentences
+        self.input_texts = input_texts
+        self.output_texts = output_texts
+        self.indices = indices
+        self.apply_task_prefix = apply_task_prefix
+        self.n = len(self.indices)
+        self.infinite = infinite
+        self._len = INFINITE_DATASET_LENGTH if infinite else self.n
+        if shuffle:
+            random.shuffle(self.indices)
+    
+    def __len__(self):
+        return self._len
+
+    def __getitem__(self, i):
+        if self.infinite:
+            i = i % self.n
+        idx = self.indices[i]
+        if random.random() < 0.7: # 70% chance of randomizing the order of sentences
+            sentences = self.input_sentences[idx][:] # copy
+            random.shuffle(sentences)
+            input_text = concatenate_facts(sentences)
+        else:
+            input_text = self.input_texts[idx]
+        output_text = self.output_texts[idx]
+        if self.apply_task_prefix:
+            input_text = f'R2NF: {input_text}'
+        return { 'input_text': input_text, 'output_text': output_text }
+
+def _prepare_reports_to_negative_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True,
+                                            val_size=500, filter_for_t5=False):
+    from nltk.tokenize import sent_tokenize
+    input_sentences = []
+    abnormal_sentences = set()
+    normal_sentence_to_negative_facts = dict()
+    output_texts = []
+    input_texts = []
+    if filter_for_t5:
+        skip_count = 0
+    for input_output_jsonl_filepath in input_output_jsonl_filepaths:
+        input_output_jsonl = load_jsonl(input_output_jsonl_filepath)
+        if verbose:
+            print(f'Loaded {len(input_output_jsonl)} input/output pairs from {input_output_jsonl_filepath}')
+        for input_output in tqdm(input_output_jsonl, mininterval=2):
+            input_query = input_output['metadata']['query']
+            sentences = sent_tokenize(input_query)
+            ruled_out_abnormalities = input_output['parsed_response']['ruled_out_abnormalities']
+            output_count = 0
+            for k, v in ruled_out_abnormalities.items():
+                output_count += len(v)
+                if len(v) > 0:
+                    abnormal_sentences.update(v)
+                    try:
+                        counts = normal_sentence_to_negative_facts[k]
+                    except KeyError:
+                        counts = dict()
+                        normal_sentence_to_negative_facts[k] = counts
+                    for x in v:
+                        counts[x] = counts.get(x, 0) + 1
+                else:
+                    abnormal_sentences.add(k)
+            if output_count == 0:
+                abnormal_sentences.update(sentences) # all sentences are abnormal
+            if filter_for_t5:
+                estimated_num_tokens = len(input_query) / 3.2
+                if estimated_num_tokens > 512:
+                    skip_count += 1
+                    continue
+            input_texts.append(input_query)
+            input_sentences.append(sentences)
+            output_text = json.dumps(ruled_out_abnormalities)
+            output_texts.append(output_text)
+    abnormal_sentences = list(abnormal_sentences)
+    
+    for k, v in normal_sentence_to_negative_facts.items():
+        # Keep the two most common negative facts
+        pairs = [(nf, c) for nf, c in v.items()]
+        pairs.sort(key=lambda x: -x[1])
+        normal_sentence_to_negative_facts[k] = [nf for nf, _ in pairs[:2]]
+
+    print(f'Number of abnormal sentences: {len(abnormal_sentences)}')
+    print(f'Number of normal sentences: {len(normal_sentence_to_negative_facts)}')
+    if filter_for_t5:
+        print(f'Skipped {skip_count} reports with estimated token count > 512')
+    
+    # Create datasets
+
+    if filter_for_t5:
+        max_num_sentences = 5
+    else:
+        max_num_sentences = 16
+    
+    # Randomized dataset up to 16 sentences
+    train_dataset_1 = _RandomizedReportToNegativeFactsDataset(abnormal_sentences, normal_sentence_to_negative_facts,
+                                                              apply_task_prefix=apply_task_prefix, max_num_sentences=max_num_sentences)
+    val_dataset_1 = _RandomizedReportToNegativeFactsDataset(abnormal_sentences, normal_sentence_to_negative_facts,
+                                                            apply_task_prefix=apply_task_prefix, max_num_sentences=max_num_sentences,
+                                                            dataset_size=val_size)
+    
+    # Randomized dataset up to 2 sentences
+    train_dataset_2 = _RandomizedReportToNegativeFactsDataset(abnormal_sentences, normal_sentence_to_negative_facts,
+                                                              apply_task_prefix=apply_task_prefix, max_num_sentences=2)
+    val_dataset_2 = _RandomizedReportToNegativeFactsDataset(abnormal_sentences, normal_sentence_to_negative_facts,
+                                                            apply_task_prefix=apply_task_prefix, max_num_sentences=2,
+                                                            dataset_size=val_size)
+    
+    # Shuffled dataset
+    indices = list(range(len(input_texts)))
+    indices.sort(key=lambda i: len(input_texts[i])) # sort by length        
+    # Choose val_size random indices uniformly distributed across the dataset
+    val_indices = np.linspace(0, len(indices) - 1, val_size, dtype=int)
+    val_indices_set = set(val_indices)
+    train_indices = [i for i in indices if i not in val_indices_set]
+
+    train_dataset_3 = _ShuffledReportToNegativeFactsDataset(train_indices, input_sentences, input_texts, output_texts,
+                                                            shuffle=True, infinite=True,
+                                                            apply_task_prefix=apply_task_prefix)
+    val_dataset_3 = _ShuffledReportToNegativeFactsDataset(val_indices, input_sentences, input_texts, output_texts,
+                                                        apply_task_prefix=apply_task_prefix)
+
+    merged_train_dataset = CompositeInfiniteDataset([train_dataset_1, train_dataset_2, train_dataset_3], [0.2, 0.1, 0.7])
+    merged_val_dataset = CompositeDataset([val_dataset_1, val_dataset_2, val_dataset_3])
+
+    print(f'len(train_dataset_1): {len(train_dataset_1)}')
+    print(f'len(train_dataset_2): {len(train_dataset_2)}')
+    print(f'len(train_dataset_3): {len(train_dataset_3)}')
+    print(f'len(val_dataset_1): {len(val_dataset_1)}')
+    print(f'len(val_dataset_2): {len(val_dataset_2)}')
+    print(f'len(val_dataset_3): {len(val_dataset_3)}')
+    print(f'len(merged_train_dataset): {len(merged_train_dataset)}')
+    print(f'len(merged_val_dataset): {len(merged_val_dataset)}')
+    
+    if verbose:
+        # Print random example
+        print_bold('----- Input/output examples from train_dataset_1:')
+        for _ in range(5):
+            pair = train_dataset_1.__getitem__(random.randint(0, len(train_dataset_1) - 1), verbose=True)
+            _print_input_output_pair(pair['input_text'], pair['output_text'])
+        print_bold('----- Input/output examples from train_dataset_2:')
+        for _ in range(10):
+            pair = train_dataset_2.__getitem__(random.randint(0, len(train_dataset_2) - 1), verbose=True)
+            _print_input_output_pair(pair['input_text'], pair['output_text'])
+        print_bold('----- Input/output example from train_dataset_3:')
+        for _ in range(2):
+            pair = train_dataset_3[random.randint(0, len(train_dataset_3) - 1)]
+            _print_input_output_pair(pair['input_text'], pair['output_text'])
+        print_bold('----- Input/output example from val_dataset_1:')
+        pair = val_dataset_1[random.randint(0, len(val_dataset_1) - 1)]
+        _print_input_output_pair(pair['input_text'], pair['output_text'])
+        print_bold('----- Input/output example from val_dataset_2:')
+        pair = val_dataset_2[random.randint(0, len(val_dataset_2) - 1)]
+        _print_input_output_pair(pair['input_text'], pair['output_text'])
+        print_bold('----- Input/output example from val_dataset_3:')
+        pair = val_dataset_3[random.randint(0, len(val_dataset_3) - 1)]
+        _print_input_output_pair(pair['input_text'], pair['output_text'])
+
+    return merged_train_dataset, merged_val_dataset
 
 def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True,
                                     collect_input_output_for_nli=False, medical_sentences=None):
@@ -2121,7 +2348,7 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
     return train_dataset, val_dataset
 
 
-def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True):
+def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True, shuffle_input_sentences=False):
     indices = list(range(len(input_texts)))
     if include_val:
         # Split intro train & val
@@ -2133,12 +2360,15 @@ def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose
         train_indices = [i for i in indices if i not in val_indices_set]
 
         # Create datasets
-        train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True)
-        val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False)
+        train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True,
+                                       shuffle_input_sentences=shuffle_input_sentences)
+        val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False,
+                                     shuffle_input_sentences=shuffle_input_sentences)
     else:
         # Create datasets
         train_indices = indices
-        train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True)
+        train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True,
+                                       shuffle_input_sentences=shuffle_input_sentences)
         val_dataset = None
 
     if verbose:
@@ -2155,6 +2385,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         chest_imagenome_obs_input_output_jsonl_filepaths=None,
                                         chest_imagenome_anatloc_input_output_jsonl_filepaths=None,
                                         report_to_sentences_input_output_jsonl_filepaths=None,
+                                        report_to_negative_facts_input_output_jsonl_filepaths=None,
                                         sentence_to_facts_input_output_jsonl_filepaths=None,
                                         background_to_facts_input_output_jsonl_filepaths=None,
                                         fact_to_metadata_input_output_jsonl_filepaths=None,
@@ -2184,6 +2415,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                         include_public_test_in_train=False,
                                         best_k_classes=None,
                                         use_numeric_templates=False,
+                                        filter_for_t5=False,
                                         val_size=200, verbose=True):
 
     assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -2229,6 +2461,11 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
     elif task_name == Seq2SeqTaskNames.REPORT_TO_SENTENCES:
         input_texts, output_texts = _prepare_reports_to_sentences_data(report_to_sentences_input_output_jsonl_filepaths)
         train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+                                                                     
+
+    elif task_name == Seq2SeqTaskNames.REPORT_TO_NEGATIVE_FACTS:
+        train_dataset, val_dataset = _prepare_reports_to_negative_facts_data(report_to_negative_facts_input_output_jsonl_filepaths,
+                                                                             filter_for_t5=filter_for_t5)
 
     elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
         input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths)
@@ -2344,6 +2581,10 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                                                                 apply_task_prefix=True)
                 train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
                                                                              include_val=include_val)
+                
+            elif task_name == Seq2SeqTaskNames.REPORT_TO_NEGATIVE_FACTS:
+                train_dataset, val_dataset = _prepare_reports_to_negative_facts_data(report_to_negative_facts_input_output_jsonl_filepaths,
+                                                                                apply_task_prefix=True, filter_for_t5=filter_for_t5)
 
             elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
                 if use_sentence2facts_for_nli:
@@ -2473,6 +2714,7 @@ class Seq2SeqTrainer():
                  fact_to_metadata_input_output_jsonl_filepaths=None,
                  fact_to_metadata_v2_input_output_jsonl_filepaths=None,
                  fact_to_comparison_input_output_jsonl_filepaths=None,
+                 report_to_negative_facts_input_output_jsonl_filepaths=None,
                  chest_imagenome_obs_input_output_jsonl_filepaths=None,
                  chest_imagenome_anatloc_input_output_jsonl_filepaths=None,
                  integrated_nli_jsonl_filepath=None,
@@ -2496,6 +2738,7 @@ class Seq2SeqTrainer():
                  include_public_test_in_train=False,
                  best_k_classes=None,
                  use_numeric_templates=False,
+                 filter_for_t5=False,
                  val_size=200, verbose=True):
 
         assert task_name in Seq2SeqTaskNames.get_all(), f'Unknown task name {task_name}'
@@ -2515,6 +2758,7 @@ class Seq2SeqTrainer():
             sentence_to_facts_input_output_jsonl_filepaths=sentence_to_facts_input_output_jsonl_filepaths,
             fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
             fact_to_metadata_v2_input_output_jsonl_filepaths=fact_to_metadata_v2_input_output_jsonl_filepaths,
+            report_to_negative_facts_input_output_jsonl_filepaths=report_to_negative_facts_input_output_jsonl_filepaths,
             fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
             chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
             chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,
@@ -2537,6 +2781,7 @@ class Seq2SeqTrainer():
             mimiccxr_integrated_report_nli_data_filepath=mimiccxr_integrated_report_nli_data_filepath,
             report_section_to_generate=report_section_to_generate,
             include_public_test_in_train=include_public_test_in_train,
+            filter_for_t5=filter_for_t5,
             val_size=val_size, verbose=verbose, best_k_classes=best_k_classes, use_numeric_templates=use_numeric_templates)
         
         self.train_dataset = tmp['train_dataset']

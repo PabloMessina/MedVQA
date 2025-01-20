@@ -33,6 +33,7 @@ from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
 from medvqa.utils.constants import (
     DATASET_NAMES,
     VINBIG_BBOX_NAMES,
+    VINBIG_LABEL2PHRASE,
     VINBIG_NUM_BBOX_CLASSES,
     MetricNames,
 )
@@ -83,9 +84,18 @@ def parse_args(args=None):
     parser.add_argument('--map_iou_thresholds', type=float, nargs='+', default=[0., 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
     parser.add_argument('--use_classifier_confs_for_map', action='store_true', help='Use classifier confidences for mAP computation')
-
     
     return parser.parse_args(args=args)
+
+_RAD_DINO_VINDRCXR_CLASSES = [ # source: https://www.nature.com/articles/s42256-024-00965-w
+    'Lung Opacity',
+    'Cardiomegaly',
+    'Pleural thickening',
+    'Aortic enlargement',
+    'Pulmonary fibrosis',
+    'Tuberculosis',
+    'Pleural effusion',
+]
 
 def _evaluate_model(
     checkpoint_folder_path,
@@ -632,8 +642,12 @@ def _evaluate_model(
         assert pred_probs.shape == gt_labels.shape
         assert pred_probs.shape[0] == len(dataset)
         prc_auc_metrics = prc_auc_fn(pred_probs, gt_labels)
+        rad_dino_phrases = [VINBIG_LABEL2PHRASE[x] for x in _RAD_DINO_VINDRCXR_CLASSES]
         for class_name, prc_auc in zip(phrases, prc_auc_metrics['per_class']):
-            print(f'PRC-AUC({class_name}): {prc_auc}')
+            if class_name in rad_dino_phrases:
+                print_bold(f'PRC-AUC({class_name}): {prc_auc}')
+            else:
+                print(f'PRC-AUC({class_name}): {prc_auc}')
         print_magenta(f'PRC-AUC(macro_avg): {prc_auc_metrics["macro_avg"]}', bold=True)
         print_magenta(f'PRC-AUC(micro_avg): {prc_auc_metrics["micro_avg"]}', bold=True)
         # 3) mAP

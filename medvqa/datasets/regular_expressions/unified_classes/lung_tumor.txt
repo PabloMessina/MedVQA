@@ -1,0 +1,2 @@
+\b(lung|pulmonar|lobar|lobe|bronch|alveol).*\b(tumor|neoplasm|cancer|carcinoma|adenocarcinoma|metasta|malignan|melanoma|small\s+cell|non\-small\s+cell|hamartoma)
+\b(tumor|neoplasm|cancer|carcinoma|adenocarcinoma|metasta|malignan|melanoma|small\s+cell|non\-small\s+cell|hamartoma).*\b(lung|pulmonar|lobar|lobe|bronch|alveol)

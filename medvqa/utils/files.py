@@ -241,3 +241,18 @@ def load_regex_from_files(txt_filepaths):
                     pattern += '|'
                 pattern += f'({line.strip()})'
     return re.compile(pattern, re.IGNORECASE)
+
+def load_class_specific_regex(dataset_name, class_name=None):
+    from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
+    class_name_to_regex_files = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, "unified_classes", f'class_name_to_regex_files.json'))
+    if class_name is None:
+        # Load all regexes for the dataset
+        class_name_to_regex = dict()
+        for class_name, filenames in class_name_to_regex_files[dataset_name].items():
+            filepaths = [os.path.join(REGULAR_EXPRESSIONS_FOLDER, "unified_classes", filename) for filename in filenames]
+            class_name_to_regex[class_name] = load_regex_from_files(filepaths)
+        return class_name_to_regex
+    else:
+        filenames = class_name_to_regex_files[dataset_name][class_name]
+        filepaths = [os.path.join(REGULAR_EXPRESSIONS_FOLDER, "unified_classes", filename) for filename in filenames]
+        return load_regex_from_files(filepaths)

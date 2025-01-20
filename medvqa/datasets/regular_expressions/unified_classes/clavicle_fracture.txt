@@ -1,0 +1,2 @@
+\bclavic.*\b(fracture|fx|lesion|trauma|injur|broken|destruct|metastas|deform|dislocat|crack|ruptur)
+\b(fracture|fx|lesion|trauma|injur|broken|destruct|metastas|deform|dislocat|crack|ruptur).*\bclavic

@@ -1,0 +1,2 @@
+(?<!pleural )\bcavit
+\babscess

@@ -103,6 +103,7 @@ def parse_args(args=None):
     parser.add_argument('--chest_imagenome_anatloc_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--report_nli_input_output_train_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--report_nli_input_output_val_jsonl_filepaths', type=str, nargs='+', default=None)
+    parser.add_argument('--report_to_negative_facts_input_output_jsonl_filepaths', type=str, nargs='+', default=None)
     parser.add_argument('--integrated_nli_jsonl_filepath', type=str, default=None)
     parser.add_argument('--integrated_report_facts_jsonl_filepath', type=str, default=None)
     parser.add_argument('--interpret_cxr__label_based_predictions_filepath', type=str, default=None)
@@ -356,6 +357,7 @@ def train_from_scratch(
     chest_imagenome_anatloc_input_output_jsonl_filepaths,
     report_nli_input_output_train_jsonl_filepaths,
     report_nli_input_output_val_jsonl_filepaths,
+    report_to_negative_facts_input_output_jsonl_filepaths,
     integrated_nli_jsonl_filepath,
     integrated_report_facts_jsonl_filepath,
     use_sentence2facts_for_nli,
@@ -445,6 +447,7 @@ def train_from_scratch(
         fact_to_metadata_input_output_jsonl_filepaths=fact_to_metadata_input_output_jsonl_filepaths,
         fact_to_comparison_input_output_jsonl_filepaths=fact_to_comparison_input_output_jsonl_filepaths,
         fact_to_metadata_v2_input_output_jsonl_filepaths=fact_to_metadata_v2_input_output_jsonl_filepaths,
+        report_to_negative_facts_input_output_jsonl_filepaths=report_to_negative_facts_input_output_jsonl_filepaths,
         chest_imagenome_obs_input_output_jsonl_filepaths=chest_imagenome_obs_input_output_jsonl_filepaths,
         chest_imagenome_anatloc_input_output_jsonl_filepaths=chest_imagenome_anatloc_input_output_jsonl_filepaths,
         integrated_nli_jsonl_filepath=integrated_nli_jsonl_filepath,
@@ -474,6 +477,7 @@ def train_from_scratch(
         include_public_test_in_train=include_public_test_in_train,
         best_k_classes=best_k_classes,
         use_numeric_templates=use_numeric_templates,
+        filter_for_t5=use_t5,
     )
 
     collate_batch_fn_kwargs = dict(

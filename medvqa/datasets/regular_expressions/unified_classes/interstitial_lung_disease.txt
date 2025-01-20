@@ -1,0 +1,7 @@
+\bild\b
+\binterst.*\b(disease|reticul|fibrot|fibrosis|marking|inflammat|abnormal|pneum)
+\b(disease|reticul|fibrot|fibrosis|marking|inflammat|abnormal|pneum).*\binterst
+honeycomb
+\b(kerley|septal)\b.*\bline
+\breticul.*\b(opacit|densit|marking|change|pattern|shadow)
+\bNSIP\b

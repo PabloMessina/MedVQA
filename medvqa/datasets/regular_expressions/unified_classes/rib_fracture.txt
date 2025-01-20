@@ -1,0 +1,2 @@
+\brib(s)?\b.*\b(fracture|fx|lesion|trauma|injur|broken|destruct|metastas|deform|dislocat|crack|ruptur)
+\b(fracture|fx|lesion|trauma|injur|broken|destruct|metastas|deform|dislocat|crack|ruptur).*\brib(s)?\b

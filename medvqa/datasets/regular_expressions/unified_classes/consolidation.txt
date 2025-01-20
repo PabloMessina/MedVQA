@@ -1,0 +1,4 @@
+\bconsolidat
+\b(peri(-)?hilar|air(-)?space) opaci
+\bshadowing
+bronchogram

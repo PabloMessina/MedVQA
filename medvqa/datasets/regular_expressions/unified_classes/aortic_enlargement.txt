@@ -1,0 +1,3 @@
+\baneurysm
+\baort.*\b(dilat|enlarg|large|wide|ectasi|ectatic|prominen|increas)
+\b(dilat|enlarg|large|wide|ectasi|ectatic|prominen|increas).*\baort

@@ -166,14 +166,38 @@ def get_image_transform(
 
             if augmentation_mode == 'random-color':
                 train_transform = image_augmented_transforms.get_train_transform('color', bbox_aware=True)
+                train_transform__no_bbox = image_augmented_transforms.get_train_transform('color', allow_returning_image_size=True) # to be used when no bboxes are present
             elif augmentation_mode == 'random-spatial':
                 train_transform = image_augmented_transforms.get_train_transform('spatial', bbox_aware=True)
+                train_transform__no_bbox = image_augmented_transforms.get_train_transform('spatial', allow_returning_image_size=True) # to be used when no bboxes are present
             elif augmentation_mode == 'random-color-and-spatial':
                 train_transform = image_augmented_transforms.get_train_transform('both', bbox_aware=True)
+                train_transform__no_bbox = image_augmented_transforms.get_train_transform('both', allow_returning_image_size=True) # to be used when no bboxes are present
             else:
                 raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
 
-            def transform_fn(image_path, bboxes, presence, albumentation_adapter, return_image_size=False):
+            # def transform_fn(img, **unused):
+            #     if random.random() < default_prob:
+            #         return test_transform(img) # no augmentation
+            #     return train_transform(img) # with augmentation
+
+            def transform_fn(image_path, bboxes=None, presence=None, albumentation_adapter=None, return_image_size=False):
+
+                if bboxes is None: # no bboxes -> use different transform
+                    assert presence is None
+                    assert albumentation_adapter is None
+                    # randomly choose between default transform and augmented transform
+                    if random.random() < default_prob:
+                        if return_image_size:
+                            img, size_before, size_after = test_transform(image_path, return_image_size=True)
+                            return img, size_before, size_after
+                        img = test_transform(image_path)
+                        return img
+                    return train_transform__no_bbox(
+                        image_path=image_path,
+                        return_image_size=return_image_size,
+                    )
+
                 # randomly choose between default transform and augmented transform
                 if random.random() < default_prob:
                     if return_image_size:

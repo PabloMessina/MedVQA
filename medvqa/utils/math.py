@@ -9,6 +9,13 @@ def rank_vectors_by_dot_product(vectors, query_vector):
     similarities = np.dot(query_vector, vectors.T)
     return np.argsort(similarities)[::-1]
 
+def rank_vectors_by_average_dot_product(vectors, query_vectors):
+    assert query_vectors.ndim == 2
+    assert query_vectors.shape[1] == vectors.shape[1]
+    assert vectors.ndim == 2
+    similarities = query_vectors @ vectors.T # (n_queries, n_vectors)
+    return np.argsort(similarities.mean(axis=0))[::-1]
+
 def rank_vectors_by_euclidean_distance(vectors, query_vector):
     distances2 = np.sum((vectors - query_vector) ** 2, axis=1)
     return np.argsort(distances2)

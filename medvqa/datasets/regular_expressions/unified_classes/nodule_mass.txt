@@ -1,0 +1,2 @@
+\b(micro|reticulo)?nodul(e|es|ar|arly|arity|arities)\b
+\bmass(es)?\b

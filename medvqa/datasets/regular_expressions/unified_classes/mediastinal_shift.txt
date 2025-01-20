@@ -1,0 +1,2 @@
+mediastin.*\b(shift|deviat|displac)
+\b(shift|deviat|displac).*mediastin

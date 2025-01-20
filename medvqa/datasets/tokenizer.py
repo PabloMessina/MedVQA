@@ -10,8 +10,7 @@ from medvqa.utils.files import (
     get_file_path_with_hashing_if_too_long,
 )
 from medvqa.datasets.preprocessing import get_sentences
-from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
-from medvqa.utils.common import CACHE_DIR
+from medvqa.utils.common import CACHE_DIR, REGULAR_EXPRESSIONS_FOLDER
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 from medvqa.utils.hashing import hash_string, hash_string_list
 import os

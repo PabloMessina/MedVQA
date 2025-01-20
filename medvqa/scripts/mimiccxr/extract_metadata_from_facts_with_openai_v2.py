@@ -15,13 +15,12 @@ from medvqa.datasets.mimiccxr import (
 from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
 from medvqa.utils.files import load_jsonl
 
-INSTRUCTIONS = """You will receive a factual statement extracted from a radiology report. Your task is to output a JSON object with the following 7 fields:  
-- "reason": A concise explanation (up to 3 brief sentences) supporting the outputs for the other fields.  
-- "too_noisy_or_irrelevant": Either "yes" or "no". Use "yes" if the statement is truncated, too noisy, too vague, incomprehensible, or not a medical observation from a radiology report. Otherwise, use "no".  
+INSTRUCTIONS = """You will receive a factual statement extracted from a radiology report. Your task is to output a JSON object with the following 7 fields:
+- "reason": A concise explanation (up to 3 brief sentences) supporting the outputs for the other fields.
+- "too_noisy_or_irrelevant": Either "yes" or "no". Use "yes" if the statement is truncated, too noisy, too vague, incomprehensible, or not a medical observation from a radiology report. Otherwise, use "no".
 - "visually_observable": Either "yes" or "no". Use "yes" if the statement describes something that can be observed visually on the chest X-ray. Otherwise, return "no".
-- "category": Must be one of the following: "anatomical finding", "disease", "device", "tubes and lines", "foreign body", "symptom", "technical assessment", "procedure", or "does not apply".  
-- "abnormality_status": Must be one of the following: "completely normal or healthy", "partial or minor abnormality", "major abnormality", or "does not apply".  
-- "anatomical_location": A short phrase explicitly extracting the anatomical location if mentioned. Infer the location only if sufficient information is available; otherwise, return "does not apply".  
+- "category": Must be one of the following: "anatomical finding", "disease", "device", "tubes and lines", "foreign body", "symptom", "technical assessment", "procedure", or "does not apply".
+- "anatomical_location": A short phrase explicitly extracting the anatomical location if mentioned. Infer the location only if sufficient information is available; otherwise, return "does not apply".
 - "general_observation": A shorter, more standardized version of the statement (e.g., omitting the anatomical location) suitable for indexing purposes, or "does not apply" if not possible."""
 
 _VALID_JSON_OBJECT_REGEX = re.compile(

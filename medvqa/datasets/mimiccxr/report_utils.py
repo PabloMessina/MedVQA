@@ -344,3 +344,13 @@ def concatenate_report_parts(background, findings, impression):
             report += ' '
         report += part
     return report
+
+def concatenate_facts(facts):
+    report = ""
+    for fact in facts:
+        if report:
+            if report[-1] != '.':
+                report += '.'
+            report += ' '
+        report += fact
+    return report

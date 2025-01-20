@@ -15,6 +15,7 @@ LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_WORKSPACE_DIR, 'cache')
 TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
 FAST_TMP_DIR = os.path.join(FAST_WORKSPACE_DIR, 'tmp')
 RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
+REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
 
 # NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem
 # and have set the YOLOv5_PYTHON_PATH environment variable to an appropriate python executable.

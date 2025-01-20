@@ -293,7 +293,6 @@ VINBIG_LABEL2PHRASE = {
     'Lung tumor': 'lung tumor seen',
     'Pneumonia': 'pneumonia seen',
     'Tuberculosis': 'tuberculosis seen',
-    'Other disease': 'other disease seen',
     'No finding': 'no abnormalities seen',
 }
 assert all([l in VINBIG_LABEL2PHRASE for l in VINBIG_LABELS])
@@ -1437,3 +1436,31 @@ MULTIDATASET_UNIFIED_CLASSES = [
 MULTIDATASET_UNIFIED_CLASSES = list(set(MULTIDATASET_UNIFIED_CLASSES))
 # Ensure sorted
 MULTIDATASET_UNIFIED_CLASSES.sort()
+
+MULTIDATASET_UNIFIED_CLASSES__VINDRCXR_SUBSET = [
+    'aortic enlargement',
+    'atelectasis',
+    'calcification',
+    'cardiomegaly',
+    'clavicle fracture',
+    'consolidation',
+    'edema',
+    'emphysema',
+    'enlarged pulmonary artery',
+    'interstitial lung disease',
+    'infiltration',
+    'lung opacity',
+    'lung cavity',
+    'lung cyst',
+    'mediastinal shift',
+    'nodule/mass',
+    'pleural effusion',
+    'pleural thickening',
+    'pneumothorax',
+    'pulmonary fibrosis',
+    'rib fracture',
+    'copd',
+    'lung tumor',
+    'pneumonia',
+    'tuberculosis',
+]

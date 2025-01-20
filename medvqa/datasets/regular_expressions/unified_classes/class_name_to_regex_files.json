@@ -1,0 +1,29 @@
+{
+    "VinDr-CXR": {
+        "Aortic enlargement": ["aortic_enlargement.txt"],
+        "Atelectasis": ["atelectasis.txt"],
+        "Calcification": ["calcification.txt"],
+        "Cardiomegaly": ["cardiomegaly.txt"],
+        "Clavicle fracture": ["clavicle_fracture.txt"],
+        "Consolidation": ["consolidation.txt"],
+        "Edema": ["edema.txt"],
+        "Emphysema": ["emphysema.txt"],
+        "Enlarged PA": ["enlarged_pulmonary_artery.txt"],
+        "ILD": ["interstitial_lung_disease.txt"],
+        "Infiltration": ["infiltration.txt"],
+        "Lung Opacity": ["opacity.txt"],
+        "Lung cavity": ["cavity.txt"],
+        "Lung cyst": ["cyst.txt"],
+        "Mediastinal shift": ["mediastinal_shift.txt"],
+        "Nodule/Mass": ["nodule_mass.txt"],
+        "Pleural effusion": ["pleural_effusion.txt"],
+        "Pleural thickening": ["pleural_thickening.txt"],
+        "Pneumothorax": ["pneumothorax.txt"],
+        "Pulmonary fibrosis": ["pulmonary_fibrosis.txt"],
+        "Rib fracture": ["rib_fracture.txt"],
+        "COPD": ["copd.txt"],
+        "Lung tumor": ["lung_tumor.txt"],
+        "Pneumonia": ["pneumonia.txt"],
+        "Tuberculosis": ["tuberculosis.txt"]
+    }
+}

@@ -1,0 +1,6 @@
+\b(enlarg|large|dilat|increas|prominen).*\b(pulm|lung|lob|parenchyma).*\b(arter|vascul|vessel)
+\b(arter|vascul|vessel).*\b(pulm|lung|lob|parenchyma).*\b(enlarg|large|dilat|increas|prominen)
+\b(pulm|lung|lob|parenchyma).*\b(enlarg|large|dilat|increas|prominen).*\b(arter|vascul|vessel)
+\b(arter|vascul|vessel).*\b(enlarg|large|dilat|increas|prominen).*\b(pulm|lung|lob|parenchyma)
+\b(pulm|lung|lob|parenchyma).*\b(arter|vascul|vessel).*\b(enlarg|large|dilat|increas|prominen)
+\b(enlarg|large|dilat|increas|prominen).*\b(arter|vascul|vessel).*\b(pulm|lung|lob|parenchyma)

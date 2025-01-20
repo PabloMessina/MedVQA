@@ -1,0 +1,5 @@
+\beffusion
+\bpleural.*\bfluid
+\bfluid.*\bpleural
+\b(costophrenic|cp) (angle|sulcus|sulci).*\b(blunt|attenuat)
+\b(blunt|attenuat).*\b(costophrenic|cp) (angle|sulcus|sulci)

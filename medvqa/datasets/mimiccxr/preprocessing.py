@@ -4,8 +4,8 @@ from pprint import pprint
 from collections import OrderedDict
 from nltk import wordpunct_tokenize
 
-from medvqa.datasets.qa_pairs_extractor import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
+from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.utils.files import read_lines_from_txt
 
 _re_header = re.compile(r'(^|\n)\s*([A-Z][a-zA-Z]*(( |-|&)+[a-zA-Z]+)*?:)')

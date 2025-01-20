@@ -1,0 +1,5 @@
+\bpn(eu|ue)moni[ac]\b
+\bpna\b
+\bpenumoni[ac]\b
+\b(lung|pulmonar|chest|lobe).*\binfect
+\binfect.*\b(lung|pulmonar|chest|lobe)

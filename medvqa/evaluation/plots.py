@@ -47,8 +47,16 @@ def _replace_nans_with_local_avgs(scores):
         scores_.append(x)
     return scores_
 
-def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_plot_figsize=(8, 6),
+def plot_train_val_curves(logs_path, metrics=None, metric_names=None, agg_fn=max, single_plot_figsize=(8, 6),
                           use_min_with_these_metrics=None, use_max_with_these_metrics=None):
+
+    # load csv without index column    
+    logs = pd.read_csv(logs_path, index_col=False)
+
+    if metrics is None:
+        assert metric_names is None
+        metrics = logs.columns
+        metric_names = metrics
 
     assert len(metrics) == len(metric_names)
     assert len(metrics) > 0
@@ -56,11 +64,11 @@ def plot_train_val_curves(logs_path, metrics, metric_names, agg_fn=max, single_p
     ncols = 2 if n > 1 else 1
     nrows = n // ncols + bool(n % ncols)
 
-    # load csv without index column    
-    logs = pd.read_csv(logs_path, index_col=False)
-
     figsize = (single_plot_figsize[0] * ncols, single_plot_figsize[1] * nrows)
     plt.figure(figsize=figsize)
+
+    if use_min_with_these_metrics is None:
+        use_min_with_these_metrics = [x for x in metrics if x.endswith('loss')]
 
     for j in range(n):
 

@@ -1,6 +1,7 @@
 # Taken and adapted from https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
 
 # imports
+import sys
 import aiohttp  # for making API calls concurrently
 import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
@@ -156,9 +157,13 @@ def run_common_boilerplate_for_api_requests(
                 batch = client.batches.retrieve(batch_object.id)
                 logger.info(f"Batch: {batch}")
                 logger.info(f"Batch status: {batch.status}")
+
+                if batch.output_file_id is None:
+                    logger.warning(f"Batch output file ID is None. Exiting.")
+                    sys.exit(1)
                 
-                if batch.status == 'completed':
-                    logger.info(f"Batch with input file ID {batch_input_file_id} is completed")
+                if batch.status in ['completed', 'cancelled']:
+                    logger.info(f"Batch with input file ID {batch_input_file_id} is {batch.status}")
 
                     logger.info(f"Retrieving batch input file ID {batch.input_file_id}")
                     input_content = client.files.content(batch.input_file_id)
@@ -170,7 +175,7 @@ def run_common_boilerplate_for_api_requests(
                         metadata = { "query": query }
                         custom_id_to_metadata[custom_id] = metadata
                     logger.info(f"Retrieved metadata for {len(custom_id_to_metadata)} queries")
-
+                    
                     logger.info(f"Retrieving batch output file ID {batch.output_file_id}")
                     output_content = client.files.content(batch.output_file_id)
                     postprocessed_responses = []
@@ -183,8 +188,8 @@ def run_common_boilerplate_for_api_requests(
                             # text = api_response[1]['choices'][0]['message']['content']
                             custom_id = api_response['custom_id']
                             text = api_response['response']['body']['choices'][0]['message']['content']
-                            parsed_output = parse_openai_output(text)
                             metadata = custom_id_to_metadata[custom_id]
+                            parsed_output = parse_openai_output(text)
                             postprocessed_responses.append({
                                 "metadata": metadata,
                                 "parsed_response": parsed_output,

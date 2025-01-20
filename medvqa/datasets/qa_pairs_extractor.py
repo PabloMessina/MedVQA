@@ -6,11 +6,9 @@ import pandas as pd
 from nltk.tokenize import sent_tokenize
 from nltk.corpus import stopwords
 
-from medvqa.utils.common import SOURCE_DIR
+from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.utils.files import load_json, load_regex_from_files, read_lines_from_txt
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
-
-REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
 
 _LINKING_WORDS = ['when', 'and', 'but', 'however', 'although', 'should', 'since', 'unless', 'nevertheless']
 _aux = '('+'|'.join(f'\\b{x}\\b' for x in _LINKING_WORDS)+'|[,;.:])'

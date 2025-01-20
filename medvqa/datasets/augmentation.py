@@ -179,7 +179,7 @@ class ImageAugmentedTransforms:
                 return image
         return test_transform
     
-    def get_train_transform(self, mode, bbox_aware=False, for_vinbig=False):
+    def get_train_transform(self, mode, bbox_aware=False, for_vinbig=False, allow_returning_image_size=False):
         tf_load_image = self._transform_fns['load_image']
         tf_bgr2rgb = self._transform_fns['bgr2rgb']
         tf_totensor = self._transform_fns['totensor']
@@ -259,13 +259,30 @@ class ImageAugmentedTransforms:
                     return image, bboxes, presence
         else:
             print('get_train_transform(): Using normal transforms')
-            def train_transform(image_path):
-                image = tf_load_image(image_path)
-                image = tf_bgr2rgb(image)
-                image = tf_alb(image=image)['image']
-                image = tf_totensor(image)
-                image = tf_normalize(image)
-                return image
+            if allow_returning_image_size:
+                def train_transform(image_path, return_image_size=False):
+                    image = tf_load_image(image_path)
+                    if return_image_size:
+                        size_before = image.shape[:2]
+                    image = tf_bgr2rgb(image)
+                    augmented = tf_alb(image=image)
+                    image = augmented['image']
+                    if return_image_size:
+                        size_after = image.shape[:2]
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    if return_image_size:
+                        return image, size_before, size_after
+                    return image
+            else:
+                def train_transform(image_path):
+                    image = tf_load_image(image_path)
+                    image = tf_bgr2rgb(image)
+                    augmented = tf_alb(image=image)
+                    image = augmented['image']
+                    image = tf_totensor(image)
+                    image = tf_normalize(image)
+                    return image
         return train_transform
 
 class SPATIAL_TRANSFORMS__BBOX:

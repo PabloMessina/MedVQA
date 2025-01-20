@@ -103,7 +103,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
-                sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
                 if use_contrastive_phrase_grounding_loss:
                     phrase_grounding_similarity = model_output['phrase_grounding_similarity'] # (batch_size, num_facts)
@@ -145,6 +144,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
                 # 4. attention regularization loss
                 if use_attention_regularization_loss:
+                    sigmoid_attention = model_output['sigmoid_attention']
                     areas = sigmoid_attention.mean(dim=-1)
                     areas_pos = areas[pos_indices]
                     areas_neg = areas[neg_indices]

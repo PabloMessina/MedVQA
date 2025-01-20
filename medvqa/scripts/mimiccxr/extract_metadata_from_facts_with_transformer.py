@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--extracted_facts_jsonl_filepath", type=str, required=True)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--checkpoint_folder_path", type=str, required=True)
-    parser.add_argument("--device", type=str, default='GPU', choices=['GPU', 'CPU'])
+    parser.add_argument("--device", type=str, default='gpu', choices=['gpu', 'cuda'])
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_length", type=int, default=512)

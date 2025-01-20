@@ -1,0 +1,2 @@
+\bpleura.*\bthicken
+\bthicken.*\bpleura

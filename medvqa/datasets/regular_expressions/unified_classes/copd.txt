@@ -1,0 +1,3 @@
+\bcopd\b
+\bchronic.*\b(pulmonary|air).*(disease|obstruct)
+\bchronic.*\bobstruct.*\bdisease

@@ -1,0 +1,3 @@
+cardiomegal
+\b(enlarg|large|dilat|hypertroph|prominen|increas).*\b(heart|cardiac|cardio|ventric)
+\b(heart|cardiac|cardio|ventric).*\b(enlarg|large|dilat|hypertroph|prominen|increas)
