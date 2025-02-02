@@ -1,3 +1,4 @@
+import random
 from dotenv import load_dotenv
 from imagesize import get as get_image_size
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
@@ -169,7 +170,8 @@ def load_labels():
         image_ids[N_IMAGES_TRAIN + i] = test_images_ids[i]
 
     # Labels
-    image_id_2_labels = {}
+    train_image_id_2_labels = {}
+    test_image_id_2_labels = {}
         
     # Train labels
     tmp = VINBIG_LABELS[:]
@@ -181,12 +183,12 @@ def load_labels():
             train_labels[3 * i + 1],
             train_labels[3 * i + 2]
         )
-        image_id_2_labels[image_ids[i]] = labels
+        train_image_id_2_labels[image_ids[i]] = labels
     
     # Test labels
     test_labels = df_labels_test[VINBIG_LABELS].values
     for i in range(N_IMAGES_TEST):
-        image_id_2_labels[image_ids[N_IMAGES_TRAIN + i]] = test_labels[i]
+        test_image_id_2_labels[image_ids[N_IMAGES_TRAIN + i]] = test_labels[i]
 
     # # Sanity check train labels
     # if sanity_check:
@@ -196,7 +198,7 @@ def load_labels():
     #     _sanity_check_train_labels(labels_matrix)
 
     # Return
-    return image_id_2_labels
+    return train_image_id_2_labels, test_image_id_2_labels
 
 def print_labels(labels):
     for i, label in enumerate(VINBIG_LABELS):
@@ -209,7 +211,8 @@ def get_original_image_path(image_id):
 def get_medium_size_image_path(image_id):
     return os.path.join(VINBIG_512x512_IMAGES_FOLDER, f'{image_id}.jpg')
 
-def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), denormalize=False, verbose=False):
+def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), denormalize=False, verbose=False,
+                                        allowed_classes=None, class_to_draw_last=None):
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     from PIL import Image
@@ -223,32 +226,109 @@ def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), d
         w, h = get_image_size(image_path)
     class_names = list(bbox_dict.keys())
     class_names.sort()
+    if class_to_draw_last is not None and class_to_draw_last in class_names:
+        class_names.remove(class_to_draw_last)
+        class_names.append(class_to_draw_last)
     for i, class_name in enumerate(class_names):
+        if allowed_classes is not None and class_name not in allowed_classes:
+            continue
         bbox_list = bbox_dict[class_name]
         if verbose:
             print(f'{i}: {class_name}')
             print(bbox_list)
+        color_idx = VINBIG_BBOX_NAMES.index(class_name)
         for bbox in bbox_list:
             if denormalize:
                 bbox = [bbox[0] * w, bbox[1] * h, bbox[2] * w, bbox[3] * h]
             rect = patches.Rectangle(
                 (bbox[0], bbox[1]), bbox[2] - bbox[0], bbox[3] - bbox[1],
-                linewidth=3, edgecolor=plt.cm.tab20(i), facecolor='none'
+                linewidth=3, edgecolor=plt.cm.tab20(color_idx), facecolor='none'
             )
             ax.add_patch(rect)
             ax.text(bbox[0], bbox[1], class_name, fontsize=10, bbox=dict(facecolor='white', alpha=0.3))
     plt.show()
 
-def compute_label_frequencies():
+class VinBigBBoxVisualizer:
+    def __init__(self):
+        # Load data
+        self.train_image_id_2_bboxes = load_train_image_id_2_bboxes()
+        self.test_image_id_2_bboxes = load_test_image_id_2_bboxes()
+        self.train_image_id_to_labels, self.test_image_id_to_labels = load_labels()
+        self.train_image_ids = list(self.train_image_id_to_labels.keys())
+        self.test_image_ids = list(self.test_image_id_to_labels.keys())
+        print(f'len(self.train_image_id_2_bboxes): {len(self.train_image_id_2_bboxes)}')
+        print(f'len(self.test_image_id_2_bboxes): {len(self.test_image_id_2_bboxes)}')
+        print(f'len(self.train_image_id_to_labels): {len(self.train_image_id_to_labels)}')
+        print(f'len(self.test_image_id_to_labels): {len(self.test_image_id_to_labels)}')
 
-    image_id_2_labels = load_labels()
+    def visualize_train_image(self, image_id=None, class_name=None, excluded_class_name=None, exclude_other_classes=False,
+                              figsize=(10, 10), verbose=False):
+        self._visualize_image(image_ids=self.train_image_ids,
+                              image_id_2_bboxes=self.train_image_id_2_bboxes,
+                              image_id_to_labels=self.train_image_id_to_labels,
+                              image_id=image_id,
+                              class_name=class_name,
+                              excluded_class_name=excluded_class_name,
+                              exclude_other_classes=exclude_other_classes,
+                              figsize=figsize,
+                              verbose=verbose)
+        
+    def visualize_test_image(self, image_id=None, class_name=None, excluded_class_name=None, exclude_other_classes=False,
+                             figsize=(10, 10), verbose=False):
+        self._visualize_image(image_ids=self.test_image_ids,
+                              image_id_2_bboxes=self.test_image_id_2_bboxes,
+                              image_id_to_labels=self.test_image_id_to_labels,
+                              image_id=image_id,
+                              class_name=class_name,
+                              excluded_class_name=excluded_class_name,
+                              exclude_other_classes=exclude_other_classes,
+                              figsize=figsize,
+                              verbose=verbose)
+
+    def _visualize_image(self, image_ids, image_id_2_bboxes, image_id_to_labels, image_id=None, class_name=None, excluded_class_name=None,
+                         exclude_other_classes=False, figsize=(10, 10), verbose=False):
+        if image_id is None:
+            if class_name is not None:
+                candidate_image_ids = []
+                for image_id, bboxes in image_id_2_bboxes.items():
+                    if class_name in bboxes:
+                        candidate_image_ids.append(image_id)
+                assert len(candidate_image_ids) > 0
+                image_id = random.choice(candidate_image_ids)
+            elif excluded_class_name is not None:
+                candidate_image_ids = []
+                for image_id in image_ids:
+                    try:
+                        bboxes = image_id_2_bboxes[image_id]
+                        if excluded_class_name not in bboxes:
+                            candidate_image_ids.append(image_id)
+                    except KeyError:
+                        candidate_image_ids.append(image_id)
+                assert len(candidate_image_ids) > 0
+                image_id = random.choice(candidate_image_ids)
+            else:
+                image_id = random.choice(image_ids)
+        try:
+            bbox_dict = image_id_2_bboxes[image_id]
+        except KeyError:
+            bbox_dict = {}
+        print('Labels:', [VINBIG_LABELS[i] for i in range(len(VINBIG_LABELS)) if image_id_to_labels[image_id][i] == 1])
+        if class_name is not None and exclude_other_classes:
+            allowed_classes = [class_name]
+        else:
+            allowed_classes = None
+        visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=figsize, verbose=verbose, allowed_classes=allowed_classes,
+                                            class_to_draw_last=class_name)
+
+def compute_label_frequencies():
+    train_image_id_2_labels, test_image_id_2_labels = load_labels()
 
     # Train labels
     df = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)
     train_image_ids = df['image_id'].unique()
     train_label_frequencies = np.zeros((len(VINBIG_LABELS),), np.int32)
     for image_id in train_image_ids:
-        labels = image_id_2_labels[image_id]
+        labels = train_image_id_2_labels[image_id]
         train_label_frequencies += labels
 
     # Test labels
@@ -256,7 +336,7 @@ def compute_label_frequencies():
     test_image_ids = df['image_id'].unique()
     test_label_frequencies = np.zeros((len(VINBIG_LABELS),), np.int32)
     for image_id in test_image_ids:
-        labels = image_id_2_labels[image_id]
+        labels = test_image_id_2_labels[image_id]
         test_label_frequencies += labels
 
     return {

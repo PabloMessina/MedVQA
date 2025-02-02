@@ -818,15 +818,18 @@ def get_labels2report_collate_batch_fn(dataset_id, use_report, use_gender, use_c
     else: assert False, f'Unknown dataset_id {dataset_id}'
     return collate_batch_fn
 
-def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
+def get_seq2seq_collate_batch_fn(use_t5=False, use_flan_t5=False, use_bart=False, model_name=None):
 
-    assert use_t5 or use_bart # TODO: support other seq2seq models eventually
+    assert use_t5 or use_flan_t5 or use_bart # TODO: support other seq2seq models eventually
 
-    if use_t5 or use_bart:
+    if use_t5 or use_flan_t5 or use_bart:
         assert model_name is not None
         if use_t5:
             from transformers import T5TokenizerFast
             tokenizer = T5TokenizerFast.from_pretrained(model_name)
+        elif use_flan_t5:
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
         elif use_bart:
             from transformers import BartTokenizerFast
             tokenizer = BartTokenizerFast.from_pretrained(model_name)
@@ -834,7 +837,7 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_bart=False, model_name=None):
     def collate_batch_fn(batch):
 
         batch_dict = dict()
-        if use_t5 or use_bart:
+        if use_t5 or use_flan_t5 or use_bart:
             output_text = [x['output_text'] for x in batch]
             assert type(output_text[0]) == str, type(output_text[0])
             output_encoding = tokenizer(

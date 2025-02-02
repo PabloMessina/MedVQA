@@ -136,6 +136,7 @@ def parse_args(args=None):
     parser.add_argument('--yolov11_model_alias', type=str, default=None)
     parser.add_argument('--query_embed_size', type=int, default=None)
     parser.add_argument('--local_attention_hidden_size', type=int, default=None)
+    parser.add_argument('--use_linear_head_for_classification', action='store_true')
     
     parser.add_argument('--optimizer_name', type=str, default='adam')
     
@@ -147,7 +148,8 @@ def parse_args(args=None):
     parser.add_argument('--warmup_and_cosine_args', type=str, default=None)
     parser.add_argument('--warmup_decay_and_cyclic_decay_args', type=str, default=None)
     
-    parser.add_argument('--batch_size', type=int, default=45, help='Batch size')
+    parser.add_argument('--train_batch_size', type=int, default=45, help='Batch size for training')
+    parser.add_argument('--val_batch_size', type=int, default=45, help='Batch size for validation')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='Number of steps to accumulate gradients')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for parallel dataloading')    
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')    
@@ -290,7 +292,8 @@ def train_model(
     count_print = CountPrinter()
     
     # Pull out some args from kwargs
-    batch_size = dataloading_kwargs['batch_size']
+    train_batch_size = dataloading_kwargs['train_batch_size']
+    val_batch_size = dataloading_kwargs['val_batch_size']
     train_iuxray = training_kwargs['train_iuxray']
     train_mimiccxr = training_kwargs['train_mimiccxr']
     train_chexpert = training_kwargs['train_chexpert']
@@ -328,13 +331,19 @@ def train_model(
     n_questions_aux_task = auxiliary_tasks_kwargs.get('n_questions_aux_task', None)
     iuxray_question_labels_filename = auxiliary_tasks_kwargs.get('iuxray_question_labels_filename', None)
     mimiccxr_question_labels_filename = auxiliary_tasks_kwargs.get('mimiccxr_question_labels_filename', None)
+    
+    # Sanity checks
+    
     if classify_questions:
         assert n_questions_aux_task is not None
         if train_iuxray: assert iuxray_question_labels_filename is not None
         if train_mimiccxr: assert mimiccxr_question_labels_filename is not None
-
+    
     if train_chexpert:
         assert classify_chexpert
+
+    if train_vinbig:
+        assert classify_labels_vinbig or predict_bboxes_vinbig
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
@@ -400,11 +409,12 @@ def train_model(
     if train_mimiccxr:
         count_print('Creating MIMIC-CXR visual module trainer ...')
         mimiccxr_trainer = MIMICCXR_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
-            batch_size = batch_size,
-            collate_batch_fn = mimiccxr_collate_batch_fn,            
-            num_workers = num_workers,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
+            collate_batch_fn=mimiccxr_collate_batch_fn,            
+            num_workers=num_workers,
             **mimiccxr_trainer_kwargs,
         )
     
@@ -412,11 +422,12 @@ def train_model(
     if train_iuxray:
         count_print('Creating IU X-Ray visual module trainer ...')
         iuxray_trainer = IUXRAY_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
-            batch_size = batch_size,
-            collate_batch_fn = iuxray_collate_batch_fn,            
-            num_workers = num_workers,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
+            collate_batch_fn=iuxray_collate_batch_fn,            
+            num_workers=num_workers,
             **iuxray_trainer_kwargs,
         )
 
@@ -424,9 +435,10 @@ def train_model(
     if train_chexpert:
         count_print('Creating CheXpert visual module trainer ...')
         chexpert_trainer = CheXpert_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
-            batch_size=batch_size,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
             collate_batch_fn=chexpert_collate_batch_fn,
             num_workers=num_workers,
             **chexpert_trainer_kwargs,
@@ -436,9 +448,10 @@ def train_model(
     if train_cxr14:
         count_print('Creating CXR14 visual module trainer ...')
         cxr14_trainer = CXR14_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CXR14]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CXR14]),
-            batch_size=batch_size,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CXR14]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CXR14]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
             collate_batch_fn=cxr14_collate_batch_fn,
             num_workers=num_workers,
             **cxr14_trainer_kwargs,
@@ -448,9 +461,10 @@ def train_model(
     if train_vinbig:
         count_print('Creating VinBig visual module trainer ...')
         vinbig_trainer = VinBig_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            batch_size=batch_size,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
             collate_batch_fn=vinbig_collate_batch_fn,
             num_workers=num_workers,
             **vinbig_trainer_kwargs,
@@ -460,9 +474,10 @@ def train_model(
     if train_padchest:
         count_print('Creating PadChest visual module trainer ...')
         padchest_trainer = PadChest_VisualModuleTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
-            val_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
-            batch_size=batch_size,
+            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
+            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.PADCHEST]),
+            train_batch_size=train_batch_size,
+            val_batch_size=val_batch_size,
             collate_batch_fn=padchest_collate_batch_fn,
             num_workers=num_workers,
             **padchest_trainer_kwargs,
@@ -754,7 +769,7 @@ def train_model(
     # Score function
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
-        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9, _metric_getter)
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.05, 0.95, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(trainer_engine.state.metrics, validator_engine.state.metrics)
     else:
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
@@ -870,7 +885,8 @@ def train_from_scratch(
     chest_imagenome_label_names_filename,
     use_chest_imagenome_decent_images_only,
     # Dataloading args
-    batch_size,
+    train_batch_size,
+    val_batch_size,
     num_workers,
     mimiccxr_weight,
     iuxray_weight,
@@ -927,6 +943,7 @@ def train_from_scratch(
     classify_labels_vinbig,
     predict_bboxes_vinbig,
     merge_findings,
+    use_linear_head_for_classification,
     # GPU
     device,
     # Other args
@@ -1033,6 +1050,7 @@ def train_from_scratch(
         vinbig_mlc_hidden_size=vinbig_mlc_hidden_size,
         merge_findings=merge_findings,
         n_findings=n_findings,
+        use_linear_head_for_classification=use_linear_head_for_classification,
     )
     if predict_bboxes_chest_imagenome:
         avg_coords = get_chest_imagenome_train_average_bbox_coords(
@@ -1068,7 +1086,8 @@ def train_from_scratch(
     )
     
     dataloading_kwargs = dict(
-        batch_size=batch_size,
+        train_batch_size=train_batch_size,
+        val_batch_size=val_batch_size,
         mimiccxr_weight=mimiccxr_weight,
         iuxray_weight=iuxray_weight,
         chexpert_weight=chexpert_weight,

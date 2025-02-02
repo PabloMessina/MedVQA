@@ -311,7 +311,7 @@ def load_and_run_labels2report_gen_model_in_inference_mode(
 
 def load_and_run_seq2seq_model_in_inference_mode(
         input_text, model_folder_path=None, model_checkpoint_path=None, max_output_length=100,
-        num_beams=1, use_amp=False, device='GPU'):
+        num_beams=1, use_amp=False, device='cuda'):
     
     from medvqa.models.checkpoint import load_metadata, get_checkpoint_filepath
     from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
@@ -325,11 +325,12 @@ def load_and_run_seq2seq_model_in_inference_mode(
     metadata = load_metadata(model_folder_path)
     model_kwargs = metadata['model_kwargs']
     use_t5 = model_kwargs['seq2seq_model_name'] == Seq2SeqModels.T5
+    use_flan_t5 = model_kwargs['seq2seq_model_name'] == Seq2SeqModels.FLAN_T5
     use_bart = model_kwargs['seq2seq_model_name'] == Seq2SeqModels.BART
     
     # device
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'cuda' else 'cpu')
     print_bold('device = ', device)
-    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
     
     # Create model
     print_bold('Create model')
@@ -347,10 +348,13 @@ def load_and_run_seq2seq_model_in_inference_mode(
 
     # Prepare input text
     print_bold('Prepare input text')
-    if use_t5 or use_bart:
+    if use_t5 or use_flan_t5 or use_bart:
         if use_t5:
             from transformers import T5TokenizerFast
             tokenizer = T5TokenizerFast.from_pretrained(model_kwargs['model_name'])
+        elif use_flan_t5:
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model_kwargs['model_name'])
         else:
             from transformers import BartTokenizerFast
             tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
@@ -376,7 +380,7 @@ def load_and_run_seq2seq_model_in_inference_mode(
             'mode': 'test',
             'max_len': max_output_length,
         }
-        if use_t5 or use_bart:
+        if use_t5 or use_flan_t5 or use_bart:
             model_input_kwargs['input_ids'] = input_ids
             model_input_kwargs['attention_mask'] = attention_mask
             model_input_kwargs['num_beams'] = num_beams
@@ -386,14 +390,14 @@ def load_and_run_seq2seq_model_in_inference_mode(
         # Forward pass
         with autocast(enabled=use_amp): # automatic mixed precision
             model_output = model(**model_input_kwargs)
-            if use_t5 or use_bart:
+            if use_t5 or use_flan_t5 or use_bart:
                 output_ids = model_output
             else:
                 raise NotImplementedError
 
     # Convert ids to string
     print_bold('Convert ids to string')
-    if use_t5 or use_bart:
+    if use_t5 or use_flan_t5 or use_bart:
         output_text = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
     else:
         raise NotImplementedError

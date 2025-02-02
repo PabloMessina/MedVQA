@@ -20,6 +20,7 @@ INSTRUCTIONS = """You will receive a factual statement extracted from a radiolog
 - "too_noisy_or_irrelevant": Either "yes" or "no". Use "yes" if the statement is truncated, too noisy, too vague, incomprehensible, or not a medical observation from a radiology report. Otherwise, use "no".
 - "visually_observable": Either "yes" or "no". Use "yes" if the statement describes something that can be observed visually on the chest X-ray. Otherwise, return "no".
 - "category": Must be one of the following: "anatomical finding", "disease", "device", "tubes and lines", "foreign body", "symptom", "technical assessment", "procedure", or "does not apply".
+- "abnormality_status": Must be one of the following: "completely normal or healthy", "partial or minor abnormality", "major abnormality", or "does not apply".  
 - "anatomical_location": A short phrase explicitly extracting the anatomical location if mentioned. Infer the location only if sufficient information is available; otherwise, return "does not apply".
 - "general_observation": A shorter, more standardized version of the statement (e.g., omitting the anatomical location) suitable for indexing purposes, or "does not apply" if not possible."""
 

@@ -17,37 +17,49 @@ _jsonl_cache = dict()
 _pickle_cache = dict()
 _csv_dataframe_cache = dict()
 
-def get_cached_json_file(path):
-    try:
-        file = _json_cache[path]
-    except KeyError:
+def get_cached_json_file(path, force_reload=False):
+    if force_reload:
         file = _json_cache[path] = load_json(path)
+    else:
+        try:
+            file = _json_cache[path]
+        except KeyError:
+            file = _json_cache[path] = load_json(path)
     return file
 
-def get_cached_jsonl_file(path):
-    try:
-        file = _jsonl_cache[path]
-    except KeyError:
+def get_cached_jsonl_file(path, force_reload=False):
+    if force_reload:
         file = _jsonl_cache[path] = load_jsonl(path)
+    else:
+        try:
+            file = _jsonl_cache[path]
+        except KeyError:
+            file = _jsonl_cache[path] = load_jsonl(path)
     return file
 
-def get_cached_pickle_file(path):
-    try:
-        file = _pickle_cache[path]        
-    except KeyError:
-        file = None
-    if file is None:
+def get_cached_pickle_file(path, force_reload=False):
+    if force_reload:
         file = _pickle_cache[path] = load_pickle(path)
+    else:
+        try:
+            file = _pickle_cache[path]        
+        except KeyError:
+            file = None
+        if file is None:
+            file = _pickle_cache[path] = load_pickle(path)
     return file
 
-def get_cached_dataframe_from_csv(path):
+def get_cached_dataframe_from_csv(path, force_reload=False):
     import pandas as pd
-    try:
-        file = _csv_dataframe_cache[path]
-    except KeyError:
-        file = None
-    if file is None:
+    if force_reload:
         file = _csv_dataframe_cache[path] = pd.read_csv(path)
+    else:
+        try:
+            file = _csv_dataframe_cache[path]
+        except KeyError:
+            file = None
+        if file is None:
+            file = _csv_dataframe_cache[path] = pd.read_csv(path)
     return file
 
 def load_json(path):

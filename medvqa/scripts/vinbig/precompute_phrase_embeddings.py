@@ -22,13 +22,13 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--average_top_k_most_similar', action='store_true')
     parser.add_argument('--top_k', type=int, default=10)
-    parser.add_argument('--facts_similar_to_anchor_facts_pickle_filepath', type=str, default=None)
+    parser.add_argument('--facts_relevant_to_anchor_facts_pickle_filepath', type=str, default=None)
 
     args = parser.parse_args()
 
     if args.average_top_k_most_similar:
         assert args.top_k > 0, 'top_k must be greater than 0 if average_top_k_most_similar is True'
-        assert args.facts_similar_to_anchor_facts_pickle_filepath is not None, 'facts_similar_to_anchor_facts_pickle_filepath must be provided if average_top_k_most_similar is True'
+        assert args.facts_relevant_to_anchor_facts_pickle_filepath is not None, 'facts_relevant_to_anchor_facts_pickle_filepath must be provided if average_top_k_most_similar is True'
 
     # Define  phrases
     phrases = [VINBIG_LABEL2PHRASE[label] for label in VINBIG_LABELS]
@@ -41,20 +41,16 @@ def main():
 
     if args.average_top_k_most_similar:
 
-        # Load integrated fact metadata
-        print(f'Loading facts_similar_to_anchor_facts from {args.facts_similar_to_anchor_facts_pickle_filepath}...')
-        tmp = load_pickle(args.facts_similar_to_anchor_facts_pickle_filepath)
-
-        # Extract facts
-        facts = set()
-        facts.update(tmp['preserved_facts'])
-        facts.update(tmp['preserved_general_facts'])
-        facts = list(facts)
-        print(f'Loaded {len(facts)} facts.')
+        # Load facts
+        print(f'Loading facts_relevant_to_anchor_facts from {args.facts_relevant_to_anchor_facts_pickle_filepath}...')
+        tmp = load_pickle(args.facts_relevant_to_anchor_facts_pickle_filepath)
+        anchor_facts = tmp['anchor_facts']
+        relevant_facts = tmp['relevant_facts']
+        anchors_per_fact = tmp['anchors_per_fact']
 
         # Extract embeddings
         print_bold('Extracting embeddings...')
-        fact_embeddings = embedding_extractor.compute_text_embeddings(facts)
+        relevant_fact_embeddings = embedding_extractor.compute_text_embeddings(relevant_facts)
         phrase_embeddings = embedding_extractor.compute_text_embeddings(phrases)
         most_similar_facts = []
         most_similar_fact_embeddings = []
@@ -69,21 +65,27 @@ def main():
                 average_phrase_embeddings[i] = phrase_embeddings[i]
                 continue
             else:
-                idxs = rank_vectors_by_dot_product(fact_embeddings, phrase_embeddings[i])
+                anchor_idx = anchor_facts.index(VINBIG_LABELS[i])
+                anchor_fact_idxs = [i for i, anchors in enumerate(anchors_per_fact) if anchor_idx in anchors]
+                print(f'{VINBIG_LABELS[i]}: len(anchor_fact_idxs)={len(anchor_fact_idxs)}')
+                anchor_fact_embeddings = relevant_fact_embeddings[anchor_fact_idxs]
+                idxs = rank_vectors_by_dot_product(anchor_fact_embeddings, phrase_embeddings[i])
                 top_k_idxs = idxs[:args.top_k]
-                top_k_similar_facts = [facts[idx] for idx in top_k_idxs]
-                top_k_similar_fact_embeddings = fact_embeddings[top_k_idxs]
+                top_k_idxs = [anchor_fact_idxs[j] for j in top_k_idxs]
+                top_k_similar_facts = [relevant_facts[j] for j in top_k_idxs]
+                top_k_similar_fact_embeddings = relevant_fact_embeddings[top_k_idxs]
                 top_k_similarities = np.dot(top_k_similar_fact_embeddings, phrase_embeddings[i])
                 for j in range(1, len(top_k_similarities)):
                     try:
-                        assert top_k_similarities[j] <= top_k_similarities[j-1]
+                        assert ((top_k_similarities[j] <= top_k_similarities[j-1]) or 
+                                abs(top_k_similarities[j] - top_k_similarities[j-1]) < 1e-6)
                     except:
                         print('top_k_similarities:', top_k_similarities)
                         print('top_k_similar_fact_embeddings:', top_k_similar_fact_embeddings)
-                        print('phrase_embeddings[i]:', phrase_embeddings[i])
+                        print(f'phrase_embeddings[{i}]:', phrase_embeddings[i])
                         print('top_k_similar_facts:', top_k_similar_facts)
-                        print('top_k_similarities[j]:', top_k_similarities[j])
-                        print('top_k_similarities[j-1]:', top_k_similarities[j-1])
+                        print(f'top_k_similarities[{j}]:', top_k_similarities[j])
+                        print(f'top_k_similarities[{j-1}]:', top_k_similarities[j-1])
                         raise
                 most_similar_facts.append(top_k_similar_facts)
                 most_similar_fact_embeddings.append(top_k_similar_fact_embeddings)
@@ -106,7 +108,7 @@ def main():
             strings=[
                 args.model_name,
                 args.model_checkpoint_folder_path,
-                args.facts_similar_to_anchor_facts_pickle_filepath,
+                args.facts_relevant_to_anchor_facts_pickle_filepath,
                 'average_top_k_most_similar',
                 f'top_k={args.top_k}',
             ],

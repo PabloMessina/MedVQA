@@ -1,14 +1,22 @@
 import torch.nn as nn
 
-from transformers import T5ForConditionalGeneration, BartForConditionalGeneration
+from transformers import (
+    T5ForConditionalGeneration,
+    BartForConditionalGeneration,
+    AutoModelForSeq2SeqLM,
+)
+
+from medvqa.utils.logging import print_orange
 
 class Seq2SeqModels:
     T5 = 't5'
+    FLAN_T5 = 'flan-t5'
     BART = 'bart'
     @staticmethod
     def get_all_models():
         return [
             Seq2SeqModels.T5,
+            Seq2SeqModels.FLAN_T5,
             Seq2SeqModels.BART,
         ]
 
@@ -18,14 +26,22 @@ class Seq2SeqModel(nn.Module):
         super().__init__()
         print('Seq2Seq model:')
         print(f'  model_name: {model_name}')
+        if unused_kwargs:
+            print_orange(f'WARNING: unused kwargs: {unused_kwargs}', bold=True)
 
         self.seq2seq_model_name = seq2seq_model_name
         self.model_name = model_name
+        self.use_t5 = seq2seq_model_name == Seq2SeqModels.T5
+        self.use_flan_t5 = seq2seq_model_name == Seq2SeqModels.FLAN_T5
+        self.use_bart = seq2seq_model_name == Seq2SeqModels.BART
 
-        if seq2seq_model_name == Seq2SeqModels.T5:
+        if self.use_t5:
             assert model_name is not None
             self.model = T5ForConditionalGeneration.from_pretrained(model_name)
-        elif seq2seq_model_name == Seq2SeqModels.BART:
+        elif self.use_flan_t5:
+            assert model_name is not None
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        elif self.use_bart:
             assert model_name is not None
             self.model = BartForConditionalGeneration.from_pretrained(model_name)
         else:
@@ -33,7 +49,7 @@ class Seq2SeqModel(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, labels=None, max_len=None, num_beams=1, mode='train'):
 
-        if self.seq2seq_model_name == Seq2SeqModels.T5 or self.seq2seq_model_name == Seq2SeqModels.BART:
+        if self.use_t5 or self.use_flan_t5 or self.use_bart:
             assert input_ids is not None
             assert attention_mask is not None
             if mode == 'train' or mode == 'val':
@@ -54,9 +70,9 @@ class Seq2SeqModel(nn.Module):
     
     def get_name(self):
         strings = []
-        if self.seq2seq_model_name == Seq2SeqModels.T5 or self.seq2seq_model_name == Seq2SeqModels.BART:
+        if self.use_t5 or self.use_flan_t5 or self.use_bart:
             assert self.model_name is not None
             strings.append(self.model_name)
         else:
-            raise ValueError(f'Unknown seq2seq_model_name: {self.seq2seq_model_name}')
+            raise ValueError(f'Unsupported Seq2Seq model: {self.seq2seq_model_name}')
         return f'Seq2Seq({",".join(strings)})'

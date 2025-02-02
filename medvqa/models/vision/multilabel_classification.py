@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision.ops import roi_align
+import torch.nn.functional as F
 
 class MLCVersion:
     DEFAULT = 'default' # global features -> fully connected layer -> softmax
@@ -224,6 +225,6 @@ class MultilabelClassifier_v3(nn.Module):
         x_glob = self.glob_proj(global_features) # (batch_size, hidden_dim)
         x_concat = torch.cat([x_loc, x_glob.unsqueeze(1)], dim=1) # (batch_size, num_regions + 1, hidden_dim)
         x_concat = x_concat.view(batch_size, -1) # (batch_size, (num_regions + 1) * hidden_dim)
-        x_concat = torch.relu(x_concat) # (batch_size, (num_regions + 1) * hidden_dim)
+        x_concat = F.gelu(x_concat) # (batch_size, (num_regions + 1) * hidden_dim)
         mlc_scores = self.fc(x_concat) # (batch_size, num_labels)
         return mlc_scores

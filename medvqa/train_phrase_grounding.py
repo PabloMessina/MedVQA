@@ -182,6 +182,7 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true', default=False)
     parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true', default=False)
     parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true', default=False)
+    parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true', default=False)
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -194,6 +195,8 @@ _METRIC_WEIGHTS = DictWithDefault(default=1.0) # Default weight is 1.0
 # Most important metrics for MICCAI CXR-LT 2024 challenge
 _METRIC_WEIGHTS['cxrlt2024o_prc_auc'] = 5.0 
 _METRIC_WEIGHTS['cxrlt2024c_prc_auc'] = 5.0
+
+_METRIC_WEIGHTS['vbg_prc_auc'] = 10.0 # Assign more weight to classification metrics for VinBig
 
 def _metric_getter(metrics_dict, key):
     metric = metrics_dict[key]
@@ -755,7 +758,7 @@ def train_model(
             metrics_to_print.append('vbg_phrcls_loss')
             if use_attention_regularization_loss:
                 metrics_to_print.append('vbg_att_reg_loss')
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=True, val=in_val)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=in_train, val=in_val)
 
     if use_chexlocalize:
         _cond_func = lambda x: x['flag'] == 'cl'
@@ -905,7 +908,7 @@ def train_model(
     # Score function
     assert len(val_metrics_to_merge) > 0
     if len(train_metrics_to_merge) > 0:
-        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.1, 0.9, _metric_getter)
+        merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0.05, 0.95, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(trainer_engine.state.metrics, validator_engine.state.metrics)
     else:
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
@@ -1064,6 +1067,7 @@ def train_from_scratch(
     neg_area_prior,
     do_visual_grounding_with_bbox_regression,
     do_visual_grounding_with_segmentation,
+    replace_phrase_embeddings_with_random_vectors,
     # Loss weights
     attention_supervision_loss_weight,
     phrase_classifier_loss_weight,
@@ -1312,6 +1316,7 @@ def train_from_scratch(
             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
             do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
             for_yolo=use_yolo,
+            replace_phrase_embeddings_with_random_vectors=replace_phrase_embeddings_with_random_vectors,
         )
     else:
         vinbig_trainer_kwargs = None

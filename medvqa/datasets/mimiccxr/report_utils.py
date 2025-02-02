@@ -1,6 +1,7 @@
 import os
 import random
 from pprint import pprint
+import re
 from medvqa.datasets.text_data_utils import (
     is_s1_subsequence_of_s2,
     remove_consecutive_repeated_words_from_text,
@@ -139,6 +140,7 @@ def _get_sentence2facts(
     sentence2facts = {}
     sentence_facts_rows = []
     duplicate_count = 0
+    no_letters_regex = re.compile(r'^[^a-zA-Z]*$')
     for extracted_facts_filepath, extraction_method in zip(extracted_facts_filepaths, extraction_methods):
         assert os.path.exists(extracted_facts_filepath)
         print(f'Loading extracted facts from {extracted_facts_filepath}...')
@@ -159,6 +161,11 @@ def _get_sentence2facts(
                 raise
             if s in sentence2facts:
                 duplicate_count += 1
+                continue
+            if no_letters_regex.match(s):
+                if len(fs) > 0:
+                    print_orange(f'Warning: sentence "{s}" has no letters but has extracted facts: {fs} (extraction_method: {extraction_method})')
+                    fs = [] # remove facts extracted from sentences with no letters
             if remove_consecutive_repeated_words:
                 fs = [remove_consecutive_repeated_words_from_text(f) for f in fs]
             sentence2facts[s] = fs
@@ -170,6 +177,15 @@ def _get_sentence2facts(
     if duplicate_count > 0:
         print_orange(f'Warning: {duplicate_count} sentences with extracted facts are duplicated in the extracted facts files', bold=True)
 
+    assert len(sentence2facts) == len(sentence_facts_rows)
+
+    # Print some statistics
+    from collections import Counter
+    extraction_methods_counter = Counter([x['extraction_method'] for x in sentence_facts_rows])
+    print('Extraction methods:')
+    for k, v in extraction_methods_counter.items():
+        print(f'\t{k}: {v} sentences')
+    
     return sentence2facts, sentence_facts_rows
     
 def integrate_reports_and_facts(preprocessed_reports_filepath, extracted_facts_filepaths, extraction_methods,

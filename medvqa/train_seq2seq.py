@@ -165,6 +165,7 @@ def train_model(
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
     use_t5 = training_kwargs['use_t5']
+    use_flan_t5 = training_kwargs['use_flan_t5']
     use_bart = training_kwargs['use_bart']
     nli1_only_on_val = seq2seq_trainer_kwargs['nli1_only_on_val']
     only_validate_nli = seq2seq_trainer_kwargs['only_validate_nli']
@@ -222,16 +223,19 @@ def train_model(
     # for logging
     metrics_to_print.append('loss')
     
-    if use_t5 or use_bart:
-        if use_t5:
-            from transformers import T5TokenizerFast
-            tokenizer = T5TokenizerFast.from_pretrained(model_kwargs['model_name'])
-        elif use_bart:
-            from transformers import BartTokenizerFast
-            tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
+    if use_t5 or use_flan_t5 or use_bart:
         attach_condition_aware_loss(trainer_engine, 'seq2seq_loss')
         attach_condition_aware_loss(validator_engine, 'seq2seq_loss')
         if only_validate_nli and nli1_only_on_val:
+            if use_t5:
+                from transformers import T5TokenizerFast
+                tokenizer = T5TokenizerFast.from_pretrained(model_kwargs['model_name'])
+            elif use_flan_t5:
+                from transformers import AutoTokenizer
+                tokenizer = AutoTokenizer.from_pretrained(model_kwargs['model_name'])
+            elif use_bart:
+                from transformers import BartTokenizerFast
+                tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
             attach_condition_aware_seq2seq_exactmatch(validator_engine,
                                                       pred_field_name='pred_output_ids',
                                                       gt_field_name='gt_text', metric_name='exact_match',
@@ -402,13 +406,14 @@ def train_from_scratch(
     print_blue('----- Training model from scratch ------', bold=True)
 
     use_t5 = seq2seq_model_name == Seq2SeqModels.T5
+    use_flan_t5 = seq2seq_model_name == Seq2SeqModels.FLAN_T5
     use_bart = seq2seq_model_name == Seq2SeqModels.BART
     
     if use_t5:
         assert t5_model_name is not None
 
     # Model
-    if use_t5:
+    if use_t5 or use_flan_t5:
         model_name = t5_model_name
     elif use_bart:
         model_name = bart_model_name
@@ -477,11 +482,12 @@ def train_from_scratch(
         include_public_test_in_train=include_public_test_in_train,
         best_k_classes=best_k_classes,
         use_numeric_templates=use_numeric_templates,
-        filter_for_t5=use_t5,
+        filter_for_t5=use_t5 or use_flan_t5,
     )
 
     collate_batch_fn_kwargs = dict(
         use_t5=use_t5,
+        use_flan_t5=use_flan_t5,
         use_bart=use_bart,
         model_name=model_name,
     )
@@ -491,18 +497,21 @@ def train_from_scratch(
         use_amp=use_amp,
         training=True,
         use_t5=use_t5,
+        use_flan_t5=use_flan_t5,
         use_bart=use_bart,
     )
     validator_engine_kwargs = dict(
         use_amp=use_amp,
         validating=True,
         use_t5=use_t5,
+        use_flan_t5=use_flan_t5,
         use_bart=use_bart,
     )
     
     training_kwargs = dict(
         use_amp=use_amp,
         use_t5=use_t5,
+        use_flan_t5=use_flan_t5,
         use_bart=use_bart,
     )
 

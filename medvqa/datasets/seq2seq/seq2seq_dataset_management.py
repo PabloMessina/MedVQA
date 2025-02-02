@@ -99,17 +99,27 @@ Task2Prefix = {
 }
 
 class Seq2SeqDataset(Dataset):
-    def __init__(self, indices, input_texts, output_texts, shuffle=False, infinite=False):
+    def __init__(self, indices, input_texts, output_texts, shuffle=False, infinite=False,
+                 apply_uppercase_data_augmentation=False, word_tokenized_input_texts=None,
+                 lowercase_indices_per_input_text=None):
         self.indices = indices
         self.input_texts = input_texts
         self.output_texts = output_texts
         self.infinite = infinite
+        self.apply_uppercase_data_augmentation = apply_uppercase_data_augmentation
+        self.word_tokenized_input_texts = word_tokenized_input_texts
+        self.lowercase_indices_per_input_text = lowercase_indices_per_input_text
         if infinite:
             self._len = INFINITE_DATASET_LENGTH
         else:
             self._len = len(self.indices)
         if shuffle:
             random.shuffle(self.indices) # shuffle in place
+        if apply_uppercase_data_augmentation:
+            assert word_tokenized_input_texts is not None, 'word_tokenized_input_texts must be provided'
+            assert lowercase_indices_per_input_text is not None, 'lowercase_indices_per_input_text must be provided'
+            assert len(word_tokenized_input_texts) == len(input_texts), 'word_tokenized_input_texts must have the same length as input_texts'
+            assert len(lowercase_indices_per_input_text) == len(input_texts), 'lowercase_indices_per_input_text must have the same length as input_texts'
     
     def __len__(self):
         return self._len
@@ -118,7 +128,19 @@ class Seq2SeqDataset(Dataset):
         if self.infinite:
             i = i % len(self.indices)
         idx = self.indices[i]
-        input_text = self.input_texts[idx]
+        if self.apply_uppercase_data_augmentation and random.random() < 0.5:
+            lowercase_indices = self.lowercase_indices_per_input_text[idx]
+            if len(lowercase_indices) > 0:
+                n = random.randint(1, len(lowercase_indices))
+                indices = random.sample(lowercase_indices, n)
+                tokens = self.word_tokenized_input_texts[idx][:]
+                for j in indices:
+                    tokens[j] = tokens[j].upper() # uppercase
+                input_text = ' '.join(tokens)
+            else:
+                input_text = self.input_texts[idx]
+        else:
+            input_text = self.input_texts[idx]
         output_text = self.output_texts[idx]
         output = { 'input_text': input_text, 'output_text': output_text }
         return output
@@ -2348,8 +2370,21 @@ def _get_fact_classifier_predictions_to_report_section_datasets__interpret_cxr_c
     return train_dataset, val_dataset
 
 
-def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True, shuffle_input_sentences=False):
+def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=True, include_val=True,
+                                    apply_uppercase_data_augmentation=False):
     indices = list(range(len(input_texts)))
+    
+    if apply_uppercase_data_augmentation:
+        import re
+        word_tokenized_input_texts = word_tokenize_texts_in_parallel(input_texts)
+        lowercase_alpha_regex = re.compile(r'^[a-z]+$')
+        lowercase_indices_per_input_text = [None] * len(input_texts)
+        for i, tokens in enumerate(word_tokenized_input_texts):
+            lowercase_indices_per_input_text[i] = [j for j, token in enumerate(tokens) if lowercase_alpha_regex.match(token)]
+    else:
+        word_tokenized_input_texts = None
+        lowercase_indices_per_input_text = None
+
     if include_val:
         # Split intro train & val
         indices.sort(key=lambda i: (len(output_texts[i]), output_texts[i])) # sort by output length, then alphabetically
@@ -2361,14 +2396,20 @@ def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose
 
         # Create datasets
         train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True,
-                                       shuffle_input_sentences=shuffle_input_sentences)
+                                       apply_uppercase_data_augmentation=apply_uppercase_data_augmentation,
+                                       word_tokenized_input_texts=word_tokenized_input_texts,
+                                       lowercase_indices_per_input_text=lowercase_indices_per_input_text)
         val_dataset = Seq2SeqDataset(val_indices, input_texts, output_texts, shuffle=False,
-                                     shuffle_input_sentences=shuffle_input_sentences)
+                                        apply_uppercase_data_augmentation=apply_uppercase_data_augmentation,
+                                        word_tokenized_input_texts=word_tokenized_input_texts,
+                                        lowercase_indices_per_input_text=lowercase_indices_per_input_text)
     else:
         # Create datasets
         train_indices = indices
         train_dataset = Seq2SeqDataset(train_indices, input_texts, output_texts, shuffle=True, infinite=True,
-                                       shuffle_input_sentences=shuffle_input_sentences)
+                                        apply_uppercase_data_augmentation=apply_uppercase_data_augmentation,
+                                        word_tokenized_input_texts=word_tokenized_input_texts,
+                                        lowercase_indices_per_input_text=lowercase_indices_per_input_text)
         val_dataset = None
 
     if verbose:
@@ -2377,6 +2418,34 @@ def _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose
         if include_val:
             print(f'Number of val examples: {len(val_indices)}')
             print(f'Number of total examples: {len(indices)}')
+
+        # Print examples from the datasets
+        for _ in range(3):
+            i = random.randint(0, len(train_indices) - 1)
+            tmp = train_dataset[i]
+            input_text = tmp['input_text']
+            output_text = tmp['output_text']
+            print('--------')
+            print_bold('Train example:')
+            print_bold('Input:')
+            print_magenta(input_text)
+            print_bold('Output:')
+            print_magenta(output_text)
+            print()
+
+        if include_val:
+            for _ in range(3):
+                i = random.randint(0, len(val_indices) - 1)
+                tmp = val_dataset[i]
+                input_text = tmp['input_text']
+                output_text = tmp['output_text']
+                print('--------')
+                print_bold('Val example:')
+                print_bold('Input:')
+                print_magenta(input_text)
+                print_bold('Output:')
+                print_magenta(output_text)
+                print()
 
     return train_dataset, val_dataset
 
@@ -2469,7 +2538,8 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
 
     elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
         input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths)
-        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose)
+        train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
+                                                                     apply_uppercase_data_augmentation=True)
 
     elif task_name == Seq2SeqTaskNames.BACKGROUND_TO_FACTS:
         input_texts, output_texts = _prepare_background_to_facts_data(background_to_facts_input_output_jsonl_filepaths)
@@ -2597,7 +2667,7 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                                                                 medical_sentences=medical_sentences)
                     
                 train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
-                                                                             include_val=include_val)
+                                                                             include_val=include_val, apply_uppercase_data_augmentation=True)
 
             elif task_name == Seq2SeqTaskNames.BACKGROUND_TO_FACTS:
                 input_texts, output_texts = _prepare_background_to_facts_data(background_to_facts_input_output_jsonl_filepaths,

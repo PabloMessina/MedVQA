@@ -38,14 +38,19 @@ from medvqa.utils.logging import print_bold, print_magenta, print_orange, print_
 
 class MIMICCXR_FactGroundingDataset(ImageFactClassificationDataset):
 
-    def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, negative_facts, indices, num_facts,
+    def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts, indices, num_facts,
+                 use_strong_and_weak_negatives=False,
+                 negative_facts=None, weak_negative_facts=None, strong_negative_facts=None,
                  infinite=False, shuffle=False, use_weights=False, weights_filepath=None):
         super().__init__(
             image_paths=image_paths,
             image_transform=image_transform,
             fact_embeddings=fact_embeddings,
             positive_facts=positive_facts,
+            use_strong_and_weak_negatives=use_strong_and_weak_negatives,
             negative_facts=negative_facts,
+            weak_negative_facts=weak_negative_facts,
+            strong_negative_facts=strong_negative_facts,
             indices=indices,
             num_facts=num_facts,
             infinite=infinite,
@@ -724,7 +729,19 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
             fact_embeddings = tmp['embeddings']
-            dicom_id_to_pos_neg_facts = tmp['dicom_id_to_pos_neg_facts']
+            try:
+                # Backward compatibility
+                dicom_id_to_pos_neg_facts = tmp['dicom_id_to_pos_neg_facts']
+                dicom_ids_with_facts = set(dicom_id_to_pos_neg_facts.keys())
+                use_strong_and_weak_negatives = False
+            except KeyError:
+                dicom_id_to_pos_facts = tmp['dicom_id_to_pos_facts']
+                dicom_id_to_strong_neg_facts = tmp['dicom_id_to_strong_neg_facts']
+                dicom_id_to_weak_neg_facts = tmp['dicom_id_to_weak_neg_facts']
+                dicom_ids_with_facts = set(dicom_id_to_pos_facts.keys())
+                use_strong_and_weak_negatives = True
+                print_orange('NOTE: Using strong and weak negatives for training...', bold=True)
+
             print(f'fact_embeddings.shape = {fact_embeddings.shape}')
 
             if balance_long_middle_short_tail and use_facts_for_train: # only for training
@@ -736,7 +753,11 @@ class MIMICCXR_PhraseGroundingTrainer:
             BIG_ENOGUGH = 1000000
             image_paths = [None] * BIG_ENOGUGH
             positive_facts = [None] * BIG_ENOGUGH
-            negative_facts = [None] * BIG_ENOGUGH
+            if use_strong_and_weak_negatives:
+                weak_negative_fact_embeddings = [None] * BIG_ENOGUGH
+                strong_negative_fact_embeddings = [None] * BIG_ENOGUGH
+            else:
+                negative_facts = [None] * BIG_ENOGUGH
             report_idxs = [None] * BIG_ENOGUGH
             image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
 
@@ -763,7 +784,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     mimiccxr_metadata['dicom_id_view_pos_pairs'],
                     mimiccxr_metadata['splits'])), mininterval=2):
                 for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id not in dicom_id_to_pos_neg_facts:
+                    if dicom_id not in dicom_ids_with_facts:
                         continue
                     
                     if use_interpret_cxr_challenge_split:
@@ -797,17 +818,29 @@ class MIMICCXR_PhraseGroundingTrainer:
                     else:
                         raise ValueError(f'Invalid split: {split}')
                     image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    pos_neg_facts = dicom_id_to_pos_neg_facts[dicom_id]
-                    assert len(pos_neg_facts) == 2
-                    positive_facts[idx] = pos_neg_facts[0]
-                    negative_facts[idx] = pos_neg_facts[1]
-                    report_idxs[idx] = ridx
+                    if use_strong_and_weak_negatives:
+                        pos_facts = dicom_id_to_pos_facts[dicom_id]
+                        strong_neg_facts = dicom_id_to_strong_neg_facts[dicom_id]
+                        weak_neg_facts = dicom_id_to_weak_neg_facts[dicom_id]
+                        positive_facts[idx] = pos_facts
+                        strong_negative_fact_embeddings[idx] = strong_neg_facts
+                        weak_negative_fact_embeddings[idx] = weak_neg_facts
+                    else:
+                        pos_neg_facts = dicom_id_to_pos_neg_facts[dicom_id]
+                        assert len(pos_neg_facts) == 2
+                        positive_facts[idx] = pos_neg_facts[0]
+                        negative_facts[idx] = pos_neg_facts[1]
+                        report_idxs[idx] = ridx
                     idx += 1
 
             print(f'Total number of images: {idx}')
             image_paths = image_paths[:idx]
             positive_facts = positive_facts[:idx]
-            negative_facts = negative_facts[:idx]
+            if use_strong_and_weak_negatives:
+                strong_negative_fact_embeddings = strong_negative_fact_embeddings[:idx]
+                weak_negative_fact_embeddings = weak_negative_fact_embeddings[:idx]
+            else:
+                negative_facts = negative_facts[:idx]
             report_idxs = report_idxs[:idx]
             aux = 0
             if use_facts_for_train:
@@ -823,20 +856,36 @@ class MIMICCXR_PhraseGroundingTrainer:
                 aux = 0
                 for i in train_indices:
                     pos_facts = positive_facts[i]
-                    neg_facts = negative_facts[i]
-                    assert len(pos_facts) + len(neg_facts) > 0 # at least one fact
-                    aux += max(len(pos_facts), len(neg_facts))
+                    if use_strong_and_weak_negatives:
+                        strong_neg_facts = strong_negative_fact_embeddings[i]
+                        weak_neg_facts = weak_negative_fact_embeddings[i]
+                        num_facts = len(pos_facts) + len(strong_neg_facts) + len(weak_neg_facts)
+                        assert num_facts > 0 # at least one fact
+                        aux += num_facts
+                    else:
+                        neg_facts = negative_facts[i]
+                        num_facts = len(pos_facts) + len(neg_facts)
+                        assert num_facts > 0
+                        aux += num_facts
                 avg_facts_per_image = aux / len(train_indices)
                 train_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
                 print(f'avg_facts_per_image = {avg_facts_per_image}')
                 print(f'train_num_facts_per_image = {train_num_facts_per_image}')
             if use_facts_for_test:
                 aux = 0
-                for i in test_indices:
+                for i in test_indices:                    
                     pos_facts = positive_facts[i]
-                    neg_facts = negative_facts[i]
-                    assert len(pos_facts) + len(neg_facts) > 0 # at least one fact
-                    aux += max(len(pos_facts), len(neg_facts))
+                    if use_strong_and_weak_negatives:
+                        strong_neg_facts = strong_negative_fact_embeddings[i]
+                        weak_neg_facts = weak_negative_fact_embeddings[i]
+                        num_facts = len(pos_facts) + len(strong_neg_facts) + len(weak_neg_facts)
+                        assert num_facts > 0
+                        aux += num_facts
+                    else:
+                        neg_facts = negative_facts[i]
+                        num_facts = len(pos_facts) + len(neg_facts)
+                        assert num_facts > 0
+                        aux += num_facts
                 avg_facts_per_image = aux / len(test_indices)
                 test_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
                 print(f'avg_facts_per_image = {avg_facts_per_image}')
@@ -890,7 +939,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                     print('Normal (unbalanced) training...')
                     train_fact_dataset = MIMICCXR_FactGroundingDataset(
                         image_paths=image_paths, image_transform=train_image_transform,
-                        fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                        fact_embeddings=fact_embeddings,
+                        positive_facts=positive_facts,
+                        use_strong_and_weak_negatives=use_strong_and_weak_negatives,
+                        negative_facts=negative_facts if not use_strong_and_weak_negatives else None,
+                        weak_negative_facts=weak_negative_fact_embeddings if use_strong_and_weak_negatives else None,
+                        strong_negative_facts=strong_negative_fact_embeddings if use_strong_and_weak_negatives else None,
                         indices=train_indices, num_facts=train_num_facts_per_image,
                         use_weights=use_weighted_phrase_classifier_loss,
                         weights_filepath=cluster_and_label_weights_for_facts_filepath)
@@ -911,7 +965,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                 print_bold('Building test fact dataloaders...')
                 test_fact_dataset = MIMICCXR_FactGroundingDataset(
                     image_paths=image_paths, image_transform=test_image_transform,
-                    fact_embeddings=fact_embeddings, positive_facts=positive_facts, negative_facts=negative_facts,
+                    fact_embeddings=fact_embeddings,
+                    positive_facts=positive_facts,
+                    negative_facts=negative_facts if not use_strong_and_weak_negatives else None,
+                    use_strong_and_weak_negatives=use_strong_and_weak_negatives,
+                    weak_negative_facts=weak_negative_fact_embeddings if use_strong_and_weak_negatives else None,
+                    strong_negative_facts=strong_negative_fact_embeddings if use_strong_and_weak_negatives else None,
                     indices=test_indices, num_facts=test_num_facts_per_image,
                     use_weights=use_weighted_phrase_classifier_loss,
                     weights_filepath=cluster_and_label_weights_for_facts_filepath)

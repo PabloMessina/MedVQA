@@ -190,6 +190,7 @@ class MultiPurposeVisualModule(nn.Module):
                 merge_findings=False,
                 n_findings=None,
                 device=None,
+                use_linear_head_for_classification=False,
                 # Other kwargs
                 **unused_kwargs,
                 ): 
@@ -259,6 +260,7 @@ class MultiPurposeVisualModule(nn.Module):
         self.local_attention_hidden_size = local_attention_hidden_size
         self.image_size = image_size
         self.device = device
+        self.use_linear_head_for_classification = use_linear_head_for_classification
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -626,13 +628,16 @@ class MultiPurposeVisualModule(nn.Module):
             if self.use_vinbig:
                 if self.classify_labels_vinbig:
                     print(f'    Initializing VinBig classification task')
-                    self.MLC_vinbig = MultilabelClassifier_v3(
-                        local_feat_dim=self.local_feat_size,
-                        global_feat_dim=self.global_feat_size,
-                        hidden_dim=self.vinbig_mlc_hidden_size,
-                        num_regions=self.num_regions,
-                        num_labels=len(VINBIG_LABELS),
-                    )
+                    if self.use_linear_head_for_classification:
+                        self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_LABELS))
+                    else:
+                        self.MLC_vinbig = MultilabelClassifier_v3(
+                            local_feat_dim=self.local_feat_size,
+                            global_feat_dim=self.global_feat_size,
+                            hidden_dim=self.vinbig_mlc_hidden_size,
+                            num_regions=self.num_regions,
+                            num_labels=len(VINBIG_LABELS),
+                        )
 
         # 9) PadChest specific tasks
         if self.use_padchest:
@@ -896,8 +901,6 @@ class MultiPurposeVisualModule(nn.Module):
                 max_det=max_det,
                 use_first_n_facts_for_detection=use_first_n_facts_for_detection,
             )
-        
-        only_compute_features = only_compute_features or self.only_compute_features
 
         # Detectron2-specific forward pass
         if detectron2_forward:
@@ -906,6 +909,8 @@ class MultiPurposeVisualModule(nn.Module):
 
         # General forward pass
         assert (raw_images is not None) or (visual_features is not None)
+
+        only_compute_features = only_compute_features or self.only_compute_features
 
         if only_compute_features:
             assert return_global_features or return_local_features
@@ -935,7 +940,8 @@ class MultiPurposeVisualModule(nn.Module):
         
         if vinbig_forward:
             compute_global_features = True
-            permute_and_flatten_local_feat = True
+            if not self.use_linear_head_for_classification:
+                permute_and_flatten_local_feat = True
 
         if compute_global_features:
             global_list = []
@@ -1109,7 +1115,10 @@ class MultiPurposeVisualModule(nn.Module):
             elif vinbig_forward:
                 if self.classify_labels_vinbig:
                     if not self.merge_findings:
-                        output['pred_vinbig'] = self.MLC_vinbig(local_feat_NxRxC, global_feat)
+                        if self.use_linear_head_for_classification:
+                            output['pred_vinbig'] = self.W_vinbig(global_feat)
+                        else:
+                            output['pred_vinbig'] = self.MLC_vinbig(local_feat_NxRxC, global_feat)
                         output['pred_vinbig_probs'] = torch.sigmoid(output['pred_vinbig'])
                 if self.predict_bboxes_vinbig:
                     assert self.raw_image_encoding == RawImageEncoding.YOLOV8

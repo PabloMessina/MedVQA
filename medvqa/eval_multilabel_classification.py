@@ -14,6 +14,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 )
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
 from medvqa.evaluation.visual_module import (
     calibrate_thresholds_on_mimiccxr_validation_set,
     calibrate_weights_and_thresholds_for_ensemble,
@@ -31,11 +32,13 @@ from medvqa.utils.constants import (
     DATASET_NAMES,
     MIMICCXR_DATASET_ID,
     MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE,
+    VINBIG_LABELS,
     MetricNames,
 )
 from medvqa.metrics import (
     attach_chexpert_labels_prf1,
     attach_chexpert_labels_roc_auc,
+    attach_condition_aware_class_averaged_prc_auc,
     attach_medical_tags_f1score,
     attach_chexpert_labels_accuracy,
     attach_dataset_aware_orientation_accuracy,
@@ -48,10 +51,10 @@ from medvqa.models.checkpoint import (
     get_checkpoint_filepath,
     get_model_name_from_checkpoint_path,
     load_metadata,
+    load_model_state_dict,
 )
 from medvqa.utils.common import (
     RESULTS_DIR,
-    WORKSPACE_DIR,
     parsed_args_to_dict,
 )    
 from medvqa.utils.handlers import (
@@ -67,44 +70,40 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue
+from medvqa.utils.logging import CountPrinter, print_blue, print_magenta
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'mimiccxr_test_set'
     CHEST_IMAGENOME_GOLD = 'chest_imagenome_gold'
+    VINBIG_TEST_SET = 'vinbig_test_set'
+    @staticmethod
+    def get_choices():
+        return [
+            EvalDatasets.MIMICCXR_TEST_SET,
+            EvalDatasets.CHEST_IMAGENOME_GOLD,
+            EvalDatasets.VINBIG_TEST_SET,
+        ]
 
 def parse_args():
     parser = argparse.ArgumentParser()
     
     # required arguments
-    parser.add_argument('--eval-dataset-name', type=str, required=True, choices=[
-        EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD])
+    parser.add_argument('--eval_dataset_name', type=str, required=True, choices=EvalDatasets.get_choices())
 
     # optional arguments
-    parser.add_argument('--checkpoint-folder', type=str, default=None)
-
-    parser.add_argument('--batch-size', type=int, default=140)
+    parser.add_argument('--checkpoint_folder_path', type=str, default=None)
+    parser.add_argument('--batch_size', type=int, default=140)
     parser.add_argument('--device', type=str, default='GPU')
-    parser.add_argument('--num-workers', type=int, default=0)
-
-    parser.add_argument('--use-amp', dest='use_amp', action='store_true')
-    parser.set_defaults(use_amp=False)
-
-    parser.add_argument('--calibrate-thresholds', dest='calibrate_thresholds', action='store_true')
-    parser.set_defaults(calibrate_thresholds=False)
-
-    parser.add_argument('--save-probs', dest='save_probs', action='store_true')
-    parser.set_defaults(save_probs=False)
-
-    parser.add_argument('--use-ensemble', dest='use_ensemble', action='store_true')
-    parser.set_defaults(use_ensemble=False)
-    parser.add_argument('--model-names-for-ensemble', type=str, nargs='+', default=None)
-    parser.add_argument('--label-name-for-ensemble', type=str, default=None)
-    parser.add_argument('--chest-imagenome-label-names-filename', type=str, default=None)
-    parser.add_argument('--chest-imagenome-labels-filename', type=str, default=None)
-    # cheat
-    parser.add_argument('--cheat', dest='cheat', action='store_true')
-    parser.set_defaults(cheat=False)
+    parser.add_argument('--num_workers', type=int, default=0)
+    parser.add_argument('--use_amp', action='store_true')
+    parser.add_argument('--calibrate_thresholds', action='store_true')
+    parser.add_argument('--save_probs', action='store_true')
+    parser.add_argument('--use_ensemble', action='store_true')
+    parser.add_argument('--model_names_for_ensemble', type=str, nargs='+', default=None)
+    parser.add_argument('--label_name_for_ensemble', type=str, default=None)
+    parser.add_argument('--chest_imagenome_label_names_filename', type=str, default=None)
+    parser.add_argument('--chest_imagenome_labels_filename', type=str, default=None)
+    parser.add_argument('--cheat', action='store_true')
     
     return parser.parse_args()
 
@@ -228,58 +227,76 @@ def _recover_vision_dataset_manager_kwargs(dataset_name, metadata, batch_size, n
             break    
     assert kwargs is not None
 
-    kwargs['batch_size'] = batch_size
+    kwargs['val_batch_size'] = batch_size
     kwargs['num_workers'] = num_workers
     if eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET:
         kwargs['use_test_set'] = True
     elif eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD:
         kwargs['use_chest_imagenome_label_gold_set'] = True
+    elif eval_dataset_name == EvalDatasets.VINBIG_TEST_SET:
+        kwargs['use_training_set'] = False
+        kwargs['use_validation_set'] = True
     else: assert False
     kwargs['data_augmentation_enabled'] = False
     
     # Define test image transform
     image_transform_kwargs = metadata['val_image_transform_kwargs']
-    if DATASET_NAMES.MIMICCXR in image_transform_kwargs:
-        image_transform = get_image_transform(**image_transform_kwargs[DATASET_NAMES.MIMICCXR])
-    else: # for backward compatibility
-        image_transform = get_image_transform(**image_transform_kwargs)
-    kwargs['test_image_transform'] = image_transform
+    if eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD]:
+        if DATASET_NAMES.MIMICCXR in image_transform_kwargs:
+            image_transform = get_image_transform(**image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        else: # for backward compatibility
+            image_transform = get_image_transform(**image_transform_kwargs)
+    elif eval_dataset_name == EvalDatasets.VINBIG_TEST_SET:
+        image_transform = get_image_transform(**image_transform_kwargs[DATASET_NAMES.VINBIG])
+    else: assert False
+    if dataset_name == 'vinbig':
+        kwargs['val_image_transform'] = image_transform
+    else:
+        kwargs['test_image_transform'] = image_transform
 
     # Define collate_batch_fn
-    use_detectron2 = kwargs.get('use_detectron2', False)
-    try:
-        collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
-    except KeyError:
-        _kwargs = dict(
-            include_image=True,
-            classify_tags=metadata['auxiliary_tasks_kwargs']['classify_tags'],
-            n_tags=metadata['auxiliary_tasks_kwargs']['n_medical_tags'],
-            classify_orientation=metadata['auxiliary_tasks_kwargs']['classify_orientation'],
-            classify_gender=metadata['auxiliary_tasks_kwargs'].get('classify_gender', False),
-            classify_chexpert=metadata['auxiliary_tasks_kwargs']['classify_chexpert'],
-            classify_questions=metadata['auxiliary_tasks_kwargs']['classify_questions'],
-            classify_chest_imagenome=metadata['auxiliary_tasks_kwargs']['classify_chest_imagenome'],
-            predict_bboxes_chest_imagenome=metadata['auxiliary_tasks_kwargs']['predict_bboxes_chest_imagenome'],
-        )
-        if use_detectron2:
-            collate_batch_fn_kwargs = {
-                DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE: {
-                    'dataset_id': MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE, **_kwargs },
-            }
+    if eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD]:
+        use_detectron2 = kwargs.get('use_detectron2', False)
+        try:
+            collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
+        except KeyError:
+            _kwargs = dict(
+                include_image=True,
+                classify_tags=metadata['auxiliary_tasks_kwargs']['classify_tags'],
+                n_tags=metadata['auxiliary_tasks_kwargs']['n_medical_tags'],
+                classify_orientation=metadata['auxiliary_tasks_kwargs']['classify_orientation'],
+                classify_gender=metadata['auxiliary_tasks_kwargs'].get('classify_gender', False),
+                classify_chexpert=metadata['auxiliary_tasks_kwargs']['classify_chexpert'],
+                classify_questions=metadata['auxiliary_tasks_kwargs']['classify_questions'],
+                classify_chest_imagenome=metadata['auxiliary_tasks_kwargs']['classify_chest_imagenome'],
+                predict_bboxes_chest_imagenome=metadata['auxiliary_tasks_kwargs']['predict_bboxes_chest_imagenome'],
+            )
+            if use_detectron2:
+                collate_batch_fn_kwargs = {
+                    DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE: {
+                        'dataset_id': MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE, **_kwargs },
+                }
+            else:
+                collate_batch_fn_kwargs = {
+                    DATASET_NAMES.MIMICCXR: { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs },
+                }
+        if use_detectron2: # special case for detectron2
+            collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE])
         else:
-            collate_batch_fn_kwargs = {
-                DATASET_NAMES.MIMICCXR: { 'dataset_id': MIMICCXR_DATASET_ID, **_kwargs },
-            }
-    if use_detectron2: # special case for detectron2
-        mimiccxr_collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE])
-    else:
-        mimiccxr_collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
-    kwargs['collate_batch_fn'] = mimiccxr_collate_batch_fn
+            collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs[DATASET_NAMES.MIMICCXR])
+    elif eval_dataset_name == EvalDatasets.VINBIG_TEST_SET:
+        collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
+        collate_batch_fn = get_vision_collate_batch_fn(**collate_batch_fn_kwargs['vinbig'])
+    else: assert False
+    kwargs['collate_batch_fn'] = collate_batch_fn
 
     return kwargs
 
 def _recover_mimiccxr_vision_evaluator_kwargs(metadata, batch_size, num_workers, eval_dataset_name):
     return _recover_vision_dataset_manager_kwargs('mimiccxr', metadata, batch_size, num_workers, eval_dataset_name)
+
+def _recover_vinbig_vision_evaluator_kwargs(metadata, batch_size, num_workers, eval_dataset_name):
+    return _recover_vision_dataset_manager_kwargs('vinbig', metadata, batch_size, num_workers, eval_dataset_name)
 
 def _calibrate_thresholds_using_chexpert_for_mimiccxr(model, device, use_amp, mimiccxr_vision_evaluator_kwargs,
                                                         trainer_engine_kwargs, save_probs=False, results_folder_path=None):
@@ -308,6 +325,7 @@ def _evaluate_model(
     model_kwargs,
     trainer_engine_kwargs,
     mimiccxr_vision_evaluator_kwargs,
+    vinbig_vision_evaluator_kwargs,
     auxiliary_tasks_kwargs,
     device='GPU',
     checkpoint_folder_path=None,
@@ -324,6 +342,8 @@ def _evaluate_model(
 ):    
     eval_mimiccxr_test_set = eval_dataset_name == EvalDatasets.MIMICCXR_TEST_SET
     eval_chest_imagenome_gold = eval_dataset_name == EvalDatasets.CHEST_IMAGENOME_GOLD
+    eval_vinbig_test_set = eval_dataset_name == EvalDatasets.VINBIG_TEST_SET
+    assert sum([eval_mimiccxr_test_set, eval_chest_imagenome_gold, eval_vinbig_test_set]) == 1
 
     if use_ensemble: # do things differently if using ensemble
         assert model_names_for_ensemble is not None
@@ -438,6 +458,8 @@ def _evaluate_model(
     predict_bboxes_chest_imagenome = auxiliary_tasks_kwargs['predict_bboxes_chest_imagenome']
     # auxiliary task: vinbig bounding boxes
     predict_bboxes_vinbig = auxiliary_tasks_kwargs['predict_bboxes_vinbig']
+    # auxiliary task: vinbig labels
+    classify_labels_vinbig = auxiliary_tasks_kwargs['classify_labels_vinbig']
     # auxiliary task: questions classification
     classify_questions = auxiliary_tasks_kwargs.get('classify_questions', False)
     
@@ -465,7 +487,7 @@ def _evaluate_model(
     else:
         raise ValueError(f'Invalid model_name: {model_name}')
     model = model.to(device)
-    model.load_state_dict(checkpoint['model'], strict=False)
+    load_model_state_dict(model, checkpoint['model'])
     
     # Create MIMIC-CXR visual module evaluator
     if eval_mimiccxr_test_set or eval_chest_imagenome_gold:
@@ -476,6 +498,11 @@ def _evaluate_model(
             assert mimiccxr_vision_evaluator_kwargs['use_chest_imagenome_label_gold_set']
         mimiccxr_vision_evaluator = MIMICCXR_VisualModuleTrainer(**mimiccxr_vision_evaluator_kwargs)
 
+    # Create VINBIG visual module evaluator
+    elif eval_vinbig_test_set:
+        count_print('Creating VINBIG visual module evaluator ...')
+        vinbig_vision_evaluator = VinBig_VisualModuleTrainer(**vinbig_vision_evaluator_kwargs)
+
     # Create evaluator engine
     count_print('Creating evaluator engine ...')
     _engine_kwargs = dict(
@@ -483,52 +510,63 @@ def _evaluate_model(
         classify_gender=classify_gender, classify_chexpert=classify_chexpert,
         classify_questions=classify_questions,
         classify_chest_imagenome=classify_chest_imagenome,
+        classify_labels_vinbig=classify_labels_vinbig,
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
-        pass_pred_bbox_coords_as_input=mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False),
         device=device, use_amp=use_amp, training=False,
-        using_yolov8=mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False),
         yolov8_use_multiple_detection_layers=trainer_engine_kwargs.get('yolov8_use_multiple_detection_layers', False),
     )
+    if mimiccxr_vision_evaluator_kwargs is not None:
+        _engine_kwargs['pass_pred_bbox_coords_as_input'] = mimiccxr_vision_evaluator_kwargs.get('pass_pred_bbox_coords_to_model', False)
+        _engine_kwargs['use_yolov8'] = mimiccxr_vision_evaluator_kwargs.get('use_yolov8', False)
+    else:
+        _engine_kwargs['pass_pred_bbox_coords_as_input'] = False
+        _engine_kwargs['use_yolov8'] = False
     if eval_chest_imagenome_gold:
         _engine_kwargs['valid_chest_imagenome_label_indices'] = mimiccxr_vision_evaluator.valid_chest_imagenome_label_indices
-    evaluator = get_engine(**_engine_kwargs)
+    evaluator_engine = get_engine(**_engine_kwargs)
 
     # Attach metrics, timer and events to engines
     count_print('Attaching metrics, timer and events to engines ...')
 
     # Metrics
     if classify_tags:
-        attach_medical_tags_f1score(evaluator, device)
+        attach_medical_tags_f1score(evaluator_engine, device)
 
     if classify_orientation:
-        attach_dataset_aware_orientation_accuracy(evaluator)
+        attach_dataset_aware_orientation_accuracy(evaluator_engine)
 
     if classify_chexpert:
-        attach_chexpert_labels_accuracy(evaluator, device)        
-        attach_chexpert_labels_prf1(evaluator, device)
-        attach_chexpert_labels_roc_auc(evaluator, 'cpu')
+        attach_chexpert_labels_accuracy(evaluator_engine, device)        
+        attach_chexpert_labels_prf1(evaluator_engine, device)
+        attach_chexpert_labels_roc_auc(evaluator_engine, 'cpu')
 
     if classify_questions:
-        attach_question_labels_prf1(evaluator, device)
+        attach_question_labels_prf1(evaluator_engine, device)
 
     if classify_chest_imagenome:
-        attach_chest_imagenome_labels_accuracy(evaluator, device)
-        attach_chest_imagenome_labels_prf1(evaluator, device)
-        attach_chest_imagenome_labels_roc_auc(evaluator, 'cpu')
+        attach_chest_imagenome_labels_accuracy(evaluator_engine, device)
+        attach_chest_imagenome_labels_prf1(evaluator_engine, device)
+        attach_chest_imagenome_labels_roc_auc(evaluator_engine, 'cpu')
+
+    if classify_labels_vinbig:
+        _cond_func = lambda x: x['flag'] == 'vinbig'
+        attach_condition_aware_class_averaged_prc_auc(evaluator_engine, 'pred_vinbig_probs', 'vinbig_labels', None, 'vnb_macro_prcauc', _cond_func)
 
     # Accumulators
-    attach_accumulator(evaluator, 'idxs')
     if classify_chexpert:
-        attach_accumulator(evaluator, 'chexpert')
-        attach_accumulator(evaluator, 'pred_chexpert_probs')
+        attach_accumulator(evaluator_engine, 'chexpert')
+        attach_accumulator(evaluator_engine, 'pred_chexpert_probs')
     if classify_chest_imagenome:
-        attach_accumulator(evaluator, 'chest_imagenome')
-        attach_accumulator(evaluator, 'pred_chest_imagenome_probs')
+        attach_accumulator(evaluator_engine, 'chest_imagenome')
+        attach_accumulator(evaluator_engine, 'pred_chest_imagenome_probs')
+    if classify_labels_vinbig:
+        attach_accumulator(evaluator_engine, 'vinbig_labels')
+        attach_accumulator(evaluator_engine, 'pred_vinbig_probs')
     
     # Timer
     timer = Timer()
-    timer.attach(evaluator, start=Events.EPOCH_STARTED)
+    timer.attach(evaluator_engine, start=Events.EPOCH_STARTED)
     
     # Logging
     metrics_to_print=[]
@@ -546,14 +584,16 @@ def _evaluate_model(
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABEL_PRF1)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELACC)
         metrics_to_print.append(MetricNames.CHESTIMAGENOMELABELROCAUC)
+    if classify_labels_vinbig:
+        metrics_to_print.append('vnb_macro_prcauc')
 
     log_metrics_handler = get_log_metrics_handler(timer, metrics_to_print=metrics_to_print)
     log_iteration_handler = get_log_iteration_handler()    
     
     # Attach handlers    
-    evaluator.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
-    evaluator.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    evaluator.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
+    evaluator_engine.add_event_handler(Events.EPOCH_STARTED, lambda : print('Evaluating model ...'))
+    evaluator_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
+    evaluator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)    
 
     # Run evaluation
     results_dict = {}
@@ -562,8 +602,8 @@ def _evaluate_model(
         count_print(f'Running evaluator engine on {eval_dataset_name} ...')
         print('len(mimiccxr_vision_evaluator.test_dataset) =', len(mimiccxr_vision_evaluator.test_dataset))
         print('len(mimiccxr_vision_evaluator.test_dataloader) =', len(mimiccxr_vision_evaluator.test_dataloader))
-        evaluator.run(mimiccxr_vision_evaluator.test_dataloader)
-        results_dict['mimiccxr_metrics'] = deepcopy(evaluator.state.metrics)
+        evaluator_engine.run(mimiccxr_vision_evaluator.test_dataloader)
+        results_dict['mimiccxr_metrics'] = deepcopy(evaluator_engine.state.metrics)
         results_dict['mimiccxr_dataset'] = mimiccxr_vision_evaluator.test_dataset        
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         
@@ -577,7 +617,7 @@ def _evaluate_model(
                 _tuples.append(('pred_chexpert_probs', f'dicom_id_to_pred_chexpert_probs__{eval_dataset_name}.pkl'))
             for pred_probs_key, save_name in _tuples:
                 dicom_id_to_pred_probs = {}            
-                pred_probs = evaluator.state.metrics[pred_probs_key]
+                pred_probs = evaluator_engine.state.metrics[pred_probs_key]
                 assert len(mimiccxr_vision_evaluator.test_indices) == len(pred_probs)
                 for i, idx in enumerate(mimiccxr_vision_evaluator.test_indices):
                     dicom_id = mimiccxr_vision_evaluator.dicom_ids[idx]
@@ -620,6 +660,64 @@ def _evaluate_model(
             chest_imagenome_thresholds=chest_imagenome_thresholds,
             chest_imagenome_label_names=mimiccxr_vision_evaluator.chest_imagenome_label_names,
         )
+
+    elif eval_vinbig_test_set:
+
+        count_print(f'Running evaluator engine on {eval_dataset_name} ...')
+        evaluator_engine.run(vinbig_vision_evaluator.val_dataloader)
+        results_dict['vinbig_metrics'] = deepcopy(evaluator_engine.state.metrics)
+        results_dict['vinbig_dataset'] = vinbig_vision_evaluator.val_dataset
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+
+        # Save probabilities
+        if save_probs:
+            print(f'Saving probabilities on {eval_dataset_name} ...')
+            _tuples = []
+            if classify_labels_vinbig:
+                _tuples.append(('pred_vinbig_probs', f'image_id_to_pred_vinbig_probs__{eval_dataset_name}.pkl'))
+            for pred_probs_key, save_name in _tuples:
+                image_id_to_pred_probs = {}
+                pred_probs = evaluator_engine.state.metrics[pred_probs_key]
+                assert len(vinbig_vision_evaluator.test_indices) == len(pred_probs)
+                for i, idx in enumerate(vinbig_vision_evaluator.test_indices):
+                    image_id = vinbig_vision_evaluator.image_ids[idx]
+                    image_id_to_pred_probs[image_id] = pred_probs[i].detach().cpu().numpy()
+                save_path = os.path.join(results_folder_path, save_name)
+                save_pickle(image_id_to_pred_probs, save_path)
+                print('Probabilities saved to:', save_path)
+
+        # PRC-AUC
+        metrics = results_dict['vinbig_metrics']
+        pred_probs = metrics['pred_vinbig_probs']
+        pred_probs = torch.stack(pred_probs).cpu().numpy()
+        assert pred_probs.ndim == 2
+        gt_labels = metrics['vinbig_labels']
+        gt_labels = torch.stack(gt_labels).cpu().numpy()
+        assert gt_labels.ndim == 2
+        assert pred_probs.shape == gt_labels.shape
+        assert pred_probs.shape[0] == len(vinbig_vision_evaluator.val_dataset)
+        prc_auc_metrics = prc_auc_fn(pred_probs, gt_labels)
+        for class_name, prc_auc in zip(VINBIG_LABELS, prc_auc_metrics['per_class']):
+            print(f'PRC-AUC({class_name}): {prc_auc}')
+        print_magenta(f'PRC-AUC(macro_avg): {prc_auc_metrics["macro_avg"]}', bold=True)
+        print_magenta(f'PRC-AUC(micro_avg): {prc_auc_metrics["micro_avg"]}', bold=True)
+
+        metrics_dict = {
+            **metrics,
+            'prc_auc': prc_auc_metrics,
+        }
+        metrics_to_save = metrics_to_print + ['prc_auc']
+
+        # Compute and save metrics
+        results_dict['final_vinbig_metrics'] = _compute_and_save_metrics(
+            metrics_dict=metrics_dict,
+            metrics_to_save=metrics_to_save,
+            dataset_name=eval_dataset_name,
+            results_folder_path=results_folder_path,
+            chexpert_thresholds=None,
+            chest_imagenome_thresholds=None,
+            chest_imagenome_label_names=None,
+        )
     
 
     torch.cuda.empty_cache()
@@ -627,7 +725,7 @@ def _evaluate_model(
         return results_dict
 
 def evaluate_model(
-    checkpoint_folder,
+    checkpoint_folder_path,
     eval_dataset_name,
     batch_size=100,
     num_workers=0,
@@ -651,16 +749,20 @@ def evaluate_model(
         assert model_names_for_ensemble is not None
         assert label_name_for_ensemble is not None
     else:
-        assert checkpoint_folder is not None
+        assert checkpoint_folder_path is not None
 
     if not use_ensemble:
-        checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
-        metadata = load_metadata(checkpoint_folder)        
+        metadata = load_metadata(checkpoint_folder_path)
         model_kwargs = _recover_model_kwargs(metadata)
         trainer_engine_kwargs = metadata['trainer_engine_kwargs']
         auxiliary_tasks_kwargs = metadata['auxiliary_tasks_kwargs']
+        mimiccxr_vision_evaluator_kwargs = None
+        vinbig_vision_evaluator_kwargs = None
         if eval_dataset_name in [EvalDatasets.MIMICCXR_TEST_SET, EvalDatasets.CHEST_IMAGENOME_GOLD]:
             mimiccxr_vision_evaluator_kwargs = _recover_mimiccxr_vision_evaluator_kwargs(
+                metadata, batch_size, num_workers, eval_dataset_name)
+        elif eval_dataset_name == EvalDatasets.VINBIG_TEST_SET:
+            vinbig_vision_evaluator_kwargs = _recover_vinbig_vision_evaluator_kwargs(
                 metadata, batch_size, num_workers, eval_dataset_name)
         else:
             assert False, f'Unknown eval_dataset_name: {eval_dataset_name}'
@@ -669,19 +771,17 @@ def evaluate_model(
         trainer_engine_kwargs = None
         auxiliary_tasks_kwargs = None
         mimiccxr_vision_evaluator_kwargs = None
-
-    # from pprint import pprint
-    # print('mimiccxr_vision_evaluator_kwargs:')
-    # pprint(mimiccxr_vision_evaluator_kwargs)
+        vinbig_vision_evaluator_kwargs = None
 
     return _evaluate_model(
                 eval_dataset_name=eval_dataset_name,
                 model_kwargs=model_kwargs,
                 trainer_engine_kwargs=trainer_engine_kwargs,
                 mimiccxr_vision_evaluator_kwargs=mimiccxr_vision_evaluator_kwargs,
+                vinbig_vision_evaluator_kwargs=vinbig_vision_evaluator_kwargs,
                 auxiliary_tasks_kwargs=auxiliary_tasks_kwargs,
                 device=device,
-                checkpoint_folder_path=checkpoint_folder,
+                checkpoint_folder_path=checkpoint_folder_path,
                 use_amp=use_amp,
                 calibrate_thresholds=calibrate_thresholds,
                 use_ensemble=use_ensemble,

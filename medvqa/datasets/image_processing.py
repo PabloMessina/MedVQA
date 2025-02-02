@@ -557,15 +557,27 @@ class ImageDataset(Dataset):
         
 class ImageFactClassificationDataset(Dataset):
     def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts,
-                 negative_facts, indices, num_facts, infinite=False, shuffle=False):
+                 indices, num_facts,
+                 use_strong_and_weak_negatives=False, negative_facts=None,
+                 weak_negative_facts=None, strong_negative_facts=None,
+                 infinite=False, shuffle=False):
         self.image_paths = image_paths
         self.image_transform = image_transform
         self.fact_embeddings = fact_embeddings
         self.positive_facts = positive_facts
+        self.use_strong_and_weak_negatives = use_strong_and_weak_negatives
         self.negative_facts = negative_facts
+        self.weak_negative_facts = weak_negative_facts
+        self.strong_negative_facts = strong_negative_facts        
         self.indices = indices
         self.num_facts = num_facts
         self.infinite = infinite
+        if use_strong_and_weak_negatives:
+            assert weak_negative_facts is not None
+            assert strong_negative_facts is not None
+            self.negative_facts = [strong + weak for strong, weak in zip(strong_negative_facts, weak_negative_facts)]
+        else:
+            assert negative_facts is not None
         if shuffle:
             random.shuffle(self.indices)
         if infinite:
@@ -599,33 +611,89 @@ class ImageFactClassificationDataset(Dataset):
         idx = self.indices[i]
         image_path = self.image_paths[idx]
         image = self.image_transform(image_path)
-        
-        positive_facts = self.positive_facts[idx]
-        negative_facts = self.negative_facts[idx]
-        if len(positive_facts) > 0 and len(negative_facts) > 0:
-            if len(positive_facts) < self.num_facts and len(negative_facts) < self.num_facts:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-            elif len(positive_facts) < self.num_facts:
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - len(positive_facts))
-            elif len(negative_facts) < self.num_facts:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - len(negative_facts))
+
+        if self.use_strong_and_weak_negatives:
+            
+            positive_facts = self.positive_facts[idx]
+            weak_negative_facts = self.weak_negative_facts[idx]
+            strong_negative_facts = self.strong_negative_facts[idx]
+            negative_facts = self.negative_facts[idx]
+            num_pos = len(positive_facts)
+            num_weak_neg = len(weak_negative_facts)
+            num_strong_neg = len(strong_negative_facts)
+            num_neg = num_weak_neg + num_strong_neg
+            assert num_neg == len(negative_facts)
+
+            if num_pos > 0 and num_neg > 0:
+                if num_pos < self.num_facts and num_neg < self.num_facts:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                elif num_pos < self.num_facts:
+                    if num_strong_neg > 0:
+                        if random.random() < 0.5: # emphasize strong negatives
+                            if num_strong_neg < self.num_facts * 2 - num_pos:
+                                negative_facts = (strong_negative_facts +
+                                                  self._adapt_fact_indices(weak_negative_facts, self.num_facts * 2 - num_strong_neg - num_pos))
+                            else:
+                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_facts * 2 - num_pos)
+                        else: # use all negatives
+                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
+                    else:
+                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
+                elif num_neg < self.num_facts:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - num_neg)
+                else:
+                    assert num_pos >= self.num_facts and num_neg >= self.num_facts
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                    if num_strong_neg > 0:
+                        if random.random() < 0.5:
+                            if num_strong_neg < self.num_facts:
+                                negative_facts = (strong_negative_facts +
+                                                  self._adapt_fact_indices(weak_negative_facts, self.num_facts - num_strong_neg))
+                            else:
+                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_facts)
+                        else:
+                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                    else:
+                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+            elif num_pos > 0:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+            elif num_neg > 0:
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
             else:
-                assert len(positive_facts) >= self.num_facts and len(negative_facts) >= self.num_facts
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-        elif len(positive_facts) > 0:
-            positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
-        elif len(negative_facts) > 0:
-            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+                raise ValueError('No positive or negative facts found!')
+        
         else:
-            raise ValueError('No positive or negative facts found!')
+            
+            positive_facts = self.positive_facts[idx]
+            negative_facts = self.negative_facts[idx]
+            num_pos = len(positive_facts)
+            num_neg = len(negative_facts)
+
+            if num_pos > 0 and num_neg > 0:
+                if num_pos < self.num_facts and num_neg < self.num_facts:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                elif num_pos < self.num_facts:
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
+                elif num_neg < self.num_facts:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - num_neg)
+                else:
+                    assert num_pos >= self.num_facts and num_neg >= self.num_facts
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+            elif num_pos > 0:
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+            elif num_neg > 0:
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+            else:
+                raise ValueError('No positive or negative facts found!')
 
         fact_indices = positive_facts + negative_facts
         assert len(fact_indices) == 2 * self.num_facts
         embeddings = self.fact_embeddings[fact_indices]
-        labels = np.zeros(len(fact_indices), dtype=np.int64)
-        labels[:len(positive_facts)] = 1
+        labels = np.zeros(len(fact_indices), dtype=np.int64) # initialize with zeros
+        labels[:len(positive_facts)] = 1 # set positive labels
         
         return {
             'fidxs': fact_indices,

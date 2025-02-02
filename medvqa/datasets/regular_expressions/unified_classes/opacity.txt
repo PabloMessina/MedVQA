@@ -1,4 +1,4 @@
 \b(radi)?opaci[tf]
 \b(radio?)?opaque
-\b(defined|increas|reticular|ground|glass|nodular|consolidat|round|ovoid|soft|tissue|calcified|metallic).*\b(radio|hyper)?dens(e|ity|ities)\b
+\b(defined|increas|reticular|ground|glass|nodular|consolidat|round|ovoid|soft|tissue|calcified|metallic|tubular).*\b(radio|hyper)?dens(e|ity|ities)\b
 \bhyperdens

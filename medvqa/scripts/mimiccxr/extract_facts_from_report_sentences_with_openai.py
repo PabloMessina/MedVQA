@@ -73,7 +73,7 @@ INSTRUCTIONS = """Relevant facts:
 1. observations of abnormalities
 2. observations of diseases
 3. observations of strange visual patterns
-4. observations of devices
+4. observations of devices, tubes, lines, or similar objects
 5. observations of foreign bodies
 6. observations of specific anatomical regions that look normal or healthy
 7. absences of abnormalities (usually expressed with a negation)
@@ -82,10 +82,7 @@ INSTRUCTIONS = """Relevant facts:
 
 Task:
 
-Given a sentence from a chest x-ray report, output a JSON array of facts.
-Each fact should be about one observation. If a sentence mentions multiple observations,
-each observation should be extracted as a separate fact.
-Each fact should include the anatomical location where it was observed. If multiple facts occur in the same location, repeat the location in each fact.
+Given a sentence from a chest x-ray report, output a JSON array of facts. Each fact should be about one observation. If a sentence mentions multiple observations, each observation should be extracted as a separate fact. Each fact should include the anatomical location where it was observed if provided. If multiple facts occur in the same location, repeat the location in each fact.
 
 If no relevant facts are mentioned, return [] (an empty array).
 
@@ -104,13 +101,15 @@ Lungs are well inflated without evidence of focal airspace consolidation to sugg
 "lungs without evidence of pneumonia"
 ]
 
-Taken together, compared with less than 1 hr earlier, the findings are suggestive of worsening of CHF, with new or significantly increased left greater right pleural effusions and underlying bibasilar collapse and/or  consolidation, particularly on the left.
+Taken together, compared with less than 1 hr earlier, the findings are suggestive of worsening of CHF, with new or significantly increased left greater right pleural effusions and underlying bibasilar collapse and/or consolidation, particularly on the left.
 [
 "worsening of CHF",
-"new or significantly increased left pleural effusions",
-"new or significantly increased right pleural effusions",
-"underlying bibasilar collapse on the left",
-"underlying consolidation on the left",
+"new or significantly increased pleural effusions",
+"the left pleural effusion is greater than the right pleural effusion",
+"bibasilar lung collapse",
+"bibasilar lung consolidation",
+"left lung collapse",
+"left lung consolidation",
 ]
 
 No acute cardiopulmonary abnormality
@@ -118,10 +117,15 @@ No acute cardiopulmonary abnormality
 "no acute cardiopulmonary abnormality"
 ]
 
+Cutaneous clips.
+[
+"cutaneous clips"
+]
+
 If clinical presentation is not convincing for pneumonia, pulmonary embolism should be considered
 [
-"clinical presentation may indicate pneumonia",
-"clinical presentation may indicate pulmonary embolism",
+"questionable evidence of pneumonia",
+"possibility of pulmonary embolism",
 ]"""
 
 _JSON_STRING_ARRAY_REGEX = re.compile(r"\[\s*(\".+?\",?\s*)*\]")
@@ -144,8 +148,6 @@ def parse_openai_model_output(text):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--api_responses_filepath", type=str, default=None)
-    parser.add_argument("--batch_input_file_id", type=str, default=None)
     parser.add_argument("--preprocessed_sentences_to_skip_filepaths", nargs="+", default=None)    
     parser.add_argument("--preprocessed_reports_filepath", type=str)
     
@@ -158,12 +160,13 @@ if __name__ == '__main__':
 
     parser.add_argument("--offset", type=int, default=None)
     parser.add_argument("--num_sentences", type=int, default=None)
-    parser.add_argument("--rank_sentences_by_difficulty", action="store_true", default=False)
-    parser.add_argument("--sample_sentences_uniformly", action="store_true", default=False)
+    parser.add_argument("--rank_sentences_by_difficulty", action="store_true")
+    parser.add_argument("--sample_sentences_uniformly", action="store_true")
     parser.add_argument("--process_kth_of_every_n_sentences", type=int, nargs=2, default=None,
                         help="If specified, only process the kth of every n sentences.")
-    parser.add_argument("--only_conditional_sentences", action="store_true", default=False)
-    parser.add_argument("--use_test_set_sentences", action="store_true", default=False)
+    parser.add_argument("--only_conditional_sentences", action="store_true")
+    parser.add_argument("--only_special_sentences", action="store_true")
+    parser.add_argument("--use_test_set_sentences", action="store_true")
 
     parser.add_argument("--openai_model_name", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--openai_request_url", type=str, default="https://api.openai.com/v1/chat/completions")
@@ -174,8 +177,11 @@ if __name__ == '__main__':
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--logging_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--alias", type=str, default="")
-    parser.add_argument("--use_batch_api", action="store_true", default=False)
+    parser.add_argument("--not_delete_api_requests_and_responses", action="store_true")
+    parser.add_argument("--api_responses_filepath", type=str, default=None)
+    parser.add_argument("--use_batch_api", action="store_true")
     parser.add_argument("--batch_description", type=str, default=None)
+    parser.add_argument("--batch_input_file_id", type=str, default=None)
     args = parser.parse_args()
 
     processed_sentences_save_filepath = os.path.join(MIMICCXR_FAST_CACHE_DIR, "openai", f"{args.openai_model_name}_facts_from_sentences{args.alias}.jsonl")
@@ -281,15 +287,39 @@ if __name__ == '__main__':
         unique_sentences = [s for s in unique_sentences if s not in sentences_to_skip]
         logger.info(f"Removed {len(sentences_to_skip)} sentences to skip. {len(unique_sentences)} sentences remaining.")
 
-        # Filter sentences by conditional sentences if necessary
+        # Filter to conditional sentences if necessary
         if args.only_conditional_sentences:
-            logger.info(f"Filtering sentences to only conditional sentences")
+            logger.info(f"Filtering to only conditional sentences")
             cond_regex = re.compile(r"\b(if|unless|when|whenever|wherever|whether|while|until|in case|as long as|provided that|given that|although|though|whereas|as soon as|as long as|as much as|as often as|as far as|as well as)\b", re.IGNORECASE)
             unique_sentences = [s for s in unique_sentences if cond_regex.search(s)]
             logger.info(f"Found {len(unique_sentences)} conditional sentences")
 
             # Print example sentences
             logger.info(f"Example sentences (after filtering to only conditional sentences):")
+            for i in range(10):
+                logger.info(f"{i+1}. {unique_sentences[i]}")
+
+        # Filter to sentences that either:
+        #   - have conditionals, or
+        #   - have at least 4 uppercase words, or
+        #   - have "greater than" or "less than"
+        #   - have "concerning for"
+        elif args.only_special_sentences:
+            logger.info(f"Filtering to only special sentences")
+            cond_regex = re.compile(r"\b(if|unless|when|whenever|wherever|whether|while|until|in case|as long as|provided that|given that|although|though|whereas|as soon as|as long as|as much as|as often as|as far as|as well as)\b", re.IGNORECASE)
+            gt_lt_regex = re.compile(r"\b(gt|lt|greater than|less than)\b", re.IGNORECASE)            
+            uppercase_regex = re.compile(r"\b[A-Z]+\b.*\b[A-Z]+\b.*\b[A-Z]+\b.*\b[A-Z]+\b") # at least 4 uppercase words
+            concern_regex = re.compile(r"\b(concerning for)\b", re.IGNORECASE)
+            unique_sentences = [s for s in unique_sentences if (
+                cond_regex.search(s) or
+                gt_lt_regex.search(s) or
+                uppercase_regex.search(s) or
+                concern_regex.search(s)
+            )]
+            logger.info(f"Found {len(unique_sentences)} special sentences")
+
+            # Print example sentences
+            logger.info(f"Example sentences (after filtering to only special sentences):")
             for i in range(10):
                 logger.info(f"{i+1}. {unique_sentences[i]}")
 
@@ -358,4 +388,5 @@ if __name__ == '__main__':
         use_batch_api=args.use_batch_api,
         batch_description=args.batch_description,
         batch_input_file_id=args.batch_input_file_id,
+        delete_api_requests_and_responses=not args.not_delete_api_requests_and_responses,
     )

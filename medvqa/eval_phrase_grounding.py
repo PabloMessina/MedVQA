@@ -863,9 +863,19 @@ def _evaluate_model(
 
             print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
 
-        if do_visual_grounding_with_bbox_regression or do_visual_grounding_with_segmentation:
-            save_pickle(output, save_path)
-            print(f'Saved metrics to {save_path}')
+        else:
+
+            results_folder_path = get_results_folder_path(checkpoint_folder_path)
+            save_path = os.path.join(results_folder_path, f'vindrcxr_metrics(classification,{len(vinbig_trainer.val_dataset)}).pkl')
+            output = {
+                'image_paths': image_paths,
+                'pred_probs': pred_probs,
+                'gt_labels': gt_labels,
+                'prc_auc': prc_auc_metrics,
+            }
+        
+        save_pickle(output, save_path)
+        print(f'Saved metrics to {save_path}')
 
 def evaluate(
     checkpoint_folder_path,

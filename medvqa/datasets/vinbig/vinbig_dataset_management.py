@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import math
 import pandas as pd
@@ -28,8 +29,8 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.vinbig_v1 import TEMPLATES_VINBIG_v1
-from medvqa.utils.files import get_cached_pickle_file
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
+from medvqa.utils.logging import print_bold, print_orange
 
 class VinBigTrainingMode:
     TRAIN_ONLY = 'train'
@@ -49,8 +50,13 @@ class VinBigTrainerBase(LabelBasedVQAClass):
                  class_id_offset=0, verbose=False, use_original_image_size=False):
 
         # Load labels
-        image_id_to_labels = load_labels()
-        image_ids = list(image_id_to_labels.keys())
+        train_image_id_to_labels, test_image_id_to_labels = load_labels()
+        train_image_ids = list(train_image_id_to_labels.keys())
+        test_image_ids = list(test_image_id_to_labels.keys())
+        assert len(train_image_ids) == N_IMAGES_TRAIN
+        assert len(test_image_ids) == N_IMAGES_TEST
+        image_ids = train_image_ids + test_image_ids
+        image_id_to_labels = {**train_image_id_to_labels, **test_image_id_to_labels}
         labels = np.array([image_id_to_labels[img_id] for img_id in image_ids], dtype=np.int8)
         assert labels.shape == (N_IMAGES_TRAIN + N_IMAGES_TEST, len(VINBIG_LABELS))
         self.image_ids = image_ids
@@ -195,8 +201,10 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
         )
 
 class VinBig_VisualModuleTrainer(VinBigTrainerBase):
-    def __init__(self, batch_size, collate_batch_fn, num_workers,
-                training_data_mode=VinBigTrainingMode.ALL, use_training_set=True, use_validation_set=True,
+    def __init__(self, collate_batch_fn, num_workers,
+                training_data_mode=VinBigTrainingMode.ALL,
+                use_training_set=True, use_validation_set=True,
+                train_batch_size=None, val_batch_size=None,
                 use_training_indices_for_validation=False,
                 train_image_transform=None, val_image_transform=None,
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
@@ -210,6 +218,13 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
             load_bouding_boxes=use_bounding_boxes,
             class_id_offset=class_id_offset,
         )
+
+        if use_training_set:
+            assert train_image_transform is not None
+            assert train_batch_size is not None
+        if use_validation_set:
+            assert val_image_transform is not None
+            assert val_batch_size is not None
         
         self.train_image_transform = train_image_transform
         self.val_image_transform = val_image_transform
@@ -231,13 +246,12 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
         
         if use_training_set:
             print('Generating train dataset and dataloader')
-            assert train_image_transform is not None
             self.train_dataset, self.train_dataloader = self._create_label_based_dataset_and_dataloader(
                 indices=train_indices,
                 labels=self.labels,
                 label_names=self.label_names,
                 templates=self.templates,
-                batch_size=batch_size,
+                batch_size=train_batch_size,
                 num_workers=num_workers,
                 collate_batch_fn=lambda batch: collate_batch_fn(batch, training_mode=True),
                 infinite=True,
@@ -253,7 +267,6 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
         
         if use_validation_set:
             print('Generating val dataset and dataloader')
-            assert val_image_transform is not None
             if use_training_indices_for_validation:
                 test_indices = self.train_indices
             else:
@@ -262,7 +275,7 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
                                                            transform=self.val_image_transform,
                                                            data_augmentation_enabled=False)
             self.val_dataloader = DataLoader(self.val_dataset,
-                                             batch_size=batch_size,
+                                             batch_size=val_batch_size,
                                              shuffle=False,
                                              num_workers=num_workers,
                                              collate_fn=lambda batch: collate_batch_fn(batch, training_mode=False),
@@ -662,6 +675,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                  do_visual_grounding_with_bbox_regression=False,
                  do_visual_grounding_with_segmentation=False,
                  for_yolo=False,
+                 replace_phrase_embeddings_with_random_vectors=False,
                  ):
         super().__init__(
             load_bouding_boxes=True,
@@ -678,9 +692,24 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         print(f'Loding phrase_embeddings and phrases from {phrase_embeddings_filepath}...')
         tmp = get_cached_pickle_file(phrase_embeddings_filepath)
         phrase_embeddings = tmp['phrase_embeddings']
+        
+        if replace_phrase_embeddings_with_random_vectors:
+            print_orange('NOTE: Replacing phrase embeddings with random vectors', bold=True)
+            save_path = f'{phrase_embeddings_filepath}.random_vectors.pkl'
+            if os.path.exists(save_path):
+                print_orange(f'Random vectors already saved at {save_path}')
+                phrase_embeddings = load_pickle(save_path)['phrase_embeddings']
+            else:
+                phrase_embeddings = np.random.randn(*phrase_embeddings.shape).astype(phrase_embeddings.dtype) # replace with random vectors
+                phrase_embeddings /= np.linalg.norm(phrase_embeddings, axis=1, keepdims=True) # normalize
+                save_dict = {'phrase_embeddings': phrase_embeddings}
+                save_pickle(save_dict, save_path)
+                print_orange(f'Saved random vectors at {save_path}')
+
         phrases = tmp['phrases']
         assert phrase_embeddings.shape[0] == len(phrases)
         print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+        print(f'phrase_embeddings.dtype = {phrase_embeddings.dtype}')
         print(f'len(phrases) = {len(phrases)}')
         for phrase in phrases:
             print('\t', phrase)

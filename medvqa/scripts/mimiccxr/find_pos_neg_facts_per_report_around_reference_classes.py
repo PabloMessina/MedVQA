@@ -48,7 +48,10 @@ def _filter_facts(integrated_fact_metadata):
                 skipped += 1
                 continue
         category = metadata['category']
-        if category in ('anatomical finding', 'disease'):
+        if category == 'does not apply':
+            skipped += 1
+            continue
+        if category in ('anatomical finding', 'disease', 'foreign body'):
             if abnormality_status == 'completely normal or healthy':
                 skipped += 1
                 continue
@@ -213,8 +216,7 @@ def _assign_positive_and_negative_facts_to_report(ridx):
     clean_snfidxs = []
     contradiction = False
     for fidx in snfidxs:
-        if (_shared_cluster_labels[fidx] in used_cluster_ids and # strong negative fact is from a used cluster
-            any(a in used_anchor_ids for a in _shared_fidx2anchors[fidx])): # strong negative fact is from a used anchor
+        if any(a in used_anchor_ids for a in _shared_fidx2anchors[fidx]): # strong negative fact is from a used anchor
             contradiction = True
             continue
         assert fidx not in report_fidxs # sanity check
@@ -269,6 +271,7 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     fact_embedding_model_checkpoint_folder_path: str,
     fact_embedding_batch_size: int,
     fact_embedding_num_workers: int,
+    skip_nli: bool,
     mlp_batch_size: int,
     mlp_num_workers: int,
     mlp_nli_checkpoint_folder_path: str,
@@ -290,6 +293,7 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
         fact_embedding_model_checkpoint_folder_path (str): Path to the fact embedding model checkpoint folder.
         fact_embedding_batch_size (int): Batch size for computing text embeddings.
         fact_embedding_num_workers (int): Number of workers for computing text embeddings.
+        skip_nli (bool): Whether to skip the NLI step.
         mlp_batch_size (int): Batch size for computing NLI softmaxes.
         mlp_num_workers (int): Number of workers for computing NLI softmaxes.
         mlp_nli_checkpoint_folder_path (str): Path to the pre-trained MLP NLI model checkpoint folder.
@@ -477,36 +481,42 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     if report_idxs_with_contradictions:
         print_red(f'WARNING: {len(report_idxs_with_contradictions)}/{n_reports} reports have contradictions!', bold=True)
 
-    # Compute softmaxes over candidate weak negative facts
-    print("Computing softmaxes over candidate weak negative facts...")
-    tmp = _compute_mlp_fact_based_nli_softmaxes_per_report(
-        embeddings=all_fact_embeddings,
-        sentence2idx=sentence2idx,
-        report_facts=report_facts,
-        ridx_fidx_pairs=cand_neg_ridx_fidx_pairs,
-        representative_facts=all_facts,
-        mlp_batch_size=mlp_batch_size,
-        mlp_num_workers=mlp_num_workers,
-        mlp_nli_checkpoint_folder_path=mlp_nli_checkpoint_folder_path,
-        device=device,
-    )
-    softmaxes = tmp['softmaxes']
-    assert softmaxes.shape[0] == cand_neg_ridx_fidx_pairs.shape[0]
+    if not skip_nli:
 
-    # Filter out negative facts with high entailment softmaxes
-    print("Filtering out negative facts with high entailment softmaxes...")
-    valid_idxs = np.where(softmaxes[:, 0] < mlp_nli_entailment_threshold)[0]
-    weak_negative_fact_idxs_per_report = [[] for _ in range(n_reports)]
-    for i in valid_idxs:
-        ridx, fidx = cand_neg_ridx_fidx_pairs[i]
-        weak_negative_fact_idxs_per_report[ridx].append(fidx.item()) # convert to int
+        # Compute softmaxes over candidate weak negative facts
+        print("Computing softmaxes over candidate weak negative facts...")
+        tmp = _compute_mlp_fact_based_nli_softmaxes_per_report(
+            embeddings=all_fact_embeddings,
+            sentence2idx=sentence2idx,
+            report_facts=report_facts,
+            ridx_fidx_pairs=cand_neg_ridx_fidx_pairs,
+            representative_facts=all_facts,
+            mlp_batch_size=mlp_batch_size,
+            mlp_num_workers=mlp_num_workers,
+            mlp_nli_checkpoint_folder_path=mlp_nli_checkpoint_folder_path,
+            device=device,
+        )
+        softmaxes = tmp['softmaxes']
+        assert softmaxes.shape[0] == cand_neg_ridx_fidx_pairs.shape[0]
+
+        # Filter out negative facts with high entailment softmaxes
+        print("Filtering out negative facts with high entailment softmaxes...")
+        valid_idxs = np.where(softmaxes[:, 0] < mlp_nli_entailment_threshold)[0]
+        weak_negative_fact_idxs_per_report = [[] for _ in range(n_reports)]
+        for i in valid_idxs:
+            ridx, fidx = cand_neg_ridx_fidx_pairs[i]
+            weak_negative_fact_idxs_per_report[ridx].append(fidx.item()) # convert to int
+
+        # Print statistics
+        print(f'Number of valid weak negative facts: {len(valid_idxs)}/{len(softmaxes)}')
+        print(f'Percentage of valid weak negative facts: {len(valid_idxs) / len(softmaxes) * 100:.2f}%')
+        # average number of negative facts per report
+        avg_num_negative_facts_per_report = np.mean([len(fidxs) for fidxs in weak_negative_fact_idxs_per_report])
+        print(f'Average number of weak negative facts per report: {avg_num_negative_facts_per_report:.2f}')
     
-    # Print statistics
-    print(f'Number of valid weak negative facts: {len(valid_idxs)}/{len(softmaxes)}')
-    print(f'Percentage of valid weak negative facts: {len(valid_idxs) / len(softmaxes) * 100:.2f}%')
-    # average number of negative facts per report
-    avg_num_negative_facts_per_report = np.mean([len(fidxs) for fidxs in weak_negative_fact_idxs_per_report])
-    print(f'Average number of weak negative facts per report: {avg_num_negative_facts_per_report:.2f}')
+    else:
+        # Skip NLI
+        weak_negative_fact_idxs_per_report = cand_neg_ridx_fidx_pairs[:, 1].reshape((n_reports, max_negative_facts_per_report)).tolist()
 
     # Build dicom_id to pos/neg facts
     detailed_metadata = load_mimiccxr_reports_detailed_metadata()
@@ -531,23 +541,31 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     }
     if report_idxs_with_contradictions:
         output['report_idxs_with_contradictions'] = report_idxs_with_contradictions
+    strings=[
+        f'len(cand_neg_ridx_fidx_pairs): {len(cand_neg_ridx_fidx_pairs)}',
+        f'max_negative_facts_per_report={max_negative_facts_per_report}',
+        integrated_report_facts_jsonl_filepath,
+        integrated_fact_metadata_jsonl_filepath,
+        background_findings_and_impression_json_filepath,
+        facts_relevant_to_anchor_facts_pickle_filepath,
+        fact_embedding_model_name,
+        fact_embedding_model_checkpoint_folder_path,
+    ]
+    if not skip_nli:
+        strings.extend([
+            f'len(valid_idxs): {len(valid_idxs)}',
+            f'mlp_nli_checkpoint_folder_path={mlp_nli_checkpoint_folder_path}',
+            f'mlp_nli_entailment_threshold={mlp_nli_entailment_threshold}',
+        ])
+        prefix = (f'mimiccxr_dicom_id_to_pos_neg_facts(num_rel_facts={len(relevant_facts)},num_clusters={num_clusters},'
+                f'max_neg={max_negative_facts_per_report},ent_th={mlp_nli_entailment_threshold:.3f})')
+    else:
+        prefix = (f'mimiccxr_dicom_id_to_pos_neg_facts(num_rel_facts={len(relevant_facts)},num_clusters={num_clusters},'
+                f'max_neg={max_negative_facts_per_report},skip_nli)')
     output_filepath = get_file_path_with_hashing_if_too_long(
         folder_path=LARGE_FAST_CACHE_DIR,
-        prefix=(f'mimiccxr_dicom_id_to_pos_neg_facts(num_rel_facts={len(relevant_facts)},num_clusters={num_clusters},'
-                f'max_neg={max_negative_facts_per_report},ent_th={mlp_nli_entailment_threshold:.3f})'),
-        strings=[
-            f'len(cand_neg_ridx_fidx_pairs): {len(cand_neg_ridx_fidx_pairs)}',
-            f'max_negative_facts_per_report={max_negative_facts_per_report}',
-            f'mlp_nli_entailment_threshold={mlp_nli_entailment_threshold}',
-            f'len(valid_idxs): {len(valid_idxs)}',
-            integrated_report_facts_jsonl_filepath,
-            integrated_fact_metadata_jsonl_filepath,
-            background_findings_and_impression_json_filepath,
-            facts_relevant_to_anchor_facts_pickle_filepath,
-            fact_embedding_model_name,
-            fact_embedding_model_checkpoint_folder_path,
-            mlp_nli_checkpoint_folder_path,
-        ],
+        prefix=prefix,
+        strings=strings,
         force_hashing=True,
     )
     print(f'Saving {output_filepath}...')
@@ -566,6 +584,7 @@ def main():
     parser.add_argument('--fact_embedding_num_workers', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--facts_relevant_to_anchor_facts_pickle_filepath', type=str)
+    parser.add_argument('--skip_nli', action='store_true')
     parser.add_argument('--mlp_batch_size', type=int, default=32)
     parser.add_argument('--mlp_num_workers', type=int, default=4)
     parser.add_argument('--mlp_nli_checkpoint_folder_path', type=str)
@@ -596,14 +615,15 @@ def main():
         assert args.integrated_sentence_to_negative_facts_jsonl_filepath is not None
         assert args.fact_embedding_model_name is not None
         assert args.fact_embedding_model_checkpoint_folder_path is not None
-        assert args.mlp_nli_checkpoint_folder_path is not None
         assert args.fact_embedding_batch_size is not None
         assert args.fact_embedding_num_workers is not None
-        assert args.mlp_batch_size is not None
-        assert args.mlp_num_workers is not None
-        assert args.mlp_nli_entailment_threshold is not None
         assert args.num_clusters is not None
         assert args.max_negative_facts_per_report is not None
+        if not args.skip_nli:
+            assert args.mlp_nli_checkpoint_folder_path is not None
+            assert args.mlp_batch_size is not None
+            assert args.mlp_num_workers is not None
+            assert args.mlp_nli_entailment_threshold is not None
         _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
             integrated_report_facts_jsonl_filepath=args.integrated_report_facts_jsonl_filepath,
             integrated_fact_metadata_jsonl_filepath=args.integrated_fact_metadata_jsonl_filepath,
@@ -615,6 +635,7 @@ def main():
             fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
             fact_embedding_batch_size=args.fact_embedding_batch_size,
             fact_embedding_num_workers=args.fact_embedding_num_workers,
+            skip_nli=args.skip_nli,
             mlp_batch_size=args.mlp_batch_size,
             mlp_num_workers=args.mlp_num_workers,
             mlp_nli_checkpoint_folder_path=args.mlp_nli_checkpoint_folder_path,

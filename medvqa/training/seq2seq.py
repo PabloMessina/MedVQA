@@ -15,6 +15,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
         lr_scheduler=None,
         # other args
         use_t5=False,
+        use_flan_t5=False,
         use_bart=False,
         num_beams=1,
     ):
@@ -22,7 +23,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
     scaler = GradScaler(enabled=use_amp)
     
     assert sum([training, validating, testing]) == 1, 'Only one of training, validating, testing must be True'
-    assert use_t5 or use_bart # TODO: support more models eventually
+    assert use_t5 or use_flan_t5 or use_bart # TODO: support more models eventually
 
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, iters_to_accumulate)
@@ -33,7 +34,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
         # Extract elements from batch
         output_ids = batch['output_ids'].to(device)
         output_text = batch['output_text']
-        if use_t5 or use_bart:
+        if use_t5 or use_flan_t5 or use_bart:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
         
@@ -50,7 +51,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
             elif testing:
                 model_kwargs['mode'] = 'test'
 
-            if use_t5 or use_bart:
+            if use_t5 or use_flan_t5 or use_bart:
                 model_kwargs['input_ids'] = input_ids
                 model_kwargs['attention_mask'] = attention_mask
                 model_kwargs['labels'] = output_ids
@@ -63,7 +64,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
                 model_output = model(**model_kwargs)
                 if training:
                     losses = []
-                if use_t5 or use_bart:
+                if use_t5 or use_flan_t5 or use_bart:
                     if training or validating:
                         pred_output_logits = model_output.logits.detach()
                         pred_output_ids = pred_output_logits.argmax(dim=-1)
@@ -86,7 +87,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device, max_len
         output['gt_text'] = output_text
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-        if use_t5 or use_bart:
+        if use_t5 or use_flan_t5 or use_bart:
             output['pred_output_ids'] = pred_output_ids.detach()
             if training or validating:
                 output['seq2seq_loss'] = seq2seq_loss.detach()
@@ -112,12 +113,13 @@ def get_engine(model, device,
                 optimizer=None,
                 update_lr_batchwise=False, lr_scheduler=None,
                 use_t5=False,
+                use_flan_t5=False,
                 use_bart=False,
                 num_beams=1,
             ):
     
     # Criterion
-    if use_t5 or use_bart:
+    if use_t5 or use_flan_t5 or use_bart:
         nlg_criterion = nn.CrossEntropyLoss(ignore_index=-100)
     else:
         nlg_criterion = nn.CrossEntropyLoss(ignore_index=0)
@@ -134,6 +136,7 @@ def get_engine(model, device,
                           lr_scheduler=lr_scheduler,
                           # other kwargs
                           use_t5=use_t5,
+                          use_flan_t5=use_flan_t5,
                           use_bart=use_bart,
                           num_beams=num_beams,
                           )
