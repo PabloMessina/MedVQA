@@ -4,7 +4,9 @@ import torch
 import numpy as np
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
+from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED, VINBIG_CHEX_CLASSES, VINBIG_CHEX_IOU_THRESHOLDS, VINBIG_NUM_BBOX_CLASSES__MODIFIED, VINBIGDATA_CHALLENGE_CLASSES, VINBIGDATA_CHALLENGE_IOU_THRESHOLD
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
+from medvqa.evaluation.bootstrapping import stratified_vinbig_bootstrap_iou_map
 from medvqa.metrics import attach_condition_aware_bbox_iou_per_class
 from medvqa.metrics.bbox.utils import (
     compute_mAP__yolov11,
@@ -28,11 +30,11 @@ from medvqa.utils.constants import (
 from medvqa.models.checkpoint import (
     load_metadata,
 )
-from medvqa.utils.common import parsed_args_to_dict
+from medvqa.utils.common import activate_determinism, parsed_args_to_dict
 from medvqa.training.vision import get_engine
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta
+from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_orange
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -54,7 +56,7 @@ def parse_args(args=None):
     parser.add_argument('--optimize_thresholds', action='store_true')
     parser.add_argument('--candidate_iou_thresholds', type=float, nargs='+', default=None)
     parser.add_argument('--candidate_conf_thresholds', type=float, nargs='+', default=None)
-    parser.add_argument('--map_iou_thresholds', type=float, nargs='+', default=[0., 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5])
+    parser.add_argument('--map_iou_thresholds', type=float, nargs='+', default=[0., 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     parser.add_argument('--max_det', type=int, default=100)
     parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
 
@@ -111,11 +113,19 @@ def _evaluate_model(
         vinbig_trainer = VinBig_VisualModuleTrainer(
             val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
             collate_batch_fn=get_vision_collate_batch_fn(**collate_batch_fn_kwargs['vinbig']),
-            batch_size=batch_size,
+            val_batch_size=batch_size,
             num_workers=num_workers,
             use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
             **vinbig_trainer_kwargs,
         )
+        use_vinbig_with_modified_labels = vinbig_trainer_kwargs.get('use_vinbig_with_modified_labels', False)
+
+        if use_vinbig_with_modified_labels:
+            vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES__MODIFIED
+            vinbig_bbox_names = VINBIG_BBOX_NAMES__MODIFIED
+        else:
+            vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES
+            vinbig_bbox_names = VINBIG_BBOX_NAMES
 
         # Create evaluation engine
         print_blue('Creating evaluation engine ...', bold=True)
@@ -133,7 +143,7 @@ def _evaluate_model(
         else:
             attach_accumulator(evaluation_engine, 'yolov11_predictions')
             attach_condition_aware_bbox_iou_per_class(evaluation_engine, ('yolov11_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'),
-                                                      'vnb_y11_bbox_iou', VINBIG_NUM_BBOX_CLASSES, _cond_func, for_vinbig=True, use_yolov8=True)
+                                                      'vnb_y11_bbox_iou', vinbig_num_bbox_classes, _cond_func, for_vinbig=True, use_yolov8=True)
             metrics_to_print.append('vnb_y11_bbox_iou')
         attach_accumulator(evaluation_engine, 'vinbig_bbox_coords')
         attach_accumulator(evaluation_engine, 'vinbig_bbox_classes')
@@ -171,7 +181,7 @@ def _evaluate_model(
             print('metrics["vnb_y11_bbox_iou"] =', metrics['vnb_y11_bbox_iou'])
 
         # Prepare ground truth bboxes
-        gt_coords_list = [[[] for _ in range(VINBIG_NUM_BBOX_CLASSES)] for _ in range(len(gt_bboxes))]
+        gt_coords_list = [[[] for _ in range(vinbig_num_bbox_classes)] for _ in range(len(gt_bboxes))]
         for i in range(len(gt_bboxes)):
             for bbox, cls in zip(gt_bboxes[i], gt_classes[i]):
                 gt_coords_list[i][cls].append(bbox)
@@ -220,7 +230,46 @@ def _evaluate_model(
                 pred_confs_list.append(pred[:, 4])
                 pred_classes_list.append(pred[:, 5].astype(int))
 
-        # Compute metrics
+        # Remove classes without any ground truth
+        gt_counts_per_class = np.zeros(vinbig_num_bbox_classes, dtype=int)
+        for i in range(len(gt_coords_list)):
+            for j in range(len(gt_coords_list[i])):
+                gt_counts_per_class[j] += len(gt_coords_list[i][j])
+        no_gt_classes = np.where(gt_counts_per_class == 0)[0]
+        with_gt_classes = np.where(gt_counts_per_class > 0)[0]
+        if len(no_gt_classes) > 0:
+            print_orange('NOTE: Removing the following classes without any bounding box annotations:', bold=True)
+            for i in no_gt_classes:
+                print_orange(f'  {vinbig_bbox_names[i]}')
+            print(f'gt_counts_per_class = {gt_counts_per_class}')
+            # Clean gt_coords_list
+            for i in range(len(gt_coords_list)):
+                gt_coords_list[i] = [gt_coords_list[i][j] for j in with_gt_classes]
+            print(f'len(gt_coords_list) = {len(gt_coords_list)}')
+            print(f'len(gt_coords_list[0]) = {len(gt_coords_list[0])}')
+            # Clean vinbig_bbox_names
+            vinbig_bbox_names = [x for i, x in enumerate(vinbig_bbox_names) if i in with_gt_classes]
+            vinbig_num_bbox_classes = len(vinbig_bbox_names)
+            print(f'len(vinbig_bbox_names) = {len(vinbig_bbox_names)}')
+            # Clean pred_boxes_list, pred_classes_list, pred_confs_list
+            old_class_idx_to_new_class_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(with_gt_classes)}
+            for i in range(len(pred_boxes_list)):
+                if len(pred_classes_list[i]) > 0:
+                    valid_idxs = np.where(np.isin(pred_classes_list[i], with_gt_classes))[0]
+                    pred_boxes_list[i] = pred_boxes_list[i][valid_idxs]
+                    pred_confs_list[i] = pred_confs_list[i][valid_idxs]
+                    pred_classes_list[i] = np.array([old_class_idx_to_new_class_idx[x] for x in pred_classes_list[i][valid_idxs]])
+            print(f'len(pred_boxes_list) = {len(pred_boxes_list)}')
+            print(f'len(pred_classes_list) = {len(pred_classes_list)}')
+            print(f'len(pred_confs_list) = {len(pred_confs_list)}')
+        
+        if optimize_thresholds: # Print optimal thresholds
+            print_magenta(f'best_iou_threshold: {best_iou_threshold}', bold=True)
+            print_magenta(f'best_conf_threshold: {best_conf_threshold}', bold=True)        
+        
+        # Compute metrics without bootstrapping
+
+        # 1. IoU
         tmp = compute_mean_iou_per_class__yolov11(
             pred_boxes=pred_boxes_list,
             pred_classes=pred_classes_list,
@@ -235,20 +284,11 @@ def _evaluate_model(
         sample_counts = tmp['sample_counts']
         micro_iou = tmp['micro_iou']
         class_idxs = np.where(class_counts > 0)[0]
-        mean_iou = class_ious[class_idxs].mean()
+        macro_iou = class_ious[class_idxs].mean()
         sample_idxs = np.where(sample_counts > 0)[0]
         sample_iou = sample_ious[sample_idxs].mean()
-        if optimize_thresholds:
-            print_magenta(f'best_iou_threshold: {best_iou_threshold}', bold=True)
-            print_magenta(f'best_conf_threshold: {best_conf_threshold}', bold=True)
-        for class_name, iou, count in zip(VINBIG_BBOX_NAMES, class_ious, class_counts):
-            print(f'mean_iou({class_name}): {iou} ({count} samples)')
-        print_magenta(f'mean_iou: {mean_iou}', bold=True)
-        print(f'\t{class_idxs.shape[0]} / {len(VINBIG_BBOX_NAMES)} classes have at least one ground truth bbox')
-        print_magenta(f'mean_sample_iou: {sample_iou}', bold=True)
-        print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
-        print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
 
+        # 2. mAP
         res = compute_mAP__yolov11(
             pred_boxes=pred_boxes_list,
             pred_classes=pred_classes_list,
@@ -259,17 +299,58 @@ def _evaluate_model(
         )
         class_aps = res['class_aps']
         micro_aps = res['micro_aps']
+
+        # 2.1 vinbigdata mAP
+        class_idxs = [vinbig_bbox_names.index(x) for x in VINBIGDATA_CHALLENGE_CLASSES]
+        iou_idx = map_iou_thresholds.index(VINBIGDATA_CHALLENGE_IOU_THRESHOLD)
+        vbdc_mAP = class_aps[iou_idx, class_idxs].mean() # vbdc = vinbigdata challenge
+
+        # 2.2 ChEX mAP
+        class_idxs = [vinbig_bbox_names.index(x) for x in VINBIG_CHEX_CLASSES]
+        iou_idxs = [map_iou_thresholds.index(x) for x in VINBIG_CHEX_IOU_THRESHOLDS]
+        chex_mAP = class_aps[iou_idxs][:, class_idxs].mean()
+
+        # Compute metrics with bootstrapping
+        iou_map_metrics_with_boot = stratified_vinbig_bootstrap_iou_map(
+            pred_boxes_list=pred_boxes_list,
+            pred_classes_list=pred_classes_list,
+            pred_confs_list=pred_confs_list,
+            classifier_confs=None,
+            gt_coords_list=gt_coords_list,
+            vinbig_bbox_names=vinbig_bbox_names,
+            map_iou_thresholds=map_iou_thresholds,
+            compute_mean_iou_per_class_fn=compute_mean_iou_per_class__yolov11,
+            compute_mAP_fn=compute_mAP__yolov11,
+            num_bootstraps=60,
+            num_processes=12,
+        )
+
+        # Print some metrics
+        for class_name, iou, count in zip(vinbig_bbox_names, class_ious, class_counts):
+            print(f'mean_iou({class_name}): {iou} ({count} samples)')
+        print_magenta(f'macro_iou: {macro_iou}', bold=True)
+        print_magenta(f'mean_sample_iou: {sample_iou}', bold=True)
+        print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
+        print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
         
         for iou_thresh, map_ in zip(map_iou_thresholds, class_aps.mean(axis=1)):
             print_magenta(f'mAP@{iou_thresh}: {map_}', bold=True)
 
         for iou_thresh, ap in zip(map_iou_thresholds, micro_aps):
             print_magenta(f'micro_AP@{iou_thresh}: {ap}', bold=True)
+
+        print_magenta(f'vbdc_mAP: {vbdc_mAP}', bold=True)
+        print_magenta(f'chex_mAP: {chex_mAP}', bold=True)
+
+        print_magenta(f'micro_iou (with bootstrap): {iou_map_metrics_with_boot["micro_iou"]["mean"]} ± {iou_map_metrics_with_boot["micro_iou"]["std"]}', bold=True)
+        print_magenta(f'macro_iou (with bootstrap): {iou_map_metrics_with_boot["macro_iou"]["mean"]} ± {iou_map_metrics_with_boot["macro_iou"]["std"]}', bold=True)
+        print_magenta(f'vbdc_mAP (with bootstrap): {iou_map_metrics_with_boot["vbdc_mAP"]["mean"]} ± {iou_map_metrics_with_boot["vbdc_mAP"]["std"]}', bold=True)
+        print_magenta(f'chex_mAP (with bootstrap): {iou_map_metrics_with_boot["chex_mAP"]["mean"]} ± {iou_map_metrics_with_boot["chex_mAP"]["std"]}', bold=True)
             
         print_blue('Saving metrics to file ...', bold=True)
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         strings = [
-            'bbox_regression',
+            'detection',
             f'{len(vinbig_trainer.val_dataset)}',
         ]
         if optimize_thresholds:
@@ -281,13 +362,18 @@ def _evaluate_model(
             pred_classes_list=pred_classes_list,
             pred_confs_list=pred_confs_list,
             gt_bboxes=gt_coords_list,
-            class_ious=class_ious,
             sample_ious=sample_ious,
-            micro_iou=micro_iou,
-            macro_iou=mean_iou,
             map_iou_thresholds=map_iou_thresholds,
-            class_aps=class_aps,
-            micro_aps=micro_aps,
+            metrics_without_bootstrapping=dict(
+                class_ious=class_ious, # (num_classes,)
+                micro_iou=micro_iou, # scalar
+                macro_iou=macro_iou, # scalar
+                class_aps=class_aps, # (num_iou_thresholds, num_classes)
+                micro_aps=micro_aps, # (num_iou_thresholds,)
+                vbdc_mAP=vbdc_mAP, # scalar
+                chex_mAP=chex_mAP, # scalar
+            ),
+            metrics_with_bootstrapping=iou_map_metrics_with_boot,
         )
         if optimize_thresholds:
             output['best_iou_threshold'] = best_iou_threshold
@@ -311,6 +397,8 @@ def evaluate(
     max_det,
     use_amp,
 ):
+    activate_determinism()
+
     print_blue('----- Evaluating model -----', bold=True)
 
     metadata = load_metadata(checkpoint_folder_path)

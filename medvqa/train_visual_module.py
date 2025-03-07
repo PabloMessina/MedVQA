@@ -12,6 +12,7 @@ from medvqa.datasets.cxr14.cxr14_dataset_management import CXR14_VisualModuleTra
 from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpert_VisualModuleTrainer
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.utils import get_merged_findings
+from medvqa.datasets.vinbig import VINBIG_NUM_BBOX_CLASSES__MODIFIED
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer, VinBigTrainingMode
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
@@ -193,6 +194,7 @@ def parse_args(args=None):
     parser.add_argument('--use_vinbig', dest='train_vinbig', action='store_true')
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_all())
     parser.add_argument('--vinbig_use_validation', action='store_true')
+    parser.add_argument('--use_vinbig_with_modified_labels', action='store_true')
 
     # PadChest arguments
     parser.add_argument('--use_padchest', dest='train_padchest', action='store_true')
@@ -306,6 +308,7 @@ def train_model(
                  (vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_yolov8', False))
     use_yolov11 = (mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_yolov11', False)) or\
                     (vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_yolov11', False))
+    use_vinbig_with_modified_labels = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_vinbig_with_modified_labels', False)
     
     visual_input_mode = model_kwargs['visual_input_mode']
     include_image = does_include_image(visual_input_mode)
@@ -664,12 +667,18 @@ def train_model(
         # VinBigData related metrics
         _cond_func = lambda x: x['flag'] == 'vinbig'
         if predict_bboxes_vinbig:
+            if use_vinbig_with_modified_labels:
+                nc = VINBIG_NUM_BBOX_CLASSES__MODIFIED
+            else:
+                nc = VINBIG_NUM_BBOX_CLASSES
             attach_condition_aware_loss(trainer_engine, 'vinbig_yolov11_loss', _cond_func, 'vnb_y11_loss')
             attach_condition_aware_loss(trainer_engine, 'vinbig_yolov11_box_loss', _cond_func, 'vnb_y11_box_loss')
             attach_condition_aware_loss(trainer_engine, 'vinbig_yolov11_cls_loss', _cond_func, 'vnb_y11_cls_loss')
             attach_condition_aware_loss(trainer_engine, 'vinbig_yolov11_dfl_loss', _cond_func, 'vnb_y11_dfl_loss')
-            attach_condition_aware_bbox_iou_per_class(validator_engine, ('yolov11_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'),
-                                                      'vnb_y11_bbox_iou', VINBIG_NUM_BBOX_CLASSES, _cond_func, for_vinbig=True, use_yolov8=True)
+            attach_condition_aware_bbox_iou_per_class(validator_engine,
+                                                      field_names=('yolov11_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'),
+                                                      metric_name='vnb_y11_bbox_iou', nc=nc, condition_function=_cond_func,
+                                                      for_vinbig=True, use_yolov8=True)
         # Chest ImageNome related metrics
         _cond_func = lambda x: x['flag'] == 'mimiccxr'
         if predict_bboxes_chest_imagenome:
@@ -677,9 +686,10 @@ def train_model(
             attach_condition_aware_loss(trainer_engine, 'yolov11_box_loss', _cond_func, 'cig_y11_box_loss')
             attach_condition_aware_loss(trainer_engine, 'yolov11_cls_loss', _cond_func, 'cig_y11_cls_loss')
             attach_condition_aware_loss(trainer_engine, 'yolov11_dfl_loss', _cond_func, 'cig_y11_dfl_loss')
-            attach_condition_aware_bbox_iou_per_class(validator_engine, ('yolov11_predictions', 'chest_imagenome_bbox_coords', 'chest_imagenome_bbox_presence'),
-                                                      'cig_y11_bbox_iou', CHEST_IMAGENOME_NUM_BBOX_CLASSES, _cond_func, use_yolov8=True)
-
+            attach_condition_aware_bbox_iou_per_class(validator_engine,
+                                                      field_names=('yolov11_predictions', 'chest_imagenome_bbox_coords', 'chest_imagenome_bbox_presence'),
+                                                      metric_name='cig_y11_bbox_iou', nc=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                                                      condition_function=_cond_func, use_yolov8=True)
 
         # for logging
         if predict_bboxes_vinbig:
@@ -907,6 +917,7 @@ def train_from_scratch(
     train_padchest,
     vinbig_training_data_mode,
     vinbig_use_validation,
+    use_vinbig_with_modified_labels,
     padchest_training_data_mode,
     padchest_use_validation,
     binary_loss_name,
@@ -1051,6 +1062,7 @@ def train_from_scratch(
         merge_findings=merge_findings,
         n_findings=n_findings,
         use_linear_head_for_classification=use_linear_head_for_classification,
+        use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
     )
     if predict_bboxes_chest_imagenome:
         avg_coords = get_chest_imagenome_train_average_bbox_coords(
@@ -1272,6 +1284,7 @@ def train_from_scratch(
             use_yolov8=use_yolov8,
             use_yolov11=use_yolov11,
             class_id_offset=vinbig_class_id_offset,
+            use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
         )
         if merge_findings:
             vinbig_trainer_kwargs.update(_merged_findings_kwargs)
@@ -1306,7 +1319,7 @@ def train_from_scratch(
         bce_loss_weight=bce_loss_weight,
         wbce_loss_weight=wbce_loss_weight,
         include_image=include_image,
-        include_visual_features=include_visual_features,        
+        include_visual_features=include_visual_features,
         use_amp=use_amp,
         training=True,
         use_chexpert_dataset=train_chexpert,

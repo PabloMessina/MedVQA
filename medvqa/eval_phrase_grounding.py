@@ -7,9 +7,11 @@ from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from medvqa.datasets.chexlocalize import CHEXLOCALIZE_CLASS_NAMES
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
+from medvqa.datasets.vinbig import VINBIG_CHEX_CLASSES, VINBIG_CHEX_IOU_THRESHOLDS, VINBIG_RAD_DINO_CLASSES, VINBIGDATA_CHALLENGE_CLASSES, VINBIGDATA_CHALLENGE_IOU_THRESHOLD
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
+from medvqa.evaluation.bootstrapping import stratified_multilabel_bootstrap_metrics, stratified_vinbig_bootstrap_iou_map
 from medvqa.metrics.bbox.utils import calculate_exact_iou_union, compute_mAP__yolov11, compute_mean_iou_per_class__yolov11, find_optimal_conf_iou_thresholds
-from medvqa.metrics.classification.prc_auc import prc_auc_fn
+from medvqa.metrics.classification.prc_auc import prc_auc_fn, prc_auc_score
 from medvqa.models.vision.visual_modules import RawImageEncoding
 from medvqa.utils.files import get_results_folder_path, save_pickle
 from medvqa.utils.handlers import (
@@ -33,7 +35,6 @@ from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder
 from medvqa.utils.constants import (
     DATASET_NAMES,
     VINBIG_BBOX_NAMES,
-    VINBIG_LABEL2PHRASE,
     VINBIG_NUM_BBOX_CLASSES,
     MetricNames,
 )
@@ -47,13 +48,13 @@ from medvqa.metrics import (
 from medvqa.models.checkpoint import (
     load_metadata,
 )
-from medvqa.utils.common import parsed_args_to_dict
+from medvqa.utils.common import activate_determinism, parsed_args_to_dict
 from medvqa.training.phrase_grounding import get_engine
 from medvqa.datasets.dataloading_utils import (
     get_phrase_grounding_collate_batch_fn,
 )
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta
+from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_orange
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -72,6 +73,7 @@ def parse_args(args=None):
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
     parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
+    parser.add_argument('--checkpoint_folder_path_to_borrow_metadata_from', type=str, default=None, help='Path to metadata file to borrow trainer kwargs from')
 
     # Evaluation arguments
     parser.add_argument('--eval_chest_imagenome_gold', action='store_true')
@@ -86,16 +88,6 @@ def parse_args(args=None):
     parser.add_argument('--use_classifier_confs_for_map', action='store_true', help='Use classifier confidences for mAP computation')
     
     return parser.parse_args(args=args)
-
-_RAD_DINO_VINDRCXR_CLASSES = [ # source: https://www.nature.com/articles/s42256-024-00965-w
-    'Lung Opacity',
-    'Cardiomegaly',
-    'Pleural thickening',
-    'Aortic enlargement',
-    'Pulmonary fibrosis',
-    'Tuberculosis',
-    'Pleural effusion',
-]
 
 def _evaluate_model(
     checkpoint_folder_path,
@@ -123,6 +115,7 @@ def _evaluate_model(
     map_iou_thresholds,
     use_amp,
     use_classifier_confs_for_map,
+    checkpoint_folder_path_to_borrow_metadata_from,
 ):
     count_print = CountPrinter()
     
@@ -206,11 +199,29 @@ def _evaluate_model(
     if eval_vinbig:
 
         count_print('Creating VinBig Phrase Grounding Trainer ...')
+        if vinbig_trainer_kwargs is None:
+            assert checkpoint_folder_path_to_borrow_metadata_from is not None
+            metadata = load_metadata(checkpoint_folder_path_to_borrow_metadata_from)
+            vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
+            try: 
+                transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.VINBIG]
+            except KeyError:
+                first_key = list(val_image_transform_kwargs.keys())[0]
+                transform_kwargs = val_image_transform_kwargs[first_key]
+                print_orange(f'Using transform_kwargs from {first_key} for VinBig')
+            try:
+                collate_batch_fn_kwargs = collate_batch_fn_kwargs['vbg']
+            except KeyError:
+                collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']['vbg']
+                print_orange(f'Borrowing collate_batch_fn_kwargs from {checkpoint_folder_path_to_borrow_metadata_from} for VinBig')
+        else:
+            transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.VINBIG]
+            collate_batch_fn_kwargs = collate_batch_fn_kwargs['vbg']
         vinbig_trainer_kwargs['use_training_set'] = False
         vinbig_trainer_kwargs['use_validation_set'] = True
         vinbig_trainer = VinBigPhraseGroundingTrainer(
-            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['vbg']),
+            val_image_transform=get_image_transform(**transform_kwargs),
+            collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
             num_val_workers=num_workers,
@@ -557,6 +568,16 @@ def _evaluate_model(
             evaluation_engine_kwargs['skip_nms'] = True # We need to skip NMS to optimize thresholds
         evaluation_engine_kwargs['use_amp'] = use_amp
         evaluation_engine = get_engine(model=model, device=device, **evaluation_engine_kwargs)
+        use_vinbig_with_modified_labels = vinbig_trainer_kwargs.get('use_vinbig_with_modified_labels', False)
+        
+        if use_vinbig_with_modified_labels:
+            print_orange('NOTE: Using VinDr-CXR with modified labels', bold=True)
+            from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED
+            vinbig_bbox_names = VINBIG_BBOX_NAMES__MODIFIED
+            vinbig_num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED)
+        else:
+            vinbig_bbox_names = VINBIG_BBOX_NAMES
+            vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES            
 
         # Attach metrics
         metrics_to_print = []
@@ -566,17 +587,17 @@ def _evaluate_model(
                 if use_fact_conditioned_yolo:
                     attach_condition_aware_bbox_iou_per_class(evaluation_engine,
                                                         field_names=['yolo_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                        metric_name='bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        metric_name='bbox_iou', nc=vinbig_num_bbox_classes, condition_function=_cond_func,
                                                         for_vinbig=True, use_fact_conditioned_yolo=True)
                 else:
                     attach_condition_aware_bbox_iou_per_class(evaluation_engine,
                                                             field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                            metric_name='bbox_iou', nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func,
+                                                            metric_name='bbox_iou', nc=vinbig_num_bbox_classes, condition_function=_cond_func,
                                                             for_vinbig=True)
                 metrics_to_print.append('bbox_iou')
         if do_visual_grounding_with_segmentation:
             attach_condition_aware_segmask_iou_per_class(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou',
-                                                        nc=len(VINBIG_BBOX_NAMES), condition_function=_cond_func)
+                                                        nc=vinbig_num_bbox_classes, condition_function=_cond_func)
             metrics_to_print.append('segmask_iou')
 
         # Attach accumulators
@@ -614,13 +635,13 @@ def _evaluate_model(
         evaluation_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
         evaluation_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
 
-        # Start evaluation
+        # Run evaluation
         print_blue('Running engine ...', bold=True)
         evaluation_engine.run(vinbig_trainer.val_dataloader)
-
-        # Print final metrics
-        print_blue('Final metrics:', bold=True)
         metrics = evaluation_engine.state.metrics
+
+        # Print some running metrics
+        
         # 1) bbox iou
         if do_visual_grounding_with_bbox_regression:
             if not optimize_thresholds:
@@ -630,9 +651,16 @@ def _evaluate_model(
         if do_visual_grounding_with_segmentation:
             metric_name = 'segmask_iou'
             print(f'{metric_name}: {metrics[metric_name]}')
-        # 2) PRC-AUC
+
+        # Compute metrics and prepare output to save to file
+
+        output_to_save = dict()
+        
+        # --- Classification metrics
+
         dataset = vinbig_trainer.val_dataset
         phrases = vinbig_trainer.phrases
+        classification_label_names = vinbig_trainer.actual_label_names[:] # copy
         pred_probs = metrics['pred_probs']
         pred_probs = torch.stack(pred_probs).cpu().numpy()
         assert pred_probs.ndim == 2
@@ -641,49 +669,95 @@ def _evaluate_model(
         assert gt_labels.ndim == 2
         assert pred_probs.shape == gt_labels.shape
         assert pred_probs.shape[0] == len(dataset)
-        prc_auc_metrics = prc_auc_fn(pred_probs, gt_labels)
-        rad_dino_phrases = [VINBIG_LABEL2PHRASE[x] for x in _RAD_DINO_VINDRCXR_CLASSES]
-        for class_name, prc_auc in zip(phrases, prc_auc_metrics['per_class']):
-            if class_name in rad_dino_phrases:
-                print_bold(f'PRC-AUC({class_name}): {prc_auc}')
-            else:
-                print(f'PRC-AUC({class_name}): {prc_auc}')
-        print_magenta(f'PRC-AUC(macro_avg): {prc_auc_metrics["macro_avg"]}', bold=True)
-        print_magenta(f'PRC-AUC(micro_avg): {prc_auc_metrics["micro_avg"]}', bold=True)
-        # 3) mAP
-        from sklearn.metrics import average_precision_score
-        mAP_micro = average_precision_score(gt_labels, pred_probs, average='micro')
-        print_magenta(f'mAP(micro_avg): {mAP_micro}', bold=True)
-        mAP_macro = average_precision_score(gt_labels, pred_probs, average='macro')
-        print_magenta(f'mAP(macro_avg): {mAP_macro}', bold=True)
 
-        # Save metrics to file
+        classif_pred_probs = pred_probs.copy() # (num_samples, num_classes)
+        classif_gt_labels = gt_labels.copy() # (num_samples, num_classes)
+
+        # Convert "Abnormal finding" to "No finding" if applicable
+        if use_vinbig_with_modified_labels:
+            print_orange('NOTE: Converting "Abnormal finding" to "No finding" for VinDr-CXR with modified labels', bold=True)
+            assert "Abnormal finding" in classification_label_names
+            assert "No finding" not in classification_label_names
+            abnormal_finding_idx = classification_label_names.index("Abnormal finding")
+            classification_label_names[abnormal_finding_idx] = "No finding"
+            classif_gt_labels[:, abnormal_finding_idx] = np.logical_not(classif_gt_labels[:, abnormal_finding_idx])
+            classif_pred_probs[:, abnormal_finding_idx] = 1 - classif_pred_probs[:, abnormal_finding_idx]
+
+        # Remove classes without any ground truth
+        classif_gt_labels_sum = classif_gt_labels.sum(axis=0)
+        no_gt_classes = np.where(classif_gt_labels_sum == 0)[0]
+        if len(no_gt_classes) > 0:
+            print_orange('NOTE: Removing the following classes without any positive classification labels:', bold=True)
+            for i in no_gt_classes:
+                print_orange(f'  {classification_label_names[i]}')
+            classif_pred_probs = np.delete(classif_pred_probs, no_gt_classes, axis=1)
+            classif_gt_labels = np.delete(classif_gt_labels, no_gt_classes, axis=1)
+            classification_label_names = [x for i, x in enumerate(classification_label_names) if i not in no_gt_classes]
+            print(f'classif_pred_probs.shape = {classif_pred_probs.shape}')
+            print(f'classif_gt_labels.shape = {classif_gt_labels.shape}')
+            print(f'len(classification_label_names) = {len(classification_label_names)}')
+
+        # Compute PRC-AUC without bootstrapping
+        prc_auc_metrics = prc_auc_fn(classif_gt_labels, classif_pred_probs)
+
+        # Compute PRC-AUC with bootstrapping
+        prc_auc_metrics_with_boot = stratified_multilabel_bootstrap_metrics(
+            gt_labels=classif_gt_labels, pred_probs=classif_pred_probs, metric_fn=prc_auc_score, num_bootstraps=500)
+        
+        # Save classification metrics to output
+        output_to_save['classification'] = dict(
+            classification_label_names=classification_label_names,
+            pred_probs=classif_pred_probs,
+            gt_labels=classif_gt_labels,
+            prc_auc=prc_auc_metrics,
+            prc_auc_with_bootstrapping=prc_auc_metrics_with_boot,
+        )
+
+        # Print some classification metrics
+        for class_name, mean, std in zip(classification_label_names,
+                                         prc_auc_metrics_with_boot['mean_per_class'],
+                                         prc_auc_metrics_with_boot['std_per_class']):
+            if class_name in VINBIG_RAD_DINO_CLASSES:
+                print_bold(f'PRC-AUC({class_name}): {mean} ± {std}')
+            else:
+                print(f'PRC-AUC({class_name}): {mean} ± {std}')
+        print_magenta(f'PRC-AUC(macro_avg) with bootstrapping: {prc_auc_metrics_with_boot["mean_macro_avg"]} ± {prc_auc_metrics_with_boot["std_macro_avg"]}', bold=True)
+        print_magenta(f'PRC-AUC(macro_avg): {prc_auc_metrics["macro_avg"]}', bold=True)
+
+        #  --- Visual grounding (object detection / segmentation) metrics
+
         image_paths = [dataset.image_paths[i] for i in dataset.indices]
+        output_to_save['image_paths'] = image_paths # for saving to file
 
         if do_visual_grounding_with_bbox_regression:
+
+            for iou_thr in VINBIG_CHEX_IOU_THRESHOLDS: assert iou_thr in map_iou_thresholds
+            assert VINBIGDATA_CHALLENGE_IOU_THRESHOLD in map_iou_thresholds
+
             gt_bboxes = metrics['vinbig_bbox_coords']
             gt_classes = metrics['vinbig_bbox_classes']
             assert len(image_paths) == len(gt_bboxes) == len(gt_classes)
-            gt_coords_list = [[[] for _ in range(VINBIG_NUM_BBOX_CLASSES)] for _ in range(len(gt_bboxes))]
+            gt_coords_list = [[[] for _ in range(vinbig_num_bbox_classes)] for _ in range(len(gt_bboxes))]
             for i in range(len(gt_bboxes)):
                 for bbox, cls in zip(gt_bboxes[i], gt_classes[i]):
                     gt_coords_list[i][cls].append(bbox)
-            # convert to numpy
+            
+            # Convert to numpy
             for i in range(len(gt_coords_list)):
                 for j in range(len(gt_coords_list[i])):
                     gt_coords_list[i][j] = np.stack(gt_coords_list[i][j]) if len(gt_coords_list[i][j]) > 0 else np.empty((0, 4))
 
             if use_classifier_confs_for_map:
-                classifier_confs = pred_probs[:, :VINBIG_NUM_BBOX_CLASSES] # (num_samples, num_classes)
+                classifier_confs = pred_probs[:, :vinbig_num_bbox_classes] # (num_samples, num_classes)
                 print_bold('Using classifier confidences for mAP computation')
                 print(f'classifier_confs.shape = {classifier_confs.shape}')
             else:
                 classifier_confs = None
-
-            if optimize_thresholds:
+            
+            if optimize_thresholds: # Optimize thresholds
                 assert candidate_iou_thresholds is not None
                 assert candidate_conf_thresholds is not None
-                num_classes = VINBIG_NUM_BBOX_CLASSES
+                num_classes = vinbig_num_bbox_classes
                 if use_fact_conditioned_yolo:
                     out = find_optimal_conf_iou_thresholds(
                         gt_coords_list=gt_coords_list,
@@ -727,7 +801,7 @@ def _evaluate_model(
                     pred_confs_list = []
                     pred_classes_list = []
                     for preds in pred_bboxes:
-                        assert len(preds) == VINBIG_NUM_BBOX_CLASSES
+                        assert len(preds) == vinbig_num_bbox_classes
                         boxes = []
                         confs = []
                         classes = []
@@ -751,7 +825,51 @@ def _evaluate_model(
                         pred_confs_list.append(preds[1].cpu().numpy())
                         pred_classes_list.append(preds[2].cpu().numpy())
 
-            # Compute metrics
+            # Remove classes without any ground truth
+            gt_counts_per_class = np.zeros(vinbig_num_bbox_classes, dtype=int)
+            for i in range(len(gt_coords_list)):
+                for j in range(len(gt_coords_list[i])):
+                    gt_counts_per_class[j] += len(gt_coords_list[i][j])
+            no_gt_classes = np.where(gt_counts_per_class == 0)[0]
+            with_gt_classes = np.where(gt_counts_per_class > 0)[0]
+            if len(no_gt_classes) > 0:
+                print_orange('NOTE: Removing the following classes without any bounding box annotations:', bold=True)
+                for i in no_gt_classes:
+                    print_orange(f'  {vinbig_bbox_names[i]}')
+                print(f'gt_counts_per_class = {gt_counts_per_class}')
+                # Clean gt_coords_list
+                for i in range(len(gt_coords_list)):
+                    gt_coords_list[i] = [gt_coords_list[i][j] for j in with_gt_classes]
+                print(f'len(gt_coords_list) = {len(gt_coords_list)}')
+                print(f'len(gt_coords_list[0]) = {len(gt_coords_list[0])}')
+                # Clean classifier_confs
+                if use_classifier_confs_for_map:
+                    classifier_confs = classifier_confs[:, with_gt_classes]
+                    print(f'classifier_confs.shape = {classifier_confs.shape}')
+                # Clean vinbig_bbox_names
+                vinbig_bbox_names = [x for i, x in enumerate(vinbig_bbox_names) if i in with_gt_classes]
+                vinbig_num_bbox_classes = len(vinbig_bbox_names)
+                print(f'len(vinbig_bbox_names) = {len(vinbig_bbox_names)}')
+                # Clean pred_boxes_list, pred_classes_list, pred_confs_list
+                old_class_idx_to_new_class_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(with_gt_classes)}
+                for i in range(len(pred_boxes_list)):
+                    if len(pred_classes_list[i]) > 0:
+                        valid_idxs = np.where(np.isin(pred_classes_list[i], with_gt_classes))[0]
+                        pred_boxes_list[i] = pred_boxes_list[i][valid_idxs]
+                        pred_confs_list[i] = pred_confs_list[i][valid_idxs]
+                        pred_classes_list[i] = np.array([old_class_idx_to_new_class_idx[x] for x in pred_classes_list[i][valid_idxs]])
+                print(f'len(pred_boxes_list) = {len(pred_boxes_list)}')
+                print(f'len(pred_classes_list) = {len(pred_classes_list)}')
+                print(f'len(pred_confs_list) = {len(pred_confs_list)}')
+
+
+            if optimize_thresholds: # Print optimal thresholds
+                print_magenta(f'best_iou_threshold: {best_iou_threshold}', bold=True)
+                print_magenta(f'best_conf_threshold: {best_conf_threshold}', bold=True)
+
+            # Compute metrics without bootstrapping
+            
+            # 1. IoU
             tmp = compute_mean_iou_per_class__yolov11(
                 pred_boxes=pred_boxes_list,
                 pred_classes=pred_classes_list,
@@ -766,20 +884,11 @@ def _evaluate_model(
             sample_counts = tmp['sample_counts']
             micro_iou = tmp['micro_iou']
             class_idxs = np.where(class_counts > 0)[0]
-            mean_iou = class_ious[class_idxs].mean()
+            macro_iou = class_ious[class_idxs].mean()
             sample_idxs = np.where(sample_counts > 0)[0]
             sample_iou = sample_ious[sample_idxs].mean()
-            if optimize_thresholds:
-                print_magenta(f'best_iou_threshold: {best_iou_threshold}', bold=True)
-                print_magenta(f'best_conf_threshold: {best_conf_threshold}', bold=True)
-            for class_name, iou, count in zip(VINBIG_BBOX_NAMES, class_ious, class_counts):
-                print(f'mean_iou({class_name}): {iou} ({count} samples)')
-            print_magenta(f'mean_iou: {mean_iou}', bold=True)
-            print(f'\t{class_idxs.shape[0]} / {len(VINBIG_BBOX_NAMES)} classes have at least one ground truth bbox')
-            print_magenta(f'mean_sample_iou: {sample_iou}', bold=True)
-            print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
-            print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
 
+            # 2. mAP
             tmp = compute_mAP__yolov11(
                 pred_boxes=pred_boxes_list,
                 pred_classes=pred_classes_list,
@@ -791,17 +900,87 @@ def _evaluate_model(
             )
             class_aps = tmp['class_aps']
             micro_aps = tmp['micro_aps']
+
+            # 2.1 vinbigdata mAP
+            class_idxs = [vinbig_bbox_names.index(x) for x in VINBIGDATA_CHALLENGE_CLASSES]
+            iou_idx = map_iou_thresholds.index(VINBIGDATA_CHALLENGE_IOU_THRESHOLD)
+            vbdc_mAP = class_aps[iou_idx, class_idxs].mean() # vbdc = vinbigdata challenge
+
+            # 2.2 ChEX mAP
+            class_idxs = [vinbig_bbox_names.index(x) for x in VINBIG_CHEX_CLASSES]
+            iou_idxs = [map_iou_thresholds.index(x) for x in VINBIG_CHEX_IOU_THRESHOLDS]
+            chex_mAP = class_aps[iou_idxs][:, class_idxs].mean()
+
+            # Update output
+            output_to_save['detection'] = dict(
+                pred_boxes_list=pred_boxes_list,
+                pred_classes_list=pred_classes_list,
+                pred_confs_list=pred_confs_list,
+                classifier_confs=classifier_confs,
+                gt_bboxes=gt_coords_list,
+                bbox_class_names=vinbig_bbox_names,
+                map_iou_thresholds=map_iou_thresholds, # (num_iou_thresholds,)
+                sample_ious=sample_ious, # (num_samples,)
+                metrics_without_bootstrapping=dict(
+                    class_ious=class_ious, # (num_classes,)
+                    micro_iou=micro_iou, # scalar
+                    macro_iou=macro_iou, # scalar
+                    class_aps=class_aps, # (num_iou_thresholds, num_classes)
+                    micro_aps=micro_aps, # (num_iou_thresholds,)
+                    vbdc_mAP=vbdc_mAP, # scalar
+                    chex_mAP=chex_mAP, # scalar
+                ),
+            )
+
+            # Compute metrics with bootstrapping
+            iou_map_metrics_with_boot = stratified_vinbig_bootstrap_iou_map(
+                pred_boxes_list=pred_boxes_list,
+                pred_classes_list=pred_classes_list,
+                pred_confs_list=pred_confs_list,
+                classifier_confs=classifier_confs,
+                gt_coords_list=gt_coords_list,
+                vinbig_bbox_names=vinbig_bbox_names,
+                map_iou_thresholds=map_iou_thresholds,
+                compute_mean_iou_per_class_fn=compute_mean_iou_per_class__yolov11,
+                compute_mAP_fn=compute_mAP__yolov11,
+                num_bootstraps=60,
+                num_processes=12,
+            )
+
+            # Update output
+            output_to_save['detection']['metrics_with_bootstrapping'] = iou_map_metrics_with_boot
+
+            if optimize_thresholds:
+                output_to_save['best_iou_threshold'] = best_iou_threshold
+                output_to_save['best_conf_threshold'] = best_conf_threshold
+
+            # Print some metrics
+            for class_name, iou, count in zip(vinbig_bbox_names, class_ious, class_counts):
+                print(f'mean_iou({class_name}): {iou} ({count} samples)')
+            print_magenta(f'macro_iou: {macro_iou}', bold=True)
+            print_magenta(f'mean_sample_iou: {sample_iou}', bold=True)
+            print(f'\t{sample_idxs.shape[0]} / {len(gt_coords_list)} samples have at least one ground truth bbox')
+            print_magenta(f'micro_iou: {micro_iou} (count={sample_counts.sum()})', bold=True)
             
             for iou_thresh, map_ in zip(map_iou_thresholds, class_aps.mean(axis=1)):
                 print_magenta(f'mAP@{iou_thresh}: {map_}', bold=True)
 
             for iou_thresh, ap in zip(map_iou_thresholds, micro_aps):
                 print_magenta(f'micro_AP@{iou_thresh}: {ap}', bold=True)
+
+            print_magenta(f'vbdc_mAP: {vbdc_mAP}', bold=True)
+            print_magenta(f'chex_mAP: {chex_mAP}', bold=True)
+
+            print_magenta(f'micro_iou (with bootstrap): {iou_map_metrics_with_boot["micro_iou"]["mean"]} ± {iou_map_metrics_with_boot["micro_iou"]["std"]}', bold=True)
+            print_magenta(f'macro_iou (with bootstrap): {iou_map_metrics_with_boot["macro_iou"]["mean"]} ± {iou_map_metrics_with_boot["macro_iou"]["std"]}', bold=True)
+            print_magenta(f'vbdc_mAP (with bootstrap): {iou_map_metrics_with_boot["vbdc_mAP"]["mean"]} ± {iou_map_metrics_with_boot["vbdc_mAP"]["std"]}', bold=True)
+            print_magenta(f'chex_mAP (with bootstrap): {iou_map_metrics_with_boot["chex_mAP"]["mean"]} ± {iou_map_metrics_with_boot["chex_mAP"]["std"]}', bold=True)
             
+            # Save metrics to file
             print_blue('Saving metrics to file ...', bold=True)
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
             strings = [
-                'bbox_regression',
+                'detection',
                 f'{len(vinbig_trainer.val_dataset)}',
             ]
             if optimize_thresholds:
@@ -809,27 +988,9 @@ def _evaluate_model(
             if use_classifier_confs_for_map:
                 strings.append('use_classifier_confs')
             save_path = os.path.join(results_folder_path, f'vindrcxr_metrics({",".join(strings)}).pkl')
-            output = dict(
-                image_paths=image_paths,
-                pred_boxes_list=pred_boxes_list,
-                pred_classes_list=pred_classes_list,
-                pred_confs_list=pred_confs_list,
-                classifier_confs=classifier_confs,
-                gt_bboxes=gt_coords_list,
-                class_ious=class_ious,
-                sample_ious=sample_ious,
-                micro_iou=micro_iou,
-                macro_iou=mean_iou,
-                map_iou_thresholds=map_iou_thresholds,
-                class_aps=class_aps,
-                micro_aps=micro_aps,
-                prc_auc=prc_auc_metrics,
-            )
-            if optimize_thresholds:
-                output['best_iou_threshold'] = best_iou_threshold
-                output['best_conf_threshold'] = best_conf_threshold
 
         elif do_visual_grounding_with_segmentation:
+
             gt_masks = metrics['gt_mask']
             pred_masks = metrics['pred_mask']
             assert len(image_paths) == len(pred_masks) == len(gt_masks),\
@@ -837,7 +998,7 @@ def _evaluate_model(
             print_blue('Saving metrics to file ...', bold=True)
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
             save_path = os.path.join(results_folder_path, f'vindrcxr_metrics(segmask,{len(vinbig_trainer.val_dataset)}).pkl')
-            output = dict(
+            output_to_save = dict(
                 image_paths=[],
                 phrases=[],
                 pred_masks=[],
@@ -853,28 +1014,22 @@ def _evaluate_model(
                         union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
                         iou = intersection / union
                         iou = iou.item()
-                        output['image_paths'].append(image_paths[i])
-                        output['phrases'].append(phrases[j])
-                        output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
-                        output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
-                        output['ious'].append(iou)
+                        output_to_save['image_paths'].append(image_paths[i])
+                        output_to_save['phrases'].append(phrases[j])
+                        output_to_save['pred_masks'].append(pred_masks[i][j].cpu().numpy())
+                        output_to_save['gt_masks'].append(gt_masks[i][j].cpu().numpy())
+                        output_to_save['ious'].append(iou)
                     else:
                         assert torch.all(gt_masks[i][j] == 0)
 
-            print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
+            print_magenta('mean_iou =', sum(output_to_save['ious']) / len(output_to_save['ious']), bold=True)
 
         else:
 
             results_folder_path = get_results_folder_path(checkpoint_folder_path)
             save_path = os.path.join(results_folder_path, f'vindrcxr_metrics(classification,{len(vinbig_trainer.val_dataset)}).pkl')
-            output = {
-                'image_paths': image_paths,
-                'pred_probs': pred_probs,
-                'gt_labels': gt_labels,
-                'prc_auc': prc_auc_metrics,
-            }
         
-        save_pickle(output, save_path)
+        save_pickle(output_to_save, save_path)
         print(f'Saved metrics to {save_path}')
 
 def evaluate(
@@ -896,7 +1051,11 @@ def evaluate(
     map_iou_thresholds,
     use_amp,
     use_classifier_confs_for_map,
-):
+    checkpoint_folder_path_to_borrow_metadata_from,
+):  
+    # Force deterministic behavior
+    activate_determinism()
+    
     print_blue('----- Evaluating model -----', bold=True)
 
     metadata = load_metadata(checkpoint_folder_path)
@@ -944,6 +1103,7 @@ def evaluate(
                 map_iou_thresholds=map_iou_thresholds,
                 use_amp=use_amp,
                 use_classifier_confs_for_map=use_classifier_confs_for_map,
+                checkpoint_folder_path_to_borrow_metadata_from=checkpoint_folder_path_to_borrow_metadata_from,
             )
 
 

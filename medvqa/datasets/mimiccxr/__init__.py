@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from pathlib import Path
 from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, save_pickle
+from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, read_txt, save_pickle
 load_dotenv()
 
 from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR, FAST_TMP_DIR
@@ -26,6 +26,7 @@ MIMICCXR_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'mimiccxr')
 MIMICCXR_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'mimiccxr')
 MIMICCXR_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
+MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH = os.path.join(MIMICCXR_CACHE_DIR, 'path_to_report_text_dict.pkl')
 MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_1_PATH']
 MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH = os.environ['MIMICCXR_CUSTOM_RADIOLOGIST_ANNOTATIONS_CSV_2_PATH']
 MIMIC_CXR_LT_2023_TRAIN_CSV_PATH = os.environ['MIMIC_CXR_LT_2023_TRAIN_CSV_PATH']
@@ -243,6 +244,23 @@ def get_reports_txt_paths():
     save_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
     print('reports txt paths saved to', MIMICCXR_REPORTS_TXT_PATHS)
     return report_paths
+
+def get_path_to_report_text_dict():
+    # if cached
+    try:
+        return get_cached_pickle_file(MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH)
+    except FileNotFoundError:
+        pass
+
+    report_paths = get_reports_txt_paths()
+    path_to_report_text_dict = {}
+    for report_path in tqdm(report_paths, mininterval=2):
+        report_text = read_txt(report_path)
+        path_to_report_text_dict[report_path] = report_text
+    
+    save_pickle(path_to_report_text_dict, MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH)
+
+    return path_to_report_text_dict
 
 def report_paths_generator():
     for x in range(10, 20):

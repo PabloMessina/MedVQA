@@ -178,7 +178,8 @@ def compute_mean_iou_per_class__yolov11(pred_boxes, pred_classes, gt_coords, val
 
 def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_confs=None,
                          adapted_pred_boxes=None, adapted_pred_confs=None, classifier_confs=None,
-                         valid_classes=None, iou_thresholds=[0.5], num_workers=5, compute_micro_average=False):
+                         valid_classes=None, iou_thresholds=[0.5], compute_micro_average=False,
+                         use_multiprocessing=True, num_processes=5):
     
     m = len(gt_coords[0]) # number of classes
     n = len(gt_coords) # number of samples
@@ -226,8 +227,11 @@ def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_con
             if valid_classes is not None and valid_classes[c] == 0:
                 continue
             task_args.append((iou_thr, c, n))
-    with Pool(num_workers) as p:
-        aps = p.map(_compute_ap__yolov11, task_args)
+    if use_multiprocessing:
+        with Pool(num_processes) as p:
+            aps = p.map(_compute_ap__yolov11, task_args)
+    else:
+        aps = [_compute_ap__yolov11(task) for task in task_args]
     if valid_classes is not None:
         aps = np.array(aps).reshape((len(iou_thresholds), np.sum(valid_classes)))
     else:
@@ -235,8 +239,11 @@ def compute_mAP__yolov11(gt_coords, pred_boxes=None, pred_classes=None, pred_con
 
     if compute_micro_average:
         task_args = [(iou_thr, n, m) for iou_thr in iou_thresholds]
-        with Pool(num_workers) as p:
-            micro_aps = p.map(_compute_ap_micro__yolov11, task_args)
+        if use_multiprocessing:
+            with Pool(num_processes) as p:
+                micro_aps = p.map(_compute_ap_micro__yolov11, task_args)
+        else:
+            micro_aps = [_compute_ap_micro__yolov11(task) for task in task_args]
         micro_aps = np.array(micro_aps)
 
         return {
@@ -714,7 +721,7 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
             time_before_map = time.time()
             score = compute_mAP__yolov11(gt_coords=gt_coords_list, pred_boxes=pred_boxes_list, pred_classes=pred_classes_list,
                                             pred_confs=pred_confs_list, classifier_confs=classifier_confs,
-                                            iou_thresholds=[0.05, 0.4], num_workers=1).mean()
+                                            iou_thresholds=[0.05, 0.4], num_processes=1).mean()
             time_after_map = time.time()
             if verbose:
                 print(f"conf_th={conf_th}, iou_th={iou_th}, mAP={score} (time_input_processing={time_before_map - start}, time_map={time_after_map - time_before_map})")
@@ -757,7 +764,7 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
             time_before_map = time.time()
             score = compute_mAP__yolov11(gt_coords=gt_coords_list, pred_boxes=pred_boxes_list_, pred_classes=pred_classes_list_,
                                          pred_confs=pred_confs_list_, classifier_confs=classifier_confs,
-                                         iou_thresholds=[0.05, 0.4], num_workers=1).mean()
+                                         iou_thresholds=[0.05, 0.4], num_processes=1).mean()
             time_after_map = time.time()
             
             if verbose:

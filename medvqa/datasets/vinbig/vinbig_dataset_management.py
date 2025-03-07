@@ -7,10 +7,12 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from medvqa.datasets.vinbig import (
+    VINBIG_BBOX_NAMES__MODIFIED,
     VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH,
     VINBIG_IMAGE_LABELS_TEST_CSV_PATH,
     N_IMAGES_TRAIN,
     N_IMAGES_TEST,
+    VINBIG_LABELS__MODIFIED,
     _merge_labels,
     compute_masks_and_binary_labels_from_bounding_boxes,
     get_medium_size_image_path,
@@ -47,10 +49,10 @@ class VinBigTrainingMode:
 class VinBigTrainerBase(LabelBasedVQAClass):
     
     def __init__(self, use_merged_findings=False, findings_remapper=None, n_findings=None, load_bouding_boxes=False,
-                 class_id_offset=0, verbose=False, use_original_image_size=False):
+                 class_id_offset=0, verbose=False, use_original_image_size=False, use_improved_labels=False):
 
         # Load labels
-        train_image_id_to_labels, test_image_id_to_labels = load_labels()
+        train_image_id_to_labels, test_image_id_to_labels = load_labels(improve_labels=use_improved_labels)
         train_image_ids = list(train_image_id_to_labels.keys())
         test_image_ids = list(test_image_id_to_labels.keys())
         assert len(train_image_ids) == N_IMAGES_TRAIN
@@ -76,9 +78,17 @@ class VinBigTrainerBase(LabelBasedVQAClass):
         if load_bouding_boxes:
             print('Loading bounding boxes')
             train_image_id_2_bboxes = load_train_image_id_2_bboxes(
-                for_training=True, normalize=True, class_id_offset=class_id_offset)
+                for_training=True, normalize=True, class_id_offset=class_id_offset,
+                improve_labels=use_improved_labels)
             test_image_id_2_bboxes = load_test_image_id_2_bboxes(
-                for_training=True, normalize=True, class_id_offset=class_id_offset)
+                for_training=True, normalize=True, class_id_offset=class_id_offset,
+                improve_labels=use_improved_labels)
+            
+            if use_improved_labels:
+                num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED)
+            else:
+                num_bbox_classes = len(VINBIG_BBOX_NAMES)
+
             image_id_2_bboxes = {}
             for img_id in image_ids:
                 if img_id in train_image_id_2_bboxes:
@@ -97,7 +107,7 @@ class VinBigTrainerBase(LabelBasedVQAClass):
                     for z in y:
                         assert 0 <= z <= 1, f'z: {z}, y: {y}, x: {x}'
                 for y in x[1]:
-                    assert 0 <= (y - class_id_offset) < len(VINBIG_BBOX_NAMES)
+                    assert 0 <= (y - class_id_offset) < num_bbox_classes
             print(f'  Loaded {len(image_id_2_bboxes)} bounding boxes')
             if verbose:
                 # print 5 random bboxes
@@ -108,8 +118,13 @@ class VinBigTrainerBase(LabelBasedVQAClass):
             self.image_id_2_bboxes = None
             self.bboxes = None
 
+        if use_improved_labels:
+            label_names = VINBIG_LABELS__MODIFIED
+        else:
+            label_names = VINBIG_LABELS
+
         super().__init__(
-            label_names=VINBIG_LABELS,
+            label_names=label_names,
             templates=TEMPLATES_VINBIG_v1,
             use_merged_findings=use_merged_findings,
             labels2mergedfindings=findings_remapper[VINBIG_DATASET_ID] if use_merged_findings else None,
@@ -210,6 +225,7 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
                 use_merged_findings=False, findings_remapper=None, n_findings=None,
                 use_bounding_boxes=False, data_augmentation_enabled=False,
                 use_yolov8=False, use_yolov11=False, class_id_offset=0,
+                use_vinbig_with_modified_labels=False,
         ):
         super().__init__(
             use_merged_findings=use_merged_findings,
@@ -217,6 +233,7 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
             n_findings=n_findings,
             load_bouding_boxes=use_bounding_boxes,
             class_id_offset=class_id_offset,
+            use_improved_labels=use_vinbig_with_modified_labels,
         )
 
         if use_training_set:
@@ -676,9 +693,11 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                  do_visual_grounding_with_segmentation=False,
                  for_yolo=False,
                  replace_phrase_embeddings_with_random_vectors=False,
+                 use_vinbig_with_modified_labels=False,
                  ):
         super().__init__(
             load_bouding_boxes=True,
+            use_improved_labels=use_vinbig_with_modified_labels,
         )
 
         assert use_training_set or use_validation_set
@@ -711,15 +730,27 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
         print(f'phrase_embeddings.dtype = {phrase_embeddings.dtype}')
         print(f'len(phrases) = {len(phrases)}')
-        for phrase in phrases:
-            print('\t', phrase)
             
         print('Compute phrase grounding masks and labels')
         self.phrase_grounding_masks = [None] * len(self.bboxes)
         self.phrase_classification_labels = [None] * len(self.bboxes)
+        if use_vinbig_with_modified_labels:
+            vinbig_bbox_names = VINBIG_BBOX_NAMES__MODIFIED
+            vinbig_labels = VINBIG_LABELS__MODIFIED
+            num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED)
+        else:
+            vinbig_bbox_names = VINBIG_BBOX_NAMES
+            vinbig_labels = VINBIG_LABELS
+            num_bbox_classes = len(VINBIG_BBOX_NAMES)
+        print(f'vinbig_bbox_names = {vinbig_bbox_names}')
+        print(f'vinbig_labels = {vinbig_labels}')
+        print(f'num_bbox_classes = {num_bbox_classes}')
         for i in range(len(self.bboxes)):
             self.phrase_grounding_masks[i], self.phrase_classification_labels[i] = compute_masks_and_binary_labels_from_bounding_boxes(
-                mask_height=mask_height, mask_width=mask_width, bbox_coords=self.bboxes[i][0], bbox_classes=self.bboxes[i][1],
+                mask_height=mask_height, mask_width=mask_width,
+                bbox_coords=self.bboxes[i][0],
+                bbox_classes=self.bboxes[i][1],
+                num_bbox_classes=num_bbox_classes,
             )
         self.phrase_grounding_masks = np.array(self.phrase_grounding_masks)
         self.phrase_classification_labels = np.array(self.phrase_classification_labels)
@@ -727,10 +758,10 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         print(f'self.phrase_classification_labels.shape = {self.phrase_classification_labels.shape}')
 
         print('Append additional labels to phrase_classification_labels')
-        # NOTE: only 22 of 28 classes have bounding boxes
-        non_bbox_labels = [i for i, name in enumerate(VINBIG_LABELS) if name not in VINBIG_BBOX_NAMES]
+        # NOTE: only 22/23 of 28 classes have bounding boxes
+        non_bbox_labels = [i for i, name in enumerate(vinbig_labels) if name not in vinbig_bbox_names]
         print(f'len(non_bbox_labels) = {len(non_bbox_labels)}')
-        print(f'non_bbox_labels = {[VINBIG_LABELS[i] for i in non_bbox_labels]}')
+        print(f'non_bbox_labels = {[vinbig_labels[i] for i in non_bbox_labels]}')
         assert len(self.labels) == len(self.phrase_classification_labels)
         self.phrase_classification_labels = np.concatenate([
             self.phrase_classification_labels,
@@ -738,18 +769,26 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
         ], axis=1)
         print(f'self.phrase_classification_labels.shape = {self.phrase_classification_labels.shape}')
         assert self.phrase_classification_labels.shape == self.labels.shape
+        
         # Reorder phrases and phrase_embeddings
         print('Reorder phrases and phrase_embeddings')
-        actual_label_names = VINBIG_BBOX_NAMES + [VINBIG_LABELS[i] for i in non_bbox_labels]
-        actual_phrases = [VINBIG_LABEL2PHRASE[name] for name in actual_label_names]
+        actual_label_names = vinbig_bbox_names + [vinbig_labels[i] for i in non_bbox_labels]
+        sorted_phrases = [VINBIG_LABEL2PHRASE[name] for name in actual_label_names]
         phrase2idx = {phrase: i for i, phrase in enumerate(phrases)}
-        phrase_idxs = [phrase2idx[phrase] for phrase in actual_phrases]
+        phrase_idxs = [phrase2idx[phrase] for phrase in sorted_phrases]
         phrases = [phrases[i] for i in phrase_idxs]
+        assert phrases == sorted_phrases
         phrase_embeddings = phrase_embeddings[phrase_idxs]
+        assert len(phrases) == len(sorted_phrases) == len(actual_label_names) == len(phrase_embeddings)
         print(f'len(phrases) = {len(phrases)}')
-        print(f'len(actual_phrases) = {len(actual_phrases)}')
+        print(f'len(sorted_phrases) = {len(sorted_phrases)}')
         print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+
+        for phrase, label in zip(phrases, actual_label_names):
+            print(f'\t{phrase} ({label})')
+
         self.phrases = phrases
+        self.actual_label_names = actual_label_names
         self.phrase_embeddings = phrase_embeddings
 
         if use_training_set:
@@ -781,7 +820,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                         phrase_embeddings=phrase_embeddings,
                         phrase_classification_labels=self.phrase_classification_labels,
                         predict_bboxes=True,
-                        num_bbox_classes=len(VINBIG_BBOX_NAMES),
+                        num_bbox_classes=num_bbox_classes,
                         feature_map_size=(mask_height, mask_width),
                         bboxes=self.bboxes,
                         data_augmentation_enabled=self.data_augmentation_enabled,
@@ -852,7 +891,7 @@ class VinBigPhraseGroundingTrainer(VinBigTrainerBase):
                     phrase_embeddings=phrase_embeddings,
                     phrase_classification_labels=self.phrase_classification_labels,
                     predict_bboxes=True,
-                    num_bbox_classes=len(VINBIG_BBOX_NAMES),
+                    num_bbox_classes=num_bbox_classes,
                     feature_map_size=(mask_height, mask_width),
                     bboxes=self.bboxes,
                     for_training=False,

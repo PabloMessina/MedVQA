@@ -8,6 +8,7 @@ from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpertPhraseG
 from medvqa.datasets.iuxray.iuxray_phrase_grounding_dataset_management import IUXRayPhraseGroundingTrainer
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.mimiccxr.mimiccxr_phrase_grounding_dataset_management import MIMICCXR_PhraseGroundingTrainer
+from medvqa.datasets.vinbig import VINBIG_NUM_BBOX_CLASSES__MODIFIED
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer, VinBigTrainingMode
 from medvqa.losses import BinaryMultiLabelClassificationLossNames
 from medvqa.losses.optimizers import create_optimizer
@@ -65,7 +66,7 @@ def parse_args(args=None):
     # Model arguments
     parser.add_argument('--pretrained_checkpoint_folder_path', type=str, default=None)
     parser.add_argument('--pretrained_checkpoint_folder_paths', type=str, nargs='+', default=None)
-    parser.add_argument('--freeze_image_encoder', action='store_true', default=False)
+    parser.add_argument('--freeze_image_encoder', action='store_true')
     parser.add_argument('--raw_image_encoding', type=str, default=RawImageEncoding.YOLOV8)
     parser.add_argument('--huggingface_model_name', type=str, default=None)
     parser.add_argument('--num_regions', type=int, default=None)
@@ -88,7 +89,7 @@ def parse_args(args=None):
     parser.add_argument('--visual_feature_proj_size', type=int, default=None)
     parser.add_argument('--visual_grounding_hidden_size', type=int, default=None)
     parser.add_argument('--phrase_mlp_hidden_dims', nargs='+', type=int, default=None)
-    parser.add_argument('--predict_global_alignment', action='store_true', default=False)
+    parser.add_argument('--predict_global_alignment', action='store_true')
     parser.add_argument('--alignment_proj_size', type=int, default=None)
     parser.add_argument('--yolov11_model_name_or_path', type=str, default=None)
     parser.add_argument('--yolov11_model_alias', type=str, default=None)
@@ -103,7 +104,7 @@ def parse_args(args=None):
     parser.add_argument('--warmup_and_cosine_args', type=str, default=None)
     parser.add_argument('--warmup_decay_and_cyclic_decay_args', type=str, default=None)
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='For gradient accumulation')
-    parser.add_argument('--override_lr', action='store_true', default=False)
+    parser.add_argument('--override_lr', action='store_true')
     parser.add_argument('--max_grad_norm', type=float, default=None, help='Max gradient norm')
     # Loss weights
     parser.add_argument('--attention_supervision_loss_weight', type=float, default=1.0)
@@ -115,17 +116,17 @@ def parse_args(args=None):
     parser.add_argument('--wbce_loss_weight', type=float, default=1.0)
     # Other loss arguments
     parser.add_argument('--binary_multilabel_classif_loss_name', type=str, default='bce')
-    parser.add_argument('--use_weighted_phrase_classifier_loss', action='store_true', default=False)
+    parser.add_argument('--use_weighted_phrase_classifier_loss', action='store_true')
     parser.add_argument('--cluster_and_label_weights_for_facts_filepath', type=str, default=None)
-    parser.add_argument('--use_attention_regularization_loss', action='store_true', default=False)
-    parser.add_argument('--use_contrastive_phrase_grounding_loss', action='store_true', default=False)
+    parser.add_argument('--use_attention_regularization_loss', action='store_true')
+    parser.add_argument('--use_contrastive_phrase_grounding_loss', action='store_true')
     parser.add_argument('--nt_xent_temperature', type=float, default=0.1)
 
     # Dataset and dataloading arguments
     parser.add_argument('--num_train_workers', type=int, default=0, help='Number of workers for train dataloader')
     parser.add_argument('--num_val_workers', type=int, default=0, help='Number of workers for test dataloader')
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
-    parser.add_argument('--use_amp', action='store_true', default=False)
+    parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--image_size', nargs='+', type=int, default=(416, 416))
     parser.add_argument('--dicom_id_to_pos_neg_facts_filepath', type=str, default=None)
     parser.add_argument('--iuxray_image_id_to_pos_neg_facts_filepath', type=str, default=None)
@@ -134,7 +135,7 @@ def parse_args(args=None):
     parser.add_argument('--vinbig_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--chexlocalize_class_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--chexpert_class_phrase_embeddings_filepath', type=str, default=None)
-    parser.add_argument('--mimiccxr_exclude_noisy_images', action='store_true', default=False)
+    parser.add_argument('--mimiccxr_exclude_noisy_images', action='store_true')
     parser.add_argument('--mimiccxr_facts_weight', type=float, default=1.0)
     parser.add_argument('--chest_imagenome_anatlocs_weight', type=float, default=1.0)
     parser.add_argument('--mscxr_weight', type=float, default=1.0)
@@ -146,43 +147,45 @@ def parse_args(args=None):
     parser.add_argument('--img_aug_mode', type=str, default=None, help='Image augmentation mode')
     parser.add_argument('--pos_area_prior', type=float, default=0.4, help='Prior for positive area')
     parser.add_argument('--neg_area_prior', type=float, default=0.0, help='Prior for negative area')
-    parser.add_argument('--use_mimiccxr_facts_for_train', action='store_true', default=False)
-    parser.add_argument('--use_mimiccxr_facts_for_test', action='store_true', default=False)
-    parser.add_argument('--use_mscxr_for_train', action='store_true', default=False)
-    parser.add_argument('--use_mscxr_for_test', action='store_true', default=False)
-    parser.add_argument('--use_chest_imagenome_for_train', action='store_true', default=False)
-    parser.add_argument('--use_chest_imagenome_gold_for_test', action='store_true', default=False)
-    parser.add_argument('--use_vinbig_for_train', action='store_true', default=False)
-    parser.add_argument('--use_vinbig_for_test', action='store_true', default=False)
-    parser.add_argument('--use_chexlocalize_for_train', action='store_true', default=False)
-    parser.add_argument('--use_chexlocalize_for_test', action='store_true', default=False)
-    parser.add_argument('--use_chexpert_for_train', action='store_true', default=False)
-    parser.add_argument('--use_chexpert_for_test', action='store_true', default=False)
-    parser.add_argument('--use_iuxray_for_train', action='store_true', default=False)
-    parser.add_argument('--use_iuxray_for_test', action='store_true', default=False)
-    parser.add_argument('--use_cxrlt2024_challenge_split', action='store_true', default=False)
-    parser.add_argument('--use_cxrlt2024_custom_labels', action='store_true', default=False)
-    parser.add_argument('--use_cxrlt2024_official_labels', action='store_true', default=False)
-    parser.add_argument('--use_all_cxrlt2024_official_labels_for_training', action='store_true', default=False)
+    parser.add_argument('--use_mimiccxr_facts_for_train', action='store_true')
+    parser.add_argument('--use_mimiccxr_facts_for_test', action='store_true')
+    parser.add_argument('--use_mscxr_for_train', action='store_true')
+    parser.add_argument('--use_mscxr_for_test', action='store_true')
+    parser.add_argument('--use_chest_imagenome_for_train', action='store_true')
+    parser.add_argument('--use_chest_imagenome_gold_for_test', action='store_true')
+    parser.add_argument('--use_vinbig_for_train', action='store_true')
+    parser.add_argument('--use_vinbig_for_test', action='store_true')
+    parser.add_argument('--use_chexlocalize_for_train', action='store_true')
+    parser.add_argument('--use_chexlocalize_for_test', action='store_true')
+    parser.add_argument('--use_chexpert_for_train', action='store_true')
+    parser.add_argument('--use_chexpert_for_test', action='store_true')
+    parser.add_argument('--use_iuxray_for_train', action='store_true')
+    parser.add_argument('--use_iuxray_for_test', action='store_true')
+    parser.add_argument('--use_cxrlt2024_challenge_split', action='store_true')
+    parser.add_argument('--use_cxrlt2024_custom_labels', action='store_true')
+    parser.add_argument('--use_cxrlt2024_official_labels', action='store_true')
+    parser.add_argument('--use_all_cxrlt2024_official_labels_for_training', action='store_true')
     parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_all())
     parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_all())
-    parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true', default=False)
+    parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true')
     parser.add_argument('--mimiccxr_long_middle_short_tail_thresholds', nargs=2, type=float, default=(0.02, 0.05))
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str, default=None)
-    parser.add_argument('--mimiccxr_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--mimiccxr_use_interpret_cxr_challenge_split', action='store_true')
     parser.add_argument('--mimiccxr_interpret_cxr_challenge_split_filepath', type=str, default=None)
-    parser.add_argument('--iuxray_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--iuxray_use_interpret_cxr_challenge_split', action='store_true')
     parser.add_argument('--iuxray_interpret_cxr_challenge_split_filepath', type=str, default=None)
-    parser.add_argument('--chexpert_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--chexpert_use_interpret_cxr_challenge_split', action='store_true')
     parser.add_argument('--chexpert_interpret_cxr_challenge_split_filepath', type=str, default=None)
-    parser.add_argument('--chexlocalize_use_interpret_cxr_challenge_split', action='store_true', default=False)
+    parser.add_argument('--chexlocalize_use_interpret_cxr_challenge_split', action='store_true')
     parser.add_argument('--chexlocalize_interpret_cxr_challenge_split_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_official_training_labels_for_fact_classification_filepath', type=str, default=None)
-    parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true', default=False)
-    parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true', default=False)
-    parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true', default=False)
-    parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true', default=False)
+    parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true')
+    parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true')
+    parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true')
+    parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true')
+    parser.add_argument('--use_vinbig_with_modified_labels', action='store_true')
+
 
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -262,6 +265,7 @@ def train_model(
     do_visual_grounding_with_segmentation = trainer_engine_kwargs['do_visual_grounding_with_segmentation']
     use_yolo = model_kwargs['raw_image_encoding'] in [RawImageEncoding.YOLOV8,
                                                       RawImageEncoding.YOLOV11_FACT_CONDITIONED]
+    use_vinbig_with_modified_labels = trainer_engine_kwargs.get('use_vinbig_with_modified_labels', False)
 
 
     # Sanity checks
@@ -723,15 +727,19 @@ def train_model(
         if in_val:
             attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
             if do_visual_grounding_with_bbox_regression:
+                if use_vinbig_with_modified_labels:
+                    nc = VINBIG_NUM_BBOX_CLASSES__MODIFIED
+                else:
+                    nc = VINBIG_NUM_BBOX_CLASSES
                 if use_yolo:
                     attach_condition_aware_bbox_iou_per_class(validator_engine,
                                                         field_names=['yolo_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                        metric_name='vbg_bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        metric_name='vbg_bbox_iou', nc=nc, condition_function=_cond_func,
                                                         for_vinbig=True, use_fact_conditioned_yolo=True)
                 else:
                     attach_condition_aware_bbox_iou_per_class(validator_engine,
                                                         field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                        metric_name='vbg_bbox_iou', nc=VINBIG_NUM_BBOX_CLASSES, condition_function=_cond_func,
+                                                        metric_name='vbg_bbox_iou', nc=nc, condition_function=_cond_func,
                                                         for_vinbig=True)
             elif do_visual_grounding_with_segmentation:
                 attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
@@ -1068,6 +1076,7 @@ def train_from_scratch(
     do_visual_grounding_with_bbox_regression,
     do_visual_grounding_with_segmentation,
     replace_phrase_embeddings_with_random_vectors,
+    use_vinbig_with_modified_labels,
     # Loss weights
     attention_supervision_loss_weight,
     phrase_classifier_loss_weight,
@@ -1300,6 +1309,7 @@ def train_from_scratch(
             cxrlt2024_do_balanced_sampling=cxrlt2024_do_balanced_sampling,
             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
             data_augmentation_enabled=img_aug_mode is not None,
+            replace_phrase_embeddings_with_random_vectors=replace_phrase_embeddings_with_random_vectors,
         )
     else:
         mimiccxr_trainer_kwargs = None
@@ -1317,6 +1327,7 @@ def train_from_scratch(
             do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
             for_yolo=use_yolo,
             replace_phrase_embeddings_with_random_vectors=replace_phrase_embeddings_with_random_vectors,
+            use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
         )
     else:
         vinbig_trainer_kwargs = None
@@ -1366,6 +1377,7 @@ def train_from_scratch(
         pos_area_prior=pos_area_prior,
         neg_area_prior=neg_area_prior,
         max_grad_norm=max_grad_norm,
+        use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
         # loss weights
         attention_supervision_loss_weight=attention_supervision_loss_weight,
         phrase_classifier_loss_weight=phrase_classifier_loss_weight,
@@ -1390,6 +1402,8 @@ def train_from_scratch(
         using_yolov11=use_yolov11,
         yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
         binary_multilabel_classif_loss_name=binary_multilabel_classif_loss_name,
+        use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
+        # loss weights
         focal_loss_weight=focal_loss_weight,
         bce_loss_weight=bce_loss_weight,
         wbce_loss_weight=wbce_loss_weight,

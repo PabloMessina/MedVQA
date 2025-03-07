@@ -10,15 +10,8 @@ from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.utils.constants import (
     CXR14_DATASET_ID,
     CHEXPERT_TASKS,
-    IUXRAY_DATASET_ID,
-    IUXRAY_DATASET_ID__CHEXPERT_MODE,
-    MIMICCXR_DATASET_ID,
     CHEXPERT_DATASET_ID,
-    MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE,
-    MIMICCXR_DATASET_ID__CHEST_IMAGENOME_MODE,
-    MIMICCXR_DATASET_ID__CHEXPERT_MODE,
     VINBIG_DATASET_ID,
-    PADCHEST_DATASET_ID,
     MetricNames,
 )
 from medvqa.utils.logging import print_magenta
@@ -669,6 +662,9 @@ def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
                 if predict_bboxes_vinbig:
                     model_kwargs['apply_nms'] = apply_nms
                     model_kwargs['yolov11_detection_tasks'] = 'vinbig'
+                    model_kwargs['conf_thres'] = 0.1
+                    model_kwargs['iou_thres'] = 0.1
+                    model_kwargs['max_det'] = 40
                     model_kwargs['batch'] = batch
 
             if not use_visual_module_only:

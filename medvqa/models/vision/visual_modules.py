@@ -13,6 +13,7 @@ from medvqa.datasets.chest_imagenome import (
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
+from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED, VINBIG_LABELS__MODIFIED
 from medvqa.models.checkpoint import load_model_state_dict
 from medvqa.models.common import freeze_parameters
 from medvqa.models.mlp import MLP
@@ -105,6 +106,7 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
         RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
         RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
+        RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
     ]:
         kwargs['mean'] = [0.485, 0.456, 0.406]
         kwargs['std'] = [0.229, 0.224, 0.225]
@@ -191,6 +193,7 @@ class MultiPurposeVisualModule(nn.Module):
                 n_findings=None,
                 device=None,
                 use_linear_head_for_classification=False,
+                use_vinbig_with_modified_labels=False,
                 # Other kwargs
                 **unused_kwargs,
                 ): 
@@ -261,6 +264,7 @@ class MultiPurposeVisualModule(nn.Module):
         self.image_size = image_size
         self.device = device
         self.use_linear_head_for_classification = use_linear_head_for_classification
+        self.use_vinbig_with_modified_labels = use_vinbig_with_modified_labels
 
         # Check that num_regions is a square number
         if self.num_regions is not None:
@@ -498,6 +502,7 @@ class MultiPurposeVisualModule(nn.Module):
                 predict_bboxes_chest_imagenome=self.predict_bboxes_chest_imagenome,
                 predict_bboxes_vinbig=self.predict_bboxes_vinbig,
                 predict_labels_vinbig=self.classify_labels_vinbig,
+                use_vinbig_with_modified_labels=self.use_vinbig_with_modified_labels,
                 query_embed_size=self.query_embed_size,
                 mlp_hidden_dims=self.classification_mlp_hidden_dims,
                 local_attention_hidden_size=self.local_attention_hidden_size,
@@ -1920,6 +1925,7 @@ def create_yolov11_model_for_det_mlc(
         predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig,
         predict_labels_vinbig,
+        use_vinbig_with_modified_labels,
         # TODO: support more tasks
         query_embed_size,
         mlp_hidden_dims,
@@ -1942,7 +1948,7 @@ def create_yolov11_model_for_det_mlc(
         classification_tasks.append(
             ClassificationTaskDescriptor(
                 task_name='vinbig',
-                label_names=VINBIG_LABELS,
+                label_names=VINBIG_LABELS if not use_vinbig_with_modified_labels else VINBIG_LABELS__MODIFIED,
                 class_names=['absent', 'present'],
             )
         )
@@ -1959,7 +1965,7 @@ def create_yolov11_model_for_det_mlc(
         detection_tasks.append(
             DetectionTaskDescriptor(
                 task_name='vinbig',
-                class_names=VINBIG_BBOX_NAMES,
+                class_names=VINBIG_BBOX_NAMES if not use_vinbig_with_modified_labels else VINBIG_BBOX_NAMES__MODIFIED,
             )
         )
 

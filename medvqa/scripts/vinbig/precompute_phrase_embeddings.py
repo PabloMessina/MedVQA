@@ -10,7 +10,7 @@ from medvqa.utils.files import (
     load_pickle,
     save_pickle,
 )
-from medvqa.datasets.vinbig import VINBIG_LARGE_FAST_CACHE_DIR
+from medvqa.datasets.vinbig import VINBIG_LABELS__MODIFIED, VINBIG_LARGE_FAST_CACHE_DIR
 from medvqa.utils.constants import VINBIG_LABELS, VINBIG_LABEL2PHRASE
 from medvqa.utils.logging import print_blue, print_bold
 from medvqa.utils.math import rank_vectors_by_dot_product
@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--average_top_k_most_similar', action='store_true')
     parser.add_argument('--top_k', type=int, default=10)
     parser.add_argument('--facts_relevant_to_anchor_facts_pickle_filepath', type=str, default=None)
+    parser.add_argument('--use_modified_labels', action='store_true')
 
     args = parser.parse_args()
 
@@ -30,8 +31,12 @@ def main():
         assert args.top_k > 0, 'top_k must be greater than 0 if average_top_k_most_similar is True'
         assert args.facts_relevant_to_anchor_facts_pickle_filepath is not None, 'facts_relevant_to_anchor_facts_pickle_filepath must be provided if average_top_k_most_similar is True'
 
-    # Define  phrases
-    phrases = [VINBIG_LABEL2PHRASE[label] for label in VINBIG_LABELS]
+    # Define phrases
+    if args.use_modified_labels:
+        vinbig_labels = VINBIG_LABELS__MODIFIED
+    else:
+        vinbig_labels = VINBIG_LABELS
+    phrases = [VINBIG_LABEL2PHRASE[label] for label in vinbig_labels]
     
     # Create embedding extractor
     embedding_extractor = CachedTextEmbeddingExtractor(
@@ -56,18 +61,18 @@ def main():
         most_similar_fact_embeddings = []
         most_similar_fact_similarities = []
         average_phrase_embeddings = np.zeros((len(phrases), phrase_embeddings.shape[1]), dtype=np.float32)
-        classes_to_skip = ('Other lesion', 'Other disease', 'No finding')
+        classes_to_skip = ('Other lesion', 'Other disease', 'No finding', 'Abnormal finding')
         for i in range(len(phrase_embeddings)):
-            if VINBIG_LABELS[i] in classes_to_skip:
+            if vinbig_labels[i] in classes_to_skip:
                 most_similar_facts.append(None)
                 most_similar_fact_embeddings.append(None)
                 most_similar_fact_similarities.append(None)
                 average_phrase_embeddings[i] = phrase_embeddings[i]
                 continue
             else:
-                anchor_idx = anchor_facts.index(VINBIG_LABELS[i])
+                anchor_idx = anchor_facts.index(vinbig_labels[i])
                 anchor_fact_idxs = [i for i, anchors in enumerate(anchors_per_fact) if anchor_idx in anchors]
-                print(f'{VINBIG_LABELS[i]}: len(anchor_fact_idxs)={len(anchor_fact_idxs)}')
+                print(f'{vinbig_labels[i]}: len(anchor_fact_idxs)={len(anchor_fact_idxs)}')
                 anchor_fact_embeddings = relevant_fact_embeddings[anchor_fact_idxs]
                 idxs = rank_vectors_by_dot_product(anchor_fact_embeddings, phrase_embeddings[i])
                 top_k_idxs = idxs[:args.top_k]
@@ -104,7 +109,7 @@ def main():
         }
         save_path = get_file_path_with_hashing_if_too_long(
             folder_path=VINBIG_LARGE_FAST_CACHE_DIR,
-            prefix='label_phrase_embeddings',
+            prefix='label_phrase_embeddings' if not args.use_modified_labels else 'label_phrase_embeddings__modified',
             strings=[
                 args.model_name,
                 args.model_checkpoint_folder_path,
@@ -126,7 +131,7 @@ def main():
         }
         save_path = get_file_path_with_hashing_if_too_long(
             folder_path=VINBIG_LARGE_FAST_CACHE_DIR,
-            prefix='label_phrase_embeddings',
+            prefix='label_phrase_embeddings' if not args.use_modified_labels else 'label_phrase_embeddings__modified',
             strings=[
                 args.model_name,
                 args.model_checkpoint_folder_path,

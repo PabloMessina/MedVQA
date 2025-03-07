@@ -205,7 +205,11 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                     # Group ground truth coordinates by class
                     gt_coords_per_class = [[] for _ in range(self.nc)]
                     for cls, box in zip(gt_classes[i], gt_coords[i]):
-                        gt_coords_per_class[cls].append(box)
+                        try:
+                            gt_coords_per_class[cls].append(box)
+                        except IndexError:
+                            print(f'IndexError: cls={cls}, gt_classes[i]={gt_classes[i]}, gt_coords[i]={gt_coords[i]}, len(gt_coords_per_class)={len(gt_coords_per_class)}')
+                            raise
                     # Group predictions by class
                     pred_coords_per_class = [[] for _ in range(self.nc)]
                     for j in range(len(yolov8_predictions[i])):

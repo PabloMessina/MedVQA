@@ -270,9 +270,14 @@ def group_indices_for_balanced_sampling(label_matrix, indices=None, label_names=
                 dedup_indices[gi].append(i)
                 seen[i] = True
     dedup_indices.sort(key = lambda x : len(x), reverse=True)
-    while len(dedup_indices) > 1 and len(dedup_indices[-1]) < min_group_size:
-        dedup_indices[-2].extend(dedup_indices[-1])
-        dedup_indices.pop()
+    while True:
+        while len(dedup_indices) > 1 and len(dedup_indices[-1]) < min_group_size:
+            last_group = dedup_indices.pop()
+            dedup_indices[-1].extend(last_group)
+        dedup_indices.sort(key = lambda x : len(x), reverse=True)
+        if len(dedup_indices[-1]) >= min_group_size:
+            break
+
     if verbose:
         print(f'Group sizes: {[len(x) for x in dedup_indices]}')
     return dedup_indices

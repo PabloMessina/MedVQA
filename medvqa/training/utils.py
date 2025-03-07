@@ -65,11 +65,6 @@ def run_common_boilerplate_code_and_start_training(
         count_print('Defining learning rate scheduler handler ...')
         lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)
 
-    # Learning rate scheduler
-    if not update_lr_batchwise:
-        count_print('Defining learning rate scheduler handler ...')
-        lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
-
     # Checkpoint saving
     model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
     if checkpoint_folder_path is None: # first time

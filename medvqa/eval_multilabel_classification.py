@@ -2,6 +2,7 @@ import  os
 import glob
 import argparse
 from copy import deepcopy
+import numpy as np
 from tqdm import tqdm
 
 import torch
@@ -15,6 +16,7 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBig_VisualModuleTrainer
+from medvqa.evaluation.bootstrapping import stratified_multilabel_bootstrap_metrics
 from medvqa.evaluation.visual_module import (
     calibrate_thresholds_on_mimiccxr_validation_set,
     calibrate_weights_and_thresholds_for_ensemble,
@@ -24,7 +26,7 @@ from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import MultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
 from medvqa.metrics.classification.roc_auc import roc_auc_fn
-from medvqa.metrics.classification.prc_auc import prc_auc_fn
+from medvqa.metrics.classification.prc_auc import prc_auc_fn, prc_auc_score
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
 
@@ -70,7 +72,7 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta
+from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_orange
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'mimiccxr_test_set'
@@ -138,7 +140,7 @@ def _compute_and_save_metrics(
             pred_chexpert_probs, gt_chexpert_labels)
         # compute chexpert prc auc
         metrics[MetricNames.CHXLABEL_PRCAUC] = prc_auc_fn(
-            pred_chexpert_probs, gt_chexpert_labels)
+            gt_chexpert_labels, pred_chexpert_probs)
 
     if chest_imagenome_thresholds is not None:
         assert chest_imagenome_label_names is not None
@@ -164,7 +166,7 @@ def _compute_and_save_metrics(
             pred_chest_imagenome_probs, gt_chest_imagenome_labels)
         # compute chest imagenome prc auc
         metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC] = prc_auc_fn(
-            pred_chest_imagenome_probs, gt_chest_imagenome_labels)
+            gt_chest_imagenome_labels, pred_chest_imagenome_probs)
         # save label names
         metrics['chest_imagenome_label_names'] = chest_imagenome_label_names
     
@@ -194,7 +196,7 @@ def _compute_and_save_metrics__ensemble__chest_imagenome(
     # compute chest imagenome auc
     metrics[MetricNames.CHESTIMAGENOMELABELAUC] = auc_fn(merged_probs, gt_labels)
     # compute precision-recall auc
-    metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC] = prc_auc_fn(merged_probs, gt_labels)
+    metrics[MetricNames.CHESTIMAGENOMELABELPRCAUC] = prc_auc_fn(gt_labels, merged_probs)
     # save label names
     metrics['chest_imagenome_label_names'] = label_names
     # save ensemble related arguments
@@ -668,25 +670,7 @@ def _evaluate_model(
         results_dict['vinbig_metrics'] = deepcopy(evaluator_engine.state.metrics)
         results_dict['vinbig_dataset'] = vinbig_vision_evaluator.val_dataset
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
-
-        # Save probabilities
-        if save_probs:
-            print(f'Saving probabilities on {eval_dataset_name} ...')
-            _tuples = []
-            if classify_labels_vinbig:
-                _tuples.append(('pred_vinbig_probs', f'image_id_to_pred_vinbig_probs__{eval_dataset_name}.pkl'))
-            for pred_probs_key, save_name in _tuples:
-                image_id_to_pred_probs = {}
-                pred_probs = evaluator_engine.state.metrics[pred_probs_key]
-                assert len(vinbig_vision_evaluator.test_indices) == len(pred_probs)
-                for i, idx in enumerate(vinbig_vision_evaluator.test_indices):
-                    image_id = vinbig_vision_evaluator.image_ids[idx]
-                    image_id_to_pred_probs[image_id] = pred_probs[i].detach().cpu().numpy()
-                save_path = os.path.join(results_folder_path, save_name)
-                save_pickle(image_id_to_pred_probs, save_path)
-                print('Probabilities saved to:', save_path)
-
-        # PRC-AUC
+        
         metrics = results_dict['vinbig_metrics']
         pred_probs = metrics['pred_vinbig_probs']
         pred_probs = torch.stack(pred_probs).cpu().numpy()
@@ -695,18 +679,46 @@ def _evaluate_model(
         gt_labels = torch.stack(gt_labels).cpu().numpy()
         assert gt_labels.ndim == 2
         assert pred_probs.shape == gt_labels.shape
-        assert pred_probs.shape[0] == len(vinbig_vision_evaluator.val_dataset)
-        prc_auc_metrics = prc_auc_fn(pred_probs, gt_labels)
-        for class_name, prc_auc in zip(VINBIG_LABELS, prc_auc_metrics['per_class']):
-            print(f'PRC-AUC({class_name}): {prc_auc}')
+
+        label_names = vinbig_vision_evaluator.label_names
+        
+        # Remove classes without any ground truth
+        gt_labels_sum = gt_labels.sum(axis=0)
+        no_gt_classes = np.where(gt_labels_sum == 0)[0]
+        if len(no_gt_classes) > 0:
+            print_orange('NOTE: Removing the following classes without any positive classification labels:', bold=True)
+            for i in no_gt_classes:
+                print_orange(f'  {label_names[i]}')
+            pred_probs = np.delete(pred_probs, no_gt_classes, axis=1)
+            gt_labels = np.delete(gt_labels, no_gt_classes, axis=1)
+            label_names = [x for i, x in enumerate(label_names) if i not in no_gt_classes]
+            print(f'pred_probs.shape = {pred_probs.shape}')
+            print(f'gt_labels.shape = {gt_labels.shape}')
+            print(f'len(label_names) = {len(label_names)}')
+
+        # PRC-AUC
+        prc_auc_metrics = prc_auc_fn(gt_labels, pred_probs)
         print_magenta(f'PRC-AUC(macro_avg): {prc_auc_metrics["macro_avg"]}', bold=True)
         print_magenta(f'PRC-AUC(micro_avg): {prc_auc_metrics["micro_avg"]}', bold=True)
 
+        prc_auc_metrics_with_boot = stratified_multilabel_bootstrap_metrics(
+            gt_labels=gt_labels, pred_probs=pred_probs, metric_fn=prc_auc_score, num_bootstraps=500)
+
+        for class_name, mean, std in zip(VINBIG_LABELS,
+                                        prc_auc_metrics_with_boot['mean_per_class'],
+                                        prc_auc_metrics_with_boot['std_per_class']):
+            print(f'PRC-AUC({class_name}): {mean} ± {std}')
+        print_magenta(f'PRC-AUC(macro_avg) with bootstrapping: {prc_auc_metrics_with_boot["mean_macro_avg"]} ± {prc_auc_metrics_with_boot["std_macro_avg"]}', bold=True)
+        print_magenta(f'PRC-AUC(micro_avg) with bootstrapping: {prc_auc_metrics_with_boot["mean_micro_avg"]} ± {prc_auc_metrics_with_boot["std_micro_avg"]}', bold=True)
+
         metrics_dict = {
-            **metrics,
+            'pred_probs': pred_probs,
+            'gt_labels': gt_labels,
+            'label_names': label_names,
             'prc_auc': prc_auc_metrics,
+            'prc_auc_with_bootstrapping': prc_auc_metrics_with_boot,
         }
-        metrics_to_save = metrics_to_print + ['prc_auc']
+        metrics_to_save = list(metrics_dict.keys())
 
         # Compute and save metrics
         results_dict['final_vinbig_metrics'] = _compute_and_save_metrics(

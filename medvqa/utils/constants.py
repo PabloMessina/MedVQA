@@ -294,11 +294,10 @@ VINBIG_LABEL2PHRASE = {
     'Pneumonia': 'pneumonia seen',
     'Tuberculosis': 'tuberculosis seen',
     'No finding': 'no abnormalities seen',
+    'Abnormal finding': 'abnormal findings seen', # this class was added (it doesn't exist in the original dataset)
 }
 assert all([l in VINBIG_LABEL2PHRASE for l in VINBIG_LABELS])
-assert all([l in VINBIG_LABELS for l in VINBIG_LABEL2PHRASE])
-
-
+assert all([l in VINBIG_LABELS for l in VINBIG_LABEL2PHRASE if l != 'Abnormal finding'])
 
 CHEXPERT_CXR14_SYNONYMS = [
     ('No Finding', 'No Finding'),

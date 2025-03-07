@@ -25,6 +25,7 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.padchest import PADCHEST_BROKEN_IMAGES_TXT_PATH, PADCHEST_IMAGES_SMALL_DIR
+from medvqa.evaluation.bootstrapping import stratified_bootstrap_pos_neg_fact_classification_metrics, stratified_multilabel_bootstrap_metrics
 from medvqa.evaluation.plots import plot_images, plot_metrics
 from medvqa.evaluation.report_generation import compute_report_level_metrics
 from medvqa.metrics.classification.multilabel_accuracy import MultiLabelAccuracy
@@ -54,6 +55,7 @@ from medvqa.models.checkpoint import (
     load_metadata,
 )
 from medvqa.utils.common import (
+    activate_determinism,
     parsed_args_to_dict,
     get_timestamp,
 )
@@ -93,6 +95,7 @@ class _EvalModes:
     MIMICCXR_TEST_SET_LABEL_BASED = 'mimiccxr_test_set_label_based'
     MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'mimiccxr_test_set_label_based__template_based_report_gen'
     MIMICCXR_TEST_SET_FACT_RANKING = 'mimiccxr_test_set_fact_ranking'
+    MIMICCXR_VAL_TEST_SETS_FACT_CLASSIFICATION = 'mimiccxr_val_test_sets_fact_classification'
     MSCXR_FACT_RANKING = 'mscxr_fact_ranking'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN = 'interpret_cxr_test_public_label_based__template_based_report_gen'
     INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN = 'interpret_cxr_test_public_label_based__generate_jsons_for_report_gen'
@@ -120,6 +123,7 @@ class _EvalModes:
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED,
             _EvalModes.MIMICCXR_TEST_SET_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING,
+            _EvalModes.MIMICCXR_VAL_TEST_SETS_FACT_CLASSIFICATION,
             _EvalModes.MSCXR_FACT_RANKING,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN,
             _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__GENERATE_JSONS_FOR_REPORT_GEN,
@@ -149,7 +153,6 @@ def parse_args(args=None):
     parser.add_argument('--max_images_per_batch', type=int, default=30)
     parser.add_argument('--max_facts_per_image', type=int, default=20)
     parser.add_argument('--image_batch_size', type=int, default=200)
-    parser.add_argument('--num_facts_per_report', type=int, default=1000)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--eval_mode', type=str, required=True, choices=_EvalModes.choices())
     parser.add_argument('--fact_embedding_model_name', type=str, default=None)
@@ -161,7 +164,6 @@ def parse_args(args=None):
     parser.add_argument('--chest_imagenome_label_names_filepath', type=str)
     parser.add_argument('--chest_imagenome_image_id_to_labels_filepath', type=str)
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str)
-    parser.add_argument('--mimiccxr_integrated_report_facts_filepath', type=str)
     parser.add_argument('--tune_thresholds', action='store_true')
     parser.add_argument('--max_processes_for_chexpert_labeler', type=int, default=14)
     parser.add_argument('--background_findings_and_impression_per_report_filepath', type=str)
@@ -191,6 +193,9 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_task3_test_submission_csv_paths', type=str, nargs='+', default=None)
     parser.add_argument('--ensemble_filepath', type=str, default=None)
     parser.add_argument('--rank_facts_using_global_alignment', action='store_true')
+    parser.add_argument('--mimiccxr_val_dicom_id_to_labels_filepath', type=str, default=None)
+    parser.add_argument('--mimiccxr_test_dicom_id_to_labels_filepath', type=str, default=None)
+    parser.add_argument('--phrase_embeddings_filepath', type=str, default=None)
 
     return parser.parse_args(args=args)
 
@@ -853,7 +858,13 @@ def _run_inference_for_feature_extraction_from_images(image_paths, checkpoint_fo
     # Create dataloader
     print('Creating dataloader ...')
     from medvqa.datasets.image_processing import ImageDataset
-    test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+    try:
+        transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]
+    except KeyError:
+        first_key = list(val_image_transform_kwargs.keys())[0]
+        transform_kwargs = val_image_transform_kwargs[first_key]
+        print_red(f'WARNING: val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] not found. Using val_image_transform_kwargs[{first_key}] instead.', bold=True)
+    test_image_transform = get_image_transform(**transform_kwargs)
     dataset = ImageDataset(image_paths=image_paths, image_transform=test_image_transform)
     def _image_collate_batch_fn(batch):
         images = [item['i'] for item in batch]
@@ -1256,7 +1267,6 @@ def _evaluate_model(
     max_images_per_batch,
     max_facts_per_image,
     image_batch_size,
-    num_facts_per_report,
     num_workers,
     device,
     eval_mode,
@@ -1269,7 +1279,6 @@ def _evaluate_model(
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
-    mimiccxr_integrated_report_facts_filepath,
     tune_thresholds,
     max_processes_for_chexpert_labeler,
     background_findings_and_impression_per_report_filepath,
@@ -1299,6 +1308,9 @@ def _evaluate_model(
     cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
     rank_facts_using_global_alignment,
+    mimiccxr_val_dicom_id_to_labels_filepath,
+    mimiccxr_test_dicom_id_to_labels_filepath,
+    phrase_embeddings_filepath,
 ):
     count_print = CountPrinter()
 
@@ -1569,23 +1581,24 @@ def _evaluate_model(
                 strings=strings_,
             )
 
-    elif eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING or\
-         eval_mode == _EvalModes.MSCXR_FACT_RANKING:
+    elif eval_mode in [_EvalModes.MIMICCXR_TEST_SET_FACT_RANKING, _EvalModes.MSCXR_FACT_RANKING]:
 
-        assert mimiccxr_integrated_report_facts_filepath is not None
+        assert dicom_id_to_pos_neg_facts_filepath is not None
 
         # Load data
         print_blue('Loading data ...', bold=True)
-        mimiccxr_integrated_report_facts = load_jsonl(mimiccxr_integrated_report_facts_filepath)
+        tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
+        all_facts = tmp['facts']
+        fact_embeddings = tmp['embeddings']
+        dicom_id_to_pos_facts = tmp['dicom_id_to_pos_facts']
+        dicom_id_to_strong_neg_facts = tmp['dicom_id_to_strong_neg_facts']
+        dicom_id_to_weak_neg_facts = tmp['dicom_id_to_weak_neg_facts']
         mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-        
-        # Collect all facts
-        print_blue('Collecting all facts ...', bold=True)
-        all_facts = set()
-        for x in mimiccxr_integrated_report_facts:
-            all_facts.update(x['facts'])
-        all_facts = sorted(list(all_facts))
         print('len(all_facts) =', len(all_facts))
+        print(f'fact_embeddings.shape = {fact_embeddings.shape}')
+        print('len(dicom_id_to_pos_facts) =', len(dicom_id_to_pos_facts))
+        print('len(dicom_id_to_strong_neg_facts) =', len(dicom_id_to_strong_neg_facts))
+        print('len(dicom_id_to_weak_neg_facts) =', len(dicom_id_to_weak_neg_facts))
 
         # Load MS-CXR dicom_ids
         if eval_mode == _EvalModes.MSCXR_FACT_RANKING:
@@ -1595,11 +1608,15 @@ def _evaluate_model(
 
         # Collect facts and images per report
         print_blue('Collecting facts and images per report ...', bold=True)
-        ridx2facts = {}
+        ridx2pos_fidxs = {}
+        ridx2neg_fidxs = {}
         ridx2image_paths = {}
         for ridx, (part_id, subject_id, study_id, dicom_id_view_pos_pairs, split) in enumerate(zip(
-            mimiccxr_metadata['part_ids'], mimiccxr_metadata['subject_ids'], mimiccxr_metadata['study_ids'],
-            mimiccxr_metadata['dicom_id_view_pos_pairs'], mimiccxr_metadata['splits'],
+            mimiccxr_metadata['part_ids'],
+            mimiccxr_metadata['subject_ids'],
+            mimiccxr_metadata['study_ids'],
+            mimiccxr_metadata['dicom_id_view_pos_pairs'],
+            mimiccxr_metadata['splits'],
         )):
             if eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
                 if split == 'test':
@@ -1609,8 +1626,8 @@ def _evaluate_model(
                         assert os.path.exists(image_path)
                         image_paths.append((image_path, view_pos))
                     ridx2image_paths[ridx] = image_paths
-                    facts = mimiccxr_integrated_report_facts[ridx]['facts']
-                    ridx2facts[ridx] = facts
+                    ridx2pos_fidxs[ridx] = dicom_id_to_pos_facts[dicom_id]
+                    ridx2neg_fidxs[ridx] = dicom_id_to_strong_neg_facts[dicom_id] + dicom_id_to_weak_neg_facts[dicom_id]
             elif eval_mode == _EvalModes.MSCXR_FACT_RANKING:
                 if any(dicom_id in mscxr_dicom_ids for dicom_id, _ in dicom_id_view_pos_pairs):
                     image_paths = []
@@ -1619,12 +1636,13 @@ def _evaluate_model(
                         assert os.path.exists(image_path)
                         image_paths.append((image_path, view_pos))
                     ridx2image_paths[ridx] = image_paths
-                    facts = mimiccxr_integrated_report_facts[ridx]['facts']                    
-                    ridx2facts[ridx] = facts
+                    ridx2pos_fidxs[ridx] = dicom_id_to_pos_facts[dicom_id]
+                    ridx2neg_fidxs[ridx] = dicom_id_to_strong_neg_facts[dicom_id] + dicom_id_to_weak_neg_facts[dicom_id]
             else: assert False
-
-        print('len(ridx2facts) =', len(ridx2facts))
+        
         print('len(ridx2image_paths) =', len(ridx2image_paths))
+        print('len(ridx2pos_fidxs) =', len(ridx2pos_fidxs))
+        print('len(ridx2neg_fidxs) =', len(ridx2neg_fidxs))
 
         # First compute image features
         print_blue('Computing image features ...', bold=True)
@@ -1648,19 +1666,8 @@ def _evaluate_model(
             image_local_features = tmp['image_local_features']
             image_global_features = tmp['image_global_features']
             print('image_local_features.shape =', image_local_features.shape)
-            print('image_global_features.shape =', image_global_features.shape)
-
-        # Then compute fact embeddings
-        print_blue('Computing fact embeddings ...', bold=True)
-        fact_encoder = CachedTextEmbeddingExtractor(
-            model_name=fact_embedding_model_name,
-            model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
-            batch_size=fact_embedding_batch_size,
-            num_workers=fact_embedding_num_workers,
-            device=fact_embedding_device,
-        )
-        fact_embeddings = fact_encoder.compute_text_embeddings(all_facts)
-        print('fact_embeddings.shape =', fact_embeddings.shape)
+            if image_global_features is not None:
+                print('image_global_features.shape =', image_global_features.shape)
 
         # Load phrase grounding model
         print_blue('Loading phrase grounding model ...', bold=True)
@@ -1686,36 +1693,31 @@ def _evaluate_model(
         print('checkpoint_path =', checkpoint_path)
         model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True)
 
-        # For each report image, rank the report facts and a sample of all the other facts
+        # For each report image, rank its positive and negative facts
         print_blue('Ranking facts ...', bold=True)
-        fact2idx = {fact: i for i, fact in enumerate(all_facts)}
         ip2idx = {ip: i for i, ip in enumerate(all_image_paths)}
-        ridxs = list(ridx2facts.keys())
+        ridxs = list(ridx2image_paths.keys())
         skipped = 0
         results = []
         
         for ridx in tqdm(ridxs, total=len(ridxs), mininterval=5):
-            facts = ridx2facts[ridx]
-            if len(facts) == 0:
+            pos_fidxs = ridx2pos_fidxs[ridx]
+            if len(pos_fidxs) == 0: # skip reports with no positive facts
                 skipped += 1
                 continue
-            
-            # Merge report facts with randomly sampled facts
-            fact_idxs = [fact2idx[fact] for fact in facts]
-            sampled_fact_idxs = random.sample(range(len(all_facts)), num_facts_per_report)
-            merged_fact_idxs = fact_idxs + sampled_fact_idxs
-            # remove duplicates keeping the order
-            merged_fact_idxs = list(dict.fromkeys(merged_fact_idxs))
-            # keep first num_facts_per_report
-            merged_fact_idxs = merged_fact_idxs[:num_facts_per_report]
-            assert merged_fact_idxs[:len(fact_idxs)] == fact_idxs # the first len(fact_idxs) should be the same
-            merged_fact_embeddings = fact_embeddings[merged_fact_idxs]
-            relevant_labels = np.zeros(num_facts_per_report, dtype=np.int8)
-            relevant_labels[:len(fact_idxs)] = 1
 
-            # Prepare merged fact embeddings tensor
-            merged_fact_embeddings_tensor = torch.tensor(merged_fact_embeddings, dtype=torch.float32)
-            merged_fact_embeddings_tensor = merged_fact_embeddings_tensor.to(device)
+            neg_fidxs = ridx2neg_fidxs[ridx]
+            assert len(neg_fidxs) > 0
+
+            report_fidxs = pos_fidxs + neg_fidxs
+            num_facts = len(report_fidxs)
+            relevant_labels = np.zeros(len(report_fidxs), dtype=np.int8)
+            relevant_labels[:len(pos_fidxs)] = 1 # positive facts have label 1
+
+            # Prepare report fact embeddings tensor
+            report_fact_embeddings = fact_embeddings[report_fidxs]
+            report_fact_embeddings_tensor = torch.tensor(report_fact_embeddings, dtype=torch.float32)
+            report_fact_embeddings_tensor = report_fact_embeddings_tensor.to(device)
 
             # For each image in the report, compute ranking
             image_paths = ridx2image_paths[ridx]
@@ -1743,52 +1745,95 @@ def _evaluate_model(
                         else:
                             global_feat = None
                     
-                    num_batches = num_facts_per_report // fact_embedding_batch_size
-                    if num_facts_per_report % fact_embedding_batch_size != 0:
+                    num_batches = num_facts // fact_embedding_batch_size
+                    if num_facts % fact_embedding_batch_size != 0:
                         num_batches += 1
                     
                     logits = []
                     for i in range(num_batches):
                         start = i * fact_embedding_batch_size
-                        end = min(start + fact_embedding_batch_size, num_facts_per_report)
+                        end = min(start + fact_embedding_batch_size, num_facts)
                         assert start < end
-                        merged_fact_embeddings_ = merged_fact_embeddings_tensor[start:end]
-                        merged_fact_embeddings_ = merged_fact_embeddings_.unsqueeze(0) # (1, end-start, fact_embedding_dim)
+                        report_fact_embeddings_ = report_fact_embeddings_tensor[start:end]
+                        report_fact_embeddings_ = report_fact_embeddings_.unsqueeze(0) # (1, end-start, fact_embedding_dim)
                         if rank_facts_using_global_alignment:
                             batch_logits = model.compute_global_alignment_similarity_with_precomputed_features(
                                 global_feat=global_feat,
-                                phrase_embeddings=merged_fact_embeddings_,
+                                phrase_embeddings=report_fact_embeddings_,
                             )
                         else:
                             batch_logits = model.forward_with_precomputed_image_features(
                                 local_feat=local_feat, global_feat=global_feat,
-                                phrase_embeddings=merged_fact_embeddings_,
+                                phrase_embeddings=report_fact_embeddings_,
                             )['phrase_classifier_logits']
                         logits.append(batch_logits)
-                    logits = torch.cat(logits, dim=1) # (1, num_facts_per_report)
-                    logits = logits.squeeze(0) # (num_facts_per_report,)
+                    logits = torch.cat(logits, dim=1) # (1, num_facts)
+                    logits = logits.squeeze(0) # (num_facts,)
                     if rank_facts_using_global_alignment:
                         probs = torch.sigmoid(logits / 0.1) # temperature scaling
                     else:
                         probs = torch.sigmoid(logits)
-                    probs = probs.cpu().numpy()
+                    probs = probs.cpu().numpy().astype(np.float16)
                     rocauc = roc_auc_score(relevant_labels, probs) # ROC AUC
-                    sorted_idxs = np.argsort(probs)[::-1]
+                    prcauc = prc_auc_score(relevant_labels, probs) # PRC AUC
+                    # sort positive facts by probabilities
+                    pos_facts = [all_facts[i] for i in pos_fidxs]
+                    pos_probs = probs[:len(pos_fidxs)]
+                    pos_sorted_idxs = np.argsort(-pos_probs)
+                    pos_facts = [pos_facts[i] for i in pos_sorted_idxs]
+                    pos_probs = pos_probs[pos_sorted_idxs]
+                    # sort negative facts by probabilities
+                    neg_facts = [all_facts[i] for i in neg_fidxs]
+                    neg_probs = probs[len(pos_fidxs):]
+                    neg_sorted_idxs = np.argsort(-neg_probs)
+                    neg_facts = [neg_facts[i] for i in neg_sorted_idxs]
+                    neg_probs = neg_probs[neg_sorted_idxs]
+                    # append to results
                     results.append({
                         'ridx': ridx,
                         'image_path': image_paths[j][0],
                         'view_pos': image_paths[j][1],
                         'rocauc': rocauc,
-                        'facts': facts,
-                        'fact_probs': probs[:len(fact_idxs)],
-                        'top100_facts': [all_facts[merged_fact_idxs[i]] for i in sorted_idxs[:100]],
-                        'top100_fact_probs': probs[sorted_idxs][:100],
+                        'prcauc': prcauc,
+                        'pos_facts': pos_facts,
+                        'pos_probs': pos_probs,
+                        'neg_facts': neg_facts,
+                        'neg_probs': neg_probs,
                     })
 
         print('skipped =', skipped)
         print('len(results) =', len(results))
 
         print_magenta(f'Average ROC AUC = {np.mean([x["rocauc"] for x in results])}', bold=True)
+        print_magenta(f'Average PRC AUC = {np.mean([x["prcauc"] for x in results])}', bold=True)
+
+        # Averages only with frontal and lateral views
+        from medvqa.datasets.mimiccxr import get_mimiccxr_image_orientation_id, MIMICCXR_IMAGE_ORIENTATIONS
+        PA_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('PA')
+        AP_ID = MIMICCXR_IMAGE_ORIENTATIONS.index('AP')
+        frontal_views_idxs = [i for i, x in enumerate(results) if get_mimiccxr_image_orientation_id(x['view_pos']) in (PA_ID, AP_ID)]
+        frontal_views_idxs_set = set(frontal_views_idxs)
+        lateral_views_idxs = [i for i in range(len(results)) if i not in frontal_views_idxs_set]
+        print_magenta(f'Average ROC AUC (frontal views only, n={len(frontal_views_idxs)}) = {np.mean([results[i]["rocauc"] for i in frontal_views_idxs])}', bold=True)
+        print_magenta(f'Average PRC AUC (frontal views only, n={len(frontal_views_idxs)}) = {np.mean([results[i]["prcauc"] for i in frontal_views_idxs])}', bold=True)
+        print_magenta(f'Average ROC AUC (lateral views only, n={len(lateral_views_idxs)}) = {np.mean([results[i]["rocauc"] for i in lateral_views_idxs])}', bold=True)
+        print_magenta(f'Average PRC AUC (lateral views only, n={len(lateral_views_idxs)}) = {np.mean([results[i]["prcauc"] for i in lateral_views_idxs])}', bold=True)
+
+        # Compute metrics with bootstrapping to estimate confidence intervals
+        print_blue('Computing PRC AUC and ROC AUC with bootstrapping ...', bold=True)
+        prcauc_with_bootstrapping = stratified_bootstrap_pos_neg_fact_classification_metrics(
+            items=results, metric_fn=prc_auc_score, num_bootstraps=100, num_processes=10,
+        )
+        mean = prcauc_with_bootstrapping['mean']
+        std = prcauc_with_bootstrapping['std']
+        print_magenta(f'Average PRC AUC (with bootstrapping) = {mean} ± {std}', bold=True)
+
+        rocauc_with_bootstrapping = stratified_bootstrap_pos_neg_fact_classification_metrics(
+            items=results, metric_fn=roc_auc_score, num_bootstraps=100, num_processes=10,
+        )
+        mean = rocauc_with_bootstrapping['mean']
+        std = rocauc_with_bootstrapping['std']
+        print_magenta(f'Average ROC AUC (with bootstrapping) = {mean} ± {std}', bold=True)
 
         # Save results
         if eval_mode == _EvalModes.MIMICCXR_TEST_SET_FACT_RANKING:
@@ -1799,15 +1844,255 @@ def _evaluate_model(
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         results_save_path = get_file_path_with_hashing_if_too_long(
             folder_path=results_folder_path,
+            prefix=f'{prefix}(nres={len(results)})',
+            strings=[
+                f'rank_facts_using_global_alignment={rank_facts_using_global_alignment}',
+                dicom_id_to_pos_neg_facts_filepath,
+            ],
+            force_hashing=True,
+        )
+        to_save = {
+            'results': results,
+            'prcauc_with_bootstrapping': prcauc_with_bootstrapping,
+            'rocauc_with_bootstrapping': rocauc_with_bootstrapping,
+        }
+        print_blue('Saving results to', results_save_path, bold=True)
+        save_pickle(to_save, results_save_path)
+        print('Done!')
+
+    elif eval_mode == _EvalModes.MIMICCXR_VAL_TEST_SETS_FACT_CLASSIFICATION:
+
+        assert mimiccxr_val_dicom_id_to_labels_filepath is not None
+        assert mimiccxr_test_dicom_id_to_labels_filepath is not None
+        assert phrase_embeddings_filepath is not None
+        
+        val_dict = load_pickle(mimiccxr_val_dicom_id_to_labels_filepath)
+        test_dict = load_pickle(mimiccxr_test_dicom_id_to_labels_filepath)
+        assert val_dict['label_names'] == test_dict['label_names']
+        label_names = val_dict['label_names']
+        val_dicom_id_to_labels = val_dict['dicom_id_to_labels']
+        test_dicom_id_to_labels = test_dict['dicom_id_to_labels']
+
+        phrase_embedding_data = load_pickle(phrase_embeddings_filepath)
+        phrases = phrase_embedding_data['phrases']
+        phrase_embeddings = phrase_embedding_data['phrase_embeddings']
+        from medvqa.utils.constants import VINBIG_LABEL2PHRASE
+        label2phrase = VINBIG_LABEL2PHRASE # TODO: support other label2phrase mappings
+        label_phrases = [label2phrase[label] for label in label_names]
+        label_phrase_idxs = [phrases.index(phrase) for phrase in label_phrases]
+        label_embeddings = phrase_embeddings[label_phrase_idxs]
+
+        imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+        all_dicom_ids = list(val_dicom_id_to_labels.keys()) + list(test_dicom_id_to_labels.keys())
+
+        # Collect image paths
+        all_image_paths = []
+        for dicom_id in all_dicom_ids:
+            part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
+            image_path = get_mimiccxr_medium_image_path(part_id, subject_id, study_id, dicom_id)
+            assert os.path.exists(image_path)
+            all_image_paths.append(image_path)
+        print('len(all_image_paths) =', len(all_image_paths))
+
+        # First compute image features
+        print_blue('Computing image features ...', bold=True)
+        tmp = _run_inference_for_feature_extraction_from_images(
+            image_paths=all_image_paths,
+            checkpoint_folder_path=checkpoint_folder_path,
+            batch_size=image_batch_size,
+            num_workers=num_workers,
+            device=device,
+            extract_global_alignment_features=rank_facts_using_global_alignment,
+        )
+        if rank_facts_using_global_alignment:
+            image_global_features = tmp['image_global_features']
+            print('image_global_features.shape =', image_global_features.shape)
+        else:
+            image_local_features = tmp['image_local_features']
+            image_global_features = tmp['image_global_features']
+            print('image_local_features.shape =', image_local_features.shape)
+            if image_global_features is not None:
+                print('image_global_features.shape =', image_global_features.shape)
+
+        # Load phrase grounding model
+        print_blue('Loading phrase grounding model ...', bold=True)
+
+        # Device
+        device = torch.device(device)
+
+        # Load checkpoint metadata
+        metadata = load_metadata(checkpoint_folder_path)
+        model_kwargs = metadata['model_kwargs']
+        val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+
+        # Create model
+        print('Creating instance of PhraseGrounder ...')
+        model = PhraseGrounder(**model_kwargs)
+        model = model.to(device)
+        model.eval() # set to eval mode
+
+        # Load model from checkpoint
+        model_wrapper = ModelWrapper(model)
+        checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
+        print('Loading model from checkpoint ...')
+        print('checkpoint_path =', checkpoint_path)
+        model_wrapper.load_checkpoint(checkpoint_path, device, model_only=True)
+
+        # For each image, rank its positive and negative facts
+        print_blue('Ranking facts ...', bold=True)
+        ip2idx = {ip: i for i, ip in enumerate(all_image_paths)}
+
+        # Prepare label embeddings tensor
+        label_embeddings_tensor = torch.tensor(label_embeddings, dtype=torch.float32)
+        label_embeddings_tensor = label_embeddings_tensor.to(device)
+        label_embeddings_tensor = label_embeddings_tensor.unsqueeze(0) # (1, num_labels, phrase_embedding_dim)
+        
+        # For each image, compute ranking
+        results = []
+        for image_idx in tqdm(range(len(all_image_paths)), total=len(all_image_paths), mininterval=5):
+            dicom_id = all_dicom_ids[image_idx]
+            image_path = all_image_paths[image_idx]
+
+            if dicom_id in val_dicom_id_to_labels:
+                labels = val_dicom_id_to_labels[dicom_id]
+            else:
+                labels = test_dicom_id_to_labels[dicom_id]
+
+            if rank_facts_using_global_alignment:
+                global_feat = image_global_features[image_idx] # (global_feat_dim,)
+                global_feat = global_feat.unsqueeze(0) # (1, global_feat_dim)
+            else:
+                local_feat = image_local_features[image_idx] # (num_regions, local_feat_dim)
+                local_feat = local_feat.unsqueeze(0) # (1, num_regions, local_feat_dim)
+                if image_global_features is not None:
+                    global_feat = image_global_features[image_idx] # (global_feat_dim,)
+                    global_feat = global_feat.unsqueeze(0) # (1, global_feat_dim)
+            
+            with torch.no_grad():
+
+                if rank_facts_using_global_alignment:
+                    global_feat = global_feat.to(device)
+                else:
+                    local_feat = local_feat.to(device)
+                    if image_global_features is not None:
+                        global_feat = global_feat.to(device)
+                    else:
+                        global_feat = None
+                
+                if rank_facts_using_global_alignment:
+                    logits = model.compute_global_alignment_similarity_with_precomputed_features(
+                        global_feat=global_feat,
+                        phrase_embeddings=label_embeddings_tensor,
+                    )
+                else:
+                    logits = model.forward_with_precomputed_image_features(
+                        local_feat=local_feat, global_feat=global_feat,
+                        phrase_embeddings=label_embeddings_tensor,
+                    )['phrase_classifier_logits']
+                
+                logits = logits.squeeze(0) # (num_labels,)
+                if rank_facts_using_global_alignment:
+                    probs = torch.sigmoid(logits / 0.1) # temperature scaling
+                else:
+                    probs = torch.sigmoid(logits)
+                probs = probs.cpu().numpy().astype(np.float16)
+                assert len(labels) == len(probs)
+                # append to results
+                results.append({
+                    'image_path': image_path,
+                    'labels': labels,
+                    'probs': probs,
+                })
+
+        val_results = results[:len(val_dicom_id_to_labels)]
+        test_results = results[len(val_dicom_id_to_labels):]
+
+        def _compute_and_print_metrics(results, dicom_id_to_labels):
+            all_labels = []
+            all_probs = []
+            for result, labels in zip(results, dicom_id_to_labels.values()):
+                all_labels.append(labels)
+                all_probs.append(result['probs'])
+            all_labels = np.array(all_labels)
+            all_probs = np.array(all_probs)
+            assert all_labels.shape == all_probs.shape
+            # Compute metrics: macro-averaged ROC AUC and PRC AUC, micro-averaged ROC AUC and PRC AUC,
+            # and per-label ROC AUC and PRC AUC
+            macro_rocauc = roc_auc_score(all_labels, all_probs, average='macro')
+            micro_rocauc = roc_auc_score(all_labels, all_probs, average='micro')
+            rocauc_per_class = roc_auc_score(all_labels, all_probs, average=None)
+            prcauc_metrics = prc_auc_fn(all_labels, all_probs)
+            macro_prcauc = prcauc_metrics['macro_avg']
+            micro_prcauc = prcauc_metrics['micro_avg']
+            prcauc_per_class = prcauc_metrics['per_class']
+            print_magenta(f'Macro-averaged ROC AUC = {macro_rocauc}', bold=True)
+            print_magenta(f'Macro-averaged PRC AUC = {macro_prcauc}', bold=True)
+            print_magenta(f'Micro-averaged ROC AUC = {micro_rocauc}', bold=True)
+            print_magenta(f'Micro-averaged PRC AUC = {micro_prcauc}', bold=True)
+            # for i, label_name in enumerate(label_names):
+            #     print_magenta(f'{label_name}: ROC AUC = {rocauc_per_class[i]}, PRC AUC = {prcauc_per_class[i]}', bold=True)
+            # Compute PRC-AUC with bootstrapping
+            prc_auc_metrics_with_boot = stratified_multilabel_bootstrap_metrics(
+                gt_labels=all_labels, pred_probs=all_probs, metric_fn=prc_auc_score, num_bootstraps=500)
+
+            for class_name, mean, std in zip(label_names,
+                                         prc_auc_metrics_with_boot['mean_per_class'],
+                                         prc_auc_metrics_with_boot['std_per_class']):
+                print(f'PRC-AUC({class_name}): {mean} ± {std}')
+            print_magenta(f'PRC-AUC(macro_avg) with bootstrapping: {prc_auc_metrics_with_boot["mean_macro_avg"]} ± {prc_auc_metrics_with_boot["std_macro_avg"]}', bold=True)
+            print_magenta(f'PRC-AUC(micro_avg) with bootstrapping: {prc_auc_metrics_with_boot["mean_micro_avg"]} ± {prc_auc_metrics_with_boot["std_micro_avg"]}', bold=True)
+
+            return dict(
+                roc_auc=dict(
+                    macro=macro_rocauc,
+                    micro=micro_rocauc,
+                    per_class=rocauc_per_class,
+                ),
+                prc_auc=dict(
+                    macro=macro_prcauc,
+                    micro=micro_prcauc,
+                    per_class=prcauc_per_class,
+                ),
+                prc_auc_with_bootstrapping=prc_auc_metrics_with_boot,
+            )
+
+        # print_blue('Validation set results:', bold=True)
+        # _compute_and_print_metrics(val_results, val_dicom_id_to_labels)
+        
+        print_blue('Test set results:', bold=True)
+        test_metrics = _compute_and_print_metrics(test_results, test_dicom_id_to_labels)
+
+        # Combined results
+        dicom_id_to_labels = {**val_dicom_id_to_labels, **test_dicom_id_to_labels}
+        print_blue('Combined val+test results:', bold=True)
+        val_test_metrics = _compute_and_print_metrics(results, dicom_id_to_labels)
+
+        # Save results
+        prefix = f'mimiccxr_val_test_sets_fact_classification(nres={len(results)},nval={len(val_results)},ntest={len(test_results)},nlabels={len(label_names)})'
+        results_folder_path = get_results_folder_path(checkpoint_folder_path)
+        results_save_path = get_file_path_with_hashing_if_too_long(
+            folder_path=results_folder_path,
             prefix=prefix,
             strings=[
-                f'num_facts_per_report={num_facts_per_report}',
                 f'rank_facts_using_global_alignment={rank_facts_using_global_alignment}',
+                mimiccxr_val_dicom_id_to_labels_filepath,
+                mimiccxr_test_dicom_id_to_labels_filepath,
+                phrase_embeddings_filepath,
             ],
             force_hashing=True,
         )
         print_blue('Saving results to', results_save_path, bold=True)
-        save_pickle(results, results_save_path)
+        output = {
+            'val_results': val_results,
+            'test_results': test_results,
+            'val_test_metrics': val_test_metrics,
+            'test_metrics': test_metrics,
+            'label_names': label_names,
+            'mimiccxr_val_dicom_id_to_labels_filepath': mimiccxr_val_dicom_id_to_labels_filepath,
+            'mimiccxr_test_dicom_id_to_labels_filepath': mimiccxr_test_dicom_id_to_labels_filepath,
+            'phrase_embeddings_filepath': phrase_embeddings_filepath,
+        }
+        save_pickle(output, results_save_path)
         print('Done!')
 
     elif eval_mode == _EvalModes.INTERPRET_CXR_TEST_PUBLIC_LABEL_BASED__TEMPLATE_BASED_REPORT_GEN:
@@ -4394,7 +4679,6 @@ def evaluate(
     max_images_per_batch,
     max_facts_per_image,
     image_batch_size,
-    num_facts_per_report,
     device,
     eval_mode,
     fact_embedding_model_name,
@@ -4406,7 +4690,6 @@ def evaluate(
     chest_imagenome_label_names_filepath,
     chest_imagenome_image_id_to_labels_filepath,
     mimiccxr_report_fact_nli_integrated_data_filepath,
-    mimiccxr_integrated_report_facts_filepath,
     tune_thresholds,
     max_processes_for_chexpert_labeler,
     background_findings_and_impression_per_report_filepath,
@@ -4436,7 +4719,14 @@ def evaluate(
     cxrlt2024_task3_test_submission_csv_paths,
     ensemble_filepath,
     rank_facts_using_global_alignment,
+    mimiccxr_val_dicom_id_to_labels_filepath,
+    mimiccxr_test_dicom_id_to_labels_filepath,
+    phrase_embeddings_filepath,
 ):
+
+    # Force deterministic behavior
+    activate_determinism()
+    
     print_blue('----- Evaluating model -----', bold=True)
 
     if checkpoint_folder_path is None:
@@ -4454,7 +4744,6 @@ def evaluate(
         max_images_per_batch=max_images_per_batch,
         max_facts_per_image=max_facts_per_image,
         image_batch_size=image_batch_size,
-        num_facts_per_report=num_facts_per_report,
         num_workers=num_workers,
         device=device,
         eval_mode=eval_mode,
@@ -4467,7 +4756,6 @@ def evaluate(
         chest_imagenome_label_names_filepath=chest_imagenome_label_names_filepath,
         chest_imagenome_image_id_to_labels_filepath=chest_imagenome_image_id_to_labels_filepath,
         mimiccxr_report_fact_nli_integrated_data_filepath=mimiccxr_report_fact_nli_integrated_data_filepath,
-        mimiccxr_integrated_report_facts_filepath=mimiccxr_integrated_report_facts_filepath,
         tune_thresholds=tune_thresholds,
         max_processes_for_chexpert_labeler=max_processes_for_chexpert_labeler,
         background_findings_and_impression_per_report_filepath=background_findings_and_impression_per_report_filepath,
@@ -4497,6 +4785,9 @@ def evaluate(
         cxrlt2024_task3_test_submission_csv_paths=cxrlt2024_task3_test_submission_csv_paths,
         ensemble_filepath=ensemble_filepath,
         rank_facts_using_global_alignment=rank_facts_using_global_alignment,
+        mimiccxr_val_dicom_id_to_labels_filepath=mimiccxr_val_dicom_id_to_labels_filepath,
+        mimiccxr_test_dicom_id_to_labels_filepath=mimiccxr_test_dicom_id_to_labels_filepath,
+        phrase_embeddings_filepath=phrase_embeddings_filepath,
     )
 
 if __name__ == '__main__':

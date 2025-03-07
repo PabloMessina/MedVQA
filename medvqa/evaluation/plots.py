@@ -15,8 +15,14 @@ from medvqa.utils.files import get_cached_pickle_file
 from medvqa.utils.metrics import average_ignoring_nones_and_nans
 from medvqa.utils.logging import print_blue, print_orange, print_bold, rgba_to_ansi
 
-# List of 30 different colors
-_COLORS = np.concatenate((plt.cm.tab20(np.linspace(0, 1, 15)), plt.cm.tab20b(np.linspace(0, 1, 15))), axis=0)
+# List of 40 different colors
+_COLORS = []
+for k in range(2):
+    for i in range(10):
+        _COLORS.append(plt.cm.tab20.colors[i * 2 + k])
+for k in range(4):
+    for i in range(5):
+        _COLORS.append(plt.cm.tab20b.colors[i * 4 + k])
 
 def _replace_nans_with_local_avgs(scores):
     scores_ = []
@@ -313,56 +319,96 @@ def plot_multilabel_classification_metrics(metrics_paths, method_aliases, metric
     plt.grid(axis='y')
     plt.show()
 
-def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, metric_aliases, title,
+def generate_color_variants(color: str, n: int):
+    import matplotlib.colors as mcolors
+    base_rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB (0-1 scale)
+    white_rgb = np.array([1, 1, 1])  # White color in RGB
+    return [
+        mcolors.to_hex(base_rgb + (white_rgb - base_rgb) * (i / (n - 1)))
+        for i in range(n)
+    ]
+
+def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metric_aliases, title,
                                 figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
-                                sort_metrics=True, row_idx_to_sort_by=None, sort_methods=True, vertical=False,
-                                bbox_to_anchor=None):
-    n = len(dataframe_rows)
+                                sort_metrics=True, method_idx_to_sort_by=None, sort_methods=True, vertical=False,
+                                bbox_to_anchor=None, show_std=False, xtick_rotation=90, xtick_ha='right',
+                                xlabel=None, ylabel=None, prepend_mean_score_to_legend=True, xlim=None, ylim=None,
+                                save_as_pdf=False, save_path=None, vertical_score_text_rotation=90, colors=_COLORS,
+                                hide_xticks=False, hide_yticks=False):
+    n = len(method_dicts)
     assert n == len(method_aliases)
     assert n > 0
     m = len(metric_names)
     assert m == len(metric_aliases)
     assert m > 0
-
-    scores_per_method = [[dataframe_rows[i][k] for k in metric_names] for i in range(n)]
-    mean_score_per_metric = [np.mean([scores_per_method[i][j] for i in range(n)]) for j in range(m)]
+    
+    scores_per_method = [[method_dicts[i].get(k, 0) for k in metric_names] for i in range(n)]
+    std_per_method = [[method_dicts[i].get(f'{k}_std', 0) for k in metric_names] for i in range(n)]
+    upper_err_per_method = []
+    lower_err_per_method = []
+    for i in range(n):
+        upper_err_list = []
+        lower_err_list = []
+        for j in range(m):
+            upper_bound = scores_per_method[i][j] + std_per_method[i][j]
+            lower_bound = scores_per_method[i][j] - std_per_method[i][j]
+            if upper_bound > 1.0:
+                delta = upper_bound - 1.0
+                upper_bound -= delta
+                lower_bound -= delta
+            if lower_bound < 0.0:
+                delta = -lower_bound
+                upper_bound += delta
+                lower_bound += delta
+            upper_err_list.append(upper_bound - scores_per_method[i][j])
+            lower_err_list.append(scores_per_method[i][j] - lower_bound)
+        upper_err_per_method.append(upper_err_list)
+        lower_err_per_method.append(lower_err_list)
     metric_idxs = list(range(m))
     if sort_metrics:
-        if row_idx_to_sort_by is not None: # sort by a specific row
-            metric_idxs.sort(key=lambda i: scores_per_method[row_idx_to_sort_by][i])
+        scores_minus_lower_err_per_method = [[scores_per_method[i][j] - lower_err_per_method[i][j] for j in range(m)] for i in range(n)]
+        if method_idx_to_sort_by is not None: # sort by a specific row
+            metric_idxs.sort(key=lambda i: scores_minus_lower_err_per_method[method_idx_to_sort_by][i], reverse=vertical)
         else: # sort by the mean score
-            metric_idxs.sort(key=lambda i: mean_score_per_metric[i])
+            mean_score_per_metric = [np.mean([scores_minus_lower_err_per_method[i][j] for i in range(n)]) for j in range(m)]
+            metric_idxs.sort(key=lambda i: mean_score_per_metric[i], reverse=vertical)
     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     if sort_methods:
-        method_idxs.sort(key=lambda i: mean_score_per_method[i])
+        method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=vertical)
     min_score = min(min(scores_per_method[i]) for i in range(n))
     max_score = max(max(scores_per_method[i]) for i in range(n))
 
-    # Create a single plot with multiple horizontal bar charts, one bar for each method and metric    
-    # The height of the bar is the metric score
-    # Each method is a different color    
     plt.figure(figsize=figsize)
     if vertical:
         bar_width = 0.9 * metrics_axis_size / (n * m)
         for i in range(n):
             label = method_aliases[method_idxs[i]]
-            label = f'({mean_score_per_method[method_idxs[i]]:.3f}) {label}'
-            positions = [j * (metrics_axis_size / m) + i*bar_width for j in range(1, m+1)]
+            if prepend_mean_score_to_legend:
+                label = f'({mean_score_per_method[method_idxs[i]]:.3f}) {label}'
+            positions = [j * (metrics_axis_size / m) + i * bar_width for j in range(1, m+1)]
             scores = [scores_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
-            plt.bar(positions, scores, width=bar_width, label=label, color=_COLORS[method_idxs[i] % len(_COLORS)])
-            # plot the scores as text on top of the bars
+            # stds = [std_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)] if show_std else None
+            if show_std:
+                upper_err = [upper_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+                lower_err = [lower_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+                yerr = [lower_err, upper_err]
+            else:
+                yerr = None
+            plt.bar(positions, scores, width=bar_width, label=label, color=colors[method_idxs[i] % len(colors)], yerr=yerr, capsize=3)
             for j in range(m):
-                plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01 , f'{scores[j]:.3f}', ha='center',
-                         va='bottom', fontsize=scores_fontsize, rotation=90)
-        plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
-                   fontsize=metrics_tick_fontsize, rotation=90, ha='right')
-        print([(j+0.5) * (metrics_axis_size / m) for j in range(0, m)])
-        plt.xlabel('Metric')
-        plt.ylabel('Score')
+                plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01, f'{scores[j]:.3f}', ha='center',
+                         va='bottom', fontsize=scores_fontsize, rotation=vertical_score_text_rotation)
+        if not hide_xticks:
+            plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
+                    fontsize=metrics_tick_fontsize, rotation=xtick_rotation, ha=xtick_ha)
+        else:
+            plt.xticks([])
+        if xlabel is None: xlabel = 'Metric'
+        if ylabel is None: ylabel = 'Score'
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
         plt.grid(axis='y')
-        # plot legend above the plot
-        # plt.legend(bbox_to_anchor=(0.5, 1.1), loc='lower center', borderaxespad=0.)
         if bbox_to_anchor is None:
             plt.legend(loc='upper left')
         else:
@@ -371,25 +417,50 @@ def plot_metric_bars_per_method(dataframe_rows, method_aliases, metric_names, me
         bar_height = 0.9 * metrics_axis_size / (n * m)
         for i in range(n):
             label = method_aliases[method_idxs[n-1-i]]
-            label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
-            positions = [j * (metrics_axis_size / m) + (n-1-i)*bar_height for j in range(1, m+1)]
+            if prepend_mean_score_to_legend:
+                label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
+            positions = [j * (metrics_axis_size / m) + (n-1-i) * bar_height for j in range(1, m+1)]
             scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-            plt.barh(positions, scores, height=bar_height, label=label, color=_COLORS[method_idxs[n-1-i] % len(_COLORS)])
-            # plot the scores as text on top of the bars
+            # stds = [std_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)] if show_std else None
+            if show_std:
+                upper_err = [upper_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+                lower_err = [lower_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+                xerr = [lower_err, upper_err]
+            else:
+                xerr = None
+            plt.barh(positions, scores, height=bar_height, label=label, color=colors[method_idxs[n-1-i] % len(colors)], xerr=xerr, capsize=3)
             for j in range(m):
-                plt.text(scores[j] + (max_score - min_score) * 0.01 , positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
-        plt.yticks([j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs], fontsize=metrics_tick_fontsize)
-        plt.ylabel('Metric')
-        plt.xlabel('Score')
+                plt.text(scores[j] + (max_score - min_score) * 0.01, positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+        if not hide_yticks:
+            plt.yticks([j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
+                    fontsize=metrics_tick_fontsize)
+        else:
+            plt.yticks([])
+        if xlabel is None: xlabel = 'Score'
+        if ylabel is None: ylabel = 'Metric'
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
         plt.grid(axis='x')
-        # plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
         if bbox_to_anchor is None:
             plt.legend(loc='upper left')
         else:
             plt.legend(bbox_to_anchor=bbox_to_anchor, loc='upper left', borderaxespad=0.)
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
     plt.title(title)
-    # Plot legend outside the plot
-    # plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+
+    # Save the plot as a PDF file
+    if save_as_pdf:
+        assert save_path is not None
+        assert save_path.endswith('.pdf')
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True) # create the directory if it doesn't exist
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1, format='pdf')
+        print_blue(f'Saved the plot as a PDF file: {save_path}')
+
+    # Show the plot
     plt.show()
 
 def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_aliases, metric_names, label_frequencies,
@@ -469,7 +540,8 @@ def plot_metrics(metric_names, metric_values, title, xlabel, ylabel, figsize=(10
 
 def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_classes, pred_confs,
                                              class_names, figsize, format='xywh', gt_bbox_coords=None,
-                                             classes_to_highlight=None):
+                                             classes_to_highlight=None, hide_other_classes=False,
+                                             minimum_confidence=0.0):
     from PIL import Image
     import matplotlib.patches as patches
 
@@ -515,6 +587,9 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
     if show_gt:
         # Ground truth bounding boxes
         for i in range(len(gt_bbox_coords)):
+            if classes_to_highlight is not None and class_names[i] not in classes_to_highlight:
+                if hide_other_classes:
+                    continue
             if gt_bbox_coords[i] is not None:
                 coords_list = gt_bbox_coords[i]
                 color = _COLORS[i % len(_COLORS)]
@@ -533,6 +608,11 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
     if len(pred_coords) > 0:
         idxs = np.argsort(pred_confs)
         for i in idxs:
+            if pred_confs[i] < minimum_confidence:
+                continue
+            if classes_to_highlight is not None and class_names[pred_classes[i]] not in classes_to_highlight:
+                if hide_other_classes:
+                    continue
             x1, y1, x2, y2 = _adapt_bbox_format(pred_coords[i], format)
             color = _COLORS[pred_classes[i] % len(_COLORS)]
             alpha = 1.0 if (classes_to_highlight is None or class_names[pred_classes[i]] in classes_to_highlight) else 0.1
@@ -546,6 +626,13 @@ def visualize_predicted_bounding_boxes__yolo(image_path, pred_coords, pred_class
         ax[1].set_title('Predictions')
     else:
         pred_ax.set_title('Predictions')
+
+    # remove ticks
+    if show_gt:
+        ax[0].axis('off')
+        ax[1].axis('off')
+    else:
+        pred_ax.axis('off')
 
     # Show the plot
     plt.show()
@@ -1253,7 +1340,11 @@ def plot_nli_distribution(report_nli_input_output_jsonl_filepaths, figsize1=(10,
 
 
 def plot_barchart(values, title, xlabel, ylabel, figsize=(10, 10), color='blue', horizontal=False, bar_names=None, sort_values=False,
-                    write_values_on_bars=False, values_fontsize=10, values_color='black', values_rotation=0):
+                    write_values_on_bars=False, values_fontsize=10, values_color='black', values_rotation=0, show_stddev=False,
+                    stddevs=None, xlim=None, ylim=None, title_loc='center', save_as_pdf=False, save_path=None, xlabel_ha='center'):
+    if show_stddev:
+        assert stddevs is not None
+        assert len(values) == len(stddevs)
     n = len(values)
     if sort_values:
         indices = list(range(n))
@@ -1265,22 +1356,42 @@ def plot_barchart(values, title, xlabel, ylabel, figsize=(10, 10), color='blue',
         bar_names = range(1, n+1)
     plt.figure(figsize=figsize)
     if horizontal:
-        plt.barh(range(1, n+1), values, color=color)
+        if show_stddev:
+            plt.barh(range(1, n+1), values, xerr=stddevs, color=color, capsize=3)
+        else:   
+            plt.barh(range(1, n+1), values, color=color)
         plt.yticks(range(1, n+1), bar_names)
         plt.ylabel(ylabel)
-        plt.xlabel(xlabel)
+        plt.xlabel(xlabel, ha=xlabel_ha)
         if write_values_on_bars:
             for i in range(n):
-                plt.text(values[i], i+1, f'{values[i]:.1f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+                plt.text(values[i], i+1, f'{values[i]:.3f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
     else:
-        plt.bar(range(1, n+1), values, color=color)
+        if show_stddev:
+            plt.bar(range(1, n+1), values, yerr=stddevs, color=color, capsize=3)
+        else:
+            plt.bar(range(1, n+1), values, color=color)
         plt.xticks(range(1, n+1), bar_names)
-        plt.xlabel(xlabel)
+        plt.xlabel(xlabel, ha=xlabel_ha)
         plt.ylabel(ylabel)
         if write_values_on_bars:
             for i in range(n):
-                plt.text(i+1, values[i], f'{values[i]:.1f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
-    plt.title(title)
+                plt.text(i+1, values[i], f'{values[i]:.3f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
+    plt.title(title, loc=title_loc)
+
+    # Save the plot as a PDF file
+    if save_as_pdf:
+        assert save_path is not None
+        assert save_path.endswith('.pdf')
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True) # create the directory if it doesn't exist
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1, format='pdf')
+        print_blue(f'Saved the plot as a PDF file: {save_path}')
+
     plt.show()
 
 def plot_images(image_paths, titles=None, image_figsize=(5, 5), max_cols=3):

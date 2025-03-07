@@ -417,6 +417,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 cxrlt2024_do_balanced_sampling=False,
                 do_visual_grounding_with_bbox_regression=False,
                 data_augmentation_enabled=False,
+                replace_phrase_embeddings_with_random_vectors=False,
                 **unused_kwargs,
             ):
 
@@ -436,6 +437,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         self.use_cxrlt2024_custom_labels = use_cxrlt2024_custom_labels
         self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
         self.use_all_cxrlt2024_official_labels_for_training = use_all_cxrlt2024_official_labels_for_training
+        self.replace_phrase_embeddings_with_random_vectors = replace_phrase_embeddings_with_random_vectors
 
         forbidden_train_dicom_ids = set()
 
@@ -729,6 +731,20 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             tmp = load_pickle(dicom_id_to_pos_neg_facts_filepath)
             fact_embeddings = tmp['embeddings']
+
+            if replace_phrase_embeddings_with_random_vectors:
+                print_orange('NOTE: Replacing fact_embeddings with random vectors', bold=True)
+                save_path = f'{dicom_id_to_pos_neg_facts_filepath}.random_vectors.pkl'
+                if os.path.exists(save_path):
+                    print_orange(f'Random vectors already saved at {save_path}')
+                    fact_embeddings = load_pickle(save_path)['fact_embeddings']
+                else:
+                    fact_embeddings = np.random.randn(*fact_embeddings.shape).astype(fact_embeddings.dtype) # replace with random vectors
+                    fact_embeddings /= np.linalg.norm(fact_embeddings, axis=1, keepdims=True) # normalize
+                    save_dict = {'fact_embeddings': fact_embeddings}
+                    save_pickle(save_dict, save_path)
+                    print_orange(f'Saved random vectors at {save_path}')
+
             try:
                 # Backward compatibility
                 dicom_id_to_pos_neg_facts = tmp['dicom_id_to_pos_neg_facts']
@@ -754,8 +770,8 @@ class MIMICCXR_PhraseGroundingTrainer:
             image_paths = [None] * BIG_ENOGUGH
             positive_facts = [None] * BIG_ENOGUGH
             if use_strong_and_weak_negatives:
-                weak_negative_fact_embeddings = [None] * BIG_ENOGUGH
-                strong_negative_fact_embeddings = [None] * BIG_ENOGUGH
+                weak_negative_facts = [None] * BIG_ENOGUGH
+                strong_negative_facts = [None] * BIG_ENOGUGH
             else:
                 negative_facts = [None] * BIG_ENOGUGH
             report_idxs = [None] * BIG_ENOGUGH
@@ -805,9 +821,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         if use_facts_for_test:
                             test_indices.append(idx)
                         else:
-                            if dicom_id in forbidden_train_dicom_ids:
-                                continue
-                            train_indices.append(idx)
+                            continue
                     elif split == 'train':
                         if use_facts_for_train:
                             if dicom_id in forbidden_train_dicom_ids:
@@ -823,8 +837,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                         strong_neg_facts = dicom_id_to_strong_neg_facts[dicom_id]
                         weak_neg_facts = dicom_id_to_weak_neg_facts[dicom_id]
                         positive_facts[idx] = pos_facts
-                        strong_negative_fact_embeddings[idx] = strong_neg_facts
-                        weak_negative_fact_embeddings[idx] = weak_neg_facts
+                        strong_negative_facts[idx] = strong_neg_facts
+                        weak_negative_facts[idx] = weak_neg_facts
                     else:
                         pos_neg_facts = dicom_id_to_pos_neg_facts[dicom_id]
                         assert len(pos_neg_facts) == 2
@@ -837,8 +851,8 @@ class MIMICCXR_PhraseGroundingTrainer:
             image_paths = image_paths[:idx]
             positive_facts = positive_facts[:idx]
             if use_strong_and_weak_negatives:
-                strong_negative_fact_embeddings = strong_negative_fact_embeddings[:idx]
-                weak_negative_fact_embeddings = weak_negative_fact_embeddings[:idx]
+                strong_negative_facts = strong_negative_facts[:idx]
+                weak_negative_facts = weak_negative_facts[:idx]
             else:
                 negative_facts = negative_facts[:idx]
             report_idxs = report_idxs[:idx]
@@ -850,6 +864,10 @@ class MIMICCXR_PhraseGroundingTrainer:
                 print(f'len(test_indices) = {len(test_indices)}')
                 aux += len(test_indices)
             assert aux == idx # sanity check
+            if use_facts_for_train and use_facts_for_test:
+                intersection = len(set(train_indices) & set(test_indices))
+                print(f'len(set(train_indices) & set(test_indices)) = {intersection}')
+                assert intersection == 0 # no intersection
 
             # Calculate the average number of facts per image
             if use_facts_for_train:
@@ -857,8 +875,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 for i in train_indices:
                     pos_facts = positive_facts[i]
                     if use_strong_and_weak_negatives:
-                        strong_neg_facts = strong_negative_fact_embeddings[i]
-                        weak_neg_facts = weak_negative_fact_embeddings[i]
+                        strong_neg_facts = strong_negative_facts[i]
+                        weak_neg_facts = weak_negative_facts[i]
                         num_facts = len(pos_facts) + len(strong_neg_facts) + len(weak_neg_facts)
                         assert num_facts > 0 # at least one fact
                         aux += num_facts
@@ -876,8 +894,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 for i in test_indices:                    
                     pos_facts = positive_facts[i]
                     if use_strong_and_weak_negatives:
-                        strong_neg_facts = strong_negative_fact_embeddings[i]
-                        weak_neg_facts = weak_negative_fact_embeddings[i]
+                        strong_neg_facts = strong_negative_facts[i]
+                        weak_neg_facts = weak_negative_facts[i]
                         num_facts = len(pos_facts) + len(strong_neg_facts) + len(weak_neg_facts)
                         assert num_facts > 0
                         aux += num_facts
@@ -943,8 +961,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                         positive_facts=positive_facts,
                         use_strong_and_weak_negatives=use_strong_and_weak_negatives,
                         negative_facts=negative_facts if not use_strong_and_weak_negatives else None,
-                        weak_negative_facts=weak_negative_fact_embeddings if use_strong_and_weak_negatives else None,
-                        strong_negative_facts=strong_negative_fact_embeddings if use_strong_and_weak_negatives else None,
+                        weak_negative_facts=weak_negative_facts if use_strong_and_weak_negatives else None,
+                        strong_negative_facts=strong_negative_facts if use_strong_and_weak_negatives else None,
                         indices=train_indices, num_facts=train_num_facts_per_image,
                         use_weights=use_weighted_phrase_classifier_loss,
                         weights_filepath=cluster_and_label_weights_for_facts_filepath)
@@ -969,8 +987,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                     positive_facts=positive_facts,
                     negative_facts=negative_facts if not use_strong_and_weak_negatives else None,
                     use_strong_and_weak_negatives=use_strong_and_weak_negatives,
-                    weak_negative_facts=weak_negative_fact_embeddings if use_strong_and_weak_negatives else None,
-                    strong_negative_facts=strong_negative_fact_embeddings if use_strong_and_weak_negatives else None,
+                    weak_negative_facts=weak_negative_facts if use_strong_and_weak_negatives else None,
+                    strong_negative_facts=strong_negative_facts if use_strong_and_weak_negatives else None,
                     indices=test_indices, num_facts=test_num_facts_per_image,
                     use_weights=use_weighted_phrase_classifier_loss,
                     weights_filepath=cluster_and_label_weights_for_facts_filepath)

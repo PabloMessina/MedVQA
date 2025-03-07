@@ -4,14 +4,17 @@ from imagesize import get as get_image_size
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_LABELS
+from medvqa.utils.logging import print_orange
 load_dotenv()
 
 import os
 import numpy as np
 import pandas as pd
 
-VINBIG_ORIGINAL_IMAGES_FOLDER = os.environ['VINBIG_ORIGINAL_IMAGES_FOLDER']
-VINBIG_512x512_IMAGES_FOLDER = os.environ['VINBIG_512x512_IMAGES_FOLDER']
+# VINBIG_ORIGINAL_IMAGES_FOLDER = os.environ['VINBIG_ORIGINAL_IMAGES_FOLDER']
+# VINBIG_512x512_IMAGES_FOLDER = os.environ['VINBIG_512x512_IMAGES_FOLDER']
+VINBIG_ORIGINAL_IMAGES_FOLDER = os.environ['VINBIG_ORIGINAL_HQ_IMAGES_FOLDER']
+VINBIG_512x512_IMAGES_FOLDER = os.environ['VINBIG_512x512_HQ_IMAGES_FOLDER']
 VINBIG_ALL_IMAGES_TXT_PATH  = os.environ['VINBIG_ALL_IMAGES_TXT_PATH']
 VINBIG_TRAIN_VAL_IMAGES_TXT_PATH = os.environ['VINBIG_TRAIN_VAL_IMAGES_TXT_PATH']
 VINBIG_TEST_IMAGES_TXT_PATH = os.environ['VINBIG_TEST_IMAGES_TXT_PATH']
@@ -30,6 +33,131 @@ VINBIG_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'vinbig')
 N_IMAGES_TRAIN = 15000
 N_IMAGES_TEST = 3000
 
+VINBIG_LABELS__MODIFIED = [
+    'Aortic enlargement',
+    'Atelectasis',
+    'Calcification',
+    'Cardiomegaly',
+    'Clavicle fracture',
+    'Consolidation',
+    'Edema',
+    'Emphysema',
+    'Enlarged PA',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Lung cavity',
+    'Lung cyst',
+    'Mediastinal shift',
+    'Nodule/Mass',
+    'Pleural effusion',
+    'Pleural thickening',
+    'Pneumothorax',
+    'Pulmonary fibrosis',
+    'Rib fracture',
+    'Other lesion',
+    'COPD',
+    'Lung tumor',
+    'Pneumonia',
+    'Tuberculosis',
+    'Other disease',
+    'Abnormal finding', # replaces "No finding"
+]
+
+VINBIG_BBOX_NAMES__MODIFIED = [
+    'Aortic enlargement',
+    'Atelectasis',
+    'Calcification',
+    'Cardiomegaly',
+    'Clavicle fracture',
+    'Consolidation',
+    'Edema',
+    'Emphysema',
+    'Enlarged PA',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Lung cavity',
+    'Lung cyst',
+    'Mediastinal shift',
+    'Nodule/Mass',
+    'Other lesion',
+    'Pleural effusion',
+    'Pleural thickening',
+    'Pneumothorax',
+    'Pulmonary fibrosis',
+    'Rib fracture',
+    'Abnormal finding', # new class not present in the original dataset, it encompasses all the other classes
+]
+
+VINBIG_NUM_BBOX_CLASSES__MODIFIED = len(VINBIG_BBOX_NAMES__MODIFIED)
+
+LUNG_OPACITY_CLASSES = [ # all classes that are subcategories of "Lung Opacity"
+    'Lung Opacity',
+    'Consolidation',
+    'Nodule/Mass',
+    'Atelectasis',
+    'Pulmonary fibrosis',
+    'Edema',
+    'Infiltration',
+    'ILD',
+]
+assert all(class_name in VINBIG_BBOX_NAMES for class_name in LUNG_OPACITY_CLASSES)
+
+
+# source: https://www.kaggle.com/competitions/vinbigdata-chest-xray-abnormalities-detection/data
+VINBIGDATA_CHALLENGE_CLASSES = [
+    'Aortic enlargement',
+    'Atelectasis',
+    'Calcification',
+    'Cardiomegaly',
+    'Consolidation',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Nodule/Mass',
+    'Other lesion',
+    'Pleural effusion',
+    'Pleural thickening',
+    'Pneumothorax',
+    'Pulmonary fibrosis',
+]
+assert all(x in VINBIG_BBOX_NAMES for x in VINBIGDATA_CHALLENGE_CLASSES)
+
+VINBIGDATA_CHALLENGE_IOU_THRESHOLD = 0.4
+
+# source: https://github.com/philip-mueller/chex/blob/main/conf/dataset/class_names/vindrcxr_loc_top15.yaml
+VINBIG_CHEX_CLASSES = [
+    'Aortic enlargement',
+    'Atelectasis',
+    'Cardiomegaly',
+    'Calcification',
+    'Consolidation',
+    'ILD',
+    'Infiltration',
+    'Lung Opacity',
+    'Mediastinal shift',
+    'Nodule/Mass',
+    'Pulmonary fibrosis',
+    'Pneumothorax',
+    'Pleural thickening',
+    'Pleural effusion',
+    'Other lesion',
+]
+assert all(x in VINBIG_BBOX_NAMES for x in VINBIG_CHEX_CLASSES)
+
+VINBIG_CHEX_IOU_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+
+VINBIG_RAD_DINO_CLASSES = [ # source: https://www.nature.com/articles/s42256-024-00965-w
+    'Lung Opacity',
+    'Cardiomegaly',
+    'Pleural thickening',
+    'Aortic enlargement',
+    'Pulmonary fibrosis',
+    'Tuberculosis',
+    'Pleural effusion',
+]
+
 def get_unique_bbox_names():
     unique_bbox_names = set()
     for csv_path in [VINBIG_ANNOTATIONS_TRAIN_CSV_PATH, VINBIG_ANNOTATIONS_TEST_CSV_PATH]:
@@ -39,7 +167,7 @@ def get_unique_bbox_names():
             unique_bbox_names.add(class_name)
     return sorted(list(unique_bbox_names))
 
-def _load_image_id_2_bboxes(csv_path, for_training=False, normalize=False, class_id_offset=0):
+def _load_image_id_2_bboxes(csv_path, for_training=False, normalize=False, class_id_offset=0, improve_labels=False):
     import pandas as pd
     df = pd.read_csv(csv_path)
     df = df[df['x_min'].notna()]
@@ -73,13 +201,50 @@ def _load_image_id_2_bboxes(csv_path, for_training=False, normalize=False, class
         if is_anomalous:
             anomalous_count += 1
     print(f'Anomalous bboxes found: {anomalous_count} of {len(df)}')
+
+    if improve_labels:
+        # We will apply some modifications to improve the labels
+        print_orange('NOTE: Improving VinDr-CXR bbox labels ...', bold=True)
+
+        # 1. The class "Lung Opacity" should subsume the following classes as they are subcategories of it:
+        #    - "Lung Opacity" (already included)
+        #    - "Consolidation"
+        #    - "Nodule/Mass"
+        #    - "Atelectasis"
+        #    - "Pulmonary fibrosis"
+        #    - "Edema"
+        #    - "Infiltration"
+        #    - "ILD"
+        for bboxes in image_id_2_bboxes.values():
+            lo_bboxes = []
+            for class_name in LUNG_OPACITY_CLASSES:
+                try:
+                    lo_bboxes.extend(bboxes[class_name])
+                except KeyError:
+                    pass
+            if len(lo_bboxes) > 0:
+                bboxes['Lung Opacity'] = lo_bboxes
+
+        # 2. The class "No finding" will be converted to "Abnormal finding" (i.e., the logical negation of "No finding"),
+        #    and all the bounding boxes present in an image will be assigned to this class.
+        for bboxes in image_id_2_bboxes.values():
+            af_bboxes = []
+            for bbox_list in bboxes.values():
+                af_bboxes.extend(bbox_list)
+            if len(af_bboxes) > 0:
+                bboxes['Abnormal finding'] = af_bboxes
+
     if for_training:
         print('class_id_offset:', class_id_offset)
+        if improve_labels:
+            class_names = VINBIG_BBOX_NAMES__MODIFIED # modified class names
+        else:
+            class_names = VINBIG_BBOX_NAMES
         for image_id, bboxes in image_id_2_bboxes.items():
             bbox_list = []
             class_list = []
             for class_name, bboxes in bboxes.items():
-                class_id = VINBIG_BBOX_NAMES.index(class_name) + class_id_offset
+                class_id = class_names.index(class_name) + class_id_offset
                 for bbox in bboxes:
                     bbox_list.append(bbox)
                     class_list.append(class_id)
@@ -87,21 +252,23 @@ def _load_image_id_2_bboxes(csv_path, for_training=False, normalize=False, class
                     
     return image_id_2_bboxes
 
-def load_train_image_id_2_bboxes(for_training=False, normalize=False, class_id_offset=0):
-    return _load_image_id_2_bboxes(VINBIG_ANNOTATIONS_TRAIN_CSV_PATH, for_training, normalize, class_id_offset)
+def load_train_image_id_2_bboxes(for_training=False, normalize=False, class_id_offset=0, improve_labels=False):
+    return _load_image_id_2_bboxes(VINBIG_ANNOTATIONS_TRAIN_CSV_PATH, for_training, normalize, class_id_offset,
+                                   improve_labels=improve_labels)
 
-def load_test_image_id_2_bboxes(for_training=False, normalize=False, class_id_offset=0):
-    return _load_image_id_2_bboxes(VINBIG_ANNOTATIONS_TEST_CSV_PATH, for_training, normalize, class_id_offset)
+def load_test_image_id_2_bboxes(for_training=False, normalize=False, class_id_offset=0, improve_labels=False):
+    return _load_image_id_2_bboxes(VINBIG_ANNOTATIONS_TEST_CSV_PATH, for_training, normalize, class_id_offset,
+                                   improve_labels=improve_labels)
 
-def compute_masks_and_binary_labels_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_classes, flatten_grid=True):
-    mask = np.zeros((len(VINBIG_BBOX_NAMES), mask_height, mask_width), dtype=np.float32)
-    binary_labels = np.zeros((len(VINBIG_BBOX_NAMES),), dtype=np.float32)
+def compute_masks_and_binary_labels_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_classes, num_bbox_classes, flatten_grid=True):
+    mask = np.zeros((num_bbox_classes, mask_height, mask_width), dtype=np.float32)
+    binary_labels = np.zeros((num_bbox_classes,), dtype=np.float32)
     for bbox, class_id in zip(bbox_coords, bbox_classes):
         x1, y1, x2, y2 = bbox
         compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, mask=mask[class_id])
         binary_labels[class_id] = 1
     if flatten_grid:
-        mask = mask.reshape((len(VINBIG_BBOX_NAMES), -1))
+        mask = mask.reshape((num_bbox_classes, -1))
     mask = (mask > 0).astype(np.float32) # binarize
     return mask, binary_labels
 
@@ -109,16 +276,16 @@ def _merge_labels(*labels_list):
     merged = np.zeros((len(VINBIG_LABELS),), np.int8)
     merged[-1] = 1
     
-    # First check: majority thinks it's healthy
-    healthy_count = 0
-    for labels in labels_list:
-        if labels[-1] == 1:
-            assert labels.sum() == 1
-            healthy_count += 1
-        else:
-            assert labels.sum() > 0
-    if healthy_count >= len(labels_list) - 1:
-        return merged
+    # # First check: majority thinks it's healthy
+    # healthy_count = 0
+    # for labels in labels_list:
+    #     if labels[-1] == 1:
+    #         assert labels.sum() == 1
+    #         healthy_count += 1
+    #     else:
+    #         assert labels.sum() > 0
+    # if healthy_count >= len(labels_list) - 1:
+    #     return merged
 
     # General case: union of labels
     for labels in labels_list:
@@ -149,7 +316,12 @@ def _merge_labels(*labels_list):
 #     print('Done!')
 
 # def load_labels(sanity_check=True):
-def load_labels():
+def load_labels(improve_labels=False):
+    """
+    Returns:
+    - train_image_id_2_labels: dict, image_id -> labels
+    - test_image_id_2_labels: dict, image_id -> labels
+    """
 
     # Train & test label dataframes
     df_labels_train = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)
@@ -197,6 +369,37 @@ def load_labels():
     #         labels_matrix[i] = image_id_2_labels[image_ids[i]]
     #     _sanity_check_train_labels(labels_matrix)
 
+    if improve_labels:
+        # We will apply some modifications to improve the labels
+        print_orange('NOTE: Improving VinDr-CXR classification labels ...', bold=True)
+        
+        # 1. The class "Lung Opacity" should subsume the following classes as they are subcategories of it:
+        #    - "Lung Opacity" (already included)
+        #    - "Consolidation"
+        #    - "Nodule/Mass"
+        #    - "Atelectasis"
+        #    - "Pulmonary fibrosis"
+        #    - "Edema"
+        #    - "Infiltration"
+        #    - "ILD"
+        lung_opacity_idx = VINBIG_LABELS.index('Lung Opacity')
+        for class_name in LUNG_OPACITY_CLASSES:
+            class_idx = VINBIG_LABELS.index(class_name)
+            for labels in train_image_id_2_labels.values():
+                if labels[class_idx] == 1:
+                    labels[lung_opacity_idx] = 1
+            for labels in test_image_id_2_labels.values():
+                if labels[class_idx] == 1:
+                    labels[lung_opacity_idx] = 1
+        
+        # 2. The class "No finding" will be converted to "Abnormal finding" (i.e., the logical negation of "No finding"),
+        #    and all the bounding boxes present in an image will be assigned to this class.
+        no_finding_idx = VINBIG_LABELS.index('No finding')
+        for labels in train_image_id_2_labels.values():
+            labels[no_finding_idx] = 1 - labels[no_finding_idx]
+        for labels in test_image_id_2_labels.values():
+            labels[no_finding_idx] = 1 - labels[no_finding_idx]
+
     # Return
     return train_image_id_2_labels, test_image_id_2_labels
 
@@ -212,7 +415,7 @@ def get_medium_size_image_path(image_id):
     return os.path.join(VINBIG_512x512_IMAGES_FOLDER, f'{image_id}.jpg')
 
 def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), denormalize=False, verbose=False,
-                                        allowed_classes=None, class_to_draw_last=None):
+                                        allowed_classes=None, class_to_draw_last=None, bbox_class_names=VINBIG_BBOX_NAMES):
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     from PIL import Image
@@ -236,7 +439,7 @@ def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), d
         if verbose:
             print(f'{i}: {class_name}')
             print(bbox_list)
-        color_idx = VINBIG_BBOX_NAMES.index(class_name)
+        color_idx = bbox_class_names.index(class_name)
         for bbox in bbox_list:
             if denormalize:
                 bbox = [bbox[0] * w, bbox[1] * h, bbox[2] * w, bbox[3] * h]
@@ -320,8 +523,8 @@ class VinBigBBoxVisualizer:
         visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=figsize, verbose=verbose, allowed_classes=allowed_classes,
                                             class_to_draw_last=class_name)
 
-def compute_label_frequencies():
-    train_image_id_2_labels, test_image_id_2_labels = load_labels()
+def compute_label_frequencies(improve_labels=False):
+    train_image_id_2_labels, test_image_id_2_labels = load_labels(improve_labels=improve_labels)
 
     # Train labels
     df = pd.read_csv(VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH)

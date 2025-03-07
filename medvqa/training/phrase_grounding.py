@@ -2,6 +2,7 @@ import torch
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
+from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED
 from medvqa.losses import BinaryMultiLabelClassificationLossNames, get_binary_multilabel_loss
 from medvqa.losses.custom_bbox_loss import compute_bbox_loss
 from medvqa.losses.nt_xent_loss import NTXentLoss
@@ -48,6 +49,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 do_visual_grounding_with_bbox_regression=False,
                 do_visual_grounding_with_segmentation=False,
                 skip_nms=False,
+                use_vinbig_with_modified_labels=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
@@ -72,6 +74,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, gradient_accumulation_steps, max_grad_norm)
+
+    if use_vinbig_with_modified_labels:
+        vinbig_num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED) # 23
+    else:
+        vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES # 22
     
     def _step_fn__fact_grounding(batch, phrase_classifier_criterion, use_weighted_phrase_classifier_loss):
 
@@ -479,8 +486,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 if not using_yolo:
                     target_coords = batch['btc'].to(device) # (batch_size, num_boxes, num_regions, 4)
                     target_presence = batch['btp'].to(device) # (batch_size, num_boxes, num_regions)
-                    assert target_coords.shape[1] == VINBIG_NUM_BBOX_CLASSES
-                    assert VINBIG_NUM_BBOX_CLASSES < phrase_classification_labels.shape[1] # some classes don't have bounding boxes
+                    assert target_coords.shape[1] == vinbig_num_bbox_classes
+                    assert vinbig_num_bbox_classes < phrase_classification_labels.shape[1] # some classes don't have bounding boxes
             else:
                 vinbig_bbox_coords = batch['bboxes']
                 vinbig_bbox_classes = batch['classes']
@@ -502,7 +509,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'batch': batch, # used by YOLO
             }
             if using_yolo:
-                model_kwargs['use_first_n_facts_for_detection'] = VINBIG_NUM_BBOX_CLASSES # only 22 out of 28 classes have bounding boxes
+                model_kwargs['use_first_n_facts_for_detection'] = vinbig_num_bbox_classes # only 22 out of 28 classes have bounding boxes
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
@@ -528,12 +535,12 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                             for preds in predicted_bboxes_:
                                 assert len(preds) == 3 # coords, confs, classes
                                 coords, confs, classes = preds
-                                mask = classes < VINBIG_NUM_BBOX_CLASSES # only first VINBIG_NUM_BBOX_CLASSES classes have bounding boxes
+                                mask = classes < vinbig_num_bbox_classes # only first vinbig_num_bbox_classes classes have bounding boxes
                                 predicted_bboxes.append((coords[mask], confs[mask], classes[mask]))
 
                 elif do_visual_grounding_with_segmentation:
-                    assert sigmoid_attention.shape[1] > VINBIG_NUM_BBOX_CLASSES # some classes don't have bounding boxes
-                    sigmoid_attention_with_mask = sigmoid_attention[:, :VINBIG_NUM_BBOX_CLASSES]
+                    assert sigmoid_attention.shape[1] > vinbig_num_bbox_classes # some classes don't have bounding boxes
+                    sigmoid_attention_with_mask = sigmoid_attention[:, :vinbig_num_bbox_classes]
                 
                 if training:
                     # Compute losses
@@ -547,8 +554,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     # 2.1 attention supervision loss
                     if not using_yolo:
                         if do_visual_grounding_with_bbox_regression:
-                            assert visual_grounding_binary_logits.shape[1] > VINBIG_NUM_BBOX_CLASSES # only 22 out of 28 classes have bounding boxes
-                            visual_grounding_binary_logits = visual_grounding_binary_logits[:, :VINBIG_NUM_BBOX_CLASSES] # only first num_boxes classes have bounding boxes
+                            assert visual_grounding_binary_logits.shape[1] > vinbig_num_bbox_classes # only 22 out of 28 classes have bounding boxes
+                            visual_grounding_binary_logits = visual_grounding_binary_logits[:, :vinbig_num_bbox_classes] # only first num_boxes classes have bounding boxes
                             visual_grounding_binary_logits = visual_grounding_binary_logits.contiguous() # (batch_size, num_boxes, num_regions)
                             attention_supervision_loss = balanced_binary_cross_entropy_criterion(visual_grounding_binary_logits, target_presence)
                             attention_supervision_loss *= attention_supervision_loss_weight # weight
@@ -562,9 +569,9 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     # 2.2 attention regularization loss
                     if not using_yolo:
                         if use_attention_regularization_loss:
-                            sigmoid_attention_without_mask = sigmoid_attention[:, VINBIG_NUM_BBOX_CLASSES:]
+                            sigmoid_attention_without_mask = sigmoid_attention[:, vinbig_num_bbox_classes:]
                             areas = sigmoid_attention_without_mask.mean(dim=-1)
-                            labels_without_mask = phrase_classification_labels[:, VINBIG_NUM_BBOX_CLASSES:]
+                            labels_without_mask = phrase_classification_labels[:, vinbig_num_bbox_classes:]
                             pos_indices = labels_without_mask == 1
                             neg_indices = labels_without_mask == 0
                             areas_pos = areas[pos_indices]
@@ -583,8 +590,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     # 3. visual grounding bbox regression loss
                     if not using_yolo:
                         if do_visual_grounding_with_bbox_regression:
-                            assert visual_grounding_bbox_logits.shape[1] > VINBIG_NUM_BBOX_CLASSES # only 22 out of 28 classes have bounding boxes
-                            visual_grounding_bbox_logits = visual_grounding_bbox_logits[:, :VINBIG_NUM_BBOX_CLASSES] # only first num_boxes classes have bounding boxes
+                            assert visual_grounding_bbox_logits.shape[1] > vinbig_num_bbox_classes # only 22 out of 28 classes have bounding boxes
+                            visual_grounding_bbox_logits = visual_grounding_bbox_logits[:, :vinbig_num_bbox_classes] # only first num_boxes classes have bounding boxes
                             visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_coords, target_presence)
                             losses.append(visual_grounding_bbox_loss)
 
@@ -648,13 +655,13 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                     predictions = detect_output
                     if skip_nms:
                         resized_shapes = batch['resized_shape']
-                        assert len(resized_shapes) * VINBIG_NUM_BBOX_CLASSES  == len(predictions)
+                        assert len(resized_shapes) * vinbig_num_bbox_classes == len(predictions)
                         output['resized_shape'] = resized_shapes # needed for NMS later
                     output['yolo_predictions'] = predictions
                 else:
                     if skip_nms:
-                        output['pred_bbox_probs'] = visual_grounding_binary_logits[:, :VINBIG_NUM_BBOX_CLASSES].detach().sigmoid()
-                        output['pred_bbox_coords'] = visual_grounding_bbox_logits[:, :VINBIG_NUM_BBOX_CLASSES].detach()
+                        output['pred_bbox_probs'] = visual_grounding_binary_logits[:, :vinbig_num_bbox_classes].detach().sigmoid()
+                        output['pred_bbox_coords'] = visual_grounding_bbox_logits[:, :vinbig_num_bbox_classes].detach()
                     else:
                         output['predicted_bboxes'] = predicted_bboxes
                 output['vinbig_bbox_coords'] = vinbig_bbox_coords
@@ -1014,6 +1021,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                do_visual_grounding_with_bbox_regression=False,
                do_visual_grounding_with_segmentation=False,
                skip_nms=False,
+               use_vinbig_with_modified_labels=False,
                **unused_kwargs,
             ):
     
@@ -1120,6 +1128,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
                             do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
                             skip_nms=skip_nms,
+                            use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
                         )
     engine = Engine(step_fn)
     return engine

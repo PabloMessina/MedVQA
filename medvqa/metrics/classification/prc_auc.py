@@ -19,7 +19,7 @@ def _prc_auc_task(idx):
     gt = _shared_gt.T[idx]
     return prc_auc_score(gt, probs)
 
-def prc_auc_fn(probs, gt, num_workers=6):
+def prc_auc_fn(gt, probs, num_workers=6):
     # start = time.time()
     # Compute micro-average AUC by flattening the arrays.
     micro_avg = prc_auc_score(gt.flatten(), probs.flatten())

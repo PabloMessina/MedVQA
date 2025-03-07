@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from datetime import datetime
@@ -47,3 +48,24 @@ class DictWithDefault:
         self.values[key] = value
     def items(self):
         return self.values.items()
+    
+def activate_determinism(seed=42, verbose=True):
+    if verbose:
+        from medvqa.utils.logging import print_red
+        print_red(f'Activating determinism(seed={seed})...', bold=True)
+    import torch
+    import random
+    import numpy as np
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+def deactivate_determinism():
+    import torch
+    torch.use_deterministic_algorithms(False)
+    torch.backends.cudnn.benchmark = True  # Enables faster training for some models
+    torch.backends.cudnn.deterministic = False

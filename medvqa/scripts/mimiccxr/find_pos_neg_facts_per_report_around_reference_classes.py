@@ -6,24 +6,29 @@ import multiprocessing as mp
 import time
 from multiprocessing import Pool
 from tqdm import tqdm
-from medvqa.datasets.mimiccxr import load_mimiccxr_reports_detailed_metadata
+from medvqa.datasets.mimiccxr import get_path_to_report_text_dict, load_mimiccxr_reports_detailed_metadata
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.scripts.mimiccxr.find_pos_neg_neutral_facts_per_report_v2 import _compute_mlp_fact_based_nli_softmaxes_per_report
 from medvqa.utils.constants import VINBIG_LABELS
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_class_specific_regex, load_json, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.files import (
+    get_file_path_with_hashing_if_too_long, load_class_specific_regex,
+    load_json, load_jsonl, load_pickle, save_pickle,
+)
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
 from medvqa.utils.logging import print_blue, print_red
 
 class _Task:
     FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS = 'find_facts_relevant_to_anchor_facts'
     FIND_POSITIVE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI = 'find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli'
+    COMBINE_POS_NEG_FACTS_WITH_GPT4_MINED_LABELS = 'combine_pos_neg_facts_with_GPT4_mined_labels'
     
     @staticmethod
     def choices():
         return [
             _Task.FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS,
             _Task.FIND_POSITIVE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI,
+            _Task.COMBINE_POS_NEG_FACTS_WITH_GPT4_MINED_LABELS,
         ]
     
 def _filter_facts(integrated_fact_metadata):
@@ -181,6 +186,7 @@ _shared_fidx2anchors = None
 _shared_anchor_to_clusters = None
 _shared_strong_negative_facts_per_report = None
 _shared_max_negative_facts_per_report = None
+_shared_aid2aids = None
 
 def _assign_positive_and_negative_facts_to_report(ridx):
     # Get report facts
@@ -195,18 +201,21 @@ def _assign_positive_and_negative_facts_to_report(ridx):
     pos_fidxs = [fidx for fidx in report_fidxs if fidx in _shared_relevant_fact_idxs_set]
     # positive_fact_idxs_per_report[ridx] = pos_fidxs
     
-    # Find used clusters and used anchor facts
+    # Find used clusters and used anchor ids
     used_cluster_ids = set()
     for fidx in report_fidxs:
         used_cluster_ids.add(_shared_cluster_labels[fidx])
     used_anchor_ids = set()
     for fidx in pos_fidxs:
-        used_anchor_ids.update(_shared_fidx2anchors[fidx])
+        for a in _shared_fidx2anchors[fidx]:
+            used_anchor_ids.add(a)
+            if a in _shared_aid2aids:
+                used_anchor_ids.update(_shared_aid2aids[a])
 
     # Collect clusters to sample from
     unused_clusters = []
     for i, (akey, sub_clusters) in enumerate(_shared_anchor_to_clusters):
-        if any(a in used_anchor_ids for a in akey): continue # skip used anchor facts
+        if any(a in used_anchor_ids for a in akey): continue # skip used anchor ids
         for j, (c, _) in enumerate(sub_clusters):
             if c not in used_cluster_ids:
                 unused_clusters.append((i, j)) # anchor index, cluster index
@@ -259,6 +268,16 @@ def _assign_positive_and_negative_facts_to_report(ridx):
 
     return (pos_fidxs, clean_snfidxs, sampled_idxs, contradiction) # positive, strong negative, weak negative, contradiction
 
+_ANCHOR_TO_ADDITIONAL_ENTAILED_ANCHORS = {
+    "Atelectasis": ["Lung Opacity"],
+    "Consolidation": ["Lung Opacity"],
+    "Edema": ["Lung Opacity"],
+    "ILD": ["Lung Opacity"],
+    "Infiltration": ["Lung Opacity"],
+    "Nodule/Mass": ["Lung Opacity"],
+    "Pneumonia": ["Lung Opacity"],
+    "Pulmonary fibrosis": ["Lung Opacity"],
+}
 
 def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     integrated_report_facts_jsonl_filepath: str,
@@ -344,11 +363,19 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     relevant_fact_idxs_set = set(relevant_fact_idxs)
 
     # --- Assign relevant facts to anchor keys
+    aid2aids = dict()
+    for anchor, additional_anchors in _ANCHOR_TO_ADDITIONAL_ENTAILED_ANCHORS.items():
+        anchor_id = anchor_facts.index(anchor)
+        for aa in additional_anchors:
+            aa_id = anchor_facts.index(aa)
+            if anchor_id not in aid2aids:
+                aid2aids[anchor_id] = []
+            aid2aids[anchor_id].append(aa_id)
+    
     anchor_to_relevant_facts = dict()
     fidx2anchors = [None] * len(all_facts)
     for fidx, anchors in zip(relevant_fact_idxs, anchors_per_fact):
-        key = sorted(anchors)
-        key = tuple(key)
+        key = tuple(sorted(anchors))
         if key not in anchor_to_relevant_facts:
             anchor_to_relevant_facts[key] = []
         anchor_to_relevant_facts[key].append(fidx)
@@ -453,6 +480,7 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     global _shared_anchor_to_clusters
     global _shared_strong_negative_facts_per_report
     global _shared_max_negative_facts_per_report
+    global _shared_aid2aids
     _shared_report_facts = report_facts
     _shared_fact2gfact = fact2gfact
     _shared_sentence2idx = sentence2idx
@@ -462,6 +490,7 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     _shared_anchor_to_clusters = anchor_to_clusters
     _shared_strong_negative_facts_per_report = strong_negative_facts_per_report
     _shared_max_negative_facts_per_report = max_negative_facts_per_report
+    _shared_aid2aids = aid2aids
     
     start_time = time.time()
     with Pool(processes=mp.cpu_count()) as pool:
@@ -571,6 +600,156 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
+def _combine_pos_neg_facts_with_GPT4_mined_labels(
+    mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath: str,
+    GPT4_mined_labels_jsonl_filepath: str,
+    precomputed_phrase_embeddings_for_labels_pickle_filepath: str,
+    hypothesis_to_class_phrase: dict,
+):
+    """
+    Combine positive and negative facts with GPT-4 mined labels.
+
+    Args:
+        mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath (str): Path to the DICOM ID to positive/negative facts pickle file.
+        GPT4_mined_labels_jsonl_filepath (str): Path to the GPT-4 mined labels JSONL file.
+        precomputed_phrase_embeddings_for_labels_pickle_filepath (str): Path to the precomputed phrase embeddings for labels pickle file.
+        hypothesis_to_class_phrase (dict): Mapping from hypothesis to class name.
+    """
+
+    print_blue(f'Running _combine_pos_neg_facts_with_GPT4_mined_labels()...', bold=True)
+
+    # Load DICOM ID to positive/negative facts
+    print(f'Loading {mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath}...')
+    dicom_id_to_pos_neg_facts = load_pickle(mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath)
+    dicom_id_to_pos_facts = dicom_id_to_pos_neg_facts['dicom_id_to_pos_facts']
+    dicom_id_to_strong_neg_facts = dicom_id_to_pos_neg_facts['dicom_id_to_strong_neg_facts']
+    dicom_id_to_weak_neg_facts = dicom_id_to_pos_neg_facts['dicom_id_to_weak_neg_facts']
+    facts = dicom_id_to_pos_neg_facts['facts']
+    fact_embeddings = dicom_id_to_pos_neg_facts['embeddings']
+    print(f'len(dicom_id_to_pos_facts): {len(dicom_id_to_pos_facts)}')
+    print(f'len(dicom_id_to_strong_neg_facts): {len(dicom_id_to_strong_neg_facts)}')
+    print(f'len(dicom_id_to_weak_neg_facts): {len(dicom_id_to_weak_neg_facts)}')
+    print(f'len(facts): {len(facts)}')
+    print(f'fact_embeddings.shape: {fact_embeddings.shape}')
+
+    # Remove unnecessary facts
+    print('Removing unnecessary facts...')
+    used_fact_idxs = set()
+    for fidxs in dicom_id_to_pos_facts.values():
+        used_fact_idxs.update(fidxs)
+    for fidxs in dicom_id_to_strong_neg_facts.values():
+        used_fact_idxs.update(fidxs)
+    for fidxs in dicom_id_to_weak_neg_facts.values():
+        used_fact_idxs.update(fidxs)
+    print(f'len(used_fact_idxs): {len(used_fact_idxs)}')
+    used_fact_idxs = list(used_fact_idxs)
+    used_fact_idxs.sort()
+    facts = [facts[i] for i in used_fact_idxs]
+    fact_embeddings = fact_embeddings[used_fact_idxs]
+    old_fidx_to_new_fidx = {old: new for new, old in enumerate(used_fact_idxs)}
+    for dicom_id in dicom_id_to_pos_facts:
+        dicom_id_to_pos_facts[dicom_id] = [old_fidx_to_new_fidx[fidx] for fidx in dicom_id_to_pos_facts[dicom_id]]
+    for dicom_id in dicom_id_to_strong_neg_facts:
+        dicom_id_to_strong_neg_facts[dicom_id] = [old_fidx_to_new_fidx[fidx] for fidx in dicom_id_to_strong_neg_facts[dicom_id]]
+    for dicom_id in dicom_id_to_weak_neg_facts:
+        dicom_id_to_weak_neg_facts[dicom_id] = [old_fidx_to_new_fidx[fidx] for fidx in dicom_id_to_weak_neg_facts[dicom_id]]
+    print(f'len(facts): {len(facts)} (after filtering)')
+    print(f'fact_embeddings.shape: {fact_embeddings.shape} (after filtering)')
+
+    # Map report text to DICOM ID
+    path_to_report_text_dict = get_path_to_report_text_dict()
+    mimiccxr_reports_detailed_metadata = load_mimiccxr_reports_detailed_metadata()
+    report_to_data = dict()
+    for filepath, dicom_id_view_pos_pairs in zip(
+        mimiccxr_reports_detailed_metadata['filepaths'],
+        mimiccxr_reports_detailed_metadata['dicom_id_view_pos_pairs'],
+    ):
+        report_text = path_to_report_text_dict[filepath]
+        report_text = ' '.join(report_text.split())
+        try:
+            data = report_to_data[report_text]
+        except KeyError:
+            data = report_to_data[report_text] = dict(
+                dicom_ids=[],
+                pos_labels=[],
+                neg_labels=[],
+            )
+        for dicom_id, _ in dicom_id_view_pos_pairs:
+            data['dicom_ids'].append(dicom_id)
+
+    # Load precomputed fact embeddings for labels
+    print(f'Loading {precomputed_phrase_embeddings_for_labels_pickle_filepath}...')
+    tmp = load_pickle(precomputed_phrase_embeddings_for_labels_pickle_filepath)
+    phrases = tmp['phrases']
+    phrase_embeddings = tmp['phrase_embeddings']
+
+    # Load GPT-4 mined labels
+    print(f'Reading {GPT4_mined_labels_jsonl_filepath}...')
+    GPT4_mined_labels = load_jsonl(GPT4_mined_labels_jsonl_filepath)
+    unknown_count = 0
+    for item in GPT4_mined_labels:
+        query = item['metadata']['query']
+        i = query.index(' | #H: ')
+        report = query[4:i]
+        hypothesis = query[i+7:]
+        class_phrase = hypothesis_to_class_phrase[hypothesis]
+        class_phrase_idx = phrases.index(class_phrase)
+        label = item['parsed_response']['label']
+        if label in ('probably true', 'certainly true'):
+            report_to_data[report]['pos_labels'].append(class_phrase_idx)
+        elif label in ('probably false', 'certainly false'):
+            report_to_data[report]['neg_labels'].append(class_phrase_idx)
+        else:
+            assert label == 'unknown'
+            unknown_count += 1
+    print(f'Number of unknown labels: {unknown_count}/{len(GPT4_mined_labels)}')
+
+    # Merge positive and negative facts with GPT-4 mined labels
+    new_dicom_id_to_pos_facts = dicom_id_to_pos_facts.copy()
+    new_dicom_id_to_strong_neg_facts = dicom_id_to_strong_neg_facts.copy()
+
+    labels_offset = len(facts)
+
+    for report_text, data in report_to_data.items():
+        dicom_ids = data['dicom_ids']
+        pos_labels = data['pos_labels']
+        neg_labels = data['neg_labels']
+        pos_labels = [labels_offset + x for x in pos_labels]
+        neg_labels = [labels_offset + x for x in neg_labels]
+        for dicom_id in dicom_ids:
+            new_dicom_id_to_pos_facts[dicom_id].extend(pos_labels)
+            new_dicom_id_to_strong_neg_facts[dicom_id].extend(neg_labels)
+
+    facts.extend([f'{phrase} (GPT-4)' for phrase in phrases])
+    fact_embeddings = np.concatenate([fact_embeddings, phrase_embeddings], axis=0, dtype=np.float32)
+    print(f'len(facts): {len(facts)} (after merging)')
+    print(f'fact_embeddings.shape: {fact_embeddings.shape} (after merging)')
+
+    # Save output
+    output = {
+        'facts': facts,
+        'embeddings': fact_embeddings,
+        'dicom_id_to_pos_facts': new_dicom_id_to_pos_facts,
+        'dicom_id_to_strong_neg_facts': new_dicom_id_to_strong_neg_facts,
+        'dicom_id_to_weak_neg_facts': dicom_id_to_weak_neg_facts, # unchanged
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        prefix=f'mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels(nf={len(facts)},nl={len(phrases)},'
+                f'ngpt4={len(GPT4_mined_labels)})',
+        folder_path=LARGE_FAST_CACHE_DIR,
+        strings=[
+            mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath,
+            GPT4_mined_labels_jsonl_filepath,
+            precomputed_phrase_embeddings_for_labels_pickle_filepath,
+            f'len(facts)={len(facts)}',
+            f'len(GPT4_mined_labels)={len(GPT4_mined_labels)}',
+            f'len(phrases)={len(phrases)}',
+        ],
+        force_hashing=True,
+    )
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', type=str, required=True, choices=_Task.choices())
@@ -591,9 +770,27 @@ def main():
     parser.add_argument('--mlp_nli_entailment_threshold', type=float, default=0.5)
     parser.add_argument('--num_clusters', type=int)
     parser.add_argument('--max_negative_facts_per_report', type=int)
+    parser.add_argument('--GPT4_mined_labels_jsonl_filepath', type=str)
+    parser.add_argument('--precomputed_phrase_embeddings_for_labels_pickle_filepath', type=str)
+    parser.add_argument('--mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath', type=str)
     args = parser.parse_args()
 
-    if args.task == _Task.FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS:
+    if args.task == _Task.COMBINE_POS_NEG_FACTS_WITH_GPT4_MINED_LABELS:
+        assert args.mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath is not None
+        assert args.GPT4_mined_labels_jsonl_filepath is not None
+        assert args.precomputed_phrase_embeddings_for_labels_pickle_filepath is not None
+        # TODO: make this more generic (below is specific to VinDr-CXR)
+        from medvqa.scripts.mimiccxr.generate_classification_labels_with_openai import VINBIG_LABEL_TO_HYPOTHESIS
+        from medvqa.utils.constants import VINBIG_LABEL2PHRASE
+        h2p = {h: VINBIG_LABEL2PHRASE[l] for l, h in VINBIG_LABEL_TO_HYPOTHESIS.items()}
+        _combine_pos_neg_facts_with_GPT4_mined_labels(
+            mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath=args.mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath,
+            GPT4_mined_labels_jsonl_filepath=args.GPT4_mined_labels_jsonl_filepath,
+            precomputed_phrase_embeddings_for_labels_pickle_filepath=args.precomputed_phrase_embeddings_for_labels_pickle_filepath,
+            hypothesis_to_class_phrase=h2p,
+        )
+
+    elif args.task == _Task.FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS:
         assert args.integrated_fact_metadata_jsonl_filepath is not None
         assert args.integrated_sentence_to_negative_facts_jsonl_filepath is not None
         dataset_name = 'VinDr-CXR' # TODO: support other datasets

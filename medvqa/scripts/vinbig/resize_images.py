@@ -10,10 +10,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--width', type=int, required=True)
     parser.add_argument('--height', type=int, required=True)
-    parser.add_argument('--keep-aspect-ratio', action='store_true', default=False)
-    parser.add_argument('--source-folder', type=str, required=True)
-    parser.add_argument('--target-folder', type=str, required=True)
-    parser.add_argument('--num-workers', type=int, default=6)
+    parser.add_argument('--keep_aspect_ratio', action='store_true', default=False)
+    parser.add_argument('--source_folder', type=str, required=True)
+    parser.add_argument('--target_folder', type=str, required=True)
+    parser.add_argument('--num_workers', type=int, default=6)
     return parser.parse_args()
 
 if __name__ == '__main__':
