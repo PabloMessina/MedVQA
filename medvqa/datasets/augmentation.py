@@ -598,3 +598,41 @@ class ChestImagenomeAlbumentationAdapter:
             return bbox_coords
         else:
             return bbox_coords, bbox_presence
+
+
+class VinBigAlbumentationAdapter:
+
+    def __init__(self):
+        pass
+    
+    def encode(self, bbox_coords, bbox_classes):
+        albumentation_bbox_coords = []
+        for i in range(len(bbox_coords)):
+            x_min = bbox_coords[i][0]
+            y_min = bbox_coords[i][1]
+            x_max = bbox_coords[i][2]
+            y_max = bbox_coords[i][3]
+            assert x_min <= x_max
+            assert y_min <= y_max
+            if x_min < x_max and y_min < y_max: # ignore invalid bboxes
+                albumentation_bbox_coords.append([
+                    bbox_coords[i][0],
+                    bbox_coords[i][1],
+                    bbox_coords[i][2],
+                    bbox_coords[i][3],
+                    bbox_classes[i],
+                ])
+        return albumentation_bbox_coords
+    
+    def decode(self, albumentation_bbox_coords):
+        bbox_coords = []
+        bbox_classes = []
+        for i in range(len(albumentation_bbox_coords)):
+            bbox_coords.append([
+                albumentation_bbox_coords[i][0],
+                albumentation_bbox_coords[i][1],
+                albumentation_bbox_coords[i][2],
+                albumentation_bbox_coords[i][3],
+            ])
+            bbox_classes.append(albumentation_bbox_coords[i][4])
+        return bbox_coords, bbox_classes

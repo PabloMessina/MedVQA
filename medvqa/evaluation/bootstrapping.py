@@ -51,7 +51,7 @@ def stratified_multilabel_bootstrap_metrics(gt_labels, pred_probs, metric_fn, nu
         boot_indices = resample(remaining_indices, replace=True)
 
         # Step 4: Combine both sets
-        final_boot_indices = np.hstack([unique_selected_indices, boot_indices])
+        final_boot_indices = np.concatenate([unique_selected_indices, boot_indices])
         assert len(final_boot_indices) == N
 
         # Step 5: Compute metric (e.g., ROCAUC) per class
@@ -117,7 +117,7 @@ def _compute_vinbig_iou_map_metrics(*unused_args):
     remaining_indices = np.setdiff1d(_shared_all_indices, unique_selected_indices, assume_unique=True)
 
     # Step 4: Combine both sets
-    boot_indices = np.hstack([unique_selected_indices, resample(remaining_indices, replace=True)])
+    boot_indices = np.concatenate([unique_selected_indices, resample(remaining_indices, replace=True)])
 
     boot_pred_boxes_list = [_shared_pred_boxes_list[i] for i in boot_indices]
     boot_pred_classes_list = [_shared_pred_classes_list[i] for i in boot_indices]
@@ -283,7 +283,7 @@ def _compute_pos_neg_fact_classification_metric(*unused_args):
         boot_indices = resample(remaining_indices, replace=True)
 
         # Step 3: Combine both sets
-        final_boot_indices = np.hstack([selected_indices, boot_indices])
+        final_boot_indices = np.concatenate([selected_indices, boot_indices])
         assert len(final_boot_indices) == len(_shared_probs_list[i])
 
         # Step 4: Compute metric (e.g., ROCAUC)
@@ -321,7 +321,7 @@ def stratified_bootstrap_pos_neg_fact_classification_metrics(items, metric_fn, n
         neg_probs = item['neg_probs']
         assert len(pos_probs) > 0, "At least one positive sample is required."
         assert len(neg_probs) > 0, "At least one negative sample is required."
-        probs_list.append(np.hstack([pos_probs, neg_probs]))
+        probs_list.append(np.concatenate([pos_probs, neg_probs]))
         pos_indices_list.append(np.arange(len(pos_probs)))
         neg_indices_list.append(np.arange(len(pos_probs), len(pos_probs) + len(neg_probs)))
         all_indices_list.append(np.arange(len(pos_probs) + len(neg_probs)))
@@ -362,3 +362,71 @@ def stratified_bootstrap_pos_neg_fact_classification_metrics(items, metric_fn, n
         mean=mean_metric,
         std=std_metric
     )
+
+_shared_metric_values = None
+_shared_indices = None
+
+def _bootstrap_metric_avg(seed):
+    np.random.seed(seed) # seed with random value
+    
+    # Sample with replacement
+    boot_indices = resample(_shared_indices, replace=True)
+    
+    # Compute average metric
+    return _shared_metric_values[boot_indices].mean()
+
+def apply_stratified_bootstrapping(metric_values, class_to_indices, class_names, metric_name,
+                                   num_bootstraps=500, num_processes=None, seed_base=0):
+    """
+    Apply bootstrapping to estimate the mean and standard deviation of metrics computed by a given function.
+
+    Args:
+        metric_values (numpy.ndarray): Array of metric values.
+        class_to_indices (list): List of indices per class.
+        class_names (list): List of class names.
+        metric_name (str): Name of the metric.
+        num_bootstraps (int, optional): Number of bootstrap iterations (default: 500).
+        num_processes (int, optional): Number of processes to use for parallel computation (default: None, don't use multiprocessing).
+        seed_base (int, optional): Base seed for random number generator (default: 0).
+
+    Returns:
+        dict: A dictionary where each metric name maps to another dictionary containing:
+              - "mean": The mean of the metric across bootstrap samples.
+              - "std": The standard deviation of the metric across bootstrap samples.
+    """
+    metric_values = np.array(metric_values)
+    
+    # Perform bootstrapping
+    global _shared_metric_values
+    global _shared_indices
+    
+    _shared_metric_values = metric_values
+    
+    indices_list = class_to_indices + [list(range(len(metric_values)))]
+    assert len(indices_list) == len(class_names) + 1
+    assert all(len(indices) > 0 for indices in indices_list)
+    avgs_list = [None] * len(indices_list)
+    bootstrap_seeds = [seed_base + i for i in range(num_bootstraps)]
+    
+    for i, indices in enumerate(indices_list):
+        _shared_indices = indices
+        
+        if num_processes is not None:
+            import multiprocessing
+            with multiprocessing.Pool(processes=num_processes) as pool:
+                avgs_list[i] = list(tqdm(pool.imap(_bootstrap_metric_avg, bootstrap_seeds),
+                                         total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+        else:
+            avgs_list[i] = list(tqdm(map(_bootstrap_metric_avg, bootstrap_seeds),
+                                     total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+    
+    # Compute mean and std deviation
+    final_metrics = {}
+    for i, avgs in enumerate(avgs_list):
+        if i < len(class_names):
+            key = f'{metric_name}({class_names[i]})'
+        else:
+            key = metric_name
+        final_metrics[key] = {"mean": np.mean(avgs), "std": np.std(avgs)}
+    
+    return final_metrics

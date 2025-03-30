@@ -1,6 +1,7 @@
 import torch
 
 from medvqa.models.checkpoint import load_model_state_dict
+from medvqa.utils.common import activate_determinism, deactivate_determinism
 
 def append_metric_name(train_list, val_list, log_list, metric_name, train=True, val=True, log=True):
     if train: train_list.append(metric_name)
@@ -12,6 +13,11 @@ def batch_to_device(batch, device):
         if isinstance(batch[key], torch.Tensor):
             batch[key] = batch[key].to(device)
     return batch
+
+def run_validation_engine(validator_engine, val_dataloader, val_dataloader_size):
+    activate_determinism(verbose=False) # deterministic validation
+    validator_engine.run(val_dataloader, max_epochs=1, epoch_length=val_dataloader_size)
+    deactivate_determinism() # back to non-deterministic training
 
 def run_common_boilerplate_code_and_start_training(
     update_lr_batchwise,
@@ -121,8 +127,7 @@ def run_common_boilerplate_code_and_start_training(
     trainer_engine.add_event_handler(Events.EPOCH_STARTED, lambda : print(f'(1) Training stage (lr = {optimizer.param_groups[0]["lr"]:.6f}) ...'))
     trainer_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
-    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, lambda : validator_engine.run(val_dataloader,
-                                     max_epochs=1, epoch_length=val_dataloader_size))
+    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, lambda : run_validation_engine(validator_engine, val_dataloader, val_dataloader_size))
     validator_engine.add_event_handler(Events.EPOCH_STARTED, lambda : print('(2) Validation stage ...'))
     validator_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
     validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)

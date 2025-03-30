@@ -1,16 +1,39 @@
 import argparse
+import math
 import os
+from pprint import pprint
 import torch
 import numpy as np
 
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
+from tqdm import tqdm
 from medvqa.datasets.chexlocalize import CHEXLOCALIZE_CLASS_NAMES
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
-from medvqa.datasets.vinbig import VINBIG_CHEX_CLASSES, VINBIG_CHEX_IOU_THRESHOLDS, VINBIG_RAD_DINO_CLASSES, VINBIGDATA_CHALLENGE_CLASSES, VINBIGDATA_CHALLENGE_IOU_THRESHOLD
+from medvqa.datasets.ms_cxr import get_ms_cxr_category_names, get_ms_cxr_phrase_to_category_name
+from medvqa.datasets.vinbig import (
+    VINBIG_CHEX_CLASSES,
+    VINBIG_CHEX_IOU_THRESHOLDS,
+    VINBIG_RAD_DINO_CLASSES,
+    VINBIGDATA_CHALLENGE_CLASSES,
+    VINBIGDATA_CHALLENGE_IOU_THRESHOLD,
+)
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
-from medvqa.evaluation.bootstrapping import stratified_multilabel_bootstrap_metrics, stratified_vinbig_bootstrap_iou_map
-from medvqa.metrics.bbox.utils import calculate_exact_iou_union, compute_mAP__yolov11, compute_mean_iou_per_class__yolov11, find_optimal_conf_iou_thresholds
+from medvqa.evaluation.bootstrapping import (
+    apply_stratified_bootstrapping,
+    stratified_multilabel_bootstrap_metrics,
+    stratified_vinbig_bootstrap_iou_map,
+)
+from medvqa.metrics.bbox.utils import (
+    calculate_exact_iou_union,
+    compute_iou_with_nms,
+    compute_mAP__yolov11,
+    compute_mean_iou_per_class__yolov11,
+    compute_probability_map_iou,
+    find_optimal_conf_iou_thresholds,
+    find_optimal_conf_iou_max_det_thresholds__single_class,
+    find_optimal_probability_map_conf_threshold,
+)
 from medvqa.metrics.classification.prc_auc import prc_auc_fn, prc_auc_score
 from medvqa.models.vision.visual_modules import RawImageEncoding
 from medvqa.utils.files import get_results_folder_path, save_pickle
@@ -42,7 +65,6 @@ from medvqa.metrics import (
     attach_condition_aware_accuracy,
     attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
-    attach_condition_aware_segmask_iou,
     attach_condition_aware_segmask_iou_per_class,
 )
 from medvqa.models.checkpoint import (
@@ -150,19 +172,27 @@ def _evaluate_model(
 
     if eval_chest_imagenome_gold or eval_mscxr:
 
+        if checkpoint_folder_path_to_borrow_metadata_from is not None:
+            metadata = load_metadata(checkpoint_folder_path_to_borrow_metadata_from)
+            collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
+            mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
+            val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+
         count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
         if eval_chest_imagenome_gold:
             bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
         else:
             bbox_grounding_collate_batch_fn = None
         if eval_mscxr:
-            phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['pg'])
+            mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
         else:
-            phrase_grounding_collate_batch_fn = None
+            mscxr_phrase_grounding_collate_batch_fn = None
         mimiccxr_trainer_kwargs['use_facts_for_train'] = False
         mimiccxr_trainer_kwargs['use_facts_for_test'] = False
         mimiccxr_trainer_kwargs['use_mscxr_for_train'] = False
+        mimiccxr_trainer_kwargs['use_mscxr_for_val'] = False
         mimiccxr_trainer_kwargs['use_mscxr_for_test'] = eval_mscxr
+        mimiccxr_trainer_kwargs['mscxr_test_on_all_images'] = eval_mscxr # if True, test on all MSCXR
         mimiccxr_trainer_kwargs['use_cxrlt2024_challenge_split'] = False 
         mimiccxr_trainer_kwargs['use_cxrlt2024_official_labels'] = False
         mimiccxr_trainer_kwargs['use_cxrlt2024_custom_labels'] = False
@@ -177,7 +207,7 @@ def _evaluate_model(
             max_phrases_per_batch=max_phrases_per_batch,
             max_phrases_per_image=max_phrases_per_image,
             bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
-            phrase_grounding_collate_batch_fn=phrase_grounding_collate_batch_fn,
+            mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
             num_test_workers=num_workers,
             **mimiccxr_trainer_kwargs,
         )
@@ -375,82 +405,285 @@ def _evaluate_model(
     if eval_mscxr:
 
         count_print('----- Evaluating on MSCXR Phrase Grounding -----')
-
-        # Create evaluation engine
-        print_blue('Creating evaluation engine ...', bold=True)
-        evaluation_engine = get_engine(model=model, device=device, **evaluation_engine_kwargs)
-
-        # Attach metrics
-        metrics_to_print = []
-        _cond_func = lambda x: x['flag'] == 'pg'
-        attach_condition_aware_segmask_iou(evaluation_engine, 'pred_mask', 'gt_mask', 'segmask_iou', _cond_func)
-        metrics_to_print.append('segmask_iou')
-
-        # Attach accumulators
-        attach_accumulator(evaluation_engine, 'pred_mask')
-        attach_accumulator(evaluation_engine, 'gt_mask')
-
-        # Timer
-        timer = Timer()
-        timer.attach(evaluation_engine, start=Events.EPOCH_STARTED)
-
-        # Logging
-        print_blue('Defining log_metrics_handler ...', bold=True)
-        log_metrics_handler = get_log_metrics_handler(timer, metrics_to_print=metrics_to_print)
-        log_iteration_handler = get_log_iteration_handler()
         
-        # Attach handlers
-        evaluation_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-        evaluation_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
+        assert candidate_conf_thresholds is not None
+        assert candidate_iou_thresholds is not None
 
-        # Start evaluation
-        print_blue('Running engine ...', bold=True)
-        evaluation_engine.run(mimiccxr_trainer.test_mscxr_dataloader)
+        # Get dataset and dataloader
+        dataset = mimiccxr_trainer.mscxr_test_dataset
+        dataloader = mimiccxr_trainer.mscxr_test_dataloader
 
-        # Print final metrics
-        print_blue('Final metrics:', bold=True)
-        metrics = evaluation_engine.state.metrics
-        # 1) segmask iou
-        metric_name = 'segmask_iou'
-        print(f'{metric_name}: {metrics[metric_name]}')
+        # Aux variables
+        train_preds_and_gt = {
+            'pred_bbox_prob_maps': [],
+            'pred_bbox_coord_maps': [],
+            'pred_classification_probs': [],
+            'gt_bbox_coords': [],
+            'phrases': [],
+            'categories': [],
+            'image_paths': [],
+        }
+        val_preds_and_gt = {
+            'pred_bbox_prob_maps': [],
+            'pred_bbox_coord_maps': [],
+            'pred_classification_probs': [],
+            'gt_bbox_coords': [],
+            'phrases': [],
+            'categories': [],
+            'image_paths': [],
+        }
+        test_preds_and_gt = {
+            'pred_bbox_prob_maps': [],
+            'pred_bbox_coord_maps': [],
+            'pred_classification_probs': [],
+            'gt_bbox_coords': [],
+            'phrases': [],
+            'categories': [],
+            'image_paths': [],
+        }
+        n_train = len(mimiccxr_trainer.mscxr_train_indices)
+        n_val = len(mimiccxr_trainer.mscxr_val_indices)
+        n_test = len(mimiccxr_trainer.mscxr_test_indices)
+        train_prc_aucs = []
+        val_prc_aucs = []
+        test_prc_aucs = []
+
+        category_names = get_ms_cxr_category_names()
+        category_name_to_idx = {name: idx for idx, name in enumerate(category_names)}
+        phrase_to_category_name = get_ms_cxr_phrase_to_category_name()
+
+        # Run evaluation
+        print_blue('Running evaluation ...', bold=True)
+        model.eval()
+        H, W = None, None
+        idx = 0
+        
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc='Evaluating', unit='batch', mininterval=2):
+                images = batch['i'].to(device)
+                phrase_embeddings = batch['pe'].to(device)
+                phrase_classification_labels = batch['pcl']
+                bboxes = batch['bboxes']
+                classes = batch['classes']
+                output = model(
+                    raw_images=images,
+                    phrase_embeddings=phrase_embeddings,
+                    predict_bboxes=True,
+                    only_compute_features=True,
+                    apply_nms=False, # Skip NMS in order to get all predictions
+                )
+                phrase_classifier_logits = output['phrase_classifier_logits']
+                visual_grounding_bbox_prob_logits = output['visual_grounding_binary_logits'] # (B, N, H * W, 1)
+                visual_grounding_bbox_prob_logits = visual_grounding_bbox_prob_logits.squeeze(-1) # (B, N, H * W)
+                visual_grounding_bbox_coord_logits = output['visual_grounding_bbox_logits'] # (B, N, H * W, 4)
+                visual_grounding_bbox_coord_logits = visual_grounding_bbox_coord_logits.cpu().numpy()
+                phrase_classifier_probs = torch.sigmoid(phrase_classifier_logits).cpu().numpy() # (B, N)
+                visual_grounding_bbox_probs = torch.sigmoid(visual_grounding_bbox_prob_logits).cpu().numpy()
+                assert visual_grounding_bbox_probs.ndim == 3
+                assert visual_grounding_bbox_coord_logits.ndim == 4
+
+                if H is None:
+                    # Get the integer square root of H * W, assuming H = W
+                    H = W = math.isqrt(visual_grounding_bbox_prob_logits.shape[-1])
+                    assert H * W == visual_grounding_bbox_prob_logits.shape[-1]
+
+                batch_size = images.size(0)
+
+                for b in range(batch_size):
+                
+                    i = dataset.indices[idx]
+                    phrase_idxs = dataset.phrase_idxs[i]
+                    image_path = dataset.image_paths[i]
+                    prc_auc = prc_auc_score(phrase_classification_labels[b], phrase_classifier_probs[b])
+                    
+                    if idx < n_train:
+                        preds_and_gt = train_preds_and_gt
+                        train_prc_aucs.append(prc_auc)
+                    elif idx < n_train + n_val:
+                        preds_and_gt = val_preds_and_gt
+                        val_prc_aucs.append(prc_auc)
+                    else:
+                        preds_and_gt = test_preds_and_gt
+                        test_prc_aucs.append(prc_auc)
+                    
+                    for j, phrase_idx in enumerate(phrase_idxs):
+                        phrase = mimiccxr_trainer.mscxr_phrases[phrase_idx]
+                        phrase_bboxes = [bbox for bbox, cls in zip(bboxes[b], classes[b]) if cls == j]
+                        assert len(phrase_bboxes) > 0
+                        pred_bbox_prob_map = visual_grounding_bbox_probs[b, j] # (H * W,)
+                        pred_bbox_coord_map = visual_grounding_bbox_coord_logits[b, j] # (H * W, 4)
+                        pred_bbox_prob_map = pred_bbox_prob_map.reshape(H, W)
+                        pred_bbox_coord_map = pred_bbox_coord_map.reshape(H, W, 4)
+                        preds_and_gt['pred_bbox_prob_maps'].append(pred_bbox_prob_map)
+                        preds_and_gt['pred_bbox_coord_maps'].append(pred_bbox_coord_map)
+                        preds_and_gt['pred_classification_probs'].append(phrase_classifier_probs[b, j])
+                        preds_and_gt['gt_bbox_coords'].append(phrase_bboxes)
+                        preds_and_gt['phrases'].append(phrase)
+                        preds_and_gt['categories'].append(phrase_to_category_name[phrase])
+                        preds_and_gt['image_paths'].append(image_path)
+
+                    idx += 1
+
+        # Print a few stats
+        print_blue('Stats:', bold=True)
+        print(f'H = {H}, W = {W}')
+        print(f'n_train = {n_train}')
+        print(f'n_val = {n_val}')
+        print(f'n_test = {n_test}')
+        print(f'len(train_preds_and_gt["pred_bbox_prob_maps"]) = {len(train_preds_and_gt["pred_bbox_prob_maps"])}')
+        print(f'len(val_preds_and_gt["pred_bbox_prob_maps"]) = {len(val_preds_and_gt["pred_bbox_prob_maps"])}')
+        print(f'len(test_preds_and_gt["pred_bbox_prob_maps"]) = {len(test_preds_and_gt["pred_bbox_prob_maps"])}')
+
+        # Print PRC-AUCs
+        print_blue('PRC-AUCs:', bold=True)
+        print(f'Train PRC-AUC: {sum(train_prc_aucs) / len(train_prc_aucs)}')
+        print(f'Val PRC-AUC: {sum(val_prc_aucs) / len(val_prc_aucs)}')
+        print(f'Test PRC-AUC: {sum(test_prc_aucs) / len(test_prc_aucs)}')
+
+        # Compute IoU based on bbox probability maps on train, val, and test sets with bootstrapping
+
+        def _compute_iou(split, preds_and_gt):
+            # Train
+            print_blue(f'Finding optimal probability threshold for IoU on the {split} set ...', bold=True)
+            tmp = find_optimal_probability_map_conf_threshold(
+                prob_maps=np.array(preds_and_gt['pred_bbox_prob_maps']), # (N, H, W)
+                gt_bboxes_list=preds_and_gt['gt_bbox_coords'],
+            )
+            print(tmp)
+            best_conf_th = tmp['best_conf_th']
+            ious = [compute_probability_map_iou(prob_map, gt_bboxes, best_conf_th) for\
+                        prob_map, gt_bboxes in zip(preds_and_gt['pred_bbox_prob_maps'],
+                                                    preds_and_gt['gt_bbox_coords'])]
+            classes = [category_name_to_idx[phrase_to_category_name[phrase]] for phrase in preds_and_gt['phrases']]
+            class_to_indices = [[] for _ in range(len(category_names))]
+            for i, class_idx in enumerate(classes):
+                class_to_indices[class_idx].append(i)
+            iou_with_boostrapping = apply_stratified_bootstrapping(
+                metric_values=ious, class_to_indices=class_to_indices,
+                class_names=category_names, metric_name='iou', num_bootstraps=500, num_processes=6)
+            print_bold(f'{split.capitalize()} IoU with bootstrapping:')
+            pprint(iou_with_boostrapping)
+            return best_conf_th, ious, iou_with_boostrapping, class_to_indices
+        
+        # Train
+        train_best_conf_th, train_ious, train_iou_with_boostrapping, train_class_to_indices =\
+            _compute_iou('train', train_preds_and_gt)
+        train_preds_and_gt['ious'] = train_ious
+        # Val
+        val_best_conf_th, val_ious, val_iou_with_boostrapping, val_class_to_indices =\
+            _compute_iou('val', val_preds_and_gt)
+        val_preds_and_gt['ious'] = val_ious
+        # Test
+        test_best_conf_th, test_ious, test_iou_with_boostrapping, test_class_to_indices =\
+            _compute_iou('test', test_preds_and_gt)
+        test_preds_and_gt['ious'] = test_ious
+
+        # Compute IoU based on bbox coordinates on train, val, and test sets with bootstrapping
+
+        def _compute_iou_2(split, preds_and_gt, class_to_indices):
+            print_blue(f'Finding optimal IoU and conf thresholds for IoU based on bounding box coordinates on the {split} set ...', bold=True)
+            tmp = find_optimal_conf_iou_max_det_thresholds__single_class(
+                gt_coords_list=preds_and_gt['gt_bbox_coords'],
+                pred_boxes_list=preds_and_gt['pred_bbox_coord_maps'],
+                pred_confs_list=preds_and_gt['pred_bbox_prob_maps'],
+                iou_thresholds=candidate_iou_thresholds,
+                conf_thresholds=candidate_conf_thresholds,
+                pre_nms_max_det=100,
+                verbose=False,
+            )
+            best_iou_th = tmp['best_iou_threshold']
+            best_conf_th = tmp['best_conf_threshold']
+            best_max_det = tmp['best_max_det']
+            print(f'{split}_best_iou_threshold = {best_iou_th}')
+            print(f'{split}_best_conf_threshold = {best_conf_th}')
+            print(f'{split}_best_max_det = {best_max_det}')
+            ious = []
+            for pred_bbox_coord_map, pred_bbox_prob_map, gt_bbox_coords in zip(preds_and_gt['pred_bbox_coord_maps'],
+                                                                            preds_and_gt['pred_bbox_prob_maps'],
+                                                                            preds_and_gt['gt_bbox_coords']):
+                iou = compute_iou_with_nms(
+                    gt_bboxes=gt_bbox_coords,
+                    pred_bbox_coords=pred_bbox_coord_map.reshape(-1, 4),
+                    pred_bbox_probs=pred_bbox_prob_map.reshape(-1),
+                    iou_th=best_iou_th,
+                    conf_th=best_conf_th,
+                    pre_nms_max_det=100,
+                    post_nms_max_det=best_max_det,
+                )
+                ious.append(iou)
+            iou_with_boostrapping = apply_stratified_bootstrapping(
+                metric_values=ious, class_to_indices=class_to_indices,
+                class_names=category_names, metric_name='iou', num_bootstraps=500, num_processes=6)
+            print_bold(f'{split.capitalize()} IoU with bootstrapping:')
+            pprint(iou_with_boostrapping)
+            return best_iou_th, best_conf_th, best_max_det, ious, iou_with_boostrapping
+
+        # Train
+        train_best_iou_th_2, train_best_conf_th_2, train_best_max_det_2, train_ious_2, train_iou_with_boostrapping_2 =\
+            _compute_iou_2('train', train_preds_and_gt, train_class_to_indices)
+        train_preds_and_gt['ious_2'] = train_ious_2
+        # Val
+        val_best_iou_th_2, val_best_conf_th_2, val_best_max_det_2, val_ious_2, val_iou_with_boostrapping_2 =\
+            _compute_iou_2('val', val_preds_and_gt, val_class_to_indices)
+        val_preds_and_gt['ious_2'] = val_ious_2
+        # Test
+        test_best_iou_th_2, test_best_conf_th_2, test_best_max_det_2, test_ious_2, test_iou_with_boostrapping_2 =\
+            _compute_iou_2('test', test_preds_and_gt, test_class_to_indices)
+        test_preds_and_gt['ious_2'] = test_ious_2
+
+        # Compute average classification probability on train, val, and test sets with bootstrapping
+
+        def _compute_avg_classification_prob(split, preds_and_gt, class_to_indices):
+            print_blue(f'Computing average classification probability on the {split} set ...', bold=True)
+            avg_classification_prob_with_boostrapping = apply_stratified_bootstrapping(
+                metric_values=preds_and_gt['pred_classification_probs'], class_to_indices=class_to_indices,
+                class_names=category_names, metric_name='avg_classification_prob', num_bootstraps=500, num_processes=6)
+            print_bold(f'{split.capitalize()} Avg Classification Prob with bootstrapping:')
+            pprint(avg_classification_prob_with_boostrapping)
+            return avg_classification_prob_with_boostrapping
+        
+        # Train
+        train_avg_classification_prob_with_bootstrappig = _compute_avg_classification_prob(
+            'train', train_preds_and_gt, train_class_to_indices)
+        # Val
+        val_avg_classification_prob_with_bootstrappig = _compute_avg_classification_prob(
+            'val', val_preds_and_gt, val_class_to_indices)
+        # Test
+        test_avg_classification_prob_with_bootstrappig = _compute_avg_classification_prob(
+            'test', test_preds_and_gt, test_class_to_indices)
 
         # Save metrics to file
-        image_paths = []
-        phrases = []
-        for dataloader in  mimiccxr_trainer.test_mscxr_dataloader.dataloaders:
-            dataset = dataloader.dataset
-            for i in dataset.indices:
-                image_paths.append(dataset.image_paths[i])
-                phrases.append(dataset.phrases[i])
-            print(f'len(image_paths) = {len(image_paths)}')
-        assert len(image_paths) == len(metrics['pred_mask']) == len(metrics['gt_mask'])
         print_blue('Saving metrics to file ...', bold=True)
         results_folder_path = get_results_folder_path(checkpoint_folder_path)
         save_path = os.path.join(results_folder_path, f'mscxr_metrics.pkl')
-        pred_masks = metrics['pred_mask']
-        gt_masks = metrics['gt_mask']
         output = dict(
-            image_paths=[],
-            phrases=[],
-            pred_masks=[],
-            gt_masks=[],
-            ious=[],
-            segmask_iou=metrics['segmask_iou'],
+            train_preds_and_gt=train_preds_and_gt,
+            val_preds_and_gt=val_preds_and_gt,
+            test_preds_and_gt=test_preds_and_gt,
+            train_iou_with_boostrapping=train_iou_with_boostrapping,
+            val_iou_with_boostrapping=val_iou_with_boostrapping,
+            test_iou_with_boostrapping=test_iou_with_boostrapping,
+            train_iou_with_boostrapping_2=train_iou_with_boostrapping_2,
+            val_iou_with_boostrapping_2=val_iou_with_boostrapping_2,
+            test_iou_with_boostrapping_2=test_iou_with_boostrapping_2,
+            train_avg_classification_prob_with_bootstrappig=train_avg_classification_prob_with_bootstrappig,
+            val_avg_classification_prob_with_bootstrappig=val_avg_classification_prob_with_bootstrappig,
+            test_avg_classification_prob_with_bootstrappig=test_avg_classification_prob_with_bootstrappig,
+            train_best_conf_th=train_best_conf_th,
+            val_best_conf_th=val_best_conf_th,
+            test_best_conf_th=test_best_conf_th,
+            train_best_iou_th_2=train_best_iou_th_2,
+            val_best_iou_th_2=val_best_iou_th_2,
+            test_best_iou_th_2=test_best_iou_th_2,
+            train_best_conf_th_2=train_best_conf_th_2,
+            val_best_conf_th_2=val_best_conf_th_2,
+            test_best_conf_th_2=test_best_conf_th_2,
+            train_best_max_det_2=train_best_max_det_2,
+            val_best_max_det_2=val_best_max_det_2,
+            test_best_max_det_2=test_best_max_det_2,
         )
-        for i in range(len(image_paths)):
-            for j in range(len(pred_masks[i])):
-                intersection = torch.min(pred_masks[i][j], gt_masks[i][j]).sum()
-                union = torch.max(pred_masks[i][j], gt_masks[i][j]).sum()
-                iou = intersection / union
-                iou = iou.item()
-                output['image_paths'].append(image_paths[i])
-                output['phrases'].append(phrases[i][j])
-                output['pred_masks'].append(pred_masks[i][j].cpu().numpy())
-                output['gt_masks'].append(gt_masks[i][j].cpu().numpy())
-                output['ious'].append(iou)
-        print_magenta('mean_iou =', sum(output['ious']) / len(output['ious']), bold=True)
         save_pickle(output, save_path)
-        print(f'Saved metrics to {save_path}')
+        print_bold(f'Saved metrics to {save_path}')
 
     if eval_chexlocalize:
 

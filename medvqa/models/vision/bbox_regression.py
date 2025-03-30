@@ -634,64 +634,123 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v6(nn.Module):
         # 4) Return the predicted bounding box coordinates, presence and multi-label classification scores
         return pred_bbox_coords, pred_bbox_presence, mlc_scores
     
-class BoundingBoxRegressorSingleClass(nn.Module):
+class MultiClassBoundingBoxRegressor(nn.Module):
+    """
+    A bounding box regressor for multiple object classes. 
+    This model predicts bounding box coordinates and presence probabilities
+    for an arbitrary number of classes and regions.
+    """
     def __init__(self, local_feat_dim):
+        """
+        Initializes the bounding box regressor.
+        
+        Args:
+            local_feat_dim (int): The dimension of the input feature vector.
+        """
         super().__init__()
-        print('BoundingBoxRegressorSingleClass')
+        print('MultiClassBoundingBoxRegressor')
         print(f'  local_feat_dim: {local_feat_dim}')
+        
         self.local_feat_dim = local_feat_dim
-
-        # create layers for the bounding box regression
-        self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)
-        self.bbox_presence_fc = nn.Linear(local_feat_dim, 1)
-        self.class_ids = None
+        
+        # Fully connected layers for bounding box regression and presence prediction
+        self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)  # Outputs (x, y, w, h)
+        self.bbox_presence_fc = nn.Linear(local_feat_dim, 1) # Outputs probability of presence
+        
+        # Cache for class ID tensor to avoid redundant computation
+        self.class_ids_cache = dict()
+    
+    def get_class_ids(self, num_classes, num_regions):
+        """
+        Retrieves or computes a tensor of class indices for the given dimensions.
+        
+        Args:
+            num_classes (int): Number of object classes.
+            num_regions (int): Number of regions to predict.
+        
+        Returns:
+            torch.Tensor: A tensor of shape (num_classes, num_regions) containing class IDs.
+        """
+        shape = (num_classes, num_regions)
+        if shape not in self.class_ids_cache:
+            self.class_ids_cache[shape] = torch.arange(num_classes, device=self.bbox_coords_fc.weight.device).unsqueeze(-1).expand(-1, num_regions).contiguous()
+        return self.class_ids_cache[shape]
 
     def forward(self, local_features, predict_presence=True, predict_coords=True,
                 apply_nms=False, iou_threshold=0.3, conf_threshold=0.5, max_det_per_class=20):
+        """
+        Performs bounding box regression and optionally applies Non-Maximum Suppression (NMS).
+        
+        Args:
+            local_features (torch.Tensor): Input feature tensor of shape (batch_size, num_classes, num_regions, local_feat_dim).
+            predict_presence (bool): Whether to predict the presence probability of bounding boxes.
+            predict_coords (bool): Whether to predict bounding box coordinates.
+            apply_nms (bool): Whether to apply Non-Maximum Suppression (NMS) to filter overlapping boxes.
+            iou_threshold (float): IoU threshold for NMS.
+            conf_threshold (float): Confidence threshold for filtering predictions.
+            max_det_per_class (int): Maximum number of detections per class after thresholding.
+        
+        Returns:
+            If apply_nms=True:
+                list of tuples: [(bbox_coords, bbox_probs, class_ids)] for each image in batch.
+            Otherwise:
+                torch.Tensor: Bounding box coordinates (if predict_coords=True).
+                torch.Tensor: Bounding box presence scores (if predict_presence=True).
+        """
+        
         if apply_nms:
-            assert predict_coords and predict_presence
-            bbox_coords = self.bbox_coords_fc(local_features) # (batch_size, num_classes, num_regions, 4)
-            bbox_presence = self.bbox_presence_fc(local_features) # (batch_size, num_classes, num_regions, 1)
-            bbox_presence_probs = torch.sigmoid(bbox_presence)
-            bbox_presence_probs = bbox_presence_probs.squeeze(-1) # (batch_size, num_classes, num_regions)
-            assert bbox_coords.ndim == 4 # (batch_size, num_classes, num_regions, 4)
-            assert bbox_coords.shape[-1] == 4
-            assert bbox_presence.ndim == 4
-            assert bbox_presence_probs.ndim == 3
-            if self.class_ids is None:
-                num_classes = bbox_coords.size(1)
-                num_regions = bbox_coords.size(2)
-                self.class_ids = torch.arange(num_classes, device=bbox_coords.device).unsqueeze(-1).expand(-1, num_regions).contiguous()
-            output = [None] * bbox_coords.size(0)
-            for i in range(bbox_coords.size(0)): # for each image in the batch
-                bbox_coords_i = bbox_coords[i] # (num_classes, num_regions, 4)
-                bbox_probs_i = bbox_presence_probs[i] # (num_classes, num_regions)
-                class_ids_i = self.class_ids # (num_classes, num_regions)
-                # Apply maximum detections per class
+            assert predict_coords and predict_presence, "NMS requires both coordinate and presence prediction"
+            
+            # Compute bounding box coordinates and presence probabilities
+            bbox_coords = self.bbox_coords_fc(local_features)  # (batch_size, num_classes, num_regions, 4)
+            bbox_presence = self.bbox_presence_fc(local_features)  # (batch_size, num_classes, num_regions, 1)
+            bbox_presence_probs = torch.sigmoid(bbox_presence).squeeze(-1)  # (batch_size, num_classes, num_regions)
+            
+            # Ensure correct tensor shapes
+            assert bbox_coords.ndim == 4 and bbox_coords.shape[-1] == 4, "Bounding box coordinates must have shape (batch, num_classes, num_regions, 4)"
+            assert bbox_presence.ndim == 4 and bbox_presence_probs.ndim == 3, "Presence scores must have correct dimensions"
+            
+            num_classes = bbox_coords.size(1)
+            num_regions = bbox_coords.size(2)
+            class_ids = self.get_class_ids(num_classes, num_regions)  # (num_classes, num_regions)
+            
+            output = [None] * bbox_coords.size(0)  # Store results for each image in batch
+            
+            for i in range(bbox_coords.size(0)):  # Iterate over batch
+                bbox_coords_i = bbox_coords[i]  # (num_classes, num_regions, 4)
+                bbox_probs_i = bbox_presence_probs[i]  # (num_classes, num_regions)
+                class_ids_i = class_ids  # (num_classes, num_regions)
+                
+                # Apply max detections per class constraint
                 if bbox_coords_i.size(1) > max_det_per_class:
-                    bbox_probs_i, idxs = torch.topk(bbox_probs_i, max_det_per_class, dim=1) # (num_classes, max_det_per_class)
-                    bbox_coords_i = torch.gather(bbox_coords_i, 1, idxs.unsqueeze(-1).expand(-1, -1, 4)) # (num_classes, max_det_per_class, 4)
-                    class_ids_i  = torch.gather(class_ids_i, 1, idxs) # (num_classes, max_det_per_class)
+                    bbox_probs_i, idxs = torch.topk(bbox_probs_i, max_det_per_class, dim=1)
+                    bbox_coords_i = torch.gather(bbox_coords_i, 1, idxs.unsqueeze(-1).expand(-1, -1, 4))
+                    class_ids_i  = torch.gather(class_ids_i, 1, idxs)
+                
                 # Apply confidence threshold
                 mask = bbox_probs_i > conf_threshold
-                bbox_coords_i = bbox_coords_i[mask] # (num_detections, 4)
-                bbox_probs_i = bbox_probs_i[mask] # (num_detections)
-                class_ids_i = class_ids_i[mask] # (num_detections)
-                # Apply NMS
+                bbox_coords_i = bbox_coords_i[mask]  # (num_detections, 4)
+                bbox_probs_i = bbox_probs_i[mask]  # (num_detections)
+                class_ids_i = class_ids_i[mask]  # (num_detections)
+                
+                # Apply NMS if there are remaining detections
                 if bbox_coords_i.size(0) > 0:
-                    shifted_bbox_coords = bbox_coords_i + class_ids_i.unsqueeze(-1).float() * 10.0
+                    shifted_bbox_coords = bbox_coords_i + class_ids_i.unsqueeze(-1).float() * 10.0  # Offset for per-class separation
                     keep = ops.nms(shifted_bbox_coords, bbox_probs_i, iou_threshold)
                     bbox_coords_i = bbox_coords_i[keep]
                     bbox_probs_i = bbox_probs_i[keep]
                     class_ids_i = class_ids_i[keep]
-                output[i] = (bbox_coords_i, bbox_probs_i, class_ids_i)
                 
+                output[i] = (bbox_coords_i, bbox_probs_i, class_ids_i)
+            
             return output, bbox_presence
-
-        if predict_coords:
-            bbox_coords = self.bbox_coords_fc(local_features) # (batch_size, num_classes, num_regions, 4)
-        if predict_presence:
-            bbox_presence = self.bbox_presence_fc(local_features) # (batch_size, num_classes, num_regions, 1)
+        
+        # Compute bounding box coordinates if requested
+        bbox_coords = self.bbox_coords_fc(local_features) if predict_coords else None
+        # Compute bounding box presence probabilities if requested
+        bbox_presence = self.bbox_presence_fc(local_features) if predict_presence else None
+        
+        # Return appropriate values based on requested predictions
         if predict_coords and predict_presence:
             return bbox_coords, bbox_presence
         elif predict_coords:

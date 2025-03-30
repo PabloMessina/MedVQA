@@ -3,9 +3,10 @@ import numpy as np
 import math
 import pandas as pd
 from PIL import Image
-import torch
 from torch.utils.data import Dataset, DataLoader
 
+from medvqa.datasets.augmentation import VinBigAlbumentationAdapter
+from medvqa.datasets.image_processing import convert_bboxes_into_target_tensors
 from medvqa.datasets.vinbig import (
     VINBIG_BBOX_NAMES__MODIFIED,
     VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH,
@@ -366,43 +367,6 @@ class VinBigVQADataset(Dataset):
             output['vf'] = self.precomputed_visual_features[self.idx2visfeatidx[idx]]
         return output
 
-class _AlbumentationAdapter:
-
-    def __init__(self):
-        pass
-    
-    def encode(self, bbox_coords, bbox_classes):
-        albumentation_bbox_coords = []
-        for i in range(len(bbox_coords)):
-            x_min = bbox_coords[i][0]
-            y_min = bbox_coords[i][1]
-            x_max = bbox_coords[i][2]
-            y_max = bbox_coords[i][3]
-            assert x_min <= x_max
-            assert y_min <= y_max
-            if x_min < x_max and y_min < y_max: # ignore invalid bboxes
-                albumentation_bbox_coords.append([
-                    bbox_coords[i][0],
-                    bbox_coords[i][1],
-                    bbox_coords[i][2],
-                    bbox_coords[i][3],
-                    bbox_classes[i],
-                ])
-        return albumentation_bbox_coords
-    
-    def decode(self, albumentation_bbox_coords):
-        bbox_coords = []
-        bbox_classes = []
-        for i in range(len(albumentation_bbox_coords)):
-            bbox_coords.append([
-                albumentation_bbox_coords[i][0],
-                albumentation_bbox_coords[i][1],
-                albumentation_bbox_coords[i][2],
-                albumentation_bbox_coords[i][3],
-            ])
-            bbox_classes.append(albumentation_bbox_coords[i][4])
-        return bbox_coords, bbox_classes
-
 class VinBigVisualDataset(Dataset):
     
     def __init__(
@@ -423,7 +387,7 @@ class VinBigVisualDataset(Dataset):
         if use_bounding_boxes:
             assert bboxes is not None
             if data_augmentation_enabled:
-                self.albumentation_adapter = _AlbumentationAdapter()
+                self.albumentation_adapter = VinBigAlbumentationAdapter()
         
         if suffle_indices: np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
@@ -521,42 +485,6 @@ class VinBig_MAE_Trainer(MAETrainerBase):
     
     def _create_mae_dataset(self, indices, shuffle=True, infinite=False):
         return BasicImageDataset(self.image_paths, self.transform, indices, shuffle, infinite)
-
-def _create_target_tensors(bboxes, classes, num_classes, feature_map_size):
-    """
-    Creates a target tensor for bounding boxes on a feature map.
-    
-    Args:
-        bboxes: A tensor of shape (N, 4) representing bounding box coordinates.
-        classes: A tensor of shape (N,) representing bounding box classes.
-        num_classes: The number of classes.
-        feature_map_size: Tuple (H, W) representing the size of the feature map.
-    
-    Returns:
-        A tensor of shape (num_classes, H*W, 4) representing the target tensor with bounding box coordinates (x_min, y_min, x_max, y_max).
-        A tensor of shape (num_classes, H*W) representing the target tensor with bounding box presence.
-    """
-    H, W = feature_map_size
-    N = len(bboxes)
-    assert len(classes) == N
-    target_coords = torch.zeros(num_classes, H, W, 4)
-    target_presence = torch.zeros(num_classes, H, W)
-    
-    for i in range(N):
-        x_min, y_min, x_max, y_max = bboxes[i]
-        cls = classes[i]
-        x_min_scaled = math.floor(x_min * W)
-        y_min_scaled = math.floor(y_min * H)
-        x_max_scaled = math.ceil(x_max * W)
-        y_max_scaled = math.ceil(y_max * H)
-        target_coords[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled, :] = torch.tensor([x_min, y_min, x_max, y_max])
-        target_presence[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled] = 1
-
-    # Reshape target tensors
-    target_coords = target_coords.view(num_classes, H*W, 4)
-    target_presence = target_presence.view(num_classes, H*W)
-    
-    return target_coords, target_presence
     
 class VinBigBboxGroundingDataset(Dataset):
 
@@ -591,7 +519,7 @@ class VinBigBboxGroundingDataset(Dataset):
             self.feature_map_size = feature_map_size
             self.bboxes = bboxes
             if data_augmentation_enabled:
-                self.albumentation_adapter = _AlbumentationAdapter()
+                self.albumentation_adapter = VinBigAlbumentationAdapter()
         elif predict_masks:
             assert phrase_grounding_masks is not None
             self.phrase_grounding_masks = phrase_grounding_masks
@@ -644,7 +572,8 @@ class VinBigBboxGroundingDataset(Dataset):
                 else:
                     image = self.image_transform(image_path)
                 if self.for_training:
-                    bbox_target_coords, bbox_target_presence = _create_target_tensors(bboxes, classes, self.num_bbox_classes, self.feature_map_size)
+                    bbox_target_coords, bbox_target_presence = convert_bboxes_into_target_tensors(bboxes, classes, self.num_bbox_classes,
+                                                                                                  self.feature_map_size)
                     return {
                         'i': image,
                         'pe': phrase_embeddings,

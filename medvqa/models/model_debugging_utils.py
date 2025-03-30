@@ -950,7 +950,11 @@ class PhraseGroundingVisualizer:
                 )
 
     def visualize_phrase_grounding_bbox_mode(
-            self, phrases, image_path, mimiccxr_forward=False, vinbig_forward=False, subfigsize=(3, 3)):
+            self, phrases, image_path, mimiccxr_forward=False, vinbig_forward=False, subfigsize=(3, 3),
+            gt_phrases_to_highlight=None, phrases_and_embeddings_file_path=None, show_heatmaps=False):
+        
+        from medvqa.utils.common import activate_determinism
+        activate_determinism() # for reproducibility
         
         assert sum([mimiccxr_forward, vinbig_forward]) == 1
 
@@ -967,8 +971,17 @@ class PhraseGroundingVisualizer:
         print(f'image.shape = {image.shape}')
 
         # Obtain text embeddings
-        print_bold('Obtain text embeddings')
-        text_embeddings = self.cached_text_embedding_extractor.compute_text_embeddings(phrases, update_cache_on_disk=False)
+        if phrases_and_embeddings_file_path is not None:
+            print_bold('Load precomputed text embeddings')
+            phrases_and_embeddings = load_pickle(phrases_and_embeddings_file_path)
+            print(f'loaded phrases = {phrases_and_embeddings["phrases"]}')
+            print(f'loaded embeddings\'s shape = {phrases_and_embeddings["phrase_embeddings"].shape}')
+            p2e = {p:e for p, e in zip(phrases_and_embeddings['phrases'], phrases_and_embeddings['phrase_embeddings'])}
+            text_embeddings = [p2e[p] for p in phrases]
+            text_embeddings = np.array(text_embeddings)
+        else:
+            print_bold('Computing text embeddings')
+            text_embeddings = self.cached_text_embedding_extractor.compute_text_embeddings(phrases, update_cache_on_disk=False)
         print(f'text_embeddings.shape = {text_embeddings.shape}')
         
         # Run phrase grounder in inference mode
@@ -982,14 +995,17 @@ class PhraseGroundingVisualizer:
             output = self.phrase_grounder(
                 raw_images=image.unsqueeze(0),
                 phrase_embeddings=text_embeddings.unsqueeze(0),
-                mimiccxr_forward=mimiccxr_forward,
-                vinbig_forward=vinbig_forward,
+                only_compute_features=True,
                 predict_bboxes=True,
                 apply_nms=True,
+                return_sigmoid_attention=show_heatmaps,
             )
             print(f'output.keys() = {output.keys()}')
             predicted_bboxes = output['predicted_bboxes']
-            # print(f'predicted_bboxes = {predicted_bboxes}')
+            phrase_classifier_logits = output['phrase_classifier_logits']
+            phrase_classifier_probs = torch.sigmoid(phrase_classifier_logits)
+            if show_heatmaps:
+                sigmoid_attention = output['sigmoid_attention']
 
         # Visualize bounding boxes
         print_bold('Visualize bounding boxes')
@@ -1000,7 +1016,13 @@ class PhraseGroundingVisualizer:
         visualize_visual_grounding_as_bboxes(
             image_path=image_path,
             phrases=phrases,
-            bboxes=[x[0].cpu().numpy() if x is not None else [] for x in predicted_bboxes[0]],
+            gt_phrases_to_highlight=gt_phrases_to_highlight,
+            phrase_classifier_probs=phrase_classifier_probs[0].cpu().numpy(),
+            bbox_coords=predicted_bboxes[0][0].cpu().numpy(),
+            bbox_probs=predicted_bboxes[0][1].cpu().numpy(),
+            phrase_ids=predicted_bboxes[0][2].cpu().numpy(),
+            show_heatmaps=show_heatmaps,
+            heatmaps=sigmoid_attention[0].cpu().numpy() if show_heatmaps else None,
             figsize=figsize,
             max_cols=3,
         )

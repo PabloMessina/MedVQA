@@ -66,6 +66,35 @@ def activate_determinism(seed=42, verbose=True):
 
 def deactivate_determinism():
     import torch
+    import random
+    import numpy as np
     torch.use_deterministic_algorithms(False)
     torch.backends.cudnn.benchmark = True  # Enables faster training for some models
     torch.backends.cudnn.deterministic = False
+    # Reset seeds using time-based randomness
+    new_seed = int(time.time()) % (2**32 - 1)
+    torch.manual_seed(new_seed)
+    torch.cuda.manual_seed_all(new_seed)
+    random.seed(new_seed)
+    np.random.seed(new_seed)
+
+def print_nested_dict(d, indent=0):
+    """
+    Recursively prints a dictionary where:
+    - Keys are printed as strings.
+    - Values that are dictionaries are expanded.
+    - Leaf values are replaced with their type.
+    - Lists are printed as "list of {type} (len={len})" if they contain at least one item.
+    
+    Parameters:
+    d (dict): The dictionary to print.
+    indent (int): The current indentation level for nested structures.
+    """
+    for key, value in d.items():
+        if isinstance(value, dict):
+            print(" " * indent + str(key) + ":")
+            print_nested_dict(value, indent + 4)
+        elif isinstance(value, list) and len(value) > 0:
+            print(" " * indent + f"{key}: list of {type(value[0]).__name__} (len={len(value)})")
+        else:
+            print(" " * indent + f"{key}: {type(value).__name__}")

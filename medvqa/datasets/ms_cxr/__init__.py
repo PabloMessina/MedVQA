@@ -8,7 +8,14 @@ from medvqa.datasets.mimiccxr import MIMICCXR_JPG_IMAGES_LARGE_DIR
 
 load_dotenv()
 
-MS_CXR_LOCAL_ALIGNMENT_CSV_PATH = os.environ['MS_CXR_LOCAL_ALIGNMENT_V1.0.0_CSV_PATH']
+MS_CXR_LOCAL_ALIGNMENT_CSV_PATH = os.environ['MS_CXR_LOCAL_ALIGNMENT_V1.1.0_CSV_PATH']
+
+def _rescale_bounding_box_coordinates(x, y, w, h, image_width, image_height, actual_image_width, actual_image_height):
+    x *= actual_image_width / image_width
+    y *= actual_image_height / image_height
+    w *= actual_image_width / image_width
+    h *= actual_image_height / image_height
+    return x, y, w, h
 
 class PhraseGroundingAnnotationsVisualizer:
 
@@ -39,6 +46,8 @@ class PhraseGroundingAnnotationsVisualizer:
         y = row['y']
         w = row['w']
         h = row['h']
+        image_width = row['image_width']
+        image_height = row['image_height']
         print(f'Image path: {image_path}')
         print(f'Label text: {label_text}')
         print(f'Category name: {category_name}')
@@ -52,6 +61,7 @@ class PhraseGroundingAnnotationsVisualizer:
         plt.axis('off')
         # Create a Rectangle patch
         import matplotlib.patches as patches
+        x, y, w, h = _rescale_bounding_box_coordinates(x, y, w, h, image_width, image_height, img.width, img.height)
         rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor='r', facecolor='none')
         # Add the patch to the Axes
         plt.gca().add_patch(rect)
@@ -84,6 +94,9 @@ class PhraseGroundingAnnotationsVisualizer:
             y = row['y']
             w = row['w']
             h = row['h']
+            image_width = row['image_width']
+            image_height = row['image_height']
+            x, y, w, h = _rescale_bounding_box_coordinates(x, y, w, h, image_width, image_height, img.width, img.height)
             print(f'Label text: {row["label_text"]}')
             print(f'Category name: {row["category_name"]}')
             print(f'x: {x}, y: {y}, w: {w}, h: {h}')
@@ -138,11 +151,42 @@ def get_ms_cxr_dicom_ids():
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
     return list(set(df['dicom_id']))
 
+def get_ms_cxr_train_val_test_dicom_ids():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    train_dicom_ids = list(set(df[df['split'] == 'train']['dicom_id']))
+    val_dicom_ids = list(set(df[df['split'] == 'val']['dicom_id']))
+    test_dicom_ids = list(set(df[df['split'] == 'test']['dicom_id']))
+    return train_dicom_ids, val_dicom_ids, test_dicom_ids
+
+def get_ms_cxr_train_dicom_ids():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    train_dicom_ids = list(set(df[df['split'] == 'train']['dicom_id']))
+    return train_dicom_ids
+
+def get_ms_cxr_val_dicom_ids():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    val_dicom_ids = list(set(df[df['split'] == 'val']['dicom_id']))
+    return val_dicom_ids
+
+def get_ms_cxr_test_dicom_ids():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    test_dicom_ids = list(set(df[df['split'] == 'test']['dicom_id']))
+    return test_dicom_ids
+
 def get_ms_cxr_phrases():
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
     phrases = list(set(df['label_text']))
     phrases.sort()
     return phrases
+
+def get_ms_cxr_dicom_id_2_split():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    dicom_id_2_split = {}
+    for _, row in df.iterrows():
+        dicom_id = row['dicom_id']
+        split = row['split']
+        dicom_id_2_split[dicom_id] = split
+    return dicom_id_2_split
 
 def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width, flatten=True):
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
@@ -178,3 +222,52 @@ def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width, flatten=Tru
             masks.append(mask)
         dicom_id_2_phrases_and_masks[dicom_id] = (phrases, masks)
     return dicom_id_2_phrases_and_masks
+
+def get_ms_cxr_dicom_id_2_phrases_and_bboxes():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    dicom_id_2_rows = {}
+    for _, row in df.iterrows():
+        dicom_id = row['dicom_id']
+        if dicom_id not in dicom_id_2_rows:
+            dicom_id_2_rows[dicom_id] = []
+        dicom_id_2_rows[dicom_id].append(row)
+    dicom_id_2_phrases_and_bboxes = {}
+    for dicom_id, rows in dicom_id_2_rows.items():
+        phrases = []
+        bbox_lists = []
+        phrase2bboxes = {}
+        for row in rows:
+            phrase = row['label_text']
+            x, y, w, h = row['x'], row['y'], row['w'], row['h']
+            iw, ih = row['image_width'], row['image_height']
+            x /= iw
+            y /= ih
+            w /= iw
+            h /= ih
+            assert 0 <= x <= 1
+            assert 0 <= y <= 1
+            assert 0 <= x + w <= 1
+            assert 0 <= y + h <= 1
+            if phrase not in phrase2bboxes:
+                phrase2bboxes[phrase] = []
+            phrase2bboxes[phrase].append((x, y, x + w, y + h))
+        for phrase, bboxes in phrase2bboxes.items():
+            phrases.append(phrase)
+            bbox_lists.append(bboxes)
+        dicom_id_2_phrases_and_bboxes[dicom_id] = (phrases, bbox_lists)
+    return dicom_id_2_phrases_and_bboxes
+
+def get_ms_cxr_phrase_to_category_name():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    phrase_to_category_name = {}
+    for _, row in df.iterrows():
+        phrase = row['label_text']
+        category_name = row['category_name']
+        phrase_to_category_name[phrase] = category_name
+    return phrase_to_category_name
+
+def get_ms_cxr_category_names():
+    df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
+    category_names = list(set(df['category_name']))
+    category_names.sort()
+    return category_names

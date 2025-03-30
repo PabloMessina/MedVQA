@@ -311,3 +311,50 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
 
     def compute(self):
         return [self._acc_score[i] / self._count[i] if self._count[i] > 0 else 0 for i in range(self.nc)]
+    
+
+class ConditionAwareBboxIOUOpenClass(ConditionAwareMetric):
+
+    def __init__(self, output_transform, condition_function=lambda _: True):
+        super().__init__(output_transform, condition_function)
+        self._acc_score = 0
+        self._count = 0
+
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+
+    def update(self, output):
+        predicted_bboxes, gt_coords, gt_classes = output        
+        # predicted_bboxes: List of tuples (coordinates, scores, classes)
+        # gt_coords: List of lists of ground truth coordinates
+        # gt_classes: List of lists of ground truth classes
+        bs = len(gt_classes) # Batch size
+        for i in range(bs): # For each image in the batch
+            # Obtain number of classes
+            nc = max(gt_classes[i]) + 1
+            # Group ground truth coordinates by class
+            gt_coords_per_class = [[] for _ in range(nc)]
+            for cls, box in zip(gt_classes[i], gt_coords[i]):
+                gt_coords_per_class[cls].append(box)
+            # Group predictions by class
+            pred_coords_per_class = [[] for _ in range(nc)]
+            coords = predicted_bboxes[i][0].detach()
+            classes = predicted_bboxes[i][2].detach()
+            for j in range(len(coords)):
+                cls = classes[j].item()
+                if cls < nc: # Skip classes not present in the ground truth
+                    box = coords[j]
+                    pred_coords_per_class[cls].append(box)
+            # Compute IOU for each class present in the image
+            for cls in range(nc):
+                assert len(gt_coords_per_class[cls]) > 0
+                iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                self._acc_score += iou
+                self._count += 1
+
+    def compute(self):
+        if self._count == 0:
+            print('WARNING: Bbox IOU defaulting to 0 since self._count is 0')
+            return 0
+        return self._acc_score / self._count

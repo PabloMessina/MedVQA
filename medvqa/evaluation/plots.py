@@ -726,48 +726,128 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
     plt.show()
 
-def visualize_visual_grounding_as_bboxes(image_path, phrases, bboxes, figsize, max_cols=3):
+# def visualize_visual_grounding_as_bboxes(image_path, phrases, bboxes, figsize, max_cols=3):
+#     from PIL import Image
+#     import matplotlib.patches as patches
+#     import textwrap
+
+#     assert len(phrases) == len(bboxes), f'len(phrases)={len(phrases)} != len(bboxes)={len(bboxes)}, phrases={phrases}, bboxes={bboxes}'
+
+#     # Create a grid of subplots
+#     n_cols = min(len(phrases), max_cols)
+#     n_rows = math.ceil(len(phrases) / n_cols)
+#     fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+#     assert ax.shape == (n_rows, n_cols)
+    
+#     # Define wrap length for titles based on number of columns and the figure size
+#     wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
+
+#     # Image
+#     image = Image.open(image_path)
+#     image = image.convert('RGB')
+#     width = image.size[0]
+#     height = image.size[1]
+
+#     # Bounding boxes
+#     for k in range(len(phrases)):
+#         row = k // n_cols
+#         col = k % n_cols
+#         # show image in subplot
+#         ax[row, col].imshow(image) # show image in subplot
+#         for i in range(len(bboxes[k])):
+#             x1, y1, x2, y2 = bboxes[k][i]
+#             x1 *= width
+#             y1 *= height
+#             x2 *= width
+#             y2 *= height
+#             # draw bounding box rectangle
+#             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
+#             ax[row, col].add_patch(rect)
+         
+#         wrapped_title = "\n".join(textwrap.wrap(phrases[k], wrap_length))
+#         ax[row, col].set_title(wrapped_title)
+
+#     plt.show()
+
+def visualize_visual_grounding_as_bboxes(image_path, phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
+                                         figsize, max_cols=3, gt_phrases_to_highlight=None, 
+                                         show_heatmaps=False, heatmaps=None):
+    """
+    Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
+    
+    Args:
+        image_path (str): Path to the image file.
+        phrases (list of str): List of phrases corresponding to detected objects.
+        phrase_classifier_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each phrase.
+        bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format (x1, y1, x2, y2).
+        bbox_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each bounding box.
+        phrase_ids (numpy.ndarray): Array of shape (n,) containing indices mapping bounding boxes to phrases.
+        figsize (tuple): Figure size for visualization.
+        max_cols (int, optional): Maximum number of columns in the grid. Default is 3.
+        gt_phrases_to_highlight (list of str, optional): List of phrases to highlight in the visualization. Default is None.
+        show_heatmaps (bool, optional): Whether to display heatmaps. Default is False.
+        heatmaps (numpy.ndarray, optional): Array of shape (num_phrases, num_regions), where num_regions = H * W.
+    """
+    assert len(phrases) == len(phrase_classifier_probs), "Mismatched dimensions between phrases and phrase classifier probabilities."
+    assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], "Mismatched dimensions between bounding box arrays."
+    assert bbox_coords.shape[1] == 4, "Bounding box coordinates must have shape (n, 4)."
+    if show_heatmaps:
+        assert heatmaps is not None, "Heatmaps must be provided when show_heatmaps is True."
+        assert heatmaps.shape[0] == len(phrases), "Heatmaps should have the same first dimension as phrases."
+    
     from PIL import Image
     import matplotlib.patches as patches
     import textwrap
 
-    assert len(phrases) == len(bboxes), f'len(phrases)={len(phrases)} != len(bboxes)={len(bboxes)}, phrases={phrases}, bboxes={bboxes}'
-
-    # Create a grid of subplots
-    n_cols = min(len(phrases), max_cols)
-    n_rows = math.ceil(len(phrases) / n_cols)
+    # Determine grid size
+    n_phrases = len(phrases)
+    n_cols = min(n_phrases, max_cols)
+    n_rows = math.ceil(n_phrases / n_cols)
     fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
-    assert ax.shape == (n_rows, n_cols)
-    
-    # Define wrap length for titles based on number of columns and the figure size
+
+    # Define wrap length for titles
     wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
 
-    # Image
-    image = Image.open(image_path)
-    image = image.convert('RGB')
-    width = image.size[0]
-    height = image.size[1]
+    # Load and process image
+    image = Image.open(image_path).convert('RGB')
+    width, height = image.size
 
-    # Bounding boxes: a yellow rectangle
-    for k in range(len(phrases)):
-        row = k // n_cols
-        col = k % n_cols
-        # show image in subplot
-        ax[row, col].imshow(image) # show image in subplot
-        for i in range(len(bboxes[k])):
-            x1, y1, x2, y2 = bboxes[k][i]
-            x1 *= width
-            y1 *= height
-            x2 *= width
-            y2 *= height
-            # draw bounding box rectangle
+    # Infer heatmap dimensions
+    if show_heatmaps:
+        H = W = int(math.sqrt(heatmaps.shape[1]))  # Assuming square heatmap regions
+        assert H * W == heatmaps.shape[1], "Heatmap size mismatch: Expected H * W regions."
+
+    # Iterate through unique phrases
+    for phrase_id in range(n_phrases):
+        row, col = divmod(phrase_id, n_cols)
+        ax[row, col].imshow(image)
+
+        phrase_prob = phrase_classifier_probs[phrase_id]
+
+        # Overlay heatmap if enabled
+        if show_heatmaps:
+            heatmap = heatmaps[phrase_id].reshape(H, W)
+            heatmap_resized = np.array(Image.fromarray(heatmap).resize((width, height), Image.BILINEAR))
+            ax[row, col].imshow(heatmap_resized, cmap='jet', alpha=0.5)
+
+        # Filter bounding boxes for the current phrase
+        mask = phrase_ids == phrase_id
+        for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
+            x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
             ax[row, col].add_patch(rect)
-         
-        wrapped_title = "\n".join(textwrap.wrap(phrases[k], wrap_length))
-        ax[row, col].set_title(wrapped_title)
+            ax[row, col].text(x1, y1, f'{prob:.2f}', color='red', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
+
+        # Set subplot title with wrapped text
+        title = f'{phrases[phrase_id]}\n({phrase_prob:.2f})'
+        wrapped_title = "\n".join(textwrap.wrap(title, wrap_length))
+        if gt_phrases_to_highlight is not None and phrases[phrase_id] in gt_phrases_to_highlight:
+            ax[row, col].set_title(wrapped_title, color='red')
+        else:
+            ax[row, col].set_title(wrapped_title)
 
     plt.show()
+
 
 def visualize_image_and_polygons(image_path, polygons_list, polygon_names, figsize, title=None, as_segmentation=False, mask_resolution=None):
     from PIL import Image, ImageDraw
@@ -1339,59 +1419,160 @@ def plot_nli_distribution(report_nli_input_output_jsonl_filepaths, figsize1=(10,
     plt.show()
 
 
-def plot_barchart(values, title, xlabel, ylabel, figsize=(10, 10), color='blue', horizontal=False, bar_names=None, sort_values=False,
-                    write_values_on_bars=False, values_fontsize=10, values_color='black', values_rotation=0, show_stddev=False,
-                    stddevs=None, xlim=None, ylim=None, title_loc='center', save_as_pdf=False, save_path=None, xlabel_ha='center'):
+def plot_barchart(
+    values,
+    title,
+    x_label,
+    y_label,
+    figsize=(10, 10),
+    bar_color='blue',
+    horizontal=False,
+    bar_labels=None,
+    sort_values=False,
+    show_values_on_bars=False,
+    values_fontsize=10,
+    values_color='black',
+    values_rotation=0,
+    values_decimal_points=3,
+    show_stddev=False,
+    stddevs=None,
+    x_limits=None,
+    y_limits=None,
+    title_alignment='center',
+    save_as_pdf=False,
+    save_path=None,
+    x_label_alignment='center',
+    tick_rotation=0
+):
+    """
+    Plots a bar chart with various customization options.
+
+    Parameters:
+    - values (list): List of numerical values for the bars.
+    - title (str): Title of the chart.
+    - x_label (str): Label for the x-axis.
+    - y_label (str): Label for the y-axis.
+    - figsize (tuple): Size of the figure (default: (10, 10)).
+    - bar_color (str): Color of the bars (default: 'blue').
+    - horizontal (bool): Whether to plot a horizontal bar chart (default: False).
+    - bar_labels (list): Labels for the bars (default: None).
+    - sort_values (bool): Whether to sort the values (default: False).
+    - show_values_on_bars (bool): Whether to display values on the bars (default: False).
+    - values_fontsize (int): Font size for the values displayed on the bars (default: 10).
+    - values_color (str): Color of the values displayed on the bars (default: 'black').
+    - values_rotation (int): Rotation angle for the values displayed on the bars (default: 0).
+    - values_decimal_points (int): Number of decimal points to display for values (default: 3).
+    - show_stddev (bool): Whether to show standard deviation as error bars (default: False).
+    - stddevs (list): List of standard deviation values (required if show_stddev=True).
+    - x_limits (tuple): Limits for the x-axis (default: None).
+    - y_limits (tuple): Limits for the y-axis (default: None).
+    - title_alignment (str): Alignment of the title (default: 'center').
+    - save_as_pdf (bool): Whether to save the plot as a PDF file (default: False).
+    - save_path (str): Path to save the PDF file (required if save_as_pdf=True).
+    - x_label_alignment (str): Horizontal alignment of the x-axis label (default: 'center').
+    - tick_rotation (int): Rotation angle for x-axis or y-axis ticks (default: 0).
+
+    Returns:
+    - None: Displays the plot and optionally saves it as a PDF.
+    """
+    # Validate inputs for standard deviation
     if show_stddev:
-        assert stddevs is not None
-        assert len(values) == len(stddevs)
-    n = len(values)
+        assert stddevs is not None, "Standard deviations must be provided when show_stddev=True."
+        assert len(values) == len(stddevs), "Length of values and stddevs must match."
+
+    # Sort values and labels if required
+    num_bars = len(values)
     if sort_values:
-        indices = list(range(n))
+        indices = list(range(num_bars))
         indices.sort(key=lambda i: values[i], reverse=not horizontal)
         values = [values[i] for i in indices]
-        if bar_names is not None:
-            bar_names = [bar_names[i] for i in indices]
-    if bar_names is None:
-        bar_names = range(1, n+1)
+        if bar_labels is not None:
+            bar_labels = [bar_labels[i] for i in indices]
+
+    # Default bar labels if none are provided
+    if bar_labels is None:
+        bar_labels = range(1, num_bars + 1)
+
+    # Create the plot
     plt.figure(figsize=figsize)
     if horizontal:
+        # Horizontal bar chart
         if show_stddev:
-            plt.barh(range(1, n+1), values, xerr=stddevs, color=color, capsize=3)
-        else:   
-            plt.barh(range(1, n+1), values, color=color)
-        plt.yticks(range(1, n+1), bar_names)
-        plt.ylabel(ylabel)
-        plt.xlabel(xlabel, ha=xlabel_ha)
-        if write_values_on_bars:
-            for i in range(n):
-                plt.text(values[i], i+1, f'{values[i]:.3f}', ha='left', va='center', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
-    else:
-        if show_stddev:
-            plt.bar(range(1, n+1), values, yerr=stddevs, color=color, capsize=3)
+            plt.barh(
+                range(1, num_bars + 1),
+                values,
+                xerr=stddevs,
+                color=bar_color,
+                capsize=3
+            )
         else:
-            plt.bar(range(1, n+1), values, color=color)
-        plt.xticks(range(1, n+1), bar_names)
-        plt.xlabel(xlabel, ha=xlabel_ha)
-        plt.ylabel(ylabel)
-        if write_values_on_bars:
-            for i in range(n):
-                plt.text(i+1, values[i], f'{values[i]:.3f}', ha='center', va='bottom', fontsize=values_fontsize, color=values_color, rotation=values_rotation)
-    if xlim is not None:
-        plt.xlim(xlim)
-    if ylim is not None:
-        plt.ylim(ylim)
-    plt.title(title, loc=title_loc)
+            plt.barh(range(1, num_bars + 1), values, color=bar_color)
+        plt.yticks(range(1, num_bars + 1), bar_labels, rotation=tick_rotation, ha='right' if tick_rotation != 0 else 'center')
+        plt.ylabel(y_label)
+        plt.xlabel(x_label, ha=x_label_alignment)
 
-    # Save the plot as a PDF file
+        # Display values on bars
+        if show_values_on_bars:
+            for i in range(num_bars):
+                plt.text(
+                    values[i],
+                    i + 1,
+                    f'{values[i]:.{values_decimal_points}f}',
+                    ha='left',
+                    va='center',
+                    fontsize=values_fontsize,
+                    color=values_color,
+                    rotation=values_rotation
+                )
+    else:
+        # Vertical bar chart
+        if show_stddev:
+            plt.bar(
+                range(1, num_bars + 1),
+                values,
+                yerr=stddevs,
+                color=bar_color,
+                capsize=3
+            )
+        else:
+            plt.bar(range(1, num_bars + 1), values, color=bar_color)
+        plt.xticks(range(1, num_bars + 1), bar_labels, rotation=tick_rotation, ha='right' if tick_rotation != 0 else 'center')
+        plt.xlabel(x_label, ha=x_label_alignment)
+        plt.ylabel(y_label)
+
+        # Display values on bars
+        if show_values_on_bars:
+            for i in range(num_bars):
+                plt.text(
+                    i + 1,
+                    values[i],
+                    f'{values[i]:.{values_decimal_points}f}',
+                    ha='center',
+                    va='bottom',
+                    fontsize=values_fontsize,
+                    color=values_color,
+                    rotation=values_rotation
+                )
+
+    # Set axis limits if provided
+    if x_limits is not None:
+        plt.xlim(x_limits)
+    if y_limits is not None:
+        plt.ylim(y_limits)
+
+    # Set the title
+    plt.title(title, loc=title_alignment)
+
+    # Save the plot as a PDF file if required
     if save_as_pdf:
-        assert save_path is not None
-        assert save_path.endswith('.pdf')
         import os
-        os.makedirs(os.path.dirname(save_path), exist_ok=True) # create the directory if it doesn't exist
+        assert save_path is not None, "Save path must be provided when save_as_pdf=True."
+        assert save_path.endswith('.pdf'), "Save path must end with '.pdf'."
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)  # Create directory if it doesn't exist
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1, format='pdf')
-        print_blue(f'Saved the plot as a PDF file: {save_path}')
+        print(f'Saved the plot as a PDF file: {save_path}')
 
+    # Display the plot
     plt.show()
 
 def plot_images(image_paths, titles=None, image_figsize=(5, 5), max_cols=3):

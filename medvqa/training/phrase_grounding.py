@@ -675,6 +675,103 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
+    def step_fn__mscxr_grounding(batch):
+
+        # Extract elements from batch
+        images = batch['i'].to(device)
+        phrase_embeddings = batch['pe'].to(device)
+        phrase_classification_labels = batch['pcl'].to(device)
+        if training:
+            target_coords = batch['btc'].to(device) # (num_phrases_with_grounding, num_regions, 4)
+            target_presence = batch['btp'].to(device) # (num_phrases_with_grounding, num_regions)
+            gidxs = batch['gidxs'] # (num_phrases_with_grounding)
+        else:
+            bbox_coords = batch['bboxes']
+            bbox_classes = batch['classes']
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'raw_images': images,
+                'phrase_embeddings': phrase_embeddings,
+                'predict_bboxes': True,
+                'only_compute_features': True,
+                'apply_nms': not training and not skip_nms, # apply NMS during validation/testing
+            }
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                model_output = model(**model_kwargs)
+                phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
+                
+                if training or skip_nms:
+                    visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits'] # (batch_size, num_facts, num_regions, 4)
+                    visual_grounding_binary_logits = model_output['visual_grounding_binary_logits'] # (batch_size, num_facts, num_regions, 1)
+                else:
+                    predicted_bboxes_ = model_output['predicted_bboxes']
+                    predicted_bboxes = []
+                    for preds in predicted_bboxes_:
+                        assert len(preds) == 3 # coords, confs, classes
+                        coords, confs, classes = preds
+                        predicted_bboxes.append((coords, confs, classes))
+                        
+                if training:
+                    # Compute losses
+                    losses = []
+                    
+                    # 1. phrase classification loss
+                    phrase_classifier_loss = generic_phrase_classifier_criterion(phrase_classifier_logits, phrase_classification_labels.float())
+                    phrase_classifier_loss *= phrase_classifier_loss_weight # weight
+                    losses.append(phrase_classifier_loss)
+
+                    # 2. attention supervision loss
+                    visual_grounding_binary_logits = visual_grounding_binary_logits.reshape(-1, visual_grounding_binary_logits.shape[-2]) # (batch_size*num_facts, num_regions)
+                    visual_grounding_binary_logits = visual_grounding_binary_logits[gidxs] # (num_phrases_with_grounding, num_regions)
+                    assert visual_grounding_binary_logits.shape == target_presence.shape, f'{visual_grounding_binary_logits.shape} != {target_presence.shape}'
+                    attention_supervision_loss = balanced_binary_cross_entropy_criterion(visual_grounding_binary_logits, target_presence)
+                    attention_supervision_loss *= attention_supervision_loss_weight # weight
+                    losses.append(attention_supervision_loss)
+
+                    # 3. visual grounding bbox regression loss
+                    visual_grounding_bbox_logits = visual_grounding_bbox_logits.reshape(-1, visual_grounding_bbox_logits.shape[-2], visual_grounding_bbox_logits.shape[-1]) # (batch_size*num_facts, num_regions, 4)
+                    visual_grounding_bbox_logits = visual_grounding_bbox_logits[gidxs] # (num_phrases_with_grounding, num_regions, 4)
+                    assert visual_grounding_bbox_logits.shape == target_coords.shape, f'{visual_grounding_bbox_logits.shape} != {target_coords.shape}'
+                    visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_coords, target_presence)
+                    losses.append(visual_grounding_bbox_loss)
+
+                    if len(losses) > 0:
+                        batch_loss = sum(losses)
+                    else:
+                        batch_loss = None
+
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+
+        # Prepare output
+        output = {}
+
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+        if training:
+            output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
+            output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
+            output['attention_supervision_loss'] = attention_supervision_loss.detach()
+        else:
+            if skip_nms:
+                output['pred_bbox_probs'] = visual_grounding_binary_logits.detach().sigmoid()
+                output['pred_bbox_coords'] = visual_grounding_bbox_logits.detach()
+            else:
+                output['predicted_bboxes'] = predicted_bboxes
+            output['bbox_coords'] = bbox_coords
+            output['bbox_classes'] = bbox_classes
+        output['pred_probs'] = phrase_classifier_logits.detach().sigmoid().view(-1)
+        output['gt_labels'] = phrase_classification_labels.detach().view(-1)
+
+        return output
+    
     def step_fn__chexlocalize(batch):
 
         # Extract elements from batch
@@ -977,6 +1074,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         'mimfg': step_fn__mimiccxr_fact_grounding, # mimiccxr fact grounding (facts extracted from radiology reports)
         'iufg': step_fn__iuxray_fact_grounding, # iuxray fact grounding (facts extracted from radiology reports)
         'pg': step_fn__phrase_grounding, # phrase grounding (this assumes ground truth masks are available)
+        'mscxr': step_fn__mscxr_grounding, # MS-CXR phrase grounding
         'cibg': step_fn__chest_imagenome_bbox_grounding, # chest imagenome bbox grounding
         'vbg': step_fn__vinbig_bbox_grounding, # vinbig bbox grounding
         'cl': step_fn__chexlocalize, # chexlocalize

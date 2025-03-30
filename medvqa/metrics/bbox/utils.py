@@ -1,3 +1,4 @@
+import itertools
 from sklearn.metrics import average_precision_score
 import time
 import torch
@@ -6,6 +7,7 @@ from torchvision.ops.boxes import nms
 from multiprocessing import Pool
 from shapely.geometry import box as shapely_box
 from shapely.ops import unary_union
+from tqdm import tqdm
 
 from medvqa.utils.logging import print_bold
 
@@ -37,6 +39,15 @@ def calculate_exact_iou_union(bboxes_A, bboxes_B):
     union_area = union_A.area + union_B.area - inter_area
     iou = inter_area / union_area if union_area > 0 else 0.0
     return iou
+
+def calculate_mean_exact_iou_union(pred_bbox_coords_list, gt_bbox_coords_list):
+    assert len(pred_bbox_coords_list) == len(gt_bbox_coords_list)
+    n = len(pred_bbox_coords_list)
+    mean_iou = 0
+    for i in range(n):
+        mean_iou += calculate_exact_iou_union(pred_bbox_coords_list[i], gt_bbox_coords_list[i])
+    mean_iou /= n
+    return mean_iou
 
 def compute_iou(pred, gt):
     assert len(pred) == 4
@@ -601,32 +612,75 @@ def _nms_method1(bbox_coords, bbox_probs, conf_th, iou_th, max_det_per_class): #
     pred_classes = np.concatenate(classes_list, axis=0) if len(classes_list) > 0 else np.empty((0,), dtype=np.int32)
     return pred_boxes, pred_confs, pred_classes
 
-def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, max_det_per_class): # faster
-    
-    # Apply maximum detections per class
+def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th,
+                 max_det_per_class, sort_confidence=False):
+    """
+    Perform Non-Maximum Suppression (NMS) on bounding boxes with an optional sorting
+    based on confidence scores.
+
+    This function limits the number of detections per class before thresholding and
+    applying NMS. After NMS, the output detections can optionally be sorted in the
+    order of decreasing confidence.
+
+    Parameters:
+        bbox_coords (torch.Tensor): Tensor of bounding box coordinates with shape
+            (num_batches, num_detections, 4). Each box is represented as [x1, y1, x2, y2].
+        bbox_probs (torch.Tensor): Tensor of detection confidence scores with shape
+            (num_batches, num_detections).
+        class_ids (torch.Tensor): Tensor of class IDs for each detection with shape
+            (num_batches, num_detections).
+        conf_th (float): Confidence threshold. Boxes with confidence lower than this value
+            will be discarded.
+        iou_th (float): Intersection-over-Union (IoU) threshold used for NMS.
+        max_det_per_class (int): Maximum number of detections to keep per class before
+            thresholding and NMS.
+        sort_confidence (bool, optional): If True, the final output detections are sorted
+            by confidence in decreasing order. Default is False.
+
+    Returns:
+        tuple: A tuple containing:
+            - pred_boxes (numpy.ndarray): The filtered bounding boxes, shape (N, 4).
+            - pred_confs (numpy.ndarray): The confidence scores for the final boxes, shape (N,).
+            - pred_classes (numpy.ndarray): The class IDs corresponding to the final boxes,
+              shape (N,).
+    """
+    # Limit detections per class by taking the top-k detections based on confidence.
     if bbox_coords.size(1) > max_det_per_class:
         bbox_probs, idxs = torch.topk(bbox_probs, max_det_per_class, dim=1)
+        # Gather the corresponding bounding boxes using index expansion.
         bbox_coords = torch.gather(bbox_coords, 1, idxs.unsqueeze(-1).expand(-1, -1, 4))
-        class_ids  = torch.gather(class_ids, 1, idxs)
+        # Gather the corresponding class IDs.
+        class_ids = torch.gather(class_ids, 1, idxs)
 
-    # Apply confidence threshold
+    # Apply confidence threshold filtering on the detections.
     mask = bbox_probs > conf_th
     bbox_coords = bbox_coords[mask]
     bbox_probs = bbox_probs[mask]
     class_ids = class_ids[mask]
 
-    # Apply NMS
+    # Run Non-Maximum Suppression (NMS) if there are any remaining detections.
     if bbox_coords.size(0) > 0:
+        # Shift bounding box coordinates based on class IDs to separate boxes
+        # of different classes during NMS.
         shifted_bbox_coords = bbox_coords + class_ids.unsqueeze(-1).float() * 10.0
         keep = nms(shifted_bbox_coords, bbox_probs, iou_th)
+        # Retrieve the final detections after NMS.
         pred_boxes = bbox_coords[keep].cpu().numpy()
         pred_confs = bbox_probs[keep].cpu().numpy()
         pred_classes = class_ids[keep].cpu().numpy()
     else:
+        # No detections remained; return empty arrays.
         pred_boxes = np.empty((0, 4), dtype=np.float32)
         pred_confs = np.empty((0,), dtype=np.float32)
         pred_classes = np.empty((0,), dtype=np.int32)
-        
+
+    # Optionally sort the output detections by confidence in decreasing order.
+    if sort_confidence and pred_confs.size > 0:
+        sort_idx = pred_confs.argsort()[::-1]
+        pred_boxes = pred_boxes[sort_idx]
+        pred_confs = pred_confs[sort_idx]
+        pred_classes = pred_classes[sort_idx]
+
     return pred_boxes, pred_confs, pred_classes
 
 def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None, is_fact_conditioned_yolo=False,
@@ -784,3 +838,255 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
         'pred_classes_list': best_pred_classes_list,
         'pred_confs_list': best_pred_confs_list
     }
+
+def find_optimal_conf_iou_max_det_thresholds__single_class(
+    gt_coords_list, pred_boxes_list, pred_confs_list, 
+    iou_thresholds=np.arange(0.05, 0.6, 0.05),
+    conf_thresholds=np.arange(0.1, 0.9, 0.05), 
+    post_nms_max_dets=[1, 2, 3, 4],
+    pre_nms_max_det=100, verbose=True
+):
+    """
+    Finds the optimal confidence and IoU thresholds for a single class by maximizing the mean IoU score.
+
+    Args:
+        gt_coords_list (list): List of ground-truth bounding box coordinates per sample.
+        pred_boxes_list (list): List of predicted bounding box coordinates per sample.
+        pred_confs_list (list): List of confidence scores for predicted bounding boxes per sample.
+        iou_thresholds (numpy.ndarray): Array of IoU thresholds to test.
+        conf_thresholds (numpy.ndarray): Array of confidence thresholds to test.
+        max_det (int): Maximum number of detections per sample.
+        verbose (bool): If True, prints progress information.
+
+    Returns:
+        dict: A dictionary containing the best IoU and confidence thresholds and the filtered bounding boxes.
+    """
+    n = len(gt_coords_list)
+    
+    # Ensure the predicted boxes and confidence lists have the same length as ground truth
+    assert len(pred_boxes_list) == n
+    assert len(pred_confs_list) == n
+
+    # Convert to PyTorch tensors if not already
+    if not isinstance(pred_boxes_list[0], torch.Tensor):
+        pred_boxes_list = [torch.tensor(pred_boxes, dtype=torch.float32) for pred_boxes in pred_boxes_list]
+    if not isinstance(pred_confs_list[0], torch.Tensor):
+        pred_confs_list = [torch.tensor(pred_confs, dtype=torch.float32) for pred_confs in pred_confs_list]
+
+    if verbose:
+        print("Finding optimal confidence and IoU thresholds")
+
+    best_score = -float("inf")  # Initialize best IoU score
+    best_iou_threshold = None
+    best_conf_threshold = None
+    best_max_det = None
+    best_pred_boxes_list = None
+    best_pred_confs_list = None
+
+    classes_tensor = None  # To store class indices
+
+    # Iterate over all combinations of confidence and IoU thresholds
+    if verbose:
+        iterable = itertools.product(conf_thresholds, iou_thresholds)
+    else:
+        iterable = tqdm(itertools.product(conf_thresholds, iou_thresholds), total=len(conf_thresholds) * len(iou_thresholds),
+                        desc="Optimizing thresholds", mininterval=2.0)
+    for conf_th, iou_th in iterable:
+        
+        # Store filtered predictions per sample
+        pred_boxes_list_ = [None] * n
+        pred_confs_list_ = [None] * n
+
+        for i, (bbox_coords, bbox_probs) in enumerate(zip(pred_boxes_list, pred_confs_list)):
+            assert bbox_coords.ndim == 3  # Expected shape: (H, W, 4)
+            assert bbox_probs.ndim == 2  # Expected shape: (H, W)
+            
+            H, W = bbox_probs.shape
+            
+            # Flatten spatial dimensions and add a class dimension
+            bbox_coords = bbox_coords.view(1, H * W, 4)  # Shape: (1, H*W, 4)
+            bbox_probs = bbox_probs.view(1, H * W)  # Shape: (1, H*W)
+
+            # Initialize class tensor once
+            if classes_tensor is None:
+                classes_tensor = torch.arange(bbox_coords.size(0), device=bbox_coords.device)
+                classes_tensor = classes_tensor.unsqueeze(-1).expand(-1, bbox_coords.size(1)).contiguous()
+
+            class_ids = classes_tensor
+
+            # Apply NMS filtering
+            pred_boxes, pred_confs, _ = _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, pre_nms_max_det,
+                                                     sort_confidence=True)
+            pred_boxes_list_[i] = pred_boxes  # Filtered boxes (num_boxes, 4)
+            pred_confs_list_[i] = pred_confs  # Filtered confidence scores (num_boxes,)
+        
+        # Compute mean IoU score for the current threshold combination
+        for max_det in post_nms_max_dets:
+            truncated_pred_boxes_list = [pred_boxes[:max_det] for pred_boxes in pred_boxes_list_]
+            score = calculate_mean_exact_iou_union(truncated_pred_boxes_list, gt_coords_list)
+            
+            # Update the best parameters if the current score is better
+            if score > best_score:
+                truncated_pred_confs_list = [pred_confs[:max_det] for pred_confs in pred_confs_list_]
+                best_score = score
+                best_iou_threshold = iou_th
+                best_conf_threshold = conf_th
+                best_max_det = max_det
+                best_pred_boxes_list = truncated_pred_boxes_list
+                best_pred_confs_list = truncated_pred_confs_list
+
+            if verbose:
+                print(f"conf_th={conf_th:.2f}, iou_th={iou_th:.2f}, max_det={max_det}, mIoU={score:.4f}")
+
+    # Return best thresholds and corresponding filtered predictions
+    return {
+        'best_iou_threshold': best_iou_threshold,
+        'best_conf_threshold': best_conf_threshold,
+        'best_max_det': best_max_det,
+        'pred_boxes_list': best_pred_boxes_list,
+        'pred_confs_list': best_pred_confs_list
+    }
+
+def compute_probability_map_iou(prob_map, gt_bboxes, conf_th):
+    """
+    Compute the Intersection over Union (IoU) between the predicted probability map and ground truth bounding boxes.
+
+    Parameters:
+    - prob_map (numpy.ndarray): A 2D array (height, width) representing the probability map.
+    - gt_bboxes (numpy.ndarray): An array of shape (num_boxes, 4) containing normalized ground truth bounding boxes in (x_min, y_min, x_max, y_max) format.
+    - conf_th (float): Confidence threshold for binarizing the probability map.
+
+    Returns:
+    - float: The computed IoU between the binary probability map and the ground truth bounding boxes.
+    """
+    assert prob_map.ndim == 2, "Probability map must be a 2D array"
+    height, width = prob_map.shape
+    binary_map = prob_map > conf_th
+    
+    # Generate predicted bounding boxes based on the binary probability map
+    pred_boxes = []
+    cell_w, cell_h = 1 / width, 1 / height
+    for y in range(height):
+        for x in range(width):
+            if binary_map[y, x]:
+                x_min, y_min = x * cell_w, y * cell_h
+                x_max, y_max = (x + 1) * cell_w, (y + 1) * cell_h
+                pred_boxes.append(shapely_box(x_min, y_min, x_max, y_max))
+    
+    if not pred_boxes:
+        return 0.0  # No predicted bounding boxes, IoU is 0
+    
+    # Compute union of predicted bounding boxes
+    pred_union = unary_union(pred_boxes)
+    
+    # Compute union of ground truth bounding boxes
+    gt_boxes = [shapely_box(x_min, y_min, x_max, y_max) for x_min, y_min, x_max, y_max in gt_bboxes]
+    gt_union = unary_union(gt_boxes)
+    
+    # Compute intersection
+    intersection = pred_union.intersection(gt_union).area
+    union = pred_union.area + gt_union.area - intersection
+    
+    return intersection / union if union > 0 else 0.0
+
+
+def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, conf_thresholds=np.arange(0.1, 0.9, 0.1)):
+    """
+    Find the optimal confidence threshold for binarizing probability maps that maximizes the average IoU with ground truth.
+
+    Parameters:
+    - prob_maps (numpy.ndarray): A 3D array (num_samples, height, width) representing multiple probability maps.
+    - gt_bboxes_list (list of arrays/lists/tuples): A list containing the ground truth bounding boxes for each sample.
+      Each entry is expected to be an array-like structure containing multiple bounding boxes, where each box is in (x_min, y_min, x_max, y_max) format.
+    - conf_thresholds (numpy.ndarray or list): A list of confidence thresholds to evaluate.
+
+    Returns:
+    - dict: A dictionary containing:
+        - 'best_iou' (float): The highest average IoU achieved across samples.
+        - 'best_conf_th' (float): The confidence threshold that achieved this IoU.
+    """
+    assert prob_maps.ndim == 3, "prob_maps must have shape (num_samples, height, width)"
+    assert len(gt_bboxes_list) == prob_maps.shape[0], "Mismatch between number of samples in prob_maps and gt_bboxes_list"
+    assert isinstance(gt_bboxes_list, list), "gt_bboxes_list must be a list"
+    assert all(isinstance(b, (np.ndarray, list, tuple)) for b in gt_bboxes_list), "Each entry in gt_bboxes_list must be an array, list, or tuple"
+    assert all(len(bbox) == 4 for bboxes in gt_bboxes_list for bbox in bboxes), "Each bounding box must be in (x_min, y_min, x_max, y_max) format"
+    assert all(0 <= x <= 1 for bboxes in gt_bboxes_list for bbox in bboxes for x in bbox), "Bounding box coordinates must be normalized"
+
+    best_iou = -1.0
+    best_conf_th = None
+
+    # Iterate over confidence thresholds to find the best one
+    for conf_th in tqdm(conf_thresholds, desc="Optimizing threshold", mininterval=2.0):
+        total_iou = 0.0
+        
+        # Compute IoU for each probability map and its corresponding ground truth
+        for prob_map, gt_bboxes in zip(prob_maps, gt_bboxes_list):
+            total_iou += compute_probability_map_iou(prob_map, gt_bboxes, float(conf_th))  # Ensure conf_th is a float
+        
+        avg_iou = total_iou / len(prob_maps)  # Compute mean IoU over all samples
+        
+        # Track the best threshold
+        if avg_iou > best_iou:
+            best_iou = avg_iou
+            best_conf_th = conf_th
+
+    return {
+        'best_iou': best_iou,
+        'best_conf_th': best_conf_th
+    }
+
+def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, conf_th, pre_nms_max_det,
+                         post_nms_max_det=None):
+    """
+    Computes the Intersection over Union (IoU) between ground truth bounding boxes and predicted bounding boxes 
+    after applying confidence thresholding and Non-Maximum Suppression (NMS).
+
+    Parameters:
+    - gt_bboxes (list or np.ndarray): List or array of ground truth bounding boxes (N_gt, 4).
+    - pred_bbox_coords (np.ndarray or torch.Tensor): Predicted bounding box coordinates (N_pred, 4).
+    - pred_bbox_probs (np.ndarray or torch.Tensor): Confidence scores for predicted bounding boxes (N_pred,).
+    - iou_th (float): IoU threshold for NMS.
+    - conf_th (float): Confidence threshold for filtering predictions.
+    - pre_nms_max_det (int): Maximum number of detections to keep before NMS.
+    - post_nms_max_det (int, optional): Maximum number of detections to keep after NMS.
+
+    Returns:
+    - float: IoU score computed between remaining predicted boxes and ground truth boxes.
+    """
+    assert isinstance(gt_bboxes, (list, np.ndarray)), "gt_bboxes must be a list or np.ndarray"
+    assert isinstance(pred_bbox_coords, (np.ndarray, torch.Tensor)), "pred_bbox_coords must be a np.ndarray or torch.Tensor"
+    assert isinstance(pred_bbox_probs, (np.ndarray, torch.Tensor)), "pred_bbox_probs must be a np.ndarray or torch.Tensor"
+    assert pred_bbox_coords.ndim == 2 and pred_bbox_coords.shape[1] == 4, "pred_bbox_coords must have shape (num_boxes, 4)"
+    assert pred_bbox_probs.ndim == 1, "pred_bbox_probs must have shape (num_boxes,)"
+    
+    # Convert inputs to tensors if needed
+    if isinstance(pred_bbox_coords, np.ndarray):
+        pred_bbox_coords = torch.tensor(pred_bbox_coords, dtype=torch.float32)
+    if isinstance(pred_bbox_probs, np.ndarray):
+        pred_bbox_probs = torch.tensor(pred_bbox_probs, dtype=torch.float32)
+    
+    # Apply pre-NMS filtering
+    if pred_bbox_coords.shape[0] > pre_nms_max_det:
+        pred_bbox_probs, idxs = torch.topk(pred_bbox_probs, pre_nms_max_det)
+        pred_bbox_coords = pred_bbox_coords[idxs]
+    
+    # Apply confidence threshold
+    mask = pred_bbox_probs > conf_th
+    pred_bbox_coords = pred_bbox_coords[mask]
+    pred_bbox_probs = pred_bbox_probs[mask]
+    
+    # Apply Non-Maximum Suppression (NMS)
+    if pred_bbox_coords.shape[0] > 0:
+        keep = nms(pred_bbox_coords, pred_bbox_probs, iou_th)
+        pred_bbox_coords = pred_bbox_coords[keep]
+        pred_bbox_probs = pred_bbox_probs[keep]
+        
+    # Apply post-NMS filtering (if specified)
+    if post_nms_max_det is not None and pred_bbox_coords.shape[0] > post_nms_max_det:
+        pred_bbox_probs, idxs = torch.topk(pred_bbox_probs, post_nms_max_det)
+        pred_bbox_coords = pred_bbox_coords[idxs]
+
+    # Compute IoU between predicted and ground truth boxes
+    iou = calculate_exact_iou_union(pred_bbox_coords, gt_bboxes)
+    
+    return iou

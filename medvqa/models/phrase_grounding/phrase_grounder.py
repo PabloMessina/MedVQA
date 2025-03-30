@@ -4,7 +4,7 @@ from torch import nn
 from medvqa.models.FiLM_utils import LinearFiLM
 from medvqa.models.mlp import MLP
 from positional_encodings.torch_encodings import PositionalEncoding1D, PositionalEncoding2D, Summer
-from medvqa.models.vision.bbox_regression import BoundingBoxRegressorSingleClass
+from medvqa.models.vision.bbox_regression import MultiClassBoundingBoxRegressor
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule, RawImageEncoding
 from medvqa.utils.logging import print_orange
 
@@ -205,7 +205,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION:
                 self.att_proj = nn.Linear(transf_d_model, 1) # hidden size -> scalar (segmentation score)
             elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION:
-                self.visual_grounding_bbox_regressor = BoundingBoxRegressorSingleClass(local_feat_dim=transf_d_model) # hidden size -> bbox
+                self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(local_feat_dim=transf_d_model) # hidden size -> bbox
 
         elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
             assert visual_feature_proj_size is not None
@@ -244,7 +244,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             self.local_film_1 = LinearFiLM(self.local_feat_size, phrase_embedding_size)
             self.local_film_2 = LinearFiLM(self.local_feat_size, phrase_embedding_size)
             self.visual_grounding_hidden_layer = nn.Linear(self.local_feat_size, visual_grounding_hidden_size)
-            self.visual_grounding_bbox_regressor = BoundingBoxRegressorSingleClass(local_feat_dim=visual_grounding_hidden_size)
+            self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(local_feat_dim=visual_grounding_hidden_size)
             self.classifier_mlp = MLP(in_dim=self.global_feat_size + self.local_feat_size + num_regions, # global, local, attention
                                       out_dim=1, # true or false (binary classification)
                                       activation=nn.GELU,
@@ -297,7 +297,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 print_orange('Using positional encoding for local features')
 
             if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
-                self.visual_grounding_bbox_regressor = BoundingBoxRegressorSingleClass(local_feat_dim=visual_grounding_hidden_size)
+                self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(local_feat_dim=visual_grounding_hidden_size)
             else:
                 self.local_attention_final_layer = nn.Linear(visual_grounding_hidden_size, 1) # hidden size -> scalar (local attention score)
 
@@ -366,6 +366,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         max_det=10, # for YOLOv11
         batch=None, # for YOLOv11
         use_first_n_facts_for_detection=None, # for YOLOv11
+        return_sigmoid_attention=False,
     ):  
         # Visual Component
         output = super().forward(
@@ -692,6 +693,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 else:
                     output['visual_grounding_binary_logits'] = visual_grounding_binary_logits # (batch_size, K, num_regions, 1)
                     output['visual_grounding_bbox_logits'] = visual_grounding_bbox_logits # (batch_size, K, num_regions, 4)
+            if return_sigmoid_attention:
+                output['sigmoid_attention'] = sigmoid_attention
 
         return output
     

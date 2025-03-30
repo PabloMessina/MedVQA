@@ -23,6 +23,7 @@ from medvqa.utils.constants import DATASET_NAMES, VINBIG_NUM_BBOX_CLASSES
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
+    attach_condition_aware_bbox_iou_open_class,
     attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
     attach_condition_aware_class_averaged_prc_auc,
@@ -150,7 +151,7 @@ def parse_args(args=None):
     parser.add_argument('--use_mimiccxr_facts_for_train', action='store_true')
     parser.add_argument('--use_mimiccxr_facts_for_test', action='store_true')
     parser.add_argument('--use_mscxr_for_train', action='store_true')
-    parser.add_argument('--use_mscxr_for_test', action='store_true')
+    parser.add_argument('--use_mscxr_for_val', action='store_true')
     parser.add_argument('--use_chest_imagenome_for_train', action='store_true')
     parser.add_argument('--use_chest_imagenome_gold_for_test', action='store_true')
     parser.add_argument('--use_vinbig_for_train', action='store_true')
@@ -185,12 +186,12 @@ def parse_args(args=None):
     parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true')
     parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true')
     parser.add_argument('--use_vinbig_with_modified_labels', action='store_true')
-
-
+    
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
     parser.add_argument('--no_save', dest='save', action='store_false')
     parser.set_defaults(save=True)
+    parser.add_argument('--override_metric_weights', nargs="*", help="Override metric weights (format: metric=value, e.g., vbg_prc_auc=7.5)")
     
     return parser.parse_args(args=args)
 
@@ -224,6 +225,7 @@ def train_model(
     val_image_transform_kwargs,
     trainer_engine_kwargs,
     validator_engine_kwargs,
+    metrics_kwargs,
     epochs,
     batches_per_epoch,
     max_images_per_batch,
@@ -243,8 +245,8 @@ def train_model(
     # Pull out some args from kwargs
     use_mimiccxr_facts_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_facts_for_train', False)
     use_mimiccxr_facts_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_facts_for_test', False)
-    use_mscxr_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_test', False)
     use_mscxr_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_train', False)
+    use_mscxr_for_val = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_val', False)
     use_chest_imagenome_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_for_train', False)
     use_chest_imagenome_gold_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_gold_for_test', False)
     use_cxrlt2024_challenge_split = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_challenge_split', False)
@@ -271,7 +273,7 @@ def train_model(
     # Sanity checks
     if use_chest_imagenome_gold_for_test:
         assert use_chest_imagenome_for_train
-    if use_mscxr_for_test:
+    if use_mscxr_for_val:
         assert use_mimiccxr_facts_for_train or use_mscxr_for_train
     if use_chexpert_for_test:
         assert use_chexpert_for_train
@@ -279,6 +281,10 @@ def train_model(
         assert use_vinbig_for_train
     if use_iuxray_for_test:
         assert use_iuxray_for_train
+
+    # Update metric weights
+    for metric_name, weight in metrics_kwargs.items():
+        _METRIC_WEIGHTS[metric_name] = weight
 
     if use_mimiccxr_facts_for_train:
         if dataloading_kwargs['mimiccxr_facts_weight'] == 0:
@@ -313,7 +319,7 @@ def train_model(
             print_orange('WARNING: use_iuxray_for_train is True but iuxray_weight is 0', bold=True)
             use_iuxray_for_train = False
 
-    use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_test or use_mscxr_for_train or\
+    use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_val or use_mscxr_for_train or\
                    use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or use_cxrlt2024_challenge_split
     
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
@@ -408,10 +414,10 @@ def train_model(
             fact_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mimfg'])
         else:
             fact_grounding_collate_batch_fn = None
-        if use_mscxr_for_train or use_mscxr_for_test:
-            phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['pg'])
+        if use_mscxr_for_train or use_mscxr_for_val:
+            mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
         else:
-            phrase_grounding_collate_batch_fn = None
+            mscxr_phrase_grounding_collate_batch_fn = None
         if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
             bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
         else:
@@ -432,10 +438,10 @@ def train_model(
             max_phrases_per_image=max_phrases_per_image,
             test_batch_size_factor=val_batch_size_factor,
             fact_grounding_collate_batch_fn=fact_grounding_collate_batch_fn,
-            phrase_grounding_collate_batch_fn=phrase_grounding_collate_batch_fn,
             bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
             cxrlt2024_image_phrase_classifier_collate_batch_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
             cxrlt2024_multilabel_classifier_collate_batch_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+            mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
             num_train_workers=num_train_workers,
             num_test_workers=num_val_workers,
             **mimiccxr_trainer_kwargs,
@@ -492,13 +498,12 @@ def train_model(
     if use_mscxr_for_train:
         _dataset_names.append('mscxr')
         _train_weights.append(dataloading_kwargs['mscxr_weight'])
-        _train_dataloaders.append(mimiccxr_trainer.train_mscxr_dataloader)
-        # _train_dataloaders.append(mimiccxr_trainer.test_mscxr_dataloader)
-        print(f'len(mimiccxr_trainer.train_mscxr_dataloader) = {len(mimiccxr_trainer.train_mscxr_dataloader)}')
+        _train_dataloaders.append(mimiccxr_trainer.mscxr_train_dataloader)
+        print(f'len(mimiccxr_trainer.mscxr_dataloader) = {len(mimiccxr_trainer.mscxr_train_dataloader)}')
 
-    if use_mscxr_for_test:
-        _val_dataloaders.append(mimiccxr_trainer.test_mscxr_dataloader)
-        print(f'len(mimiccxr_trainer.test_mscxr_dataloader) = {len(mimiccxr_trainer.test_mscxr_dataloader)}')
+    if use_mscxr_for_val:
+        _val_dataloaders.append(mimiccxr_trainer.mscxr_val_dataloader)
+        print(f'len(mimiccxr_trainer.mscxr_val_dataloader) = {len(mimiccxr_trainer.mscxr_val_dataloader)}')
 
     if use_chest_imagenome_for_train:
         _dataset_names.append('chst-img-anat')
@@ -686,19 +691,28 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_att_sup_loss', train=in_train, val=in_val)
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_segmask_iou', train=in_train, val=in_val)
 
-    if use_mscxr_for_train or use_mscxr_for_test:
-        _cond_func = lambda x: x['flag'] == 'pg'
+    if use_mscxr_for_train or use_mscxr_for_val:
+        _cond_func = lambda x: x['flag'] == 'mscxr'
         in_train = use_mscxr_for_train
-        in_val = use_mscxr_for_test
+        in_val = use_mscxr_for_val
         if in_train:
-            attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'pg_att_sup_loss')
-            attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'pg_segmask_iou', _cond_func)
+            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mscxr_phrcls_loss')
+            attach_condition_aware_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
+            attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'mscxr_att_sup_loss')
+            attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'mscxr_vgbbox_loss')
         if in_val:
-            attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'pg_att_sup_loss')
-            attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'pg_segmask_iou', _cond_func)
+            attach_condition_aware_prc_auc(validator_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
+            attach_condition_aware_bbox_iou_open_class(validator_engine,
+                                                field_names=['predicted_bboxes', 'bbox_coords', 'bbox_classes'],
+                                                metric_name='mscxr_bbox_iou', condition_function=_cond_func)
         # for logging
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pg_att_sup_loss', train=in_train, val=in_val)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pg_segmask_iou', train=in_train, val=in_val)
+        if in_train:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_att_sup_loss', val=False)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_vgbbox_loss', val=False)
+            metrics_to_print.append('mscxr_phrcls_loss')
+        if in_val:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_bbox_iou', train=False)
+        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_prc_auc', train=in_train, val=in_val)
     
     if use_vinbig_for_train or use_vinbig_for_test:
         _cond_func = lambda x: x['flag'] == 'vbg'
@@ -948,6 +962,7 @@ def train_model(
             val_image_transform_kwargs=val_image_transform_kwargs,
             trainer_engine_kwargs=trainer_engine_kwargs,
             validator_engine_kwargs=validator_engine_kwargs,
+            metrics_kwargs=metrics_kwargs,
         ),
         device=device,
         trainer_engine=trainer_engine,
@@ -1051,7 +1066,7 @@ def train_from_scratch(
     use_mimiccxr_facts_for_train,
     use_mimiccxr_facts_for_test,
     use_mscxr_for_train,
-    use_mscxr_for_test,
+    use_mscxr_for_val,
     use_chest_imagenome_for_train,
     use_chest_imagenome_gold_for_test,
     use_vinbig_for_train,
@@ -1099,6 +1114,7 @@ def train_from_scratch(
     device,
     # Other args
     save,
+    override_metric_weights,
     debug=False,
 ):
     print_blue('----- Training model from scratch ------', bold=True)
@@ -1109,7 +1125,7 @@ def train_from_scratch(
     use_bbox_aware_transform = use_yolov8 or do_visual_grounding_with_bbox_regression
     use_segmentation_mask_aware_transform = do_visual_grounding_with_segmentation
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
-    use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_test or\
+    use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_val or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
                      use_cxrlt2024_challenge_split # this challenge is built on top of MIMIC-CXR
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
@@ -1120,11 +1136,11 @@ def train_from_scratch(
     yolov8_use_multiple_detection_layers = predict_bboxes_chest_imagenome and predict_bboxes_vinbig
 
     assert use_mimiccxr or use_vinbig or use_chexlocalize or use_chexpert or use_iuxray
-    assert use_chest_imagenome_gold_for_test or use_mscxr_for_test or use_vinbig_for_test or use_chexlocalize_for_test or\
+    assert use_chest_imagenome_gold_for_test or use_mscxr_for_val or use_vinbig_for_test or use_chexlocalize_for_test or\
            use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test or use_cxrlt2024_challenge_split
     if use_chest_imagenome_gold_for_test:
         assert use_chest_imagenome_for_train
-    if use_mscxr_for_test:
+    if use_mscxr_for_val:
         assert use_mimiccxr_facts_for_train or use_mscxr_for_train
     if use_vinbig_for_test:
         assert use_vinbig_for_train
@@ -1252,8 +1268,8 @@ def train_from_scratch(
         print(f'include_loss_weights = {include_loss_weights}')
         # fact grounding
         collate_batch_fn_kwargs['mimfg'] = { 'flag': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
-        # phrase grounding
-        collate_batch_fn_kwargs['pg'] = { 'flag': 'pg', **_kwargs }
+        # MS-CXR phrase grounding
+        collate_batch_fn_kwargs['mscxr'] = { 'flag': 'mscxr', **_kwargs }
         # chest imagenome bbox grounding
         collate_batch_fn_kwargs['cibg'] = { 'flag': 'cibg', **_kwargs }
         # cxrlt2024 challenge custom labels
@@ -1285,7 +1301,7 @@ def train_from_scratch(
             use_facts_for_test=use_mimiccxr_facts_for_test,
             dicom_id_to_pos_neg_facts_filepath=dicom_id_to_pos_neg_facts_filepath,
             use_mscxr_for_train=use_mscxr_for_train,
-            use_mscxr_for_test=use_mscxr_for_test,
+            use_mscxr_for_val=use_mscxr_for_val,
             mscxr_phrase2embedding_filepath=mscxr_phrase2embedding_filepath,
             use_chest_imagenome_for_train=use_chest_imagenome_for_train,
             use_chest_imagenome_gold_for_test=use_chest_imagenome_gold_for_test,
@@ -1416,6 +1432,16 @@ def train_from_scratch(
         do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
     )
 
+    metrics_kwargs = dict()
+    if override_metric_weights:
+        for override in override_metric_weights:
+            try:
+                key, value = override.split("=")
+                metrics_kwargs[key] = float(value)
+            except ValueError:
+                raise ValueError(f"Invalid metric override format: {override}. Expected format: metric=value")
+        print(f'Overriden metric weights: {metrics_kwargs}')
+
     return train_model(
                 model_kwargs=model_kwargs,
                 optimizer_kwargs=optimizer_kwargs,
@@ -1431,6 +1457,7 @@ def train_from_scratch(
                 val_image_transform_kwargs=val_image_transform_kwargs,
                 trainer_engine_kwargs=trainer_engine_kwargs,
                 validator_engine_kwargs=validator_engine_kwargs,
+                metrics_kwargs=metrics_kwargs,
                 epochs=epochs,
                 batches_per_epoch=batches_per_epoch,
                 max_images_per_batch=max_images_per_batch,
@@ -1486,6 +1513,7 @@ def resume_training(
     val_image_transform_kwargs = metadata['val_image_transform_kwargs']
     trainer_engine_kwargs = metadata['trainer_engine_kwargs']
     validator_engine_kwargs = metadata['validator_engine_kwargs']
+    metrics_kwargs = metadata['metrics_kwargs']
 
     if override_lr:
         optimizer_kwargs = dict(
@@ -1517,6 +1545,7 @@ def resume_training(
                 val_image_transform_kwargs=val_image_transform_kwargs,
                 trainer_engine_kwargs=trainer_engine_kwargs,
                 validator_engine_kwargs=validator_engine_kwargs,
+                metrics_kwargs=metrics_kwargs,
                 epochs=epochs,
                 batches_per_epoch=batches_per_epoch,
                 max_images_per_batch=max_images_per_batch,

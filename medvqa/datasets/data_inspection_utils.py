@@ -13,15 +13,12 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_label_names,
 )
 from medvqa.metrics.bbox.utils import compute_iou
-from medvqa.utils.metrics import (
-    chexpert_label_array_to_string,
-    chest_imagenome_label_array_to_string,
-)
 from medvqa.datasets.image_processing import inv_normalize
 from medvqa.utils.constants import CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 from medvqa.utils.files import get_cached_json_file
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
+from medvqa.utils.logging import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 
 def inspect_chexpert_vision_trainer(chexpert_vision_trainer, i):
     instance = chexpert_vision_trainer.dataset[i]
@@ -245,6 +242,175 @@ def inspect_labels2report_trainer(trainer, dataset_name, i):
         print('chest imagenome labels (verbose):',
             chest_imagenome_label_array_to_string(instance['chest_imagenome'],
             chest_imagenome_label_names))
+        
+def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
+    import os
+    from medvqa.datasets.mimiccxr import get_detailed_metadata_for_dicom_id
+    from medvqa.utils.files import read_txt
+    from medvqa.utils.logging import print_bold
+    from medvqa.datasets.image_processing import inv_normalize
+    from PIL import Image
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    if train:
+        dataset = mimiccxr_trainer.mscxr_train_dataset
+        idx = dataset.indices[i]
+        phrase_bboxes, phrase_classes = dataset.phrase_bboxes_and_classes[idx]
+        phrase_idxs = dataset.phrase_idxs[idx]
+        pos_fact_idxs = dataset.positive_fact_idxs[idx]
+        strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
+        weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
+        image_path = dataset.image_paths[idx]
+        dicom_id = os.path.basename(image_path).split('.')[0]
+        metadata = get_detailed_metadata_for_dicom_id(dicom_id)[0]
+        report = read_txt(metadata['filepath'])
+        instance = dataset[i]
+        image_tensor = instance['i'] # (3, H, W)
+        phrase_embeddings = instance['pe'] # (num_phrases, 128)
+        phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
+        bbox_target_coords = instance['btc'] # (num_phrases, num_regions, 4)
+        bbox_target_presence = instance['btp'] # (num_phrases, num_regions)
+        gidxs = instance['gidxs'] # (num_phrases_with_bbox,)
+
+        print_bold('idx:', end=' '); print(idx)
+        print_bold('dicom_id:', end=' '); print(dicom_id)
+        print_bold('image_path:', end=' '); print(image_path)
+        print_bold('report:'); print(report)
+        print_bold('metadata:'); print(metadata)
+        print_bold('image_tensor:', end=' '); print(image_tensor.shape)
+        print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
+        print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
+        print_bold('bbox_target_coords:', end=' '); print(bbox_target_coords.shape)
+        print_bold('bbox_target_presence:', end=' '); print(bbox_target_presence.shape)
+        print_bold('gidxs:', end=' '); print(gidxs.shape)
+
+        # Obtain bbox coordinates from target
+        bbox_target_coords = bbox_target_coords.view(-1, 4)
+        bbox_target_presence = bbox_target_presence.view(-1)
+        bbox_coords = set()
+        for i in range(len(bbox_target_presence)):
+            if bbox_target_presence[i] == 1:
+                bbox_coords.add(tuple(bbox_target_coords[i].tolist()))
+        bbox_coords = list(bbox_coords)
+        print_bold('bbox_coords:', end=' '); print(bbox_coords)
+
+        # Display transformed image + bboxes
+        print_bold('Transformed image:')
+        img = Image.fromarray((inv_normalize(image_tensor).permute(1,2,0) * 255).numpy().astype(np.uint8))
+        plt.imshow(img)
+        ax = plt.gca()
+        for bbox_coord in bbox_coords:
+            x1, y1, x2, y2 = bbox_coord
+            x1 *= img.width
+            y1 *= img.height
+            x2 *= img.width
+            y2 *= img.height
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+        plt.show()
+
+        # Display original image
+        print_bold('Original image:')
+        img = Image.open(image_path).convert('RGB')
+        plt.imshow(img)
+        plt.show()
+
+        print_bold('Phrase bboxes:', end=' '); print(phrase_bboxes)
+        print_bold('Phrase classes:', end=' '); print(phrase_classes)
+        print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
+        print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
+        print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
+        print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
+
+        print_bold('Phrases:')
+        for i in phrase_idxs:
+            print(mimiccxr_trainer.mscxr_phrases[i])
+
+        print_bold('Positive facts:')
+        for i in pos_fact_idxs:
+            print(mimiccxr_trainer.mscxr_facts[i])
+
+        print_bold('Strong negative facts:')
+        for i in strong_neg_fact_idxs:
+            print(mimiccxr_trainer.mscxr_facts[i])
+
+        print_bold('Weak negative facts:')
+        for i in weak_neg_fact_idxs[:20]:
+            print(mimiccxr_trainer.mscxr_facts[i])
+    
+    else:
+
+        dataset = mimiccxr_trainer.mscxr_val_dataset
+        idx = dataset.indices[i]
+        phrase_idxs = dataset.phrase_idxs[idx]
+        pos_fact_idxs = dataset.positive_fact_idxs[idx]
+        strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
+        weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
+        image_path = dataset.image_paths[idx]
+        dicom_id = os.path.basename(image_path).split('.')[0]
+        metadata = get_detailed_metadata_for_dicom_id(dicom_id)[0]
+        report = read_txt(metadata['filepath'])
+        instance = dataset[i]
+        image_tensor = instance['i'] # (3, H, W)
+        phrase_embeddings = instance['pe'] # (num_phrases, 128)
+        phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
+        phrase_bboxes = instance['bboxes'] # (list of 4-tuples)
+        phrase_classes = instance['classes'] # (list of ints)
+
+        print_bold('idx:', end=' '); print(idx)
+        print_bold('dicom_id:', end=' '); print(dicom_id)
+        print_bold('image_path:', end=' '); print(image_path)
+        print_bold('report:'); print(report)
+        print_bold('metadata:'); print(metadata)
+        print_bold('image_tensor:', end=' '); print(image_tensor.shape)
+        print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
+        print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
+        print_bold('phrase_bboxes:', end=' '); print(phrase_bboxes)
+        print_bold('phrase_classes:', end=' '); print(phrase_classes)
+
+        # Display transformed image + bboxes
+        print_bold('Transformed image:')
+        img = Image.fromarray((inv_normalize(image_tensor).permute(1,2,0) * 255).numpy().astype(np.uint8))
+        plt.imshow(img)
+        ax = plt.gca()
+        for bbox_coord in phrase_bboxes:
+            x1, y1, x2, y2 = bbox_coord
+            x1 *= img.width
+            y1 *= img.height
+            x2 *= img.width
+            y2 *= img.height
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+        plt.show()
+
+        # Display original image
+        print_bold('Original image:')
+        img = Image.open(image_path).convert('RGB')
+        plt.imshow(img)
+        plt.show()
+        
+        print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
+        print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
+        print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
+        print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
+
+        print_bold('Phrases:')
+        for i in phrase_idxs:
+            print(mimiccxr_trainer.mscxr_phrases[i])
+
+        print_bold('Positive facts:')
+        for i in pos_fact_idxs:
+            print(mimiccxr_trainer.mscxr_facts[i])
+
+        print_bold('Strong negative facts:')
+        for i in strong_neg_fact_idxs:
+            print(mimiccxr_trainer.mscxr_facts[i])
+
+        print_bold('Weak negative facts:')
+        for i in weak_neg_fact_idxs[:20]:
+            print(mimiccxr_trainer.mscxr_facts[i])
+
 
 _shared_image_id_to_binary_labels = None
 def _count_labels(idx):

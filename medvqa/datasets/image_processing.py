@@ -1,3 +1,4 @@
+import math
 import torch
 import torchvision.transforms as T
 import torchxrayvision as xrv
@@ -127,7 +128,6 @@ def get_image_transform(
             print('    Returning default transform (no augmentation)')
             return test_transform
         
-        
         print('    augmentation_mode =', augmentation_mode)
         print('    default_prob =', default_prob)
 
@@ -166,12 +166,15 @@ def get_image_transform(
 
             if augmentation_mode == 'random-color':
                 train_transform = image_augmented_transforms.get_train_transform('color', bbox_aware=True)
+                train_transform__vinbig = image_augmented_transforms.get_train_transform('color', bbox_aware=True, for_vinbig=True) # compatible with vinbig-like annotations
                 train_transform__no_bbox = image_augmented_transforms.get_train_transform('color', allow_returning_image_size=True) # to be used when no bboxes are present
             elif augmentation_mode == 'random-spatial':
                 train_transform = image_augmented_transforms.get_train_transform('spatial', bbox_aware=True)
+                train_transform__vinbig = image_augmented_transforms.get_train_transform('spatial', bbox_aware=True, for_vinbig=True) # compatible with vinbig-like annotations
                 train_transform__no_bbox = image_augmented_transforms.get_train_transform('spatial', allow_returning_image_size=True) # to be used when no bboxes are present
             elif augmentation_mode == 'random-color-and-spatial':
                 train_transform = image_augmented_transforms.get_train_transform('both', bbox_aware=True)
+                train_transform__vinbig = image_augmented_transforms.get_train_transform('both', bbox_aware=True, for_vinbig=True) # compatible with vinbig-like annotations
                 train_transform__no_bbox = image_augmented_transforms.get_train_transform('both', allow_returning_image_size=True) # to be used when no bboxes are present
             else:
                 raise ValueError(f'Invalid augmentation_mode: {augmentation_mode}')
@@ -181,7 +184,7 @@ def get_image_transform(
             #         return test_transform(img) # no augmentation
             #     return train_transform(img) # with augmentation
 
-            def transform_fn(image_path, bboxes=None, presence=None, albumentation_adapter=None, return_image_size=False):
+            def transform_fn(image_path, bboxes=None, classes=None, presence=None, albumentation_adapter=None, return_image_size=False):
 
                 if bboxes is None: # no bboxes -> use different transform
                     assert presence is None
@@ -202,16 +205,31 @@ def get_image_transform(
                 if random.random() < default_prob:
                     if return_image_size:
                         img, size_before, size_after = test_transform(image_path, return_image_size=True)
-                        return img, bboxes, presence, size_before, size_after
+                        if presence is not None:
+                            return img, bboxes, presence, size_before, size_after
+                        else:
+                            return img, bboxes, classes, size_before, size_after
                     img = test_transform(image_path)
-                    return img, bboxes, presence
-                return train_transform(
-                    image_path=image_path,
-                    bboxes=bboxes,
-                    presence=presence,
-                    albumentation_adapter=albumentation_adapter,
-                    return_image_size=return_image_size,
-                )
+                    if presence is not None:
+                        return img, bboxes, presence
+                    else:
+                        return img, bboxes, classes
+                if presence is not None:
+                    return train_transform(
+                        image_path=image_path,
+                        bboxes=bboxes,
+                        presence=presence,
+                        albumentation_adapter=albumentation_adapter,
+                        return_image_size=return_image_size,
+                    )
+                else:
+                    return train_transform__vinbig( # compatible with vinbig-like annotations
+                        image_path=image_path,
+                        bboxes=bboxes,
+                        classes=classes,
+                        albumentation_adapter=albumentation_adapter,
+                        return_image_size=return_image_size,
+                    )
 
             print(f'    Returning augmented transform with mode {augmentation_mode}')
             return transform_fn
@@ -557,7 +575,7 @@ class ImageDataset(Dataset):
         
 class ImageFactClassificationDataset(Dataset):
     def __init__(self, image_paths, image_transform, fact_embeddings, positive_facts,
-                 indices, num_facts,
+                 indices, num_facts_per_image,
                  use_strong_and_weak_negatives=False, negative_facts=None,
                  weak_negative_facts=None, strong_negative_facts=None,
                  infinite=False, shuffle=False):
@@ -570,7 +588,12 @@ class ImageFactClassificationDataset(Dataset):
         self.weak_negative_facts = weak_negative_facts
         self.strong_negative_facts = strong_negative_facts        
         self.indices = indices
-        self.num_facts = num_facts
+        self.num_facts_per_image = num_facts_per_image
+        self.num_neg_facts_per_image = num_facts_per_image // 2
+        self.num_pos_facts_per_image = num_facts_per_image - self.num_neg_facts_per_image
+        assert self.num_facts_per_image >= 2
+        assert self.num_pos_facts_per_image >= 1
+        assert self.num_neg_facts_per_image >= 1
         self.infinite = infinite
         if use_strong_and_weak_negatives:
             assert weak_negative_facts is not None
@@ -625,41 +648,41 @@ class ImageFactClassificationDataset(Dataset):
             assert num_neg == len(negative_facts)
 
             if num_pos > 0 and num_neg > 0:
-                if num_pos < self.num_facts and num_neg < self.num_facts:
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-                elif num_pos < self.num_facts:
+                if num_pos < self.num_pos_facts_per_image and num_neg < self.num_neg_facts_per_image:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_pos_facts_per_image)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_neg_facts_per_image)
+                elif num_pos < self.num_pos_facts_per_image:
                     if num_strong_neg > 0:
                         if random.random() < 0.5: # emphasize strong negatives
-                            if num_strong_neg < self.num_facts * 2 - num_pos:
+                            if num_strong_neg < self.num_facts_per_image - num_pos:
                                 negative_facts = (strong_negative_facts +
-                                                  self._adapt_fact_indices(weak_negative_facts, self.num_facts * 2 - num_strong_neg - num_pos))
+                                                  self._adapt_fact_indices(weak_negative_facts, self.num_facts_per_image - num_strong_neg - num_pos))
                             else:
-                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_facts * 2 - num_pos)
+                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_facts_per_image - num_pos)
                         else: # use all negatives
-                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
+                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts_per_image - num_pos)
                     else:
-                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
-                elif num_neg < self.num_facts:
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - num_neg)
+                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts_per_image - num_pos)
+                elif num_neg < self.num_neg_facts_per_image:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts_per_image - num_neg)
                 else:
-                    assert num_pos >= self.num_facts and num_neg >= self.num_facts
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
+                    assert num_pos >= self.num_pos_facts_per_image and num_neg >= self.num_neg_facts_per_image
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_pos_facts_per_image)
                     if num_strong_neg > 0:
                         if random.random() < 0.5:
-                            if num_strong_neg < self.num_facts:
+                            if num_strong_neg < self.num_neg_facts_per_image:
                                 negative_facts = (strong_negative_facts +
-                                                  self._adapt_fact_indices(weak_negative_facts, self.num_facts - num_strong_neg))
+                                                  self._adapt_fact_indices(weak_negative_facts, self.num_neg_facts_per_image - num_strong_neg))
                             else:
-                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_facts)
+                                negative_facts = self._adapt_fact_indices(strong_negative_facts, self.num_neg_facts_per_image)
                         else:
-                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                            negative_facts = self._adapt_fact_indices(negative_facts, self.num_neg_facts_per_image)
                     else:
-                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                        negative_facts = self._adapt_fact_indices(negative_facts, self.num_neg_facts_per_image)
             elif num_pos > 0:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts_per_image)
             elif num_neg > 0:
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts_per_image)
             else:
                 raise ValueError('No positive or negative facts found!')
         
@@ -671,26 +694,26 @@ class ImageFactClassificationDataset(Dataset):
             num_neg = len(negative_facts)
 
             if num_pos > 0 and num_neg > 0:
-                if num_pos < self.num_facts and num_neg < self.num_facts:
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
-                elif num_pos < self.num_facts:
-                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2 - num_pos)
-                elif num_neg < self.num_facts:
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2 - num_neg)
+                if num_pos < self.num_pos_facts_per_image and num_neg < self.num_neg_facts_per_image:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_pos_facts_per_image)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_neg_facts_per_image)
+                elif num_pos < self.num_pos_facts_per_image:
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts_per_image - num_pos)
+                elif num_neg < self.num_neg_facts_per_image:
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts_per_image - num_neg)
                 else:
-                    assert num_pos >= self.num_facts and num_neg >= self.num_facts
-                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts)
-                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts)
+                    assert num_pos >= self.num_pos_facts_per_image and num_neg >= self.num_neg_facts_per_image
+                    positive_facts = self._adapt_fact_indices(positive_facts, self.num_pos_facts_per_image)
+                    negative_facts = self._adapt_fact_indices(negative_facts, self.num_neg_facts_per_image)
             elif num_pos > 0:
-                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts * 2)
+                positive_facts = self._adapt_fact_indices(positive_facts, self.num_facts_per_image)
             elif num_neg > 0:
-                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts * 2)
+                negative_facts = self._adapt_fact_indices(negative_facts, self.num_facts_per_image)
             else:
                 raise ValueError('No positive or negative facts found!')
 
         fact_indices = positive_facts + negative_facts
-        assert len(fact_indices) == 2 * self.num_facts
+        assert len(fact_indices) == self.num_facts_per_image
         embeddings = self.fact_embeddings[fact_indices]
         labels = np.zeros(len(fact_indices), dtype=np.int64) # initialize with zeros
         labels[:len(positive_facts)] = 1 # set positive labels
@@ -897,3 +920,40 @@ class _ImageSizeCache():
             self._dirty = False
 
 image_size_cache = _ImageSizeCache()
+
+
+def convert_bboxes_into_target_tensors(bboxes, classes, num_classes, feature_map_size):
+    """
+    Creates a target tensor for bounding boxes on a feature map.
+    
+    Args:
+        bboxes: A tensor or array of shape (N, 4) representing bounding box coordinates.
+        classes: A tensor or array of shape (N,) representing bounding box classes.
+        num_classes: The number of classes.
+        feature_map_size: Tuple (H, W) representing the size of the feature map.
+    
+    Returns:
+        A tensor of shape (num_classes, H*W, 4) representing the target tensor with bounding box coordinates (x_min, y_min, x_max, y_max).
+        A tensor of shape (num_classes, H*W) representing the target tensor with bounding box presence.
+    """
+    H, W = feature_map_size
+    N = len(bboxes)
+    assert len(classes) == N
+    target_coords = torch.zeros(num_classes, H, W, 4)
+    target_presence = torch.zeros(num_classes, H, W)
+    
+    for i in range(N):
+        x_min, y_min, x_max, y_max = bboxes[i]
+        cls = classes[i]
+        x_min_scaled = math.floor(x_min * W)
+        y_min_scaled = math.floor(y_min * H)
+        x_max_scaled = math.ceil(x_max * W)
+        y_max_scaled = math.ceil(y_max * H)
+        target_coords[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled, :] = torch.tensor([x_min, y_min, x_max, y_max])
+        target_presence[cls, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled] = 1
+
+    # Reshape target tensors
+    target_coords = target_coords.view(num_classes, H*W, 4)
+    target_presence = target_presence.view(num_classes, H*W)
+    
+    return target_coords, target_presence

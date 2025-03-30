@@ -1140,6 +1140,50 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             #     raise
             batch_dict['pgm'] = torch.tensor(np.array([x['pgm'] for x in batch]))
             return batch_dict
+    elif flag == 'mscxr': # MS-CXR
+        assert not use_yolo
+        def collate_batch_fn(batch, training_mode):
+            # We expect:
+            # if training mode:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pcl': phrase classification labels
+            # - 'btc': tensor with bounding boxes coordinates
+            # - 'btp': tensor with bounding boxes presence
+            # - 'gidxs': indices with grounding, used for computing the loss only for the phrases with grounding
+            # else:
+            # - 'i': images
+            # - 'pe': phrase embeddings
+            # - 'pcl': phrase classification labels
+            # - 'bboxes': bounding boxes coordinates
+            # - 'classes': bounding boxes classes
+
+            batch_dict = dict(flag=flag)
+
+            if training_mode:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+                batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+                batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+                batch_dict['btc'] = torch.cat([x['btc'] for x in batch], dim=0) # shape: (num_phrases_with_grounding, H*W, 4)
+                batch_dict['btp'] = torch.cat([x['btp'] for x in batch], dim=0) # shape: (num_phrases_with_grounding, H*W)
+                gidxs = []
+                offset = 0
+                for x in batch:
+                    gidxs.append(x['gidxs'] + offset)
+                    offset += x['gidxs'].shape[0]
+                batch_dict['gidxs'] = torch.tensor(np.concatenate(gidxs))
+                assert batch_dict['gidxs'].shape[0] == batch_dict['btc'].shape[0]
+                assert batch_dict['gidxs'].shape[0] == batch_dict['btp'].shape[0]
+            else:
+                batch_dict['i'] = torch.stack([x['i'] for x in batch])
+                batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+                batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+                batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+                batch_dict['classes'] = [x['classes'] for x in batch]
+
+            return batch_dict
+        
+
     elif flag == 'cibg': # chest imagenome bbox grounding
         # assert use_yolov8
         def collate_batch_fn(batch, training_mode=True, do_visual_grounding_with_bbox_regression=False):

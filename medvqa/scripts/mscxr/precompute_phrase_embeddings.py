@@ -14,7 +14,7 @@ from medvqa.utils.logging import print_blue, print_bold
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, required=True, choices=SupportedHuggingfaceMedicalBERTModels.get_all())
-    parser.add_argument('--device', type=str, default='GPU', choices=['CPU', 'GPU'])
+    parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--model_checkpoint_folder_path', type=str, required=True)
