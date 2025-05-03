@@ -8,9 +8,9 @@ from tqdm import tqdm
 
 from medvqa.datasets.text_data_utils import remove_consecutive_repeated_words_from_text
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
-from medvqa.utils.logging import get_console_logger, print_red
+from medvqa.utils.logging_utils import get_console_logger, print_red
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl, save_jsonl
+from medvqa.utils.files_utils import load_jsonl, save_jsonl
 
 _VALID_JSON_OBJECT_REGEX = re.compile(
     r'\s*(?:"[^"]*"\s*:\s*\[\s*(?:"[^"]*"(?:\s*,\s*"[^"]*")*)?\s*\]\s*,?\s*)*',

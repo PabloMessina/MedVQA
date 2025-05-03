@@ -14,8 +14,8 @@ from medvqa.metrics.bbox.utils import (
     find_optimal_conf_iou_thresholds,
 )
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
-from medvqa.utils.files import get_results_folder_path, save_pickle
-from medvqa.utils.handlers import (
+from medvqa.utils.files_utils import get_results_folder_path, save_pickle
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handler,
     get_log_iteration_handler,
@@ -34,7 +34,7 @@ from medvqa.utils.common import activate_determinism, parsed_args_to_dict
 from medvqa.training.vision import get_engine
 from medvqa.datasets.dataloading_utils import get_vision_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_orange
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_magenta, print_orange
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

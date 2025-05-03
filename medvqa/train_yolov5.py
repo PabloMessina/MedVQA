@@ -5,7 +5,7 @@ import argparse
 from tqdm import tqdm
 from medvqa.datasets.vinbig import VINBIG_FAST_CACHE_DIR, VINBIG_LARGE_FAST_CACHE_DIR, VINBIG_ORIGINAL_IMAGES_FOLDER, VINBIG_YOLOV5_LABELS_DIR
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigTrainerBase
-from medvqa.utils.logging import print_blue
+from medvqa.utils.logging_utils import print_blue
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
     CHEST_IMAGENOME_FAST_CACHE_DIR,

@@ -7,9 +7,9 @@ from sklearn.cluster import KMeans
 from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader, remove_consecutive_repeated_words_from_text, sentence_tokenize_texts_in_parallel
 from medvqa.models.checkpoint import load_model_state_dict, get_checkpoint_filepath
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
-from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string, hash_string_list, update_hash
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files_utils import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.hashing_utils import compute_hashes_in_parallel, hash_string, hash_string_list, update_hash
+from medvqa.utils.logging_utils import print_bold
 
 class SupportedHuggingfaceMedicalBERTModels:
     BiomedVLP_CXR_BERT_specialized = 'microsoft/BiomedVLP-CXR-BERT-specialized'

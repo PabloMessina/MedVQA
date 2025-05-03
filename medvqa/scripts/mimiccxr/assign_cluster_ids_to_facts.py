@@ -10,8 +10,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.models.huggingface_utils import compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.files_utils import load_jsonl, load_pickle, save_pickle
 
 def _sample_from_each_cluster(cluster_ids, embeddings, cluster_centers, n_samples_per_cluster):
     """

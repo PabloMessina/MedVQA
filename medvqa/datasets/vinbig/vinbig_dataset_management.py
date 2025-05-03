@@ -32,8 +32,8 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.vinbig_v1 import TEMPLATES_VINBIG_v1
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
-from medvqa.utils.logging import print_bold, print_orange
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle, save_pickle
+from medvqa.utils.logging_utils import print_bold, print_orange
 
 class VinBigTrainingMode:
     TRAIN_ONLY = 'train'

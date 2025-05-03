@@ -2,9 +2,9 @@ import os
 import argparse
 import random
 from medvqa.utils.common import FAST_CACHE_DIR, FAST_TMP_DIR
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl, load_pickle
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl, load_pickle
 
 INSTRUCTIONS = """You will receive a Python object with the predictions from an Image Classifier over one or more views of a Chest X-ray. The object has the following format:
 {

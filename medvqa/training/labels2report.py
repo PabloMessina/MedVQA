@@ -10,7 +10,7 @@ from medvqa.utils.constants import (
     MIMICCXR_DATASET_ID,
     MetricNames,
 )
-from medvqa.utils.logging import print_bold
+from medvqa.utils.logging_utils import print_bold
 
 def get_step_fn(model, optimizer, tokenizer, training, validating, testing, device,
         shift_tokens_for_transformer=True,

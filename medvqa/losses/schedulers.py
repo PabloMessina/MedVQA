@@ -6,6 +6,9 @@ from torch.optim.lr_scheduler import (
 from bisect import bisect_right
 import math
 import warnings
+import logging
+
+logger = logging.getLogger(__name__)
 
 class LRSchedulerNames:
     ReduceLROnPlateau = 'reduce-lr-on-plateau'
@@ -134,9 +137,9 @@ class CyclicExponentialLR(_LRScheduler):
         self.steps_to_restart = steps_to_restart
         self.steps = -1
         self.initial_lr = initial_lr
-        print('self.steps_to_restart =', self.steps_to_restart)
-        print('self.steps =', self.steps)
-        print('self.initial_lr =', self.initial_lr)
+        logger.info(f'self.steps_to_restart = {self.steps_to_restart}')
+        logger.info(f'self.steps = {self.steps}')
+        logger.info(f'self.initial_lr = {self.initial_lr}')
         super(CyclicExponentialLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -196,9 +199,9 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
         update_batchwise = False
     elif name == LRSchedulerNames.ExponentialWarmUpPlusDecay:
         assert warmup_and_decay_args is not None
-        print(f'Using {name} scheduler: {warmup_and_decay_args}')
+        logger.info(f'Using {name} scheduler: {warmup_and_decay_args}')
         lr0, steps01, lr1, steps12, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
-        print(lr0, steps01, lr1, steps12, lr2)
+        logger.info(f'lr0 = {lr0}, steps01 = {steps01}, lr1 = {lr1}, steps12 = {steps12}, lr2 = {lr2}')
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, steps01), verbose=True)
         scheduler2 = ExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, steps12), verbose=True)
         scheduler = SequentialLR(schedulers=[scheduler1, scheduler2], milestones=[steps01+1])
@@ -206,9 +209,9 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
     elif name == LRSchedulerNames.ExponentialWarmUpPlusCyclicDecayBatchwise:
         assert warmup_and_decay_args is not None
         assert n_batches_per_epoch is not None
-        print(f'Using {name} scheduler: {warmup_and_decay_args}')
+        logger.info(f'Using {name} scheduler: {warmup_and_decay_args}')
         lr0, warmup_epochs, lr1, restart_epochs, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
-        print(lr0, warmup_epochs, lr1, restart_epochs, lr2)
+        logger.info(f'lr0 = {lr0}, warmup_epochs = {warmup_epochs}, lr1 = {lr1}, restart_epochs = {restart_epochs}, lr2 = {lr2}')
         warmup_steps = warmup_epochs * n_batches_per_epoch
         restart_steps = restart_epochs * n_batches_per_epoch
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, warmup_steps))
@@ -219,9 +222,9 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
         update_batchwise = True
     elif name == LRSchedulerNames.ExponentialWarmUpPlusCyclicDecay:
         assert warmup_and_decay_args is not None
-        print(f'Using {name} scheduler: {warmup_and_decay_args}')
+        logger.info(f'Using {name} scheduler: {warmup_and_decay_args}')
         lr0, warmup_epochs, lr1, restart_epochs, lr2 = parse_warmup_and_decay_args_string(warmup_and_decay_args)
-        print(lr0, warmup_epochs, lr1, restart_epochs, lr2)
+        logger.info(f'lr0 = {lr0}, warmup_epochs = {warmup_epochs}, lr1 = {lr1}, restart_epochs = {restart_epochs}, lr2 = {lr2}')
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, warmup_epochs))
         scheduler2 = CyclicExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, restart_epochs),
                                          steps_to_restart=restart_epochs, initial_lr=lr1)
@@ -231,9 +234,9 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
     elif name == LRSchedulerNames.ExponentialWarmUpPlusCosineAnnealing:
         assert warmup_and_cosine_args is not None
         assert n_batches_per_epoch is not None
-        print(f'Using {name} scheduler: {warmup_and_cosine_args}')
+        logger.info(f'Using {name} scheduler: {warmup_and_cosine_args}')
         lr0, warmup_epochs, lr1, restart_epochs, lr2 = parse_warmup_and_cosine_args_string(warmup_and_cosine_args)
-        print(lr0, warmup_epochs, lr1, restart_epochs, lr2)
+        logger.info(f'lr0 = {lr0}, warmup_epochs = {warmup_epochs}, lr1 = {lr1}, restart_epochs = {restart_epochs}, lr2 = {lr2}')
         warmup_steps = warmup_epochs * n_batches_per_epoch
         restart_steps = warmup_epochs * n_batches_per_epoch
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, warmup_steps))
@@ -243,10 +246,11 @@ def create_lr_scheduler(name, optimizer, factor=None, patience=None, warmup_and_
         update_batchwise = True
     elif name == LRSchedulerNames.ExponentialWarmUpPlusDecayPlusCyclicDecay:
         assert warmup_decay_and_cyclic_decay_args is not None
-        print(f'Using {name} scheduler: {warmup_decay_and_cyclic_decay_args}')
+        logger.info(f'Using {name} scheduler: {warmup_decay_and_cyclic_decay_args}')
         lr0, epochs01, lr1, epochs12, lr2, lr3, restart_epochs, lr4 = \
             parse_warmup_decay_and_cyclic_decay_args_string(warmup_decay_and_cyclic_decay_args)
-        print(lr0, epochs01, lr1, epochs12, lr2, lr3, restart_epochs, lr4)
+        logger.info(f'lr0 = {lr0}, epochs01 = {epochs01}, lr1 = {lr1}, epochs12 = {epochs12}, lr2 = {lr2}, '
+                    f'lr3 = {lr3}, restart_epochs = {restart_epochs}, lr4 = {lr4}')
         scheduler1 = ExponentialLR(optimizer, gamma=calc_gamma(lr0, lr1, epochs01))
         scheduler2 = ExponentialLR(optimizer, gamma=calc_gamma(lr1, lr2, epochs12))
         scheduler3 = CyclicExponentialLR(optimizer, gamma=calc_gamma(lr3, lr4, restart_epochs-1),

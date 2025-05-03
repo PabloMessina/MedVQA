@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 from tqdm import tqdm
 from medvqa.utils.common import get_timestamp
 
-from medvqa.utils.files import save_jsonl
+from medvqa.utils.files_utils import save_jsonl
 
 def apply_seq2seq_model_to_sentences(
         checkpoint_folder_path, sentences, device, batch_size, num_workers, max_length, num_beams,

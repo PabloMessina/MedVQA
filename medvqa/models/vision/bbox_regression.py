@@ -1,7 +1,12 @@
+import math
 import torch
 import torch.nn as nn
 from torchvision.ops import roi_align
 import torchvision.ops as ops
+from medvqa.metrics.bbox.utils import cxcywh_to_xyxy_tensor, get_grid_centers
+import logging
+
+logger = logging.getLogger(__name__)
 
 class BBoxRegressorVersion:
     V1 = 'v1'
@@ -16,11 +21,11 @@ class BoundingBoxRegressor_v1(nn.Module):
 
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_classes, train_average_bbox_coords):
         super().__init__()
-        print('BoundingBoxRegressor_v1:')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  global_feat_dim: {global_feat_dim}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_classes: {num_classes}')
+        logger.info('BoundingBoxRegressor_v1:')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  global_feat_dim: {global_feat_dim}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_classes: {num_classes}')
         self.local_feat_dim = local_feat_dim
         self.global_feat_dim = global_feat_dim
         self.hidden_dim = hidden_dim
@@ -83,12 +88,12 @@ class BoundingBoxRegressor_v2(nn.Module):
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_classes, num_regions,
                 train_average_bbox_coords):
         super().__init__()
-        print('BoundingBoxRegressor_v2:')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  global_feat_dim: {global_feat_dim}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_classes: {num_classes}')
-        print(f'  num_regions: {num_regions}')
+        logger.info('BoundingBoxRegressor_v2:')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  global_feat_dim: {global_feat_dim}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_classes: {num_classes}')
+        logger.info(f'  num_regions: {num_regions}')
         self.local_feat_dim = local_feat_dim
         self.global_feat_dim = global_feat_dim
         self.hidden_dim = hidden_dim
@@ -142,12 +147,12 @@ class BoundingBoxRegressor_v3(nn.Module):
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_classes, num_regions,
                 train_average_bbox_coords):
         super().__init__()
-        print('BoundingBoxRegressor_v3:')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  global_feat_dim: {global_feat_dim}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_classes: {num_classes}')
-        print(f'  num_regions: {num_regions}')
+        logger.info('BoundingBoxRegressor_v3:')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  global_feat_dim: {global_feat_dim}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_classes: {num_classes}')
+        logger.info(f'  num_regions: {num_regions}')
         self.local_feat_dim = local_feat_dim
         self.global_feat_dim = global_feat_dim
         self.hidden_dim = hidden_dim
@@ -192,12 +197,12 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v4(nn.Module):
     def __init__(self, local_feat_dim, global_feat_dim, hidden_dim, num_bboxes, num_bboxes_to_supervise,
                  num_regions, train_average_bbox_coords, bbox_to_labels, bbox_group_to_labels):
         super().__init__()
-        print('BoundingBoxRegressorAndMultiLabelClassifier_v4:')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  global_feat_dim: {global_feat_dim}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_bboxes: {num_bboxes}')
-        print(f'  num_regions: {num_regions}')
+        logger.info('BoundingBoxRegressorAndMultiLabelClassifier_v4:')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  global_feat_dim: {global_feat_dim}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_bboxes: {num_bboxes}')
+        logger.info(f'  num_regions: {num_regions}')
         self.local_feat_dim = local_feat_dim
         self.global_feat_dim = global_feat_dim
         self.hidden_dim = hidden_dim
@@ -293,11 +298,11 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v4_1(nn.Module):
 
     def __init__(self, local_feat_dim, hidden_dim, num_bboxes,  num_regions, bbox_to_labels, bbox_group_to_labels):
         super().__init__()
-        print('BoundingBoxRegressorAndMultiLabelClassifier_v4_1')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_bboxes: {num_bboxes}')
-        print(f'  num_regions: {num_regions}')
+        logger.info('BoundingBoxRegressorAndMultiLabelClassifier_v4_1')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_bboxes: {num_bboxes}')
+        logger.info(f'  num_regions: {num_regions}')
         self.local_feat_dim = local_feat_dim
         self.hidden_dim = hidden_dim
         self.num_regions = num_regions
@@ -385,14 +390,14 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v5(nn.Module):
                 roi_align_spatial_scale, hidden_dim, num_boxes, num_boxes_to_supervise,
                 bbox_to_labels, bbox_group_to_labels):
         super().__init__()
-        print('BoundingBoxRegressorAndMultiLabelClassifier_v5:')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  input_size: {input_size}')
-        print(f'  roi_align_output_size: {roi_align_output_size}')
-        print(f'  roi_align_spatial_scale: {roi_align_spatial_scale}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_boxes: {num_boxes}')
-        print(f'  num_boxes_to_supervise: {num_boxes_to_supervise}')        
+        logger.info('BoundingBoxRegressorAndMultiLabelClassifier_v5:')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  input_size: {input_size}')
+        logger.info(f'  roi_align_output_size: {roi_align_output_size}')
+        logger.info(f'  roi_align_spatial_scale: {roi_align_spatial_scale}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_boxes: {num_boxes}')
+        logger.info(f'  num_boxes_to_supervise: {num_boxes_to_supervise}')        
         
         assert len(bbox_to_labels) <= num_boxes # some bboxes may not have labels
         assert type(bbox_to_labels) == list # list of [idx, labels]
@@ -412,7 +417,7 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v5(nn.Module):
         self.bbox_group_to_labels = bbox_group_to_labels
         self.num_labels = sum(len(labels) for _, labels in bbox_to_labels) + \
                             sum(len(labels) for _, labels in bbox_group_to_labels)
-        print(f'  self.num_labels: {self.num_labels}')
+        logger.info(f'  self.num_labels: {self.num_labels}')
 
         # create layers for the multi-label classification
         self.loc_mlc_fc = nn.ModuleList([nn.Linear(hidden_dim, len(labels)) for _, labels in bbox_to_labels])
@@ -502,16 +507,16 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v6(nn.Module):
                 roi_align_spatial_scale, hidden_dim, num_boxes, num_boxes_to_supervise,
                 bbox_to_labels, bbox_group_to_labels, train_average_bbox_coords):
         super().__init__()
-        print('BoundingBoxRegressorAndMultiLabelClassifier_v6:')
-        print(f'  global_feat_dim: {global_feat_dim}')
-        print(f'  local_feat_dim: {local_feat_dim}')
-        print(f'  input_size: {input_size}')
-        print(f'  roi_align_output_size: {roi_align_output_size}')
-        print(f'  roi_align_spatial_scale: {roi_align_spatial_scale}')
-        print(f'  hidden_dim: {hidden_dim}')
-        print(f'  num_boxes: {num_boxes}')
-        print(f'  num_boxes_to_supervise: {num_boxes_to_supervise}')
-        print(f'  len(train_average_bbox_coords): {len(train_average_bbox_coords)}')
+        logger.info('BoundingBoxRegressorAndMultiLabelClassifier_v6:')
+        logger.info(f'  global_feat_dim: {global_feat_dim}')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  input_size: {input_size}')
+        logger.info(f'  roi_align_output_size: {roi_align_output_size}')
+        logger.info(f'  roi_align_spatial_scale: {roi_align_spatial_scale}')
+        logger.info(f'  hidden_dim: {hidden_dim}')
+        logger.info(f'  num_boxes: {num_boxes}')
+        logger.info(f'  num_boxes_to_supervise: {num_boxes_to_supervise}')
+        logger.info(f'  len(train_average_bbox_coords): {len(train_average_bbox_coords)}')
         
         assert len(bbox_to_labels) <= num_boxes # some bboxes may not have labels
         assert type(bbox_to_labels) == list # list of [idx, labels]
@@ -531,7 +536,7 @@ class BoundingBoxRegressorAndMultiLabelClassifier_v6(nn.Module):
         self.bbox_group_to_labels = bbox_group_to_labels
         self.num_labels = sum(len(labels) for _, labels in bbox_to_labels) + \
                             sum(len(labels) for _, labels in bbox_group_to_labels)
-        print(f'  self.num_labels: {self.num_labels}')
+        logger.info(f'  self.num_labels: {self.num_labels}')
 
         # create parameters for the average coordinates of the training set
         self.train_average_bbox_coords = nn.parameter.Parameter(torch.zeros(len(train_average_bbox_coords)), requires_grad=False)
@@ -639,28 +644,43 @@ class MultiClassBoundingBoxRegressor(nn.Module):
     A bounding box regressor for multiple object classes. 
     This model predicts bounding box coordinates and presence probabilities
     for an arbitrary number of classes and regions.
+    
+    Supports both 'xyxy' and 'cxcywh' bbox formats, and can predict coordinates
+    relative to grid cell centers.
     """
-    def __init__(self, local_feat_dim):
+    def __init__(self, local_feat_dim, bbox_format='xyxy', predict_relative=False):
         """
         Initializes the bounding box regressor.
         
         Args:
             local_feat_dim (int): The dimension of the input feature vector.
+            bbox_format (str): The format of bounding box coordinates, either 'xyxy' or 'cxcywh'.
+            predict_relative (bool): Whether to predict bbox coordinates relative to grid cell centers.
         """
         super().__init__()
-        print('MultiClassBoundingBoxRegressor')
-        print(f'  local_feat_dim: {local_feat_dim}')
+        logger.info('MultiClassBoundingBoxRegressor')
+        logger.info(f'  local_feat_dim: {local_feat_dim}')
+        logger.info(f'  bbox_format: {bbox_format}')
+        logger.info(f'  predict_relative: {predict_relative}')
         
         self.local_feat_dim = local_feat_dim
+        self.bbox_format = bbox_format
+        self.predict_relative = predict_relative
+        
+        if bbox_format not in ['xyxy', 'cxcywh']:
+            raise ValueError("bbox_format must be either 'xyxy' or 'cxcywh'")
         
         # Fully connected layers for bounding box regression and presence prediction
-        self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)  # Outputs (x, y, w, h)
+        self.bbox_coords_fc = nn.Linear(local_feat_dim, 4)  # Outputs (cx, cy, w, h) or (x1, y1, x2, y2)
         self.bbox_presence_fc = nn.Linear(local_feat_dim, 1) # Outputs probability of presence
         
         # Cache for class ID tensor to avoid redundant computation
         self.class_ids_cache = dict()
+        
+        # Cache for grid cell centers
+        self.grid_centers_cache = dict()
     
-    def get_class_ids(self, num_classes, num_regions):
+    def _get_class_ids(self, num_classes, num_regions):
         """
         Retrieves or computes a tensor of class indices for the given dimensions.
         
@@ -673,8 +693,33 @@ class MultiClassBoundingBoxRegressor(nn.Module):
         """
         shape = (num_classes, num_regions)
         if shape not in self.class_ids_cache:
-            self.class_ids_cache[shape] = torch.arange(num_classes, device=self.bbox_coords_fc.weight.device).unsqueeze(-1).expand(-1, num_regions).contiguous()
+            self.class_ids_cache[shape] = torch.arange(
+                num_classes, device=self.bbox_coords_fc.weight.device
+            ).unsqueeze(-1).expand(-1, num_regions).contiguous()
         return self.class_ids_cache[shape]
+    
+    def _get_grid_centers(self, num_regions):
+        """
+        Retrieves or computes a tensor of grid centers for the given number of regions.
+        
+        Args:
+            num_regions (int): Number of regions to predict.
+        
+        Returns:
+            torch.Tensor: A tensor of shape (num_regions, 2) containing grid centers.
+        """
+        if num_regions not in self.grid_centers_cache:
+            grid_height = grid_width = math.isqrt(num_regions)
+            assert grid_height * grid_width == num_regions, "Number of regions must be a square number"
+            device = self.bbox_coords_fc.weight.device
+            centers = get_grid_centers(grid_height, grid_width, device) # (H, W, 2)
+            centers = centers.view(-1, 2)  # (num_regions, 2)
+            if self.bbox_format == 'xyxy': # We need to repeat the centers for each corner
+                centers = centers.repeat(1, 2) # (num_regions, 4)
+            self.grid_centers_cache[num_regions] = centers
+            # print_blue(f'grid_centers_cache: {self.grid_centers_cache[num_regions].shape}')
+        return self.grid_centers_cache[num_regions]
+
 
     def forward(self, local_features, predict_presence=True, predict_coords=True,
                 apply_nms=False, iou_threshold=0.3, conf_threshold=0.5, max_det_per_class=20):
@@ -705,14 +750,21 @@ class MultiClassBoundingBoxRegressor(nn.Module):
             bbox_coords = self.bbox_coords_fc(local_features)  # (batch_size, num_classes, num_regions, 4)
             bbox_presence = self.bbox_presence_fc(local_features)  # (batch_size, num_classes, num_regions, 1)
             bbox_presence_probs = torch.sigmoid(bbox_presence).squeeze(-1)  # (batch_size, num_classes, num_regions)
-            
+
             # Ensure correct tensor shapes
             assert bbox_coords.ndim == 4 and bbox_coords.shape[-1] == 4, "Bounding box coordinates must have shape (batch, num_classes, num_regions, 4)"
             assert bbox_presence.ndim == 4 and bbox_presence_probs.ndim == 3, "Presence scores must have correct dimensions"
-            
+
             num_classes = bbox_coords.size(1)
             num_regions = bbox_coords.size(2)
-            class_ids = self.get_class_ids(num_classes, num_regions)  # (num_classes, num_regions)
+            class_ids = self._get_class_ids(num_classes, num_regions)  # (num_classes, num_regions)
+
+            # Add grid cell centers to bbox_coords if predicting relative coordinates
+            if self.predict_relative:
+                if self.bbox_format == 'xyxy':
+                    bbox_coords += self._get_grid_centers(num_regions).view(1, 1, num_regions, 4)
+                else: # 'cxcywh' -> we only add centers to the first two coordinates
+                    bbox_coords[:, :, :, :2] += self._get_grid_centers(num_regions).view(1, 1, num_regions, 2)
             
             output = [None] * bbox_coords.size(0)  # Store results for each image in batch
             
@@ -723,20 +775,24 @@ class MultiClassBoundingBoxRegressor(nn.Module):
                 
                 # Apply max detections per class constraint
                 if bbox_coords_i.size(1) > max_det_per_class:
-                    bbox_probs_i, idxs = torch.topk(bbox_probs_i, max_det_per_class, dim=1)
-                    bbox_coords_i = torch.gather(bbox_coords_i, 1, idxs.unsqueeze(-1).expand(-1, -1, 4))
-                    class_ids_i  = torch.gather(class_ids_i, 1, idxs)
+                    bbox_probs_i, idxs = torch.topk(bbox_probs_i, max_det_per_class, dim=1) # (num_classes, max_det_per_class)
+                    bbox_coords_i = torch.gather(bbox_coords_i, 1, idxs.unsqueeze(-1).expand(-1, -1, 4)) # (num_classes, max_det_per_class, 4)
+                    class_ids_i  = torch.gather(class_ids_i, 1, idxs) # (num_classes, max_det_per_class)
                 
                 # Apply confidence threshold
-                mask = bbox_probs_i > conf_threshold
+                mask = bbox_probs_i > conf_threshold # (num_classes, num_regions) or (num_classes, max_det_per_class)
                 bbox_coords_i = bbox_coords_i[mask]  # (num_detections, 4)
                 bbox_probs_i = bbox_probs_i[mask]  # (num_detections)
                 class_ids_i = class_ids_i[mask]  # (num_detections)
                 
                 # Apply NMS if there are remaining detections
                 if bbox_coords_i.size(0) > 0:
-                    shifted_bbox_coords = bbox_coords_i + class_ids_i.unsqueeze(-1).float() * 10.0  # Offset for per-class separation
-                    keep = ops.nms(shifted_bbox_coords, bbox_probs_i, iou_threshold)
+                    if self.bbox_format == 'cxcywh':
+                        bbox_coords_i_xyxy = cxcywh_to_xyxy_tensor(bbox_coords_i) # Convert to 'xyxy' format
+                    else: # 'xyxy'
+                        bbox_coords_i_xyxy = bbox_coords_i # Already in 'xyxy' format
+                    shifted_bbox_coords = bbox_coords_i_xyxy + class_ids_i.unsqueeze(-1).float() * 10.0  # Offset for per-class separation
+                    keep = ops.nms(shifted_bbox_coords, bbox_probs_i, iou_threshold) # NMS requires 'xyxy' format
                     bbox_coords_i = bbox_coords_i[keep]
                     bbox_probs_i = bbox_probs_i[keep]
                     class_ids_i = class_ids_i[keep]
@@ -746,7 +802,16 @@ class MultiClassBoundingBoxRegressor(nn.Module):
             return output, bbox_presence
         
         # Compute bounding box coordinates if requested
-        bbox_coords = self.bbox_coords_fc(local_features) if predict_coords else None
+        if predict_coords:
+            bbox_coords = self.bbox_coords_fc(local_features) # (batch_size, num_classes, num_regions, 4)
+            if self.predict_relative:
+                num_regions = bbox_coords.size(2)
+                if self.bbox_format == 'xyxy':
+                    bbox_coords += self._get_grid_centers(num_regions).view(1, 1, num_regions, 4)
+                else: # 'cxcywh' -> we only add centers to the first two coordinates
+                    bbox_coords[:, :, :, :2] += self._get_grid_centers(num_regions).view(1, 1, num_regions, 2)
+        else:
+            predict_coords = None
         # Compute bounding box presence probabilities if requested
         bbox_presence = self.bbox_presence_fc(local_features) if predict_presence else None
         

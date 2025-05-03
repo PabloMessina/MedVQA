@@ -24,9 +24,9 @@ from medvqa.models.checkpoint import load_metadata
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.constants import CHEXBERT_LABELS, CHEXPERT_LABELS
-from medvqa.utils.files import  get_results_folder_path, load_pickle, save_pickle, save_txt
-from medvqa.utils.logging import print_blue, print_bold, print_magenta, print_orange
-from medvqa.utils.metrics import f1_between_dicts
+from medvqa.utils.files_utils import  get_results_folder_path, load_pickle, save_pickle, save_txt
+from medvqa.utils.logging_utils import print_blue, print_bold, print_magenta, print_orange
+from medvqa.utils.metrics_utils import f1_between_dicts
 
 class _EvalModes:
     INTERPRET_CXR_TEST_PUBLIC__FINDINGS = 'interpret_cxr_test_public__findings'

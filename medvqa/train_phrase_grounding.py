@@ -2,12 +2,21 @@ import  os
 import argparse
 import torch
 import shlex
+import logging
+
+from medvqa.utils.logging_utils import ANSI_BLUE_BOLD, ANSI_RESET, log_title, setup_logging
+
+# Setup logging as early as possible
+setup_logging()
+logger = logging.getLogger(__name__)
 
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpertPhraseGroundingTrainer, CheXpertTrainingMode
+from medvqa.datasets.image_transforms_factory import create_image_transforms
 from medvqa.datasets.iuxray.iuxray_phrase_grounding_dataset_management import IUXRayPhraseGroundingTrainer
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.mimiccxr.mimiccxr_phrase_grounding_dataset_management import MIMICCXR_PhraseGroundingTrainer
+from medvqa.datasets.ms_cxr import MS_CXR_TrainingMode
 from medvqa.datasets.vinbig import VINBIG_NUM_BBOX_CLASSES__MODIFIED
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer, VinBigTrainingMode
 from medvqa.losses import BinaryMultiLabelClassificationLossNames
@@ -23,6 +32,7 @@ from medvqa.utils.constants import DATASET_NAMES, VINBIG_NUM_BBOX_CLASSES
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
+    attach_condition_aware_bbox_iou_class_agnostic,
     attach_condition_aware_bbox_iou_open_class,
     attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
@@ -35,7 +45,7 @@ from medvqa.models.checkpoint import (
     load_metadata,
 )
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import get_checkpoint_folder_path
+from medvqa.utils.files_utils import get_checkpoint_folder_path
 from medvqa.training.phrase_grounding import get_engine
 from medvqa.datasets.dataloading_utils import (
     balanced_dataloaders_generator,
@@ -43,9 +53,9 @@ from medvqa.datasets.dataloading_utils import (
     multi_cyclic_dataloaders_generator,
 )
 from medvqa.metrics.utils import get_merge_metrics_fn
-from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_orange
-from medvqa.utils.metrics import average_ignoring_nones_and_nans
+from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
+
+
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -94,6 +104,8 @@ def parse_args(args=None):
     parser.add_argument('--alignment_proj_size', type=int, default=None)
     parser.add_argument('--yolov11_model_name_or_path', type=str, default=None)
     parser.add_argument('--yolov11_model_alias', type=str, default=None)
+    parser.add_argument('--bbox_format', type=str, default='cxcywh', choices=['xyxy', 'cxcywh'])
+    parser.add_argument('--predict_relative_bbox_coords', action='store_true')
     
     # Optimization arguments
     parser.add_argument('--optimizer_name', type=str, default='adamw')
@@ -186,6 +198,8 @@ def parse_args(args=None):
     parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true')
     parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true')
     parser.add_argument('--use_vinbig_with_modified_labels', action='store_true')
+    parser.add_argument('--mscxr_training_data_mode', type=str, default=MS_CXR_TrainingMode.TRAIN, choices=MS_CXR_TrainingMode.get_all())
+    parser.add_argument('--mscxr_do_grounding_only', action='store_true')
     
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -239,14 +253,13 @@ def train_model(
     save = True,
     override_lr = False,
     debug = False,
-):
-    count_print = CountPrinter()
-    
+):  
     # Pull out some args from kwargs
     use_mimiccxr_facts_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_facts_for_train', False)
     use_mimiccxr_facts_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_facts_for_test', False)
     use_mscxr_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_train', False)
     use_mscxr_for_val = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_mscxr_for_val', False)
+    mscxr_do_grounding_only = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('mscxr_do_grounding_only', False)
     use_chest_imagenome_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_for_train', False)
     use_chest_imagenome_gold_for_test = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_chest_imagenome_gold_for_test', False)
     use_cxrlt2024_challenge_split = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_challenge_split', False)
@@ -268,7 +281,7 @@ def train_model(
     use_yolo = model_kwargs['raw_image_encoding'] in [RawImageEncoding.YOLOV8,
                                                       RawImageEncoding.YOLOV11_FACT_CONDITIONED]
     use_vinbig_with_modified_labels = trainer_engine_kwargs.get('use_vinbig_with_modified_labels', False)
-
+    bbox_format = model_kwargs['bbox_format']
 
     # Sanity checks
     if use_chest_imagenome_gold_for_test:
@@ -288,35 +301,35 @@ def train_model(
 
     if use_mimiccxr_facts_for_train:
         if dataloading_kwargs['mimiccxr_facts_weight'] == 0:
-            print_orange('WARNING: use_mimiccxr_facts_for_train is True but mimiccxr_facts_weight is 0', bold=True)
+            logger.warning('use_mimiccxr_facts_for_train is True but mimiccxr_facts_weight is 0', bold=True)
             use_mimiccxr_facts_for_train = False
     if use_chest_imagenome_for_train:
         if dataloading_kwargs['chest_imagenome_anatlocs_weight'] == 0:
-            print_orange('WARNING: use_chest_imagenome_for_train is True but chest_imagenome_anatlocs_weight is 0', bold=True)
+            logger.warning('use_chest_imagenome_for_train is True but chest_imagenome_anatlocs_weight is 0', bold=True)
             use_chest_imagenome_for_train = False
     if use_mscxr_for_train:
         if dataloading_kwargs['mscxr_weight'] == 0:
-            print_orange('WARNING: use_mscxr_for_train is True but mscxr_weight is 0', bold=True)
+            logger.warning('use_mscxr_for_train is True but mscxr_weight is 0', bold=True)
             use_mscxr_for_train = False
     if use_cxrlt2024_challenge_split:
         if dataloading_kwargs['cxrlt2024_weight'] == 0:
-            print_orange('WARNING: use_cxrlt2024_challenge_split is True but cxrlt2024_weight is 0', bold=True)
+            logger.warning('use_cxrlt2024_challenge_split is True but cxrlt2024_weight is 0', bold=True)
             use_cxrlt2024_challenge_split = False
     if use_vinbig_for_train:
         if dataloading_kwargs['vinbig_weight'] == 0:
-            print_orange('WARNING: use_vinbig_for_train is True but vinbig_weight is 0', bold=True)
+            logger.warning('use_vinbig_for_train is True but vinbig_weight is 0', bold=True)
             use_vinbig_for_train = False
     if use_chexlocalize_for_train:
         if dataloading_kwargs['chexlocalize_weight'] == 0:
-            print_orange('WARNING: use_chexlocalize_for_train is True but chexlocalize_weight is 0', bold=True)
+            logger.warning('use_chexlocalize_for_train is True but chexlocalize_weight is 0', bold=True)
             use_chexlocalize_for_train = False
     if use_chexpert_for_train:
         if dataloading_kwargs['chexpert_weight'] == 0:
-            print_orange('WARNING: use_chexpert_for_train is True but chexpert_weight is 0', bold=True)
+            logger.warning('use_chexpert_for_train is True but chexpert_weight is 0', bold=True)
             use_chexpert_for_train = False
     if use_iuxray_for_train:
         if dataloading_kwargs['iuxray_weight'] == 0:
-            print_orange('WARNING: use_iuxray_for_train is True but iuxray_weight is 0', bold=True)
+            logger.warning('use_iuxray_for_train is True but iuxray_weight is 0', bold=True)
             use_iuxray_for_train = False
 
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_val or use_mscxr_for_train or\
@@ -336,23 +349,23 @@ def train_model(
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
-    count_print('device =', device)
+    logger.info(f'device = {device}')
 
     # Create model
-    count_print('Creating instance of PhraseGrounder ...')
+    log_title(logger, 'Creating instance of PhraseGrounder')
     model = PhraseGrounder(**model_kwargs, device=device)
     model = model.to(device)
 
     # Optimizer
-    count_print('Defining optimizer ...')
+    log_title(logger, 'Defining optimizer')
     optimizer = create_optimizer(params=model.parameters(), **optimizer_kwargs)
 
     # Learning rate scheduler
-    count_print('Defining scheduler ...')
+    log_title(logger, 'Defining scheduler')
     lr_scheduler, update_lr_batchwise = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
 
     # Create trainer and validator engines
-    count_print('Creating trainer and validator engines ...')
+    log_title(logger, 'Creating trainer and validator engines')
     if model_kwargs['raw_image_encoding'] == RawImageEncoding.YOLOV8:
         model_for_yolov8 = model.raw_image_encoder
     else:
@@ -364,10 +377,10 @@ def train_model(
 
     # Create CheXLocalize trainer
     if use_chexlocalize:
-        count_print('Creating CheXLocalize Phrase Grounding Trainer ...')
+        log_title(logger, 'Creating CheXLocalize Phrase Grounding Trainer')
         chexlocalize_trainer = CheXlocalizePhraseGroundingTrainer(
-            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE]),
-            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE]),
+            train_image_transform=create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE]),
+            val_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE]),
             collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cl']),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
@@ -379,10 +392,10 @@ def train_model(
 
     # Create CheXpert trainer
     if use_chexpert:
-        count_print('Creating CheXpert Phrase Grounding Trainer ...')
+        log_title(logger, 'Creating CheXpert Phrase Grounding Trainer')
         chexpert_trainer = CheXpertPhraseGroundingTrainer(
-            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
-            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
+            train_image_transform=create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
+            val_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]),
             collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['chxp']),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
@@ -394,10 +407,10 @@ def train_model(
 
     # Create VINBIG trainer
     if use_vinbig:
-        count_print('Creating VinBig Phrase Grounding Trainer ...')
+        log_title(logger, 'Creating VinBig Phrase Grounding Trainer')
         vinbig_trainer = VinBigPhraseGroundingTrainer(
-            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            val_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
+            train_image_transform=create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
+            val_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
             collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['vbg']),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
@@ -409,39 +422,39 @@ def train_model(
 
     # Create MIMIC-CXR trainer
     if use_mimiccxr:
-        count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
-        if use_mimiccxr_facts_for_train or use_mimiccxr_facts_for_test:
-            fact_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mimfg'])
-        else:
-            fact_grounding_collate_batch_fn = None
-        if use_mscxr_for_train or use_mscxr_for_val:
-            mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
-        else:
-            mscxr_phrase_grounding_collate_batch_fn = None
-        if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
-            bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
-        else:
-            bbox_grounding_collate_batch_fn = None
-        if use_cxrlt2024_custom_labels:
-            cxrlt2024_image_phrase_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024c'])
-        else:
-            cxrlt2024_image_phrase_classifier_collate_batch_fn = None
-        if use_cxrlt2024_official_labels:
-            cxrlt2024_multilabel_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024o'])
-        else:
-            cxrlt2024_multilabel_classifier_collate_batch_fn = None
+        log_title(logger, 'Creating MIMIC-CXR Phrase Grounding Trainer')
+        # if use_mimiccxr_facts_for_train or use_mimiccxr_facts_for_test:
+        #     fact_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mimfg'])
+        # else:
+        #     fact_grounding_collate_batch_fn = None
+        # if use_mscxr_for_train or use_mscxr_for_val:
+        #     mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
+        # else:
+        #     mscxr_phrase_grounding_collate_batch_fn = None
+        # if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
+        #     bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
+        # else:
+        #     bbox_grounding_collate_batch_fn = None
+        # if use_cxrlt2024_custom_labels:
+        #     cxrlt2024_image_phrase_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024c'])
+        # else:
+        #     cxrlt2024_image_phrase_classifier_collate_batch_fn = None
+        # if use_cxrlt2024_official_labels:
+        #     cxrlt2024_multilabel_classifier_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cxrlt2024o'])
+        # else:
+        #     cxrlt2024_multilabel_classifier_collate_batch_fn = None
         mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
-            train_image_transform = get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
-            test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            train_image_transform = create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            test_image_transform = create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
             max_phrases_per_image=max_phrases_per_image,
             test_batch_size_factor=val_batch_size_factor,
-            fact_grounding_collate_batch_fn=fact_grounding_collate_batch_fn,
-            bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
-            cxrlt2024_image_phrase_classifier_collate_batch_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
-            cxrlt2024_multilabel_classifier_collate_batch_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
-            mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
+            # fact_grounding_collate_batch_fn=fact_grounding_collate_batch_fn,
+            # bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
+            # cxrlt2024_image_phrase_classifier_collate_batch_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
+            # cxrlt2024_multilabel_classifier_collate_batch_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
+            # mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
             num_train_workers=num_train_workers,
             num_test_workers=num_val_workers,
             **mimiccxr_trainer_kwargs,
@@ -449,10 +462,10 @@ def train_model(
 
     # Create IU X-Ray trainer
     if use_iuxray:
-        count_print('Creating IU X-Ray Phrase Grounding Trainer ...')
+        log_title(logger, 'Creating IU X-Ray Phrase Grounding Trainer')
         iuxray_trainer = IUXRayPhraseGroundingTrainer(
-            train_image_transform=get_image_transform(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
-            test_image_transform=get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            train_image_transform=create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
+            test_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.IUXRAY]),
             collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['iufg']),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
@@ -478,7 +491,7 @@ def train_model(
         return output
 
     # Create complex dataloaders
-    count_print('Creating dataloaders ...')
+    log_title(logger, 'Creating dataloaders')
     
     _train_weights = []
     _train_dataloaders = []
@@ -489,31 +502,31 @@ def train_model(
         _dataset_names.append('mim-facts')
         _train_weights.append(dataloading_kwargs['mimiccxr_facts_weight'])
         _train_dataloaders.append(mimiccxr_trainer.train_fact_dataloader)
-        print(f'len(mimiccxr_trainer.train_fact_dataloader) = {len(mimiccxr_trainer.train_fact_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.train_fact_dataloader) = {len(mimiccxr_trainer.train_fact_dataloader)}')
 
     if use_mimiccxr_facts_for_test:
         _val_dataloaders.append(mimiccxr_trainer.test_fact_dataloader)
-        print(f'len(mimiccxr_trainer.test_fact_dataloader) = {len(mimiccxr_trainer.test_fact_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.test_fact_dataloader) = {len(mimiccxr_trainer.test_fact_dataloader)}')
 
     if use_mscxr_for_train:
         _dataset_names.append('mscxr')
         _train_weights.append(dataloading_kwargs['mscxr_weight'])
         _train_dataloaders.append(mimiccxr_trainer.mscxr_train_dataloader)
-        print(f'len(mimiccxr_trainer.mscxr_dataloader) = {len(mimiccxr_trainer.mscxr_train_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.mscxr_dataloader) = {len(mimiccxr_trainer.mscxr_train_dataloader)}')
 
     if use_mscxr_for_val:
         _val_dataloaders.append(mimiccxr_trainer.mscxr_val_dataloader)
-        print(f'len(mimiccxr_trainer.mscxr_val_dataloader) = {len(mimiccxr_trainer.mscxr_val_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.mscxr_val_dataloader) = {len(mimiccxr_trainer.mscxr_val_dataloader)}')
 
     if use_chest_imagenome_for_train:
         _dataset_names.append('chst-img-anat')
         _train_weights.append(dataloading_kwargs['chest_imagenome_anatlocs_weight'])
         _train_dataloaders.append(mimiccxr_trainer.train_chest_imagenome_dataloader)
-        print(f'len(mimiccxr_trainer.train_chest_imagenome_dataloader) = {len(mimiccxr_trainer.train_chest_imagenome_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.train_chest_imagenome_dataloader) = {len(mimiccxr_trainer.train_chest_imagenome_dataloader)}')
 
     if use_chest_imagenome_gold_for_test:
         _val_dataloaders.append(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)
-        print(f'len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader) = {len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader) = {len(mimiccxr_trainer.test_chest_imagenome_gold_dataloader)}')
 
     if use_cxrlt2024_challenge_split or use_cxrlt2024_custom_labels:
         assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
@@ -528,66 +541,66 @@ def train_model(
             _dataset_names.append('cxrlt2024(Off)')
             _train_weights.append(wo) # weight for official labels
             _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_train_dataloader)
-            print(f'len(mimiccxr_trainer.cxrlt2024_official_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_train_dataloader)}')
+            logger.info(f'len(mimiccxr_trainer.cxrlt2024_official_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_train_dataloader)}')
             if not mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training: # if not all official labels are used for training
                 _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_official_val_dataloader)
-                print(f'len(mimiccxr_trainer.cxrlt2024_official_val_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_val_dataloader)}')
+                logger.info(f'len(mimiccxr_trainer.cxrlt2024_official_val_dataloader) = {len(mimiccxr_trainer.cxrlt2024_official_val_dataloader)}')
         if use_cxrlt2024_custom_labels:
             _dataset_names.append('cxrlt2024(GPT4)')
             _train_weights.append(wc) # weight for custom labels
             _train_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)
-            print(f'len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
+            logger.info(f'len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_train_dataloader)}')
             if not use_cxrlt2024_official_labels or mimiccxr_trainer.use_all_cxrlt2024_official_labels_for_training:
                 _val_dataloaders.append(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)
-                print(f'len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)}')
+                logger.info(f'len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader) = {len(mimiccxr_trainer.cxrlt2024_custom_dev_dataloader)}')
 
     if use_vinbig_for_train:
         _dataset_names.append('vinbig')
         _train_weights.append(dataloading_kwargs['vinbig_weight'])
         _train_dataloaders.append(vinbig_trainer.train_dataloader)
-        print(f'len(vinbig_trainer.train_dataloader) = {len(vinbig_trainer.train_dataloader)}')
+        logger.info(f'len(vinbig_trainer.train_dataloader) = {len(vinbig_trainer.train_dataloader)}')
 
     if use_vinbig_for_test:
         _val_dataloaders.append(vinbig_trainer.val_dataloader)
-        print(f'len(vinbig_trainer.val_dataloader) = {len(vinbig_trainer.val_dataloader)}')
+        logger.info(f'len(vinbig_trainer.val_dataloader) = {len(vinbig_trainer.val_dataloader)}')
 
     if use_chexlocalize_for_train:
         _dataset_names.append('chexloc')
         _train_weights.append(dataloading_kwargs['chexlocalize_weight'])
         _train_dataloaders.append(chexlocalize_trainer.train_dataloader)
         # _train_dataloaders.append(chexlocalize_trainer.val_dataloader) # for debugging
-        print(f'len(chexlocalize_trainer.train_dataloader) = {len(chexlocalize_trainer.train_dataloader)}')
+        logger.info(f'len(chexlocalize_trainer.train_dataloader) = {len(chexlocalize_trainer.train_dataloader)}')
 
     if use_chexlocalize_for_test:
         _val_dataloaders.append(chexlocalize_trainer.val_dataloader)
-        print(f'len(chexlocalize_trainer.val_dataloader) = {len(chexlocalize_trainer.val_dataloader)}')
+        logger.info(f'len(chexlocalize_trainer.val_dataloader) = {len(chexlocalize_trainer.val_dataloader)}')
 
     if use_chexpert_for_train:
         _dataset_names.append('chxp')
         _train_weights.append(dataloading_kwargs['chexpert_weight'])
         _train_dataloaders.append(chexpert_trainer.train_dataloader)
-        print(f'len(chexpert_trainer.train_dataloader) = {len(chexpert_trainer.train_dataloader)}')
+        logger.info(f'len(chexpert_trainer.train_dataloader) = {len(chexpert_trainer.train_dataloader)}')
 
     if use_chexpert_for_test:
         _val_dataloaders.append(chexpert_trainer.val_dataloader)
-        print(f'len(chexpert_trainer.val_dataloader) = {len(chexpert_trainer.val_dataloader)}')
+        logger.info(f'len(chexpert_trainer.val_dataloader) = {len(chexpert_trainer.val_dataloader)}')
 
     if use_iuxray_for_train:
         _dataset_names.append('iuxray')
         _train_weights.append(dataloading_kwargs['iuxray_weight'])
         _train_dataloaders.append(iuxray_trainer.train_dataloader)
-        print(f'len(iuxray_trainer.train_dataloader) = {len(iuxray_trainer.train_dataloader)}')
+        logger.info(f'len(iuxray_trainer.train_dataloader) = {len(iuxray_trainer.train_dataloader)}')
 
     if use_iuxray_for_test:
         _val_dataloaders.append(iuxray_trainer.test_dataloader)
-        print(f'len(iuxray_trainer.test_dataloader) = {len(iuxray_trainer.test_dataloader)}')
+        logger.info(f'len(iuxray_trainer.test_dataloader) = {len(iuxray_trainer.test_dataloader)}')
     
     assert len(_train_dataloaders) > 0
     assert len(_val_dataloaders) > 0
     assert len(_train_dataloaders) == len(_train_weights)
-    print(f'len(_train_dataloaders) = {len(_train_dataloaders)}')
-    print(f'len(_val_dataloaders) = {len(_val_dataloaders)}')
-    print(f'_train_weights = {_train_weights}')
+    logger.info(f'len(_train_dataloaders) = {len(_train_dataloaders)}')
+    logger.info(f'len(_val_dataloaders) = {len(_val_dataloaders)}')
+    logger.info(f'_train_weights = {_train_weights}')
 
     # final train dataloader
     if len(_train_dataloaders) > 1:
@@ -600,10 +613,10 @@ def train_model(
     val_dataloader = multi_cyclic_dataloaders_generator(_val_dataloaders)
     
     merged_dataset_name = '+'.join(_dataset_names)
-    print('merged_dataset_name =', merged_dataset_name)
+    logger.info(f'merged_dataset_name = {merged_dataset_name}')
     
     # Attach metrics, losses, timer and events to engines    
-    count_print('Attaching metrics, losses, timer and events to engines ...')
+    log_title(logger, 'Attaching metrics, losses, timer and events to engines')
 
     train_metrics_to_merge = []
     val_metrics_to_merge = []
@@ -613,7 +626,7 @@ def train_model(
     metrics_to_print.append('loss')
 
     if use_mimiccxr_facts_for_train or use_mimiccxr_facts_for_test:
-        _cond_func = lambda x: x['flag'] == 'mimfg'
+        _cond_func = lambda x: x['dataset_name'] == 'mimfg'
         in_train = use_mimiccxr_facts_for_train
         in_val = use_mimiccxr_facts_for_test
         if in_train:
@@ -646,7 +659,7 @@ def train_model(
     
     # if use_chest_imagenome_for_train:
         # if use_yolov8: # TODO: eventually support other bbox predictors
-        #     _cond_func = lambda x: x['flag'] == 'cibg'
+        #     _cond_func = lambda x: x['dataset_name'] == 'cibg'
         #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_LOSS, _cond_func, 'cibg_y8_loss')
         #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_BOX_LOSS, _cond_func, 'cibg_y8_box_loss')
         #     attach_condition_aware_loss(trainer_engine, MetricNames.YOLOV8_CLS_LOSS, _cond_func, 'cibg_y8_cls_loss')
@@ -664,7 +677,7 @@ def train_model(
         #         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_y8_bbox_iou', train=False)
 
     if use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test:
-        _cond_func = lambda x: x['flag'] == 'cibg'
+        _cond_func = lambda x: x['dataset_name'] == 'cibg'
         in_train = use_chest_imagenome_for_train
         in_val = use_chest_imagenome_gold_for_test
         if in_train:
@@ -692,30 +705,39 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cibg_segmask_iou', train=in_train, val=in_val)
 
     if use_mscxr_for_train or use_mscxr_for_val:
-        _cond_func = lambda x: x['flag'] == 'mscxr'
+        _cond_func = lambda x: x['dataset_name'] == 'mscxr'
         in_train = use_mscxr_for_train
         in_val = use_mscxr_for_val
         if in_train:
-            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mscxr_phrcls_loss')
-            attach_condition_aware_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
-            attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'mscxr_att_sup_loss')
-            attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'mscxr_vgbbox_loss')
+            if not mscxr_do_grounding_only:
+                attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'mscxr_phrcls_loss')
+                attach_condition_aware_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
+            attach_condition_aware_loss(trainer_engine, 'visual_grounding_confidence_loss', _cond_func, 'mscxr_vgconf_loss')
+            attach_condition_aware_loss(trainer_engine, 'visual_grounding_bbox_loss', _cond_func, 'mscxr_vgbbox_loss')
         if in_val:
-            attach_condition_aware_prc_auc(validator_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
-            attach_condition_aware_bbox_iou_open_class(validator_engine,
-                                                field_names=['predicted_bboxes', 'bbox_coords', 'bbox_classes'],
-                                                metric_name='mscxr_bbox_iou', condition_function=_cond_func)
+            if not mscxr_do_grounding_only:
+                attach_condition_aware_prc_auc(validator_engine, 'pred_probs', 'gt_labels', 'mscxr_prc_auc', _cond_func)
+                attach_condition_aware_bbox_iou_open_class(validator_engine,
+                                                    field_names=['predicted_bboxes', 'bbox_coords', 'bbox_classes'],
+                                                    metric_name='mscxr_bbox_iou', condition_function=_cond_func)
+            else:
+                attach_condition_aware_bbox_iou_class_agnostic(validator_engine,
+                                                    field_names=['predicted_bboxes', 'bbox_coords'],
+                                                    metric_name='mscxr_bbox_iou', bbox_format=bbox_format,
+                                                    condition_function=_cond_func)
         # for logging
         if in_train:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_att_sup_loss', val=False)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_vgconf_loss', val=False)
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_vgbbox_loss', val=False)
-            metrics_to_print.append('mscxr_phrcls_loss')
+            if not mscxr_do_grounding_only:
+                metrics_to_print.append('mscxr_phrcls_loss')
         if in_val:
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_bbox_iou', train=False)
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_prc_auc', train=in_train, val=in_val)
+        if not mscxr_do_grounding_only:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_prc_auc', train=in_train, val=in_val)
     
     if use_vinbig_for_train or use_vinbig_for_test:
-        _cond_func = lambda x: x['flag'] == 'vbg'
+        _cond_func = lambda x: x['dataset_name'] == 'vbg'
         in_train = use_vinbig_for_train
         in_val = use_vinbig_for_test
 
@@ -783,7 +805,7 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=in_train, val=in_val)
 
     if use_chexlocalize:
-        _cond_func = lambda x: x['flag'] == 'cl'
+        _cond_func = lambda x: x['dataset_name'] == 'cl'
         in_train = use_chexlocalize_for_train
         in_val = use_chexlocalize_for_test
         if in_train:
@@ -806,7 +828,7 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cl_gac_loss', train=in_train, val=False)
 
     if use_chexpert:
-        _cond_func = lambda x: x['flag'] == 'chxp'
+        _cond_func = lambda x: x['dataset_name'] == 'chxp'
         in_train = use_chexpert_for_train
         in_val = use_chexpert_for_test
         if in_train:
@@ -838,7 +860,7 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'chxp_prc_auc', train=in_train, val=in_val)
 
     if use_iuxray:
-        _cond_func = lambda x: x['flag'] == 'iufg'
+        _cond_func = lambda x: x['dataset_name'] == 'iufg'
         in_train = use_iuxray_for_train
         in_val = use_iuxray_for_test
         if in_train:
@@ -870,7 +892,7 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'iufg_prc_auc', train=in_train, val=in_val)
 
     if use_cxrlt2024_custom_labels:
-        _cond_func = lambda x: x['flag'] == 'cxrlt2024c'
+        _cond_func = lambda x: x['dataset_name'] == 'cxrlt2024c'
         # Train
         if use_attention_regularization_loss:
             attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024c_att_reg_loss')
@@ -899,7 +921,7 @@ def train_model(
         append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'cxrlt2024c_prc_auc', val=in_val)
 
     if use_cxrlt2024_official_labels:
-        _cond_func = lambda x: x['flag'] == 'cxrlt2024o'
+        _cond_func = lambda x: x['dataset_name'] == 'cxrlt2024o'
         # Train
         if use_attention_regularization_loss:
             attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'cxrlt2024o_att_reg_loss')
@@ -976,7 +998,6 @@ def train_model(
         batches_per_epoch=batches_per_epoch,
         val_dataloader_size=val_dataloader_size,
         model_kwargs=model_kwargs,
-        count_print=count_print,
         override_lr=override_lr,
     )
 
@@ -1011,6 +1032,8 @@ def train_from_scratch(
     phrase_mlp_hidden_dims,
     predict_global_alignment,
     alignment_proj_size,
+    bbox_format,
+    predict_relative_bbox_coords,
     # Optimizer args
     optimizer_name,
     lr,
@@ -1084,6 +1107,8 @@ def train_from_scratch(
     cxrlt2024_do_balanced_sampling,
     vinbig_training_data_mode,
     chexpert_training_data_mode,
+    mscxr_training_data_mode,
+    mscxr_do_grounding_only,
     use_amp,
     gradient_accumulation_steps,
     pos_area_prior,
@@ -1117,13 +1142,11 @@ def train_from_scratch(
     override_metric_weights,
     debug=False,
 ):
-    print_blue('----- Training model from scratch ------', bold=True)
+    log_title(logger, 'Training model from scratch')
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     use_yolov11 = raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED
     use_yolo = use_yolov8 or use_yolov11
-    use_bbox_aware_transform = use_yolov8 or do_visual_grounding_with_bbox_regression
-    use_segmentation_mask_aware_transform = do_visual_grounding_with_segmentation
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_val or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
@@ -1177,6 +1200,7 @@ def train_from_scratch(
         predict_bboxes_chest_imagenome=predict_bboxes_chest_imagenome,
         predict_bboxes_vinbig=predict_bboxes_vinbig,
         predict_global_alignment=predict_global_alignment,
+        predict_relative_bbox_coords=predict_relative_bbox_coords,
         alignment_proj_size=alignment_proj_size,
         # Other
         apply_positional_encoding=not comes_with_positional_encoding(raw_image_encoding), # apply PE only if not comes with PE
@@ -1191,6 +1215,7 @@ def train_from_scratch(
         transf_dim_feedforward=transf_dim_feedforward,
         transf_dropout=transf_dropout,
         transf_num_layers=transf_num_layers,
+        bbox_format=bbox_format,
     )
     
     optimizer_kwargs = dict(
@@ -1222,38 +1247,33 @@ def train_from_scratch(
     # Image transforms
     train_image_transform_kwargs = {}
     val_image_transform_kwargs = {}
-    _kwargs = dict(
+    _train_kwargs = dict(
+        use_model_specific_transforms=False,
         image_size=image_size,
-        augmentation_mode=img_aug_mode,
-        for_yolov8=use_yolov8,
-        for_yolov11=use_yolov11,
-        use_bbox_aware_transform=use_bbox_aware_transform,
-        use_segmentation_mask_aware_transform=use_segmentation_mask_aware_transform,
-        mask_height=regions_height, # for segmentation mask-aware transform
-        mask_width=regions_width, # for segmentation mask-aware transform
+        is_train=True,
+        bbox_format=bbox_format, # In order to use bbox-aware augmentations
     )
-    inject_mean_std_for_image_normalization(_kwargs, raw_image_encoding)
+    _val_kwargs = dict(
+        use_model_specific_transforms=False,
+        image_size=image_size,
+    )
+    inject_mean_std_for_image_normalization(_train_kwargs, raw_image_encoding)
+    inject_mean_std_for_image_normalization(_val_kwargs, raw_image_encoding)
     if use_mimiccxr:
-        train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = _kwargs.copy()
-        val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = train_image_transform_kwargs[DATASET_NAMES.MIMICCXR].copy()
-        val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]['augmentation_mode'] = None # no augmentation for validation
+        train_image_transform_kwargs[DATASET_NAMES.MIMICCXR] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.MIMICCXR] =_val_kwargs.copy()
     if use_vinbig:
-        train_image_transform_kwargs[DATASET_NAMES.VINBIG] = _kwargs.copy()
-        train_image_transform_kwargs[DATASET_NAMES.VINBIG]['for_vinbig'] = True
-        val_image_transform_kwargs[DATASET_NAMES.VINBIG] = train_image_transform_kwargs[DATASET_NAMES.VINBIG].copy()
-        val_image_transform_kwargs[DATASET_NAMES.VINBIG]['augmentation_mode'] = None # no augmentation for validation
+        train_image_transform_kwargs[DATASET_NAMES.VINBIG] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.VINBIG] = _val_kwargs.copy()
     if use_chexlocalize:
-        train_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE] = _kwargs.copy()
-        val_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE] = train_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE].copy()
-        val_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE]['augmentation_mode'] = None # no augmentation for validation
+        train_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.CHEXLOCALIZE] = _val_kwargs.copy()
     if use_chexpert:
-        train_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = _kwargs.copy()
-        val_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = train_image_transform_kwargs[DATASET_NAMES.CHEXPERT].copy()
-        val_image_transform_kwargs[DATASET_NAMES.CHEXPERT]['augmentation_mode'] = None # no augmentation for validation
+        train_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.CHEXPERT] = _val_kwargs.copy()
     if use_iuxray:
-        train_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _kwargs.copy()
-        val_image_transform_kwargs[DATASET_NAMES.IUXRAY] = train_image_transform_kwargs[DATASET_NAMES.IUXRAY].copy()
-        val_image_transform_kwargs[DATASET_NAMES.IUXRAY]['augmentation_mode'] = None # no augmentation for validation
+        train_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _val_kwargs.copy()
     
     # Collate batch functions
     _kwargs = dict(
@@ -1265,25 +1285,25 @@ def train_from_scratch(
             BinaryMultiLabelClassificationLossNames.WBCE,
             BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
         ]
-        print(f'include_loss_weights = {include_loss_weights}')
+        logger.info(f'include_loss_weights = {include_loss_weights}')
         # fact grounding
-        collate_batch_fn_kwargs['mimfg'] = { 'flag': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
+        collate_batch_fn_kwargs['mimfg'] = { 'dataset_name': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
         # MS-CXR phrase grounding
-        collate_batch_fn_kwargs['mscxr'] = { 'flag': 'mscxr', **_kwargs }
+        collate_batch_fn_kwargs['mscxr'] = { 'dataset_name': 'mscxr', **_kwargs }
         # chest imagenome bbox grounding
-        collate_batch_fn_kwargs['cibg'] = { 'flag': 'cibg', **_kwargs }
+        collate_batch_fn_kwargs['cibg'] = { 'dataset_name': 'cibg', **_kwargs }
         # cxrlt2024 challenge custom labels
-        collate_batch_fn_kwargs['cxrlt2024c'] = { 'flag': 'cxrlt2024c', **_kwargs }
+        collate_batch_fn_kwargs['cxrlt2024c'] = { 'dataset_name': 'cxrlt2024c', **_kwargs }
         # cxrlt2024 challenge official labels
-        collate_batch_fn_kwargs['cxrlt2024o'] = { 'flag': 'cxrlt2024o', **_kwargs }
+        collate_batch_fn_kwargs['cxrlt2024o'] = { 'dataset_name': 'cxrlt2024o', **_kwargs }
     if use_vinbig:
-        collate_batch_fn_kwargs['vbg'] = { 'flag': 'vbg', **_kwargs }
+        collate_batch_fn_kwargs['vbg'] = { 'dataset_name': 'vbg', **_kwargs }
     if use_chexlocalize:
-        collate_batch_fn_kwargs['cl'] = { 'flag': 'cl', **_kwargs }
+        collate_batch_fn_kwargs['cl'] = { 'dataset_name': 'cl', **_kwargs }
     if use_chexpert:
-        collate_batch_fn_kwargs['chxp'] = { 'flag': 'chxp', **_kwargs }
+        collate_batch_fn_kwargs['chxp'] = { 'dataset_name': 'chxp', **_kwargs }
     if use_iuxray:
-        collate_batch_fn_kwargs['iufg'] = { 'flag': 'iufg', **_kwargs }
+        collate_batch_fn_kwargs['iufg'] = { 'dataset_name': 'iufg', **_kwargs }
     
     if use_mimiccxr:
         x = image_size if type(image_size) is int else image_size[0]
@@ -1293,7 +1313,7 @@ def train_from_scratch(
             source_image_size_mode = MIMICCXR_ImageSizeModes.MEDIUM_512
         else:
             source_image_size_mode = MIMICCXR_ImageSizeModes.SMALL_256x256
-        print(f'source_image_size_mode: {source_image_size_mode}')
+        logger.info(f'source_image_size_mode: {source_image_size_mode}')
         mimiccxr_trainer_kwargs = dict(
             mask_width=regions_width,
             mask_height=regions_height,
@@ -1326,6 +1346,9 @@ def train_from_scratch(
             do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
             data_augmentation_enabled=img_aug_mode is not None,
             replace_phrase_embeddings_with_random_vectors=replace_phrase_embeddings_with_random_vectors,
+            mscxr_training_data_mode=mscxr_training_data_mode,
+            mscxr_do_grounding_only=mscxr_do_grounding_only,
+            bbox_format=bbox_format,
         )
     else:
         mimiccxr_trainer_kwargs = None
@@ -1394,6 +1417,7 @@ def train_from_scratch(
         neg_area_prior=neg_area_prior,
         max_grad_norm=max_grad_norm,
         use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
+        mscxr_do_grounding_only=mscxr_do_grounding_only,
         # loss weights
         attention_supervision_loss_weight=attention_supervision_loss_weight,
         phrase_classifier_loss_weight=phrase_classifier_loss_weight,
@@ -1419,6 +1443,7 @@ def train_from_scratch(
         yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
         binary_multilabel_classif_loss_name=binary_multilabel_classif_loss_name,
         use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
+        mscxr_do_grounding_only=mscxr_do_grounding_only,
         # loss weights
         focal_loss_weight=focal_loss_weight,
         bce_loss_weight=bce_loss_weight,
@@ -1440,7 +1465,7 @@ def train_from_scratch(
                 metrics_kwargs[key] = float(value)
             except ValueError:
                 raise ValueError(f"Invalid metric override format: {override}. Expected format: metric=value")
-        print(f'Overriden metric weights: {metrics_kwargs}')
+        logger.info(f'Overriden metric weights: {metrics_kwargs}')
 
     return train_model(
                 model_kwargs=model_kwargs,
@@ -1494,7 +1519,7 @@ def resume_training(
     debug=False,
     **unused_kwargs,
 ):
-    print_blue('----- Resuming training ------', bold=True)
+    log_title(logger, 'Resuming training')
 
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)

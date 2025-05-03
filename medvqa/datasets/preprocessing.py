@@ -1,6 +1,6 @@
 import os
-from medvqa.utils.files import get_cached_json_file, load_pickle, save_pickle
-from medvqa.utils.hashing import update_hash
+from medvqa.utils.files_utils import get_cached_json_file, load_pickle, save_pickle
+from medvqa.utils.hashing_utils import update_hash
 
 def get_sentences(qa_adapted_datasets, mode='report', include_unmatched=True):
     if mode == 'report':

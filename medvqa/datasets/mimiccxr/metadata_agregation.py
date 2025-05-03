@@ -9,8 +9,8 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, get_mimiccxr_large_image_path, load_mimiccxr_reports_detailed_metadata
 from medvqa.metrics.medical.chexpert import ChexpertLabeler
 from medvqa.utils.constants import CHEXPERT_LABELS
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file
-from medvqa.utils.logging import chest_imagenome_label_array_to_string, chexpert_label_array_to_string, print_bold
+from medvqa.utils.files_utils import get_cached_json_file, get_cached_pickle_file
+from medvqa.utils.logging_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string, print_bold
 import imagesize
 
 import re

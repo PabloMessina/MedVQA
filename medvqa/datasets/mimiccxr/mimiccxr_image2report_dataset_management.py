@@ -26,8 +26,8 @@ from medvqa.datasets.mimiccxr import (
     get_image_path_getter,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.files import get_cached_pickle_file
-from medvqa.utils.logging import print_bold, print_magenta, print_orange
+from medvqa.utils.files_utils import get_cached_pickle_file
+from medvqa.utils.logging_utils import print_bold, print_magenta, print_orange
 
 class MIMICCXR_Image2Report_Dataset(Dataset):
     def __init__(self, indices, reports, report_ids, image_paths, image_transform,

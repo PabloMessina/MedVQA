@@ -3,14 +3,14 @@ import argparse
 import sys
 import numpy as np
 import pandas as pd
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl
 
 # INSTRUCTIONS = """Context: natural language inference.
 

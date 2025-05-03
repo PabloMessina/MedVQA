@@ -4,7 +4,7 @@ import torch.nn as nn
 from transformers import T5ForConditionalGeneration
 
 from medvqa.models.nlp.text_decoder import TransformerTextDecoder
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 class GenerationMode:
     PREDICTIONS_2_REFINED_PREDICTIONS_2_REPORT = 'pred2refpred2rep'

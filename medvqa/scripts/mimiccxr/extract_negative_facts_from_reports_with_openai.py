@@ -1,4 +1,4 @@
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.utils.nlp import sort_sentences
 import logging
 import os
@@ -11,8 +11,8 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_LARGE_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl
 
 INSTRUCTIONS = """You will be given a list of factual statements extracted from a chest X-ray radiology report. Your task is to analyze them and produce a JSON object with the following fields:
 

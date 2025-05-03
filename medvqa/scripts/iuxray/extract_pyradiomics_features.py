@@ -3,7 +3,7 @@ import argparse
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH, IUXRAY_DATASET_AUX_DIR
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import _get_iuxray_image_path
 from medvqa.utils.common import SOURCE_DIR
-from medvqa.utils.files import load_json_file
+from medvqa.utils.files_utils import load_json_file
 from medvqa.datasets.pyradiomics import extract_features_chunk, extract_features_all
 
 _TMP_FOLDER = os.path.join(IUXRAY_DATASET_AUX_DIR, '__tmp')

@@ -3,9 +3,9 @@ import numpy as np
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata, load_model_state_dict
 from medvqa.utils.constants import DATASET_NAMES, VINBIG_BBOX_NAMES
-from medvqa.utils.files import get_cached_pickle_file, load_pickle
-from medvqa.utils.logging import print_bold
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle
+from medvqa.utils.logging_utils import print_bold
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 
 def visualize_yolov8_predictions(
         model_name_or_path, checkpoint_folder_path, num_classes, class_names, image_path,
@@ -156,7 +156,7 @@ def get_gt_labels_for_dicom_id(dicom_id, use_chexpert=True, use_chest_imagenome=
         load_chest_imagenome_labels,
     )
     from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, get_detailed_metadata_for_dicom_id
-    from medvqa.utils.metrics import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
+    from medvqa.utils.metrics_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
     from medvqa.utils.constants import CHEXPERT_LABELS
     
     if use_chexpert:
@@ -813,21 +813,24 @@ class PhraseGroundingVisualizer:
         # Load image transform
         print_bold('Load image transform')
         from medvqa.datasets.image_processing import get_image_transform
-        try:
-            self.image_transform_kwargs = self.metadata['val_image_transform_kwargs']
-        except KeyError: # HACK: when val_image_transform_kwargs is missing due to a bug
-            self.image_transform_kwargs = {
-                DATASET_NAMES.MIMICCXR: dict(
-                    image_size=(416, 416),
-                    augmentation_mode=None,
-                    use_bbox_aware_transform=True,
-                    for_yolov8=True,
-                )
-            }
-        if DATASET_NAMES.MIMICCXR in self.image_transform_kwargs:
-            self.mimiccxr_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.MIMICCXR])
-        if DATASET_NAMES.VINBIG in self.image_transform_kwargs:
-            self.vinbigdata_image_transform = get_image_transform(**self.image_transform_kwargs[DATASET_NAMES.VINBIG])
+        # try:
+        self.train_image_transform_kwargs = self.metadata['train_image_transform_kwargs']
+        self.val_image_transform_kwargs = self.metadata['val_image_transform_kwargs']
+        # except KeyError: # HACK: when val_image_transform_kwargs is missing due to a bug
+        #     self.image_transform_kwargs = {
+        #         DATASET_NAMES.MIMICCXR: dict(
+        #             image_size=(416, 416),
+        #             augmentation_mode=None,
+        #             use_bbox_aware_transform=True,
+        #             for_yolov8=True,
+        #         )
+        #     }
+        if DATASET_NAMES.MIMICCXR in self.train_image_transform_kwargs:
+            self.mimiccxr_train_image_transform = get_image_transform(**self.train_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+            self.mimiccxr_val_image_transform = get_image_transform(**self.val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+        if DATASET_NAMES.VINBIG in self.train_image_transform_kwargs:
+            self.vinbig_train_image_transform = get_image_transform(**self.train_image_transform_kwargs[DATASET_NAMES.VINBIG])
+            self.vinbig_val_image_transform = get_image_transform(**self.val_image_transform_kwargs[DATASET_NAMES.VINBIG])
 
     def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0,
                                    mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None,
@@ -840,9 +843,9 @@ class PhraseGroundingVisualizer:
         # Load image
         print(f'image_path = {image_path}')
         if mimiccxr_forward:
-            image_transform = self.mimiccxr_image_transform
+            image_transform = self.mimiccxr_val_image_transform
         elif vinbig_forward:
-            image_transform = self.vinbigdata_image_transform
+            image_transform = self.vinbig_val_image_transform
         else: assert False
         image, image_size_before, image_size_after = image_transform(image_path, return_image_size=True)
         print(f'image.shape = {image.shape}')
@@ -951,24 +954,40 @@ class PhraseGroundingVisualizer:
 
     def visualize_phrase_grounding_bbox_mode(
             self, phrases, image_path, mimiccxr_forward=False, vinbig_forward=False, subfigsize=(3, 3),
-            gt_phrases_to_highlight=None, phrases_and_embeddings_file_path=None, show_heatmaps=False):
-        
-        from medvqa.utils.common import activate_determinism
-        activate_determinism() # for reproducibility
+            gt_phrases_to_highlight=None, phrases_and_embeddings_file_path=None, show_heatmaps=False,
+            apply_data_augmentation=False, iou_threshold=0.5, conf_threshold=0.5, max_det_per_class=100):
         
         assert sum([mimiccxr_forward, vinbig_forward]) == 1
+
+        from medvqa.utils.common import activate_determinism
+        activate_determinism() # for reproducibility
 
         import torch
 
         # Load image
         print(f'image_path = {image_path}')
         if mimiccxr_forward:
-            image_transform = self.mimiccxr_image_transform
+            image_transform = (self.mimiccxr_train_image_transform
+                               if apply_data_augmentation else self.mimiccxr_val_image_transform)
         elif vinbig_forward:
-            image_transform = self.vinbigdata_image_transform
+            image_transform = (self.vinbig_train_image_transform
+                               if apply_data_augmentation else self.vinbig_val_image_transform)
         else: assert False
+        if apply_data_augmentation:
+            # Break determinism by using OS-level entropy or system time
+            import random
+            seed = int.from_bytes(os.urandom(4), "big")  # Generate a random seed using OS-level entropy
+            np.random.seed(seed)
+            random.seed(seed)
         image = image_transform(image_path)
         print(f'image.shape = {image.shape}')
+
+        if apply_data_augmentation:
+            from PIL import Image
+            from medvqa.datasets.image_processing import inv_normalize
+            image_from_tensor = Image.fromarray((inv_normalize(image).permute(1,2,0) * 255).numpy().astype(np.uint8))
+        else:
+            image_from_tensor = None
 
         # Obtain text embeddings
         if phrases_and_embeddings_file_path is not None:
@@ -998,6 +1017,9 @@ class PhraseGroundingVisualizer:
                 only_compute_features=True,
                 predict_bboxes=True,
                 apply_nms=True,
+                iou_threshold=iou_threshold,
+                conf_threshold=conf_threshold,
+                max_det_per_class=max_det_per_class,
                 return_sigmoid_attention=show_heatmaps,
             )
             print(f'output.keys() = {output.keys()}')
@@ -1014,7 +1036,8 @@ class PhraseGroundingVisualizer:
         n_cols = min(len(phrases), 3)
         figsize = (subfigsize[0] * n_cols, subfigsize[1] * n_rows)
         visualize_visual_grounding_as_bboxes(
-            image_path=image_path,
+            image=image_from_tensor, # Use image reconstructed from tensor when data augmentation is applied
+            image_path=image_path if not apply_data_augmentation else None,
             phrases=phrases,
             gt_phrases_to_highlight=gt_phrases_to_highlight,
             phrase_classifier_probs=phrase_classifier_probs[0].cpu().numpy(),
@@ -1025,6 +1048,7 @@ class PhraseGroundingVisualizer:
             heatmaps=sigmoid_attention[0].cpu().numpy() if show_heatmaps else None,
             figsize=figsize,
             max_cols=3,
+            bbox_format=self.phrase_grounder.visual_grounding_bbox_regressor.bbox_format,
         )
 
 class YOLOv11Visualizer:

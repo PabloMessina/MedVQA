@@ -14,7 +14,7 @@ from medvqa.datasets.mimiccxr import (
     choose_dicom_id_and_orientation,
     get_mimiccxr_image_path,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_file_path_with_hashing_if_too_long,
 )

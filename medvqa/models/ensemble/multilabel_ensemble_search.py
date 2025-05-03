@@ -6,9 +6,9 @@ from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
 
 from medvqa.metrics.classification.prc_auc import prc_auc_score
-from medvqa.utils.files import load_json, load_pickle
-from medvqa.utils.logging import print_blue
-from medvqa.utils.metrics import (
+from medvqa.utils.files_utils import load_json, load_pickle
+from medvqa.utils.logging_utils import print_blue
+from medvqa.utils.metrics_utils import (
     best_threshold_and_accuracy_score,
     best_threshold_and_f1_score,
     best_threshold_and_precision_score,

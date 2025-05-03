@@ -6,14 +6,14 @@ import pandas as pd
 import numpy as np
 import Levenshtein
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_LARGE_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
 )
-from medvqa.utils.math import rank_vectors_by_dot_product
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl, load_pickle, save_pickle
 
 INSTRUCTIONS = """Given a premise (#P) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} is one or two short explanation sentences and {label} is one of {definitely true, likely true, unknown, likely false, definitely false}. Be careful with tricky sentences that mention multiple findings. Remember that unknown applies when both statements might be true but there is no clear way to know with the information provided."""
 

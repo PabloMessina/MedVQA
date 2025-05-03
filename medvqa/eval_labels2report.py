@@ -33,19 +33,19 @@ from medvqa.models.checkpoint import (
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handler,
     get_log_iteration_handler,
     get_log_epoch_started_handler,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_results_folder_path,
     save_pickle,
 )
 from medvqa.training.labels2report import get_engine
 from medvqa.datasets.dataloading_utils import get_labels2report_collate_batch_fn
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

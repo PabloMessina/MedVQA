@@ -4,7 +4,7 @@ from transformers import AutoModel
 from medvqa.models.common import freeze_parameters
 from medvqa.models.nlp.text_decoder import TransformerTextDecoder
 
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 class HuggingfaceModels:
     MICROSOFT_BIOMEDVLP_CXR_BERT_SPECIALIZED = 'microsoft/BiomedVLP-CXR-BERT-specialized'

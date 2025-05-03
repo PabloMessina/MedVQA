@@ -2,15 +2,15 @@ import os
 import argparse
 import random
 import numpy as np
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_LARGE_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     get_path_to_report_text_dict,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
 
 INSTRUCTIONS = """Given a report (#R) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} must be a short explanation (no more than 5 sentences) and {label} must be one of {certainly true, probably true, unknown, probably false, certainly false}. Remember that unknown applies when it's not possible to know whether #H is true or false with the information provided."""
 

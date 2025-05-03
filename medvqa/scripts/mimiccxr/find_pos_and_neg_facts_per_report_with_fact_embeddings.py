@@ -14,13 +14,13 @@ from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata, loa
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.models.nlp.nli import BertBasedNLI
 from medvqa.utils.data_structures import UnionFind
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     load_pickle,
     save_pickle,
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 class FactEmbeddingsDataset(Dataset):
     def __init__(self, fact_embeddings):

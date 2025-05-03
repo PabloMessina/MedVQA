@@ -1,10 +1,10 @@
 import argparse
 from tqdm import tqdm
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_json, save_pickle
+from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, load_json, save_pickle
 from medvqa.datasets.iuxray import IUXRAY_LARGE_FAST_CACHE_DIR, IUXRAY_REPORTS_MIN_JSON_PATH
-from medvqa.utils.files import load_json, load_jsonl
-from medvqa.utils.logging import print_blue
+from medvqa.utils.files_utils import load_json, load_jsonl
+from medvqa.utils.logging_utils import print_blue
 
 def compute_positive_negative_facts_per_image(
     manual_tags_with_slashes_to_sentences_jsol_filepath,

@@ -6,15 +6,15 @@ import pandas as pd
 from tqdm import tqdm
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
 )
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 from medvqa.utils.nlp import sort_sentences
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_json, load_jsonl
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_json, load_jsonl
 from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
 
 INSTRUCTIONS = """Context: natural language inference.

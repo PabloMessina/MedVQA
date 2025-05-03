@@ -45,14 +45,14 @@ from medvqa.utils.common import (
     parsed_args_to_dict,
 )
 from medvqa.utils.constants import DATASET_NAMES, MIMICCXR_DATASET_ID__CHEST_IMAGENOME__DETECTRON2_MODE
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_checkpoint_folder_path,
     get_results_folder_path,
     save_to_pickle,
 )
-from medvqa.utils.handlers import attach_accumulator
+from medvqa.utils.handlers_utils import attach_accumulator
 
-from medvqa.utils.logging import print_blue
+from medvqa.utils.logging_utils import print_blue
 
 class EvalMode:
     CHEST_IMAGENOME__AVERAGE_BBOX = 'chest_imagenome_average_bbox'

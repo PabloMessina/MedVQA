@@ -1,13 +1,13 @@
 from dotenv import load_dotenv
 
-from medvqa.utils.logging import print_red
+from medvqa.utils.logging_utils import print_red
 load_dotenv()
 
 from medvqa.datasets.chexpert import CHEXPERT_V1_0_SMALL_DATASET_DIR
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
 from medvqa.datasets.padchest import PADCHEST_IMAGES_SMALL_DIR
-from medvqa.utils.files import get_cached_dataframe_from_csv, get_cached_json_file
+from medvqa.utils.files_utils import get_cached_dataframe_from_csv, get_cached_json_file
 
 import os
 import numpy as np

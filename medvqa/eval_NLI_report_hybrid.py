@@ -23,9 +23,9 @@ from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
 from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, save_pickle, load_pickle
-from medvqa.utils.logging import get_console_logger, print_blue, print_bold
-from medvqa.utils.metrics import best_threshold_and_f1_score
+from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, save_pickle, load_pickle
+from medvqa.utils.logging_utils import get_console_logger, print_blue, print_bold
+from medvqa.utils.metrics_utils import best_threshold_and_f1_score
 
 logger = None
 

@@ -2,9 +2,10 @@ from collections import namedtuple
 import os
 import random
 import re
+import logging
+from medvqa.utils.files_utils import get_cached_json_file, save_json
 
-from medvqa.utils.files import get_cached_json_file, save_json
-from medvqa.utils.logging import print_orange
+logger = logging.getLogger(__name__)
 
 _CHECKPOINT_REGEX = re.compile(r'^[A-Za-z]+_(\d+)(?:_((.+)=)?([\d\.]+)\.pt)?$')
 CheckpointInfo = namedtuple('CheckpointInfo', ('name', 'epoch', 'metric', 'value'))
@@ -24,7 +25,7 @@ def get_checkpoint_filepath(folder, verbose=True):
     best_epoch = -1
     best_name = None
     if verbose:
-        print('checkpoint_names =', checkpoint_names)
+        logger.info(f'checkpoint_names = {checkpoint_names}')
     for name in checkpoint_names:
         info = split_checkpoint_name(name)
         if info.value > best_value or (info.value == best_value and info.epoch > best_epoch):
@@ -61,7 +62,7 @@ def load_metadata(folder, verbose=True):
     fpath = os.path.join(folder, 'metadata.json')    
     data = get_cached_json_file(fpath)
     if verbose:
-        print('metadata loaded from', fpath)
+        logger.info(f'metadata loaded from {fpath}')
     return data
 
 def save_metadata(folder, verbose=True, **kwargs):
@@ -69,7 +70,7 @@ def save_metadata(folder, verbose=True, **kwargs):
     fpath = os.path.join(folder, 'metadata.json')
     save_json(data, fpath)
     if verbose:
-        print('metadata saved to', fpath)
+        logger.info(f'metadata saved to {fpath}')
 
 def load_model_state_dict(model, state_dict, ignore_size_mismatch=True, strict=False):
     if ignore_size_mismatch:
@@ -78,7 +79,7 @@ def load_model_state_dict(model, state_dict, ignore_size_mismatch=True, strict=F
         for k in state_dict.keys():
             if k in model_state_dict:
                 if state_dict[k].shape != model_state_dict[k].shape:
-                    print(f"Skip loading parameter: {k}, "
+                    logger.info(f"Skip loading parameter: {k}, "
                         f"required shape: {model_state_dict[k].shape}, "
                         f"loaded shape: {state_dict[k].shape}")
                     to_delete.append(k)
@@ -90,22 +91,24 @@ def load_model_state_dict(model, state_dict, ignore_size_mismatch=True, strict=F
     intersection = model_keys & state_dict_keys
     union = model_keys | state_dict_keys
     if len(intersection) != len(union):
-        print_orange(f"Warning: model state dict has {len(model_keys)} keys, "
-            f"loaded state dict has {len(state_dict_keys)} keys, "
-            f"intersection has {len(intersection)} keys, "
-            f"union has {len(union)} keys.")
+        message = f"model state dict has {len(model_keys)} keys, " \
+            f"loaded state dict has {len(state_dict_keys)} keys, " \
+            f"intersection has {len(intersection)} keys, " \
+            f"union has {len(union)} keys."
         missing_keys = list(model_keys - state_dict_keys)
         if len(missing_keys) > 0:
-            print_orange("Examples of keys in model but not in loaded state dict:")
+            message += "\nExamples of keys in model but not in loaded state dict:"
             missing_keys = random.sample(missing_keys, min(10, len(missing_keys)))
             for k in missing_keys:
-                print_orange(f"  {k}")
+                message += f"\n  {k}"
         missing_keys = list(state_dict_keys - model_keys)
         if len(missing_keys) > 0:
-            print_orange("Examples of keys in loaded state dict but not in model:")
+            message += "\nExamples of keys in loaded state dict but not in model:"
             missing_keys = random.sample(missing_keys, min(10, len(missing_keys)))
             for k in missing_keys:
-                print_orange(f"  {k}")
+                message += f"\n  {k}"
+        logger.warning(message)
+
     model.load_state_dict(state_dict, strict=strict)
 
 # define named tuple for model training history
@@ -129,7 +132,7 @@ def get_model_training_history(model_checkpoint_folder_path):
     try:
         datasets = folder[16:folder.index('_',16)]
     except ValueError:
-        print(f'WARNING: could not parse datasets from {folder} (model_dir={model_dir})')
+        logger.warning(f'Could not parse datasets from {folder} (model_dir={model_dir})')
         raise
     datasets = f'{len(datasets.split("+"))}:{datasets}'
     training_instance = ModelTrainingInstance(

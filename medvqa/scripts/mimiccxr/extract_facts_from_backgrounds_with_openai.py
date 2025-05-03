@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 load_dotenv()
 
 import os
@@ -16,8 +16,8 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_CACHE_DIR,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.openai_api import process_api_requests_from_file
-from medvqa.utils.files import load_json, load_jsonl, load_pickle, save_jsonl
+from medvqa.utils.openai_api_utils import process_api_requests_from_file
+from medvqa.utils.files_utils import load_json, load_jsonl, load_pickle, save_jsonl
 from medvqa.utils.common import get_timestamp
 
 INSTRUCTIONS = """You are a function. Your input is the indication/history section of chest x-ray report.

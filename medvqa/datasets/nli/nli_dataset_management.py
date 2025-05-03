@@ -9,9 +9,9 @@ from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PAT
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import _compute_input2paraphrases, _prepare_nli_data, _prepare_sentence_to_facts_data
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.files import load_jsonl
-from medvqa.utils.logging import print_bold
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.files_utils import load_jsonl
+from medvqa.utils.logging_utils import print_bold
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 
 _LABEL_TO_INDEX = {
     'entailment': 0,

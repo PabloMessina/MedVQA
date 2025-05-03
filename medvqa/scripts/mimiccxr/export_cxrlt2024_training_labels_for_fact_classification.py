@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.constants import CXRLT2024_TASK1_CLASSES
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH, MIMICCXR_LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import save_pickle
+from medvqa.utils.files_utils import save_pickle
 
 def export_labels_for_fact_classification(fact_encoder_model_name, fact_encoder_checkpoint_folder_path,
                                           batch_size, num_workers, positive_fraction):

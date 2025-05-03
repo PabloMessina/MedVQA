@@ -10,8 +10,8 @@ from PIL import Image
 from transformers import SamModel, SamProcessor
 from medvqa.datasets.vinbig import visualize_image_with_bounding_boxes
 from medvqa.utils.common import RESULTS_DIR, get_timestamp, parsed_args_to_dict
-from medvqa.utils.files import save_pickle
-from medvqa.utils.logging import print_magenta, print_orange
+from medvqa.utils.files_utils import save_pickle
+from medvqa.utils.logging_utils import print_magenta, print_orange
 
 class EvalDatasets:
     VINBIG_TEST_SET = 'vinbig_test_set'

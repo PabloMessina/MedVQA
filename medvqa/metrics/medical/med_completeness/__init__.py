@@ -3,7 +3,7 @@ from ignite.exceptions import NotComputableError
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 from medvqa.utils.common import SOURCE_DIR, CACHE_DIR
-from medvqa.utils.files import load_pickle
+from medvqa.utils.files_utils import load_pickle
 import os
 
 MEDICAL_TERMS_PATH = os.path.join(SOURCE_DIR, 'medvqa', 'metrics', 'medical',

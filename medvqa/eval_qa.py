@@ -29,7 +29,7 @@ from medvqa.utils.common import (
     WORKSPACE_DIR,
     parsed_args_to_dict,
 )    
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     get_log_metrics_handlers,
     get_log_iteration_handler,
     get_log_epoch_started_handler,
@@ -37,7 +37,7 @@ from medvqa.utils.handlers import (
 )
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.models.qa import OpenEndedQA
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_results_folder_path,
     save_to_pickle,
@@ -45,7 +45,7 @@ from medvqa.utils.files import (
 from medvqa.training.qa import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_qa_dataset_management import MIMICCXR_QA_Evaluator
 from medvqa.datasets.iuxray.iuxray_qa_dataset_management import IUXRAY_QA_Trainer
-from medvqa.utils.logging import CountPrinter
+from medvqa.utils.logging_utils import CountPrinter
 from medvqa.evaluation.vqa import compute_aggregated_metrics
 from medvqa.evaluation.report_generation import (
     recover_reports,

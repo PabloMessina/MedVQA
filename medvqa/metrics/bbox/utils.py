@@ -9,16 +9,40 @@ from shapely.geometry import box as shapely_box
 from shapely.ops import unary_union
 from tqdm import tqdm
 
-from medvqa.utils.logging import print_bold
+from medvqa.utils.logging_utils import print_bold
 
 _VALID_TYPES = [np.ndarray, list, torch.Tensor]
 
-def calculate_exact_iou_union(bboxes_A, bboxes_B):
+def compute_bbox_union_iou(bboxes_A, bboxes_B, bbox_format='xyxy'):
+    """
+    Calculates the exact IoU (Intersection over Union) between two sets of bounding boxes.
+    
+    Args:
+        bboxes_A (list, np.ndarray, or torch.Tensor): First set of bounding boxes (N, 4) or (4,).
+        bboxes_B (list, np.ndarray, or torch.Tensor): Second set of bounding boxes (M, 4) or (4,).
+        bbox_format (str): Format of bounding boxes, either 'xyxy' or 'cxcywh'. Default is 'xyxy'.
+    
+    Returns:
+        float: IoU value between the two sets of bounding boxes.
+    """
     assert type(bboxes_A) in _VALID_TYPES, f"bboxes_A is of type {type(bboxes_A)}"
     assert type(bboxes_B) in _VALID_TYPES, f"bboxes_B is of type {type(bboxes_B)}"
+    assert bbox_format in ['xyxy', 'cxcywh'], f"Invalid bbox_format: {bbox_format}. Must be 'xyxy' or 'cxcywh'."
 
     if len(bboxes_A) == 0 or len(bboxes_B) == 0:
         return 0.0
+    
+    # Convert bounding boxes to 'xyxy' format if necessary
+    if bbox_format == 'cxcywh':
+        if type(bboxes_A[0]) in _VALID_TYPES:
+            bboxes_A = [cxcywh_to_xyxy_basic(bbox) for bbox in bboxes_A]
+        else:
+            bboxes_A = cxcywh_to_xyxy_basic(bboxes_A)
+        
+        if type(bboxes_B[0]) in _VALID_TYPES:
+            bboxes_B = [cxcywh_to_xyxy_basic(bbox) for bbox in bboxes_B]
+        else:
+            bboxes_B = cxcywh_to_xyxy_basic(bboxes_B)
     
     # bboxes_A: (N, 4) or (4,)
     if type(bboxes_A[0]) in _VALID_TYPES:
@@ -40,12 +64,12 @@ def calculate_exact_iou_union(bboxes_A, bboxes_B):
     iou = inter_area / union_area if union_area > 0 else 0.0
     return iou
 
-def calculate_mean_exact_iou_union(pred_bbox_coords_list, gt_bbox_coords_list):
+def compute_mean_bbox_union_iou(pred_bbox_coords_list, gt_bbox_coords_list, bbox_format='xyxy'):
     assert len(pred_bbox_coords_list) == len(gt_bbox_coords_list)
     n = len(pred_bbox_coords_list)
     mean_iou = 0
     for i in range(n):
-        mean_iou += calculate_exact_iou_union(pred_bbox_coords_list[i], gt_bbox_coords_list[i])
+        mean_iou += compute_bbox_union_iou(pred_bbox_coords_list[i], gt_bbox_coords_list[i], bbox_format)
     mean_iou /= n
     return mean_iou
 
@@ -155,7 +179,7 @@ def compute_mean_iou_per_class__yolov11(pred_boxes, pred_classes, gt_coords, val
         for j in range(m):
             if gt_coords[i][j] is not None and len(gt_coords[i][j]) > 0:
                 assert gt_coords[i][j].ndim == 2 # (N, 4)
-                iou = calculate_exact_iou_union(gt_coords[i][j], coords_per_class[j])
+                iou = compute_bbox_union_iou(gt_coords[i][j], coords_per_class[j])
                 class_ious[j] += iou
                 class_counts[j] += 1
                 if compute_iou_per_sample:
@@ -273,7 +297,7 @@ def _compute_ap__yolov11(task):
             y_true[i] = 1
         if _shared_pred_boxes[i][c] is not None:
             if y_true[i]:
-                if calculate_exact_iou_union(_shared_pred_boxes[i][c], _shared_gt_coords[i][c]) >= iou_thr:
+                if compute_bbox_union_iou(_shared_pred_boxes[i][c], _shared_gt_coords[i][c]) >= iou_thr:
                     y_scores[i] = _shared_pred_confs[i][c]
             else:
                 y_scores[i] = _shared_pred_confs[i][c]
@@ -289,7 +313,7 @@ def _compute_ap_micro__yolov11(task):
                 y_true[i, j] = 1
             if _shared_pred_boxes[i][j] is not None:
                 if y_true[i, j]:
-                    if calculate_exact_iou_union(_shared_pred_boxes[i][j], _shared_gt_coords[i][j]) >= iou_thr:
+                    if compute_bbox_union_iou(_shared_pred_boxes[i][j], _shared_gt_coords[i][j]) >= iou_thr:
                         y_scores[i, j] = _shared_pred_confs[i][j]
                 else:
                     y_scores[i, j] = _shared_pred_confs[i][j]
@@ -613,7 +637,7 @@ def _nms_method1(bbox_coords, bbox_probs, conf_th, iou_th, max_det_per_class): #
     return pred_boxes, pred_confs, pred_classes
 
 def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th,
-                 max_det_per_class, sort_confidence=False):
+                 max_det_per_class, sort_confidence=False, bbox_format='xyxy'):
     """
     Perform Non-Maximum Suppression (NMS) on bounding boxes with an optional sorting
     based on confidence scores.
@@ -624,7 +648,7 @@ def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th,
 
     Parameters:
         bbox_coords (torch.Tensor): Tensor of bounding box coordinates with shape
-            (num_batches, num_detections, 4). Each box is represented as [x1, y1, x2, y2].
+            (num_batches, num_detections, 4).
         bbox_probs (torch.Tensor): Tensor of detection confidence scores with shape
             (num_batches, num_detections).
         class_ids (torch.Tensor): Tensor of class IDs for each detection with shape
@@ -636,6 +660,7 @@ def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th,
             thresholding and NMS.
         sort_confidence (bool, optional): If True, the final output detections are sorted
             by confidence in decreasing order. Default is False.
+        bbox_format (str, optional): Format of the bounding boxes. Can be 'xyxy' or 'xywh'.
 
     Returns:
         tuple: A tuple containing:
@@ -662,7 +687,11 @@ def _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th,
     if bbox_coords.size(0) > 0:
         # Shift bounding box coordinates based on class IDs to separate boxes
         # of different classes during NMS.
-        shifted_bbox_coords = bbox_coords + class_ids.unsqueeze(-1).float() * 10.0
+        if bbox_format == 'cxcywh':
+            bbox_coords_xyxy = cxcywh_to_xyxy_tensor(bbox_coords) # Convert to 'xyxy' format
+        else: # 'xyxy'
+            bbox_coords_xyxy = bbox_coords # Already in 'xyxy' format
+        shifted_bbox_coords = bbox_coords_xyxy + class_ids.unsqueeze(-1).float() * 10.0
         keep = nms(shifted_bbox_coords, bbox_probs, iou_th)
         # Retrieve the final detections after NMS.
         pred_boxes = bbox_coords[keep].cpu().numpy()
@@ -841,10 +870,12 @@ def find_optimal_conf_iou_thresholds(gt_coords_list, yolo_predictions_list=None,
 
 def find_optimal_conf_iou_max_det_thresholds__single_class(
     gt_coords_list, pred_boxes_list, pred_confs_list, 
+    bbox_format='xyxy',
     iou_thresholds=np.arange(0.05, 0.6, 0.05),
     conf_thresholds=np.arange(0.1, 0.9, 0.05), 
     post_nms_max_dets=[1, 2, 3, 4],
-    pre_nms_max_det=100, verbose=True
+    pre_nms_max_dets=[20, 50, 100],
+    verbose=True
 ):
     """
     Finds the optimal confidence and IoU thresholds for a single class by maximizing the mean IoU score.
@@ -853,19 +884,24 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
         gt_coords_list (list): List of ground-truth bounding box coordinates per sample.
         pred_boxes_list (list): List of predicted bounding box coordinates per sample.
         pred_confs_list (list): List of confidence scores for predicted bounding boxes per sample.
+        bbox_format (str): Format of the bounding box coordinates. Either 'xyxy' or 'cxcywh'.
         iou_thresholds (numpy.ndarray): Array of IoU thresholds to test.
         conf_thresholds (numpy.ndarray): Array of confidence thresholds to test.
-        max_det (int): Maximum number of detections per sample.
+        post_nms_max_dets (list): List of maximum detections to keep after NMS.
+        pre_nms_max_dets (list): List of maximum detections to keep before NMS.
         verbose (bool): If True, prints progress information.
 
     Returns:
-        dict: A dictionary containing the best IoU and confidence thresholds and the filtered bounding boxes.
+        dict: A dictionary containing the best IoU threshold, confidence threshold, and the corresponding filtered predictions.
     """
     n = len(gt_coords_list)
     
     # Ensure the predicted boxes and confidence lists have the same length as ground truth
     assert len(pred_boxes_list) == n
     assert len(pred_confs_list) == n
+    
+    # Ensure the bounding box format is valid
+    assert bbox_format in ['xyxy', 'cxcywh']
 
     # Convert to PyTorch tensors if not already
     if not isinstance(pred_boxes_list[0], torch.Tensor):
@@ -879,7 +915,8 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
     best_score = -float("inf")  # Initialize best IoU score
     best_iou_threshold = None
     best_conf_threshold = None
-    best_max_det = None
+    best_pre_nms_max_det = None
+    best_post_nms_max_det = None
     best_pred_boxes_list = None
     best_pred_confs_list = None
 
@@ -887,11 +924,12 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
 
     # Iterate over all combinations of confidence and IoU thresholds
     if verbose:
-        iterable = itertools.product(conf_thresholds, iou_thresholds)
+        iterable = itertools.product(conf_thresholds, iou_thresholds, pre_nms_max_dets)
     else:
-        iterable = tqdm(itertools.product(conf_thresholds, iou_thresholds), total=len(conf_thresholds) * len(iou_thresholds),
+        iterable = tqdm(itertools.product(conf_thresholds, iou_thresholds, pre_nms_max_dets),
+                        total=len(conf_thresholds) * len(iou_thresholds) * len(pre_nms_max_dets),
                         desc="Optimizing thresholds", mininterval=2.0)
-    for conf_th, iou_th in iterable:
+    for conf_th, iou_th, pre_nms_max_det in iterable:
         
         # Store filtered predictions per sample
         pred_boxes_list_ = [None] * n
@@ -916,22 +954,23 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
 
             # Apply NMS filtering
             pred_boxes, pred_confs, _ = _nms_method2(bbox_coords, bbox_probs, class_ids, conf_th, iou_th, pre_nms_max_det,
-                                                     sort_confidence=True)
+                                                     sort_confidence=True, bbox_format=bbox_format)
             pred_boxes_list_[i] = pred_boxes  # Filtered boxes (num_boxes, 4)
             pred_confs_list_[i] = pred_confs  # Filtered confidence scores (num_boxes,)
         
         # Compute mean IoU score for the current threshold combination
-        for max_det in post_nms_max_dets:
-            truncated_pred_boxes_list = [pred_boxes[:max_det] for pred_boxes in pred_boxes_list_]
-            score = calculate_mean_exact_iou_union(truncated_pred_boxes_list, gt_coords_list)
+        for post_nms_max_det in post_nms_max_dets:
+            truncated_pred_boxes_list = [pred_boxes[:post_nms_max_det] for pred_boxes in pred_boxes_list_]
+            score = compute_mean_bbox_union_iou(truncated_pred_boxes_list, gt_coords_list, bbox_format=bbox_format)
             
             # Update the best parameters if the current score is better
             if score > best_score:
-                truncated_pred_confs_list = [pred_confs[:max_det] for pred_confs in pred_confs_list_]
+                truncated_pred_confs_list = [pred_confs[:post_nms_max_det] for pred_confs in pred_confs_list_]
                 best_score = score
                 best_iou_threshold = iou_th
                 best_conf_threshold = conf_th
-                best_max_det = max_det
+                best_pre_nms_max_det = pre_nms_max_det
+                best_post_nms_max_det = post_nms_max_det
                 best_pred_boxes_list = truncated_pred_boxes_list
                 best_pred_confs_list = truncated_pred_confs_list
 
@@ -942,19 +981,21 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
     return {
         'best_iou_threshold': best_iou_threshold,
         'best_conf_threshold': best_conf_threshold,
-        'best_max_det': best_max_det,
+        'best_pre_nms_max_det': best_pre_nms_max_det,
+        'best_post_nms_max_det': best_post_nms_max_det,
         'pred_boxes_list': best_pred_boxes_list,
         'pred_confs_list': best_pred_confs_list
     }
 
-def compute_probability_map_iou(prob_map, gt_bboxes, conf_th):
+def compute_probability_map_iou(prob_map, gt_bboxes, conf_th, bbox_format='xyxy'):
     """
     Compute the Intersection over Union (IoU) between the predicted probability map and ground truth bounding boxes.
 
     Parameters:
     - prob_map (numpy.ndarray): A 2D array (height, width) representing the probability map.
-    - gt_bboxes (numpy.ndarray): An array of shape (num_boxes, 4) containing normalized ground truth bounding boxes in (x_min, y_min, x_max, y_max) format.
+    - gt_bboxes (numpy.ndarray): An array of shape (num_boxes, 4) containing normalized ground truth bounding boxes.
     - conf_th (float): Confidence threshold for binarizing the probability map.
+    - bbox_format (str): Format of the bounding box coordinates. Either 'xyxy' or 'cxcywh'.
 
     Returns:
     - float: The computed IoU between the binary probability map and the ground truth bounding boxes.
@@ -980,6 +1021,12 @@ def compute_probability_map_iou(prob_map, gt_bboxes, conf_th):
     pred_union = unary_union(pred_boxes)
     
     # Compute union of ground truth bounding boxes
+    if bbox_format == 'cxcywh':
+        gt_bboxes = [(
+            cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
+        ) for cx, cy, w, h in gt_bboxes]
+    elif bbox_format != 'xyxy':
+        raise ValueError("Invalid bbox_format. Use 'xyxy' or 'cxcywh'.")
     gt_boxes = [shapely_box(x_min, y_min, x_max, y_max) for x_min, y_min, x_max, y_max in gt_bboxes]
     gt_union = unary_union(gt_boxes)
     
@@ -990,14 +1037,15 @@ def compute_probability_map_iou(prob_map, gt_bboxes, conf_th):
     return intersection / union if union > 0 else 0.0
 
 
-def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, conf_thresholds=np.arange(0.1, 0.9, 0.1)):
+def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, bbox_format='xyxy',
+                                                 conf_thresholds=np.arange(0.1, 0.9, 0.1)):
     """
     Find the optimal confidence threshold for binarizing probability maps that maximizes the average IoU with ground truth.
 
     Parameters:
     - prob_maps (numpy.ndarray): A 3D array (num_samples, height, width) representing multiple probability maps.
     - gt_bboxes_list (list of arrays/lists/tuples): A list containing the ground truth bounding boxes for each sample.
-      Each entry is expected to be an array-like structure containing multiple bounding boxes, where each box is in (x_min, y_min, x_max, y_max) format.
+    - bbox_format (str): Format of the bounding box coordinates. Either 'xyxy' or 'cxcywh'.
     - conf_thresholds (numpy.ndarray or list): A list of confidence thresholds to evaluate.
 
     Returns:
@@ -1021,7 +1069,8 @@ def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, conf_
         
         # Compute IoU for each probability map and its corresponding ground truth
         for prob_map, gt_bboxes in zip(prob_maps, gt_bboxes_list):
-            total_iou += compute_probability_map_iou(prob_map, gt_bboxes, float(conf_th))  # Ensure conf_th is a float
+            total_iou += compute_probability_map_iou(prob_map, gt_bboxes, float(conf_th),
+                                                     bbox_format=bbox_format)  # Ensure conf_th is a float
         
         avg_iou = total_iou / len(prob_maps)  # Compute mean IoU over all samples
         
@@ -1036,7 +1085,7 @@ def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, conf_
     }
 
 def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, conf_th, pre_nms_max_det,
-                         post_nms_max_det=None):
+                         post_nms_max_det=None, bbox_format='xyxy'):
     """
     Computes the Intersection over Union (IoU) between ground truth bounding boxes and predicted bounding boxes 
     after applying confidence thresholding and Non-Maximum Suppression (NMS).
@@ -1049,6 +1098,7 @@ def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, c
     - conf_th (float): Confidence threshold for filtering predictions.
     - pre_nms_max_det (int): Maximum number of detections to keep before NMS.
     - post_nms_max_det (int, optional): Maximum number of detections to keep after NMS.
+    - bbox_format (str): Format of the bounding box coordinates. Either 'xyxy' or 'cxcywh'.
 
     Returns:
     - float: IoU score computed between remaining predicted boxes and ground truth boxes.
@@ -1058,6 +1108,7 @@ def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, c
     assert isinstance(pred_bbox_probs, (np.ndarray, torch.Tensor)), "pred_bbox_probs must be a np.ndarray or torch.Tensor"
     assert pred_bbox_coords.ndim == 2 and pred_bbox_coords.shape[1] == 4, "pred_bbox_coords must have shape (num_boxes, 4)"
     assert pred_bbox_probs.ndim == 1, "pred_bbox_probs must have shape (num_boxes,)"
+    assert bbox_format in ['xyxy', 'cxcywh'], "bbox_format must be 'xyxy' or 'cxcywh'"
     
     # Convert inputs to tensors if needed
     if isinstance(pred_bbox_coords, np.ndarray):
@@ -1077,7 +1128,11 @@ def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, c
     
     # Apply Non-Maximum Suppression (NMS)
     if pred_bbox_coords.shape[0] > 0:
-        keep = nms(pred_bbox_coords, pred_bbox_probs, iou_th)
+        if bbox_format == 'cxcywh':
+            pred_bbox_coords_xyxy = cxcywh_to_xyxy_tensor(pred_bbox_coords) # Convert to 'xyxy' format
+        else: # 'xyxy'
+            pred_bbox_coords_xyxy = pred_bbox_coords # Already in 'xyxy' format
+        keep = nms(pred_bbox_coords_xyxy, pred_bbox_probs, iou_th)
         pred_bbox_coords = pred_bbox_coords[keep]
         pred_bbox_probs = pred_bbox_probs[keep]
         
@@ -1087,6 +1142,95 @@ def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, c
         pred_bbox_coords = pred_bbox_coords[idxs]
 
     # Compute IoU between predicted and ground truth boxes
-    iou = calculate_exact_iou_union(pred_bbox_coords, gt_bboxes)
+    iou = compute_bbox_union_iou(pred_bbox_coords, gt_bboxes, bbox_format)
     
     return iou
+
+def get_grid_centers(grid_height, grid_width, device=None):
+    """
+    Computes normalized grid cell centers for the given grid dimensions.
+
+    Args:
+        grid_height (int): Number of rows in the grid.
+        grid_width (int): Number of columns in the grid.
+        device (torch.device): Device to place the tensor on.
+
+    Returns:
+        torch.Tensor: Tensor of shape (grid_height, grid_width, 2) containing cell centers [cx, cy].
+    """    
+    centers = torch.empty((grid_height, grid_width, 2), device=device)
+    w = 1.0 / grid_width
+    h = 1.0 / grid_height
+    for i in range(grid_height):
+        for j in range(grid_width):
+            centers[i, j, 0] = (j + 0.5) * w
+            centers[i, j, 1] = (i + 0.5) * h
+    return centers
+
+def cxcywh_to_xyxy_tensor(boxes):
+    """
+    Convert bounding boxes from (cx, cy, w, h) format to (x_min, y_min, x_max, y_max) format.
+
+    Args:
+        boxes (torch.Tensor): Bounding boxes in (cx, cy, w, h) format.
+
+    Returns:
+        torch.Tensor: Bounding boxes in (x_min, y_min, x_max, y_max) format.
+    """
+    cx, cy, w, h = boxes.unbind(-1)
+    x_min = cx - 0.5 * w
+    y_min = cy - 0.5 * h
+    x_max = cx + 0.5 * w
+    y_max = cy + 0.5 * h
+    return torch.stack((x_min, y_min, x_max, y_max), dim=-1)
+
+def xyxy_to_cxcywh_tensor(boxes):
+    """
+    Convert bounding boxes from (x_min, y_min, x_max, y_max) format to (cx, cy, w, h) format.
+
+    Args:
+        boxes (torch.Tensor): Bounding boxes in (x_min, y_min, x_max, y_max) format.
+
+    Returns:
+        torch.Tensor: Bounding boxes in (cx, cy, w, h) format.
+    """
+    x_min, y_min, x_max, y_max = boxes.unbind(-1)
+    cx = 0.5 * (x_min + x_max)
+    cy = 0.5 * (y_min + y_max)
+    w = x_max - x_min
+    h = y_max - y_min
+    return torch.stack((cx, cy, w, h), dim=-1)
+
+def cxcywh_to_xyxy_basic(bbox):
+    """
+    Converts bounding box from 'cxcywh' format to 'xyxy' format.
+    
+    Args:
+        bbox (list, np.ndarray, or torch.Tensor): Bounding box in 'cxcywh' format (cx, cy, w, h).
+    
+    Returns:
+        list: Bounding box in 'xyxy' format (x1, y1, x2, y2).
+    """
+    cx, cy, w, h = bbox
+    x1 = cx - w / 2
+    y1 = cy - h / 2
+    x2 = cx + w / 2
+    y2 = cy + h / 2
+    return [x1, y1, x2, y2]
+
+def xyxy_to_cxcywh_basic(bbox):
+    """
+    Converts bounding box from 'xyxy' format to 'cxcywh' format.
+    
+    Args:
+        bbox (list, np.ndarray, or torch.Tensor): Bounding box in 'xyxy' format (x1, y1, x2, y2).
+    
+    Returns:
+        list: Bounding box in 'cxcywh' format (cx, cy, w, h).
+    """
+    x1, y1, x2, y2 = bbox
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    w = x2 - x1
+    h = y2 - y1
+    return [cx, cy, w, h]

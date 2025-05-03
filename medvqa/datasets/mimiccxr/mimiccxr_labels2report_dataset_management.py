@@ -20,8 +20,8 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import _create_dataset
-from medvqa.utils.files import get_cached_pickle_file, load_json, load_pickle
-from medvqa.utils.logging import print_bold, print_magenta, print_red
+from medvqa.utils.files_utils import get_cached_pickle_file, load_json, load_pickle
+from medvqa.utils.logging_utils import print_bold, print_magenta, print_red
 
 class MIMICCXR_Labels2Report_Dataset(Dataset):
     def __init__(self, indices, reports, report_ids,

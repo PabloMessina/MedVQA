@@ -3,7 +3,7 @@ from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     save_pickle,
 )
@@ -14,7 +14,7 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CHEXPERT_LABEL2PHRASE,
 )
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 def main():
     parser = argparse.ArgumentParser()

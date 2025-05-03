@@ -3,7 +3,7 @@ load_dotenv()
 
 import os
 from medvqa.datasets.iuxray import IUXRAY_REPORTS_MIN_JSON_PATH
-from medvqa.utils.files import load_json, make_dirs_in_filepath
+from medvqa.utils.files_utils import load_json, make_dirs_in_filepath
 from medvqa.utils.common import CACHE_DIR
 
 if __name__ == '__main__':

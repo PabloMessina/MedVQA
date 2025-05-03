@@ -8,8 +8,8 @@ from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
 from medvqa.models.nlp.nli import BertBasedNLI
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.datasets.dataloading_utils import get_fact_embedding_collate_batch_fn, get_nli_collate_batch_fn
-from medvqa.utils.files import load_jsonl
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.files_utils import load_jsonl
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

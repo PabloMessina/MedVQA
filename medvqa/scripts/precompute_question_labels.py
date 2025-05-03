@@ -1,4 +1,4 @@
-from medvqa.utils.files import load_json_file, save_to_pickle
+from medvqa.utils.files_utils import load_json_file, save_to_pickle
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import get_timestamp

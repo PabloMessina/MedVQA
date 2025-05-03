@@ -3,7 +3,7 @@ from medvqa.datasets.padchest import (
     PADCHEST_CACHE_DIR,
     PADCHEST_LABELS_CSV_PATH,
 )
-from medvqa.utils.files import save_to_txt, read_lines_from_txt
+from medvqa.utils.files_utils import save_to_txt, read_lines_from_txt
 from medvqa.utils.common import get_timestamp
 from PIL import Image, UnidentifiedImageError
 from tqdm import tqdm

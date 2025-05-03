@@ -17,8 +17,8 @@ from medvqa.eval_yolov5 import get_eval_image_paths_txt_filepath__chest_imagenom
 from medvqa.metrics.bbox.utils import compute_mAP__yolov11, compute_mean_iou_per_class__yolov11
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_NUM_BBOX_CLASSES
-from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_pickle
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.files_utils import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_pickle
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 class EvalDatasets:
     CHEST_IMAGENOME_MIMICCXR_TEST_SET = 'chest_imagenome__mimiccxr_test_set'

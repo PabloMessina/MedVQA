@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-from medvqa.utils.files import save_pickle
+from medvqa.utils.files_utils import save_pickle
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_CACHE_DIR, CHEST_IMAGENOME_GOLD_ATTRIBUTE_RELATIONS_TXT_PATH
 
 if __name__ == '__main__':

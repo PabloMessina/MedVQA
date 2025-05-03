@@ -3,8 +3,8 @@ import random
 import numpy as np
 import os
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
-from medvqa.utils.logging import print_orange
+from medvqa.utils.files_utils import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.logging_utils import print_orange
 
 if __name__ == '__main__':
 

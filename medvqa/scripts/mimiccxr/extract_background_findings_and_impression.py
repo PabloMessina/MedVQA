@@ -1,4 +1,4 @@
-from medvqa.utils.files import save_json
+from medvqa.utils.files_utils import save_json
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, get_reports_txt_paths
 from medvqa.datasets.mimiccxr.preprocessing import extract_background_findings_and_impression
 from medvqa.utils.common import get_timestamp

@@ -8,8 +8,8 @@ from f1chexbert.f1chexbert import tokenize, generate_attention_masks
 from nltk.tokenize import sent_tokenize
 from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.constants import CHEXBERT_LABELS
-from medvqa.utils.files import get_cached_pickle_file, save_pickle
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.files_utils import get_cached_pickle_file, save_pickle
+from medvqa.utils.hashing_utils import hash_string
 
 def merge_labels(labels_list):        
     merged = np.zeros((len(CHEXBERT_LABELS),), np.int8)

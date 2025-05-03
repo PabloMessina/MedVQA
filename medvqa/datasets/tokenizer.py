@@ -2,7 +2,7 @@ from nltk.tokenize import wordpunct_tokenize
 from tqdm import tqdm
 from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor
 from medvqa.datasets.text_data_utils import wordpunct_tokenize_texts_in_parallel
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     load_pickle,
     save_pickle,
@@ -12,7 +12,7 @@ from medvqa.utils.files import (
 from medvqa.datasets.preprocessing import get_sentences
 from medvqa.utils.common import CACHE_DIR, REGULAR_EXPRESSIONS_FOLDER
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
-from medvqa.utils.hashing import hash_string, hash_string_list
+from medvqa.utils.hashing_utils import hash_string, hash_string_list
 import os
 import re
 

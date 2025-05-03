@@ -3,10 +3,10 @@
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from sklearn.metrics import f1_score
-from medvqa.utils.files import get_cached_pickle_file, save_pickle
+from medvqa.utils.files_utils import get_cached_pickle_file, save_pickle
 from medvqa.utils.common import CACHE_DIR, TMP_DIR
 from medvqa.utils.constants import CHEXPERT_LABELS
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing_utils import hash_string
 import os
 import subprocess
 import pandas as pd

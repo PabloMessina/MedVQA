@@ -2,12 +2,12 @@ import argparse
 import os
 import numpy as np
 from tqdm import tqdm
-from medvqa.utils.files import save_pickle
+from medvqa.utils.files_utils import save_pickle
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_CACHE_DIR
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_scene_graphs_in_parallel,
 )
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 def _compute_phrases_to_labels(scene_graph, categories_to_skip):
     phrases2observations = {}

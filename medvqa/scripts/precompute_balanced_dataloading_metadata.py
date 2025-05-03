@@ -1,8 +1,8 @@
-from medvqa.utils.files import load_pickle, load_json_file, save_to_pickle
+from medvqa.utils.files_utils import load_pickle, load_json_file, save_to_pickle
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import CACHE_DIR, get_timestamp
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing_utils import hash_string
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.metrics.medical.chexpert import merge_raw_labels
 from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor

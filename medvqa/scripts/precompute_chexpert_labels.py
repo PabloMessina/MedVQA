@@ -1,14 +1,14 @@
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.common import CACHE_DIR
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     load_json_file,
     load_pickle,
     save_to_pickle,
 )
 from medvqa.datasets.preprocessing import get_sentences
 from medvqa.utils.common import get_timestamp
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing_utils import hash_string
 from medvqa.metrics.medical.chexpert import invoke_chexpert_labeler_process
 from medvqa.datasets.tokenizer import Tokenizer
 

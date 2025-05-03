@@ -5,15 +5,15 @@ from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     load_pickle,
     save_pickle,
 )
 from medvqa.datasets.vinbig import VINBIG_LABELS__MODIFIED, VINBIG_LARGE_FAST_CACHE_DIR
 from medvqa.utils.constants import VINBIG_LABELS, VINBIG_LABEL2PHRASE
-from medvqa.utils.logging import print_blue, print_bold
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.logging_utils import print_blue, print_bold
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 
 def main():
     parser = argparse.ArgumentParser()

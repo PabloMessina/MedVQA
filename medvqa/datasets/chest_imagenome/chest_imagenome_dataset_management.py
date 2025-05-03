@@ -37,9 +37,9 @@ from medvqa.datasets.mimiccxr import (
     load_mimiccxr_reports_detailed_metadata,
 )
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2partId
-from medvqa.utils.files import get_cached_pickle_file, load_json, load_pickle, save_pickle
+from medvqa.utils.files_utils import get_cached_pickle_file, load_json, load_pickle, save_pickle
 from medvqa.metrics.bbox.utils import compute_iou
-from medvqa.utils.logging import print_blue, print_red
+from medvqa.utils.logging_utils import print_blue, print_red
 
 def _load_scene_graph(scene_graph_path):
     return load_json(scene_graph_path)

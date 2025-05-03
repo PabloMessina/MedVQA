@@ -1,6 +1,5 @@
 import os
 import argparse
-import pandas as pd
 import numpy as np
 from nltk import sent_tokenize
 from tqdm import tqdm
@@ -14,14 +13,14 @@ from medvqa.eval_report_gen_metrics import (
     compute_mean_contradictions_at_k,
 )
 from medvqa.evaluation.ranking_evaluation_utils import load_mimiccxr_custom_radiologist_annotations
-from medvqa.utils.logging import print_magenta, print_orange
+from medvqa.utils.logging_utils import print_magenta, print_orange
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.common import CACHE_DIR, parsed_args_to_dict
-from medvqa.utils.files import load_json, load_pickle, save_pickle
-from medvqa.utils.math import (
+from medvqa.utils.files_utils import load_json, load_pickle, save_pickle
+from medvqa.utils.math_utils import (
     rank_vectors_by_dot_product,
 )
-from medvqa.utils.metrics import jaccard_between_dicts
+from medvqa.utils.metrics_utils import jaccard_between_dicts
 
 class _EvaluationModes:
     MIMICCXR_RADIOLOGIST_ANNOTATIONS = 'mimiccxr_radiologist_annotations'

@@ -47,13 +47,13 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     METRIC2SHORT,
 )
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, save_pickle
-from medvqa.utils.handlers import (
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle, save_pickle
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_iteration_handler,
     get_log_metrics_handler,
 )
-from medvqa.utils.logging import print_blue, print_bold, print_normal_and_bold, print_red
+from medvqa.utils.logging_utils import print_blue, print_bold, print_normal_and_bold, print_red
 
 _VISUAL_MODULE_METRIC_NAMES = [
     MetricNames.ORIENACC,

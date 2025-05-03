@@ -11,8 +11,8 @@ from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.constants import CXRLT2024_CLASS_2_SENTENCE, CXRLT2024_CLASSES, CXRLT2024_SENTENCE_2_CLASS, CXRLT2024_TASK1_CLASSES
-from medvqa.utils.hashing import compute_hashes_in_parallel, hash_string
-from medvqa.utils.logging import get_console_logger, print_orange
+from medvqa.utils.hashing_utils import compute_hashes_in_parallel, hash_string
+from medvqa.utils.logging_utils import get_console_logger, print_orange
 from medvqa.datasets.mimiccxr import (
     MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH,
     MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH,
@@ -22,8 +22,8 @@ from medvqa.datasets.mimiccxr import (
     get_imageId2reportId,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl, load_pickle, read_txt, save_pickle
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl, load_pickle, read_txt, save_pickle
 
 INSTRUCTIONS = """Given a report (#R) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} is one or two short explanation sentences and {label} is one of {definitely true, likely true, unknown, likely false, definitely false}. Be careful with tricky sentences that mention multiple findings. Remember that unknown applies when both #R and #H might be true but there is no conclusive way to know with the information provided."""
 

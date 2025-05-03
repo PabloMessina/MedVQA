@@ -6,11 +6,11 @@ from medvqa.datasets.text_data_utils import (
     is_s1_subsequence_of_s2,
     remove_consecutive_repeated_words_from_text,
 )
-from medvqa.utils.files import load_json, load_jsonl
+from medvqa.utils.files_utils import load_json, load_jsonl
 from nltk.tokenize import sent_tokenize
 from tqdm import tqdm
 
-from medvqa.utils.logging import print_orange, print_red
+from medvqa.utils.logging_utils import print_orange, print_red
 
 _FACT_METADATA_FIELDS = ('anatomical location', 'detailed observation', 'short observation', 'category', 'health status', 'prev_study_comparison?', 'comparison status')
 

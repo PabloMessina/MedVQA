@@ -6,7 +6,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
 )
 
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 class Seq2SeqModels:
     T5 = 't5'

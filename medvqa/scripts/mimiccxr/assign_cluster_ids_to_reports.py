@@ -6,8 +6,8 @@ import numpy as np
 
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.models.huggingface_utils import compute_text_embeddings_with_BiomedVLP_CXR_BERT_specialized
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.files import load_json, load_pickle, read_lines_from_txt, save_pickle
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.files_utils import load_json, load_pickle, read_lines_from_txt, save_pickle
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 
 import multiprocessing as mp

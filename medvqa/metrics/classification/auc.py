@@ -1,7 +1,7 @@
 import numpy as np
 import multiprocessing as mp
 
-from medvqa.utils.metrics import auc
+from medvqa.utils.metrics_utils import auc
 # import time
 
 _shared_probs = None

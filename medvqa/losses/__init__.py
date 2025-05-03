@@ -1,7 +1,10 @@
 import torch.nn as nn
-from .wbce import NegativePositiveBalancedBCELoss, WeigthedByClassBCELoss, WeigthedBCELoss
+from .wbce import NegativePositiveBalancedBCELoss, WeightedByClassBCELoss, WeightedBCELoss
 from .focal_loss import FocalLoss
 from .dataset_aware_loss import DatasetAwareLoss, ConditionAwareLoss
+
+import logging
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'get_binary_multilabel_loss',
@@ -14,14 +17,13 @@ class Focal_BCE_WBCBCE_Loss(nn.Module):
         super().__init__()        
         self.focal_loss = FocalLoss(alpha=alpha, gamma=gamma)
         self.bce_loss = nn.BCEWithLogitsLoss()
-        self.wbcbce_loss = WeigthedByClassBCELoss()
+        self.wbcbce_loss = WeightedByClassBCELoss()
         tot = focal_weight + bce_weight + wbcbce_weight
         self.focal_weight = focal_weight / tot
         self.bce_weight = bce_weight / tot
         self.wbcbce_weight = wbcbce_weight / tot
         self.adaptively_rescale_losses = adaptively_rescale_losses
-        print('Focal_BCE_WBCBCE_Loss(): focal_weight =',
-               self.focal_weight, 'bce_weight =', self.bce_weight, 'wbcbce_weight =', self.wbcbce_weight)
+        logger.info(f'Focal_BCE_WBCBCE_Loss(): focal_weight = {self.focal_weight}, bce_weight = {self.bce_weight}, wbcbce_weight = {self.wbcbce_weight}')
 
     def forward(self, output, target):
         loss1 = self.focal_loss(output, target)
@@ -46,14 +48,13 @@ class Focal_BCE_WBCE_Loss(nn.Module):
         super().__init__()        
         self.focal_loss = FocalLoss(alpha=alpha, gamma=gamma)
         self.bce_loss = nn.BCEWithLogitsLoss()
-        self.wbce_loss = WeigthedBCELoss()
+        self.wbce_loss = WeightedBCELoss()
         tot = focal_weight + bce_weight + wbce_weight
         self.focal_weight = focal_weight / tot
         self.bce_weight = bce_weight / tot
         self.wbce_weight = wbce_weight / tot
         self.adaptively_rescale_losses = adaptively_rescale_losses
-        print('Focal_BCE_WBCE_Loss(): focal_weight =',
-               self.focal_weight, 'bce_weight =', self.bce_weight, 'wbce_weight =', self.wbce_weight)
+        logger.info(f'Focal_BCE_WBCE_Loss(): focal_weight = {self.focal_weight}, bce_weight = {self.bce_weight}, wbce_weight = {self.wbce_weight}')
 
     def forward(self, output, target, weights):
         loss1 = self.focal_loss(output, target)
@@ -84,8 +85,7 @@ class Focal_BCE_NPBBCE_Loss(nn.Module):
         self.bce_weight = bce_weight / tot
         self.npbbce_weight = npbbce_weight / tot
         self.adaptively_rescale_losses = adaptively_rescale_losses
-        print('Focal_BCE_NPBBCE_Loss(): focal_weight =',
-                self.focal_weight, 'bce_weight =', self.bce_weight, 'npbbce_weight =', self.npbbce_weight)
+        logger.info(f'Focal_BCE_NPBBCE_Loss(): focal_weight = {self.focal_weight}, bce_weight = {self.bce_weight}, npbbce_weight = {self.npbbce_weight}')
 
     def forward(self, output, target):
         loss1 = self.focal_loss(output, target)
@@ -114,7 +114,7 @@ class Focal_BCE_Loss(nn.Module):
         self.focal_weight = focal_weight / tot
         self.bce_weight = bce_weight / tot
         self.adaptively_rescale_losses = adaptively_rescale_losses
-        print('Focal_BCE_Loss(): focal_weight =', self.focal_weight, 'bce_weight =', self.bce_weight)
+        logger.info(f'Focal_BCE_Loss(): focal_weight = {self.focal_weight}, bce_weight = {self.bce_weight}')
 
     def forward(self, output, target):
         loss1 = self.focal_loss(output, target)
@@ -132,7 +132,7 @@ class Focal_BCE_Loss(nn.Module):
 
 _BINARY_MULTILABEL_LOSSES = {
     'bce': nn.BCEWithLogitsLoss,
-    'wbcbce': WeigthedByClassBCELoss,
+    'wbcbce': WeightedByClassBCELoss,
     'focal': FocalLoss,
     'focal+bce': Focal_BCE_Loss,
     'focal+bce+npbbce': Focal_BCE_NPBBCE_Loss,

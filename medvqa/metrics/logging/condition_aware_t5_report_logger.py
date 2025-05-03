@@ -1,6 +1,6 @@
 import random
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.logging_utils import print_bold, print_magenta
 
 class ConditionAwareSeq2SeqOutputLogger(ConditionAwareMetric):
 

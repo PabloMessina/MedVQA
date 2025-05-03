@@ -1,4 +1,3 @@
-import numpy as np
 import math
 import copy
 import torch
@@ -46,8 +45,9 @@ from medvqa.utils.constants import (
 from ultralytics.utils.ops import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
 import re
+import logging
 
-from medvqa.utils.logging import print_bold, print_red
+logger = logging.getLogger(__name__)
 
 class RawImageEncoding:
     DENSENET_121 = 'densenet-121'
@@ -99,8 +99,8 @@ def comes_with_positional_encoding(raw_image_encoding):
     ]
 
 def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
-    assert 'mean' not in kwargs
-    assert 'std' not in kwargs
+    assert 'image_mean' not in kwargs
+    assert 'image_std' not in kwargs
     if raw_image_encoding in [
         RawImageEncoding.DENSENET_121,
         RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
@@ -108,19 +108,19 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
         RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
         RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE,
     ]:
-        kwargs['mean'] = [0.485, 0.456, 0.406]
-        kwargs['std'] = [0.229, 0.224, 0.225]
+        kwargs['image_mean'] = [0.485, 0.456, 0.406]
+        kwargs['image_std'] = [0.229, 0.224, 0.225]
     elif raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
-        kwargs['mean'] = [0.5307, 0.5307, 0.5307]
-        kwargs['std'] = [0.2583, 0.2583, 0.2583]
+        kwargs['image_mean'] = [0.5307, 0.5307, 0.5307]
+        kwargs['image_std'] = [0.2583, 0.2583, 0.2583]
     elif raw_image_encoding in [
         RawImageEncoding.YOLOV8,
         RawImageEncoding.YOLOV11_FOR_DET_MLC,
         RawImageEncoding.YOLOV11_FACT_CONDITIONED,
         RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR,
     ]:
-        kwargs['mean'] = [0.0, 0.0, 0.0]
-        kwargs['std'] = [1.0, 1.0, 1.0]
+        kwargs['image_mean'] = [0.0, 0.0, 0.0]
+        kwargs['image_std'] = [1.0, 1.0, 1.0]
     else:
         raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
 
@@ -199,7 +199,7 @@ class MultiPurposeVisualModule(nn.Module):
                 ): 
         super().__init__()
 
-        print(f'MultiPurposeVisualModule()')
+        logger.info('MultiPurposeVisualModule()')
         
         self.visual_input_mode = visual_input_mode
         self.raw_image_encoding = raw_image_encoding
@@ -354,8 +354,8 @@ class MultiPurposeVisualModule(nn.Module):
             assert global_feat_size > 0
             self.local_feat_size = self.image_local_feat_size
             self.global_feat_size = global_feat_size
-            print('  self.global_feat_size =', self.global_feat_size)
-            print('  self.local_feat_size =', self.local_feat_size)
+            logger.info(f'  self.global_feat_size = {self.global_feat_size}')
+            logger.info(f'  self.local_feat_size = {self.local_feat_size}')
 
     def _get_raw_image_encoder_global_feat_size(self, image_local_feat_size):
         if self.raw_image_encoding in [
@@ -394,45 +394,45 @@ class MultiPurposeVisualModule(nn.Module):
     
     def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder,
                                 dropout_p=0):
-        print(f'  Initializing raw_image_encoder: {self.raw_image_encoding}')
+        logger.info(f'  Initializing raw_image_encoder: {self.raw_image_encoding}')
         ignore_name_regex = None
         if self.raw_image_encoding == RawImageEncoding.DENSENET_121:
             self.raw_image_encoder = create_densenet121_feature_extractor(
                 pretrained_weights_path, imagenet_pretrained, drop_rate=dropout_p)
         elif self.raw_image_encoding == RawImageEncoding.DENSENET_121__TORCHXRAYVISION:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_torchxrayvision_densenet121_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.RESNET__TORCHXRAYVISION:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_torchxrayvision_resnet_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.RESNET_AUTOENCODER__TORCHXRAYVISION:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_torchxrayvision_resnet_autoencoder_feature_extractor(model_name)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_RESNET:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_clip_resnet_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_clip_vit_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.CLIP_VIT__HUGGINGFACE or \
                 self.raw_image_encoding == RawImageEncoding.CLIP_VIT_LARGE__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_clip_vit_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.VITMODEL__HUGGINGFACE or \
                 self.raw_image_encoding == RawImageEncoding.VITMODEL_LARGE__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
             ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
         elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             if self.predict_bboxes_chest_imagenome:
                 if self.use_anaxnet_bbox_subset:
                     num_classes = CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES
@@ -446,7 +446,7 @@ class MultiPurposeVisualModule(nn.Module):
                                                              rpn_batch_size_per_image=self.rpn_batch_size_per_image)
         elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model', bold=True)
             assert self.predict_bboxes_chest_imagenome or self.predict_bboxes_vinbig
             if self.yolov8_use_one_detector_per_dataset:
                 assert self.predict_bboxes_chest_imagenome and self.predict_bboxes_vinbig # at least two datasets
@@ -471,7 +471,7 @@ class MultiPurposeVisualModule(nn.Module):
                     class_names_list.append(class_names)
                     nc_list.append(len(class_names))
                     self.num_bbox_classes.append(len(class_names))
-                print(f'  nc_list: {nc_list}')
+                logger.info(f'  nc_list: {nc_list}')
                 self.raw_image_encoder = create_yolov8_model_for_multiple_datasets(
                     model_name_or_path=model_name, nc_list=nc_list, class_names_list=class_names_list
                 )
@@ -491,12 +491,12 @@ class MultiPurposeVisualModule(nn.Module):
                     for i, name in enumerate(VINBIG_BBOX_NAMES):
                         class_names[i+offset] = name
                     offset += len(VINBIG_BBOX_NAMES)
-                print(f'  num_bbox_classes: {offset}')
+                logger.info(f'  num_bbox_classes: {offset}')
                 self.num_bbox_classes = offset
                 self.raw_image_encoder = create_yolov8_model(model_name_or_path=model_name, nc=offset, class_names=class_names)
         elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FOR_DET_MLC:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             assert self.predict_bboxes_chest_imagenome or self.predict_bboxes_vinbig
             self.raw_image_encoder = create_yolov11_model_for_det_mlc(
                 predict_bboxes_chest_imagenome=self.predict_bboxes_chest_imagenome,
@@ -513,7 +513,7 @@ class MultiPurposeVisualModule(nn.Module):
             )
         elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_yolov11_fact_conditioned(
                 fact_embed_size=self.query_embed_size,
                 mlp_hidden_dims=self.classification_mlp_hidden_dims,
@@ -526,7 +526,7 @@ class MultiPurposeVisualModule(nn.Module):
             )
         elif self.raw_image_encoding == RawImageEncoding.YOLOV11_FEATURE_EXTRACTOR:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_yolov11_feature_extractor(
                 model_name_or_path=self.yolov11_model_name_or_path,
                 yolo_alias=self.yolov11_model_alias,
@@ -534,57 +534,57 @@ class MultiPurposeVisualModule(nn.Module):
             )
         elif self.raw_image_encoding == RawImageEncoding.CONVNEXTMODEL__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_convnextmodel_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.RAD_DINO__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_rad_dino_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_uniformer_base_tl_384_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_siglip_feature_extractor(model_name, pretrained_weights_path)
         elif self.raw_image_encoding == RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE:
             if dropout_p:
-                print_red('Warning: dropout_p is not implemented yet for this model', bold=True)
+                logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_medsam_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
         if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
     def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
-        print(f'  Initializing mlp_visual_feat_encoder: {mlp_in_dim} -> {mlp_out_dim}, hidden_dims={mlp_hidden_dims}')
+        logger.info(f'  Initializing mlp_visual_feat_encoder: {mlp_in_dim} -> {mlp_out_dim}, hidden_dims={mlp_hidden_dims}')
         self.mlp_vf_encoder = MLP(in_dim=mlp_in_dim, out_dim=mlp_out_dim, hidden_dims=mlp_hidden_dims)
         if freeze_image_encoder: freeze_parameters(self.mlp_vf_encoder)
 
     def _init_auxiliary_tasks(self):
         
-        print('  Initializing auxiliary tasks')
+        logger.info('  Initializing auxiliary tasks')
         # Optional auxiliary tasks
 
         if self.raw_image_encoding in [
             RawImageEncoding.YOLOV11_FOR_DET_MLC,
             RawImageEncoding.YOLOV11_FACT_CONDITIONED,
         ]:
-            print('    Skipping auxiliary tasks initialization for YOLOv11 models')
+            logger.info('    Skipping auxiliary tasks initialization for YOLOv11 models')
             return
         
         # 1) medical tags classification
         if self.classify_tags:
-            print(f'    Initializing medical tags classification task (n_medical_tags={self.n_medical_tags})')
+            logger.info(f'    Initializing medical tags classification task (n_medical_tags={self.n_medical_tags})')
             assert self.n_medical_tags is not None
             self.W_tags = nn.Linear(self.global_feat_size, self.n_medical_tags)
         
         # 2) orientation classifiction
         if self.classify_orientation:
-            print(f'    Initializing orientation classification task')
+            logger.info(f'    Initializing orientation classification task')
             if self.use_mimiccxr:
                 self.W_ori_mimiccxr = nn.Linear(self.global_feat_size, len(MIMICCXR_IMAGE_ORIENTATIONS))
             if self.use_iuxray:
@@ -594,24 +594,24 @@ class MultiPurposeVisualModule(nn.Module):
 
         # 3) questions classification
         if self.classify_questions:
-            print(f'    Initializing questions classification task (n_questions_aux_task={self.n_questions_aux_task})')
+            logger.info(f'    Initializing questions classification task (n_questions_aux_task={self.n_questions_aux_task})')
             self.W_q = nn.Linear(self.global_feat_size, self.n_questions_aux_task)
 
         # 4) gender classification
         if self.classify_gender:
-            print(f'    Initializing gender classification task')   
+            logger.info(f'    Initializing gender classification task')   
             self.W_gender_chexpert = nn.Linear(self.global_feat_size, len(CHEXPERT_GENDERS))
             self.W_gender_chstimgn = nn.Linear(self.global_feat_size, len(CHEST_IMAGENOME_GENDERS))
 
         if self.merge_findings:
-            print(f'    Initializing merged findings classification task (n_findings={self.n_findings})')
+            logger.info(f'    Initializing merged findings classification task (n_findings={self.n_findings})')
             assert self.n_findings is not None
             self.W_findings = nn.Linear(self.global_feat_size, self.n_findings)
         else:        
             # 6) chexpert classifiction
             if self.classify_chexpert:
-                print(f'    Initializing chexpert classification task')
-                print(f'    chexpert_mlc_version: {self.chexpert_mlc_version}')
+                logger.info(f'    Initializing chexpert classification task')
+                logger.info(f'    chexpert_mlc_version: {self.chexpert_mlc_version}')
                 if self.chexpert_mlc_version == MLCVersion.DEFAULT:
                     self.W_chx = nn.Linear(self.global_feat_size, len(CHEXPERT_LABELS))
                 elif self.chexpert_mlc_version == MLCVersion.V3:
@@ -626,13 +626,13 @@ class MultiPurposeVisualModule(nn.Module):
 
             # 7) CXR14 specific labels
             if self.use_cxr14:
-                print(f'    Initializing CXR14 classification task')
+                logger.info(f'    Initializing CXR14 classification task')
                 self.W_cxr14 = nn.Linear(self.global_feat_size, len(CXR14_LABELS))
 
             # 8) VinBig specific labels
             if self.use_vinbig:
                 if self.classify_labels_vinbig:
-                    print(f'    Initializing VinBig classification task')
+                    logger.info(f'    Initializing VinBig classification task')
                     if self.use_linear_head_for_classification:
                         self.W_vinbig = nn.Linear(self.global_feat_size, len(VINBIG_LABELS))
                     else:
@@ -646,7 +646,7 @@ class MultiPurposeVisualModule(nn.Module):
 
         # 9) PadChest specific tasks
         if self.use_padchest:
-            print(f'    Initializing PadChest classification tasks')
+            logger.info(f'    Initializing PadChest classification tasks')
             self.W_padchest_labels = nn.Linear(self.global_feat_size, PADCHEST_NUM_LABELS)
             self.W_padchest_loc = nn.Linear(self.global_feat_size, PADCHEST_NUM_LOCALIZATIONS)
             self.W_padchest_ori = nn.Linear(self.global_feat_size, len(PADCHEST_PROJECTIONS))
@@ -663,7 +663,7 @@ class MultiPurposeVisualModule(nn.Module):
                 f'len(self.chest_imagenome_anatomy_to_labels)={len(self.chest_imagenome_anatomy_to_labels)}' \
                 f' != CHEST_IMAGENOME_NUM_BBOX_CLASSES={CHEST_IMAGENOME_NUM_BBOX_CLASSES}'
             assert self.n_chest_imagenome_bboxes is not None
-            print(f'    Initializing Chest ImaGenome classification and bounding box regression'
+            logger.info(f'    Initializing Chest ImaGenome classification and bounding box regression'
                   f' tasks (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
             if self.chest_imagenome_bbox_regressor_version == BBoxRegressorVersion.V4:
                 assert self.chest_imagenome_train_average_bbox_coords is not None
@@ -719,7 +719,7 @@ class MultiPurposeVisualModule(nn.Module):
                 raise NotImplementedError(f'Unsupported Chest ImaGenome bbox regressor version: {self.chest_imagenome_bbox_regressor_version}')
         else:
             if self.classify_chest_imagenome:
-                print(f'    Initializing Chest ImaGenome classification task (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
+                logger.info(f'    Initializing Chest ImaGenome classification task (n_chest_imagenome_labels={self.n_chest_imagenome_labels})')
                 if self.chest_imagenome_mlc_version == MLCVersion.DEFAULT:
                     assert self.n_chest_imagenome_labels is not None
                     self.W_chst_imgn = nn.Linear(self.global_feat_size, self.n_chest_imagenome_labels)
@@ -754,7 +754,7 @@ class MultiPurposeVisualModule(nn.Module):
                     raise NotImplementedError(f'Unsupported Chest ImaGenome MLC version: {self.chest_imagenome_mlc_version}')
             if self.predict_bboxes_chest_imagenome and not self.raw_image_encoding in [
                     RawImageEncoding.DETECTRON2, RawImageEncoding.YOLOV8]:
-                print(f'    Initializing Chest ImaGenome bounding box regression task')
+                logger.info(f'    Initializing Chest ImaGenome bounding box regression task')
                 # Don't need to initialize these custom bbox regressors if using Detectron2
                 assert self.chest_imagenome_bbox_hidden_size is not None
                 assert self.chest_imagenome_bbox_regressor_version is not None
@@ -1051,10 +1051,10 @@ class MultiPurposeVisualModule(nn.Module):
                     assert type(detection_output) == list or type(detection_output) == tuple
                     assert len(detection_output) == 3 or len(detection_output) == 2
                     if len(detection_output) == 2: # this is the case when the model is in evaluation mode
-                        # print('YOLOv8 output in evaluation mode')
+                        # logger.info('YOLOv8 output in evaluation mode')
                         yolov8_features = detection_output[1]
                         yolov8_predictions = detection_output[0]
-                        # print(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
+                        # logger.info(f'yolov8_predictions.shape = {yolov8_predictions.shape}')
                         if yolov8_detection_layer_index is None:
                             num_bbox_classes = self.num_bbox_classes
                         else:
@@ -1062,9 +1062,9 @@ class MultiPurposeVisualModule(nn.Module):
                         yolov8_predictions = non_max_suppression(yolov8_predictions.detach(),
                                                                 conf_thres=0.1, iou_thres=0.1,
                                                                 max_det=num_bbox_classes)
-                        # print(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
+                        # logger.info(f'len(yolov8_predictions) (after NMS) = {len(yolov8_predictions)}')
                     else: # this is the case when the model is in training mode
-                        # print('YOLOv8 output in training mode')
+                        # logger.info('YOLOv8 output in training mode')
                         yolov8_predictions = None
                         yolov8_features = detection_output
                 if permute_and_flatten_local_feat:
@@ -1393,35 +1393,35 @@ def create_densenet121_feature_extractor(
     imagenet_pretrained=False,
     drop_rate=0.0,
 ):
-    print('create_densenet121_feature_extractor()')
-    print(f'   drop_rate: {drop_rate}')
+    logger.info('create_densenet121_feature_extractor()')
+    logger.info(f'   drop_rate: {drop_rate}')
     # Load pre-trained CNN weights
     if pretrained_weights_path:
         densenet = models.densenet121(drop_rate=drop_rate)
         pretrained_weights = torch.load(pretrained_weights_path, map_location='cuda')
         densenet.load_state_dict(pretrained_weights, strict=False)
-        print("DenseNet121's pretrained weights loaded from", pretrained_weights_path)
+        logger.info("DenseNet121's pretrained weights loaded from", pretrained_weights_path)
     elif imagenet_pretrained:
         densenet = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1, drop_rate=drop_rate)
-        print("DenseNet121's pretrained weights loaded from ImageNet")
+        logger.info("DenseNet121's pretrained weights loaded from ImageNet")
     else:
         densenet = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT, drop_rate=drop_rate)
-        print("DenseNet121's default weights loaded")
+        logger.info("DenseNet121's default weights loaded")
     return densenet.features
 
 def create_torchxrayvision_densenet121_feature_extractor(weights_name):
-    print('create_torchxrayvision_densenet121_feature_extractor()')
+    logger.info('create_torchxrayvision_densenet121_feature_extractor()')
     model = xrv.models.DenseNet(weights=weights_name)
     return model
 
 def create_torchxrayvision_resnet_feature_extractor(weights_name):
-    print('create_torchxrayvision_resnet_feature_extractor()')
+    logger.info('create_torchxrayvision_resnet_feature_extractor()')
     model = xrv.models.ResNet(weights=weights_name)
     model.forward = _torchxrayvision_resnet_modified_forward.__get__(model) # HACK: monkey patching
     return model
 
 def create_torchxrayvision_resnet_autoencoder_feature_extractor(weights_name):
-    print('create_torchxrayvision_resnet_autoencoder_feature_extractor()')
+    logger.info('create_torchxrayvision_resnet_autoencoder_feature_extractor()')
     model = xrv.autoencoders.ResNetAE(weights=weights_name)
     return model
 
@@ -1610,7 +1610,7 @@ def _load_pretrained_model_state_dict(model, pretrained_weights_path, key_adapta
     if key_adaptation_fn:
         data = {key_adaptation_fn(k): v for k, v in data.items()}
     load_model_state_dict(model, data)
-    print(f'Pre-trained weights successfully loaded from {pretrained_weights_path}')
+    logger.info(f'Pre-trained weights successfully loaded from {pretrained_weights_path}')
 
 def create_clip_vit_feature_extractor(clip_vit_version, pretrained_weights_path):
     import clip
@@ -1705,29 +1705,29 @@ def create_detectron2_model(
     cfg.merge_from_file(detectron2_model_zoo.get_config_file(model_yaml))
     # Relevant reading on how to update the config:
     # https://detectron2.readthedocs.io/en/latest/tutorials/datasets.html#update-the-config-for-new-datasets
-    print('Building Detectron2 model')
+    logger.info('Building Detectron2 model')
     if num_classes is not None:
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
         cfg.MODEL.RETINANET.NUM_CLASSES = num_classes
-        print(f'cfg.MODEL.ROI_HEADS.NUM_CLASSES overriden to {num_classes}')
-        print(f'cfg.MODEL.RETINANET.NUM_CLASSES overriden to {num_classes}')
+        logger.info(f'cfg.MODEL.ROI_HEADS.NUM_CLASSES overriden to {num_classes}')
+        logger.info(f'cfg.MODEL.RETINANET.NUM_CLASSES overriden to {num_classes}')
     if roi_heads_batch_size_per_image is not None:
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = roi_heads_batch_size_per_image
-        print(f'cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE overriden to {roi_heads_batch_size_per_image}')
+        logger.info(f'cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE overriden to {roi_heads_batch_size_per_image}')
     if rpn_batch_size_per_image is not None:
         cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE = rpn_batch_size_per_image
-        print(f'cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE overriden to {rpn_batch_size_per_image}')
+        logger.info(f'cfg.MODEL.RPN.BATCH_SIZE_PER_IMAGE overriden to {rpn_batch_size_per_image}')
     if verbose:
-        print(cfg)
+        logger.info(cfg)
         
     model = build_detectron2_model(cfg)
-    print('Detectron2 model successfully built')
+    logger.info('Detectron2 model successfully built')
     # Load weights from the official Detectron2 model zoo
     if load_model_zoo_weights:
         checkpoint_url = detectron2_model_zoo.get_checkpoint_url(model_yaml)
-        print(f'Loading weights from {checkpoint_url}')
+        logger.info(f'Loading weights from {checkpoint_url}')
         DetectionCheckpointer(model).load(checkpoint_url)
-        print('Weights successfully loaded')
+        logger.info('Weights successfully loaded')
     return model
 
 class YOLOv8DetectionAndFeatureExtractorModel(DetectionModel):
@@ -1883,7 +1883,7 @@ def create_yolov8_model_for_multiple_datasets(model_name_or_path, nc_list, class
     assert type(class_names_list) == list
     assert len(nc_list) == len(class_names_list)
 
-    print_bold('Creating YOLOv8 model for multiple datasets')
+    logger.info('Creating YOLOv8 model for multiple datasets')
     
     # Load weights and config
     ckpt = None
@@ -1898,7 +1898,7 @@ def create_yolov8_model_for_multiple_datasets(model_name_or_path, nc_list, class
     for i, nc in enumerate(nc_list):
         # (cfg, ch, nc, verbose)
         if verbose:
-            print_bold(f'   {i+1}. Creating DetectionModel for {nc} classes')
+            logger.info(f'   {i+1}. Creating DetectionModel for {nc} classes')
             time.sleep(0.2) # to avoid colliding prints
         # clone cfg
         cfg_ = copy.deepcopy(cfg)
@@ -1909,7 +1909,7 @@ def create_yolov8_model_for_multiple_datasets(model_name_or_path, nc_list, class
 
     # Create a new model with the detection layers from the previous models
     if verbose:
-        print_bold(f'   Creating final YOLOv8 model with {len(detection_layers)} detection layers')
+        logger.info(f'   Creating final YOLOv8 model with {len(detection_layers)} detection layers')
         time.sleep(0.2) # to avoid colliding prints
     model = YOLOv8DetectionAndFeatureExtractorModel(cfg, nc=nc_list[0], verbose=verbose, detection_layers=detection_layers)
     if weights:

@@ -6,7 +6,7 @@ from nltk import wordpunct_tokenize
 
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
-from medvqa.utils.files import read_lines_from_txt
+from medvqa.utils.files_utils import read_lines_from_txt
 
 _re_header = re.compile(r'(^|\n)\s*([A-Z][a-zA-Z]*(( |-|&)+[a-zA-Z]+)*?:)')
 _re_paragraph_breaks = re.compile(r'(\s*\n(\s*\n\s*)+)|(\n\s*_+\s*\n)')

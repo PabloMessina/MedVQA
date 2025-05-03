@@ -14,8 +14,8 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 )
 from medvqa.eval_yolov5 import _compute_bbox_metrics, _load_ground_truth, prepare_eval_data__chest_imagenome
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_pickle
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.files_utils import get_checkpoint_folder_path, get_results_folder_path, read_lines_from_txt, save_pickle
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'chest_imagenome__mimiccxr_test_set'

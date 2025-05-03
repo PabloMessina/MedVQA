@@ -19,9 +19,11 @@ class ImageAugmentedTransforms:
                 p_coarse_dropout=0.5,
                 gaussian_noise_limit=(10, 50), p_gaussian_noise=0.2,
                 gaussian_blur_limit=(3, 5), p_gaussian_blur=0.2,
-                custom_normalization_transform=None):
+                custom_normalization_transform=None,
+                bbox_format='albumentations'):
         
         self._transform_fns = dict()
+        self.bbox_format = bbox_format
 
         # Transformations:
 
@@ -194,7 +196,7 @@ class ImageAugmentedTransforms:
                 self._transform_fns['gauss-noise'],
                 self._transform_fns['gaussian-blur'],
             ],
-            bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+            bbox_params=A.BboxParams(format=self.bbox_format) if bbox_aware else None)
         elif mode == 'spatial':
             tf_alb = A.Compose([
                 self._transform_fns['clahe-train'],
@@ -202,7 +204,7 @@ class ImageAugmentedTransforms:
                 self._transform_fns['resize'],
                 self._transform_fns['shift-scale-rotate'],
                 self._transform_fns['horizontal-flip'],
-            ], bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+            ], bbox_params=A.BboxParams(format=self.bbox_format) if bbox_aware else None)
         elif mode == 'both':
             tf_alb = A.Compose([
                 self._transform_fns['clahe-train'],
@@ -214,7 +216,7 @@ class ImageAugmentedTransforms:
                 self._transform_fns['color-jitter'],
                 self._transform_fns['gauss-noise'],
                 self._transform_fns['gaussian-blur'],
-            ], bbox_params=A.BboxParams(format='albumentations') if bbox_aware else None)
+            ], bbox_params=A.BboxParams(format=self.bbox_format) if bbox_aware else None)
         else:
             raise ValueError('Invalid mode: {}'.format(mode))
         
@@ -602,26 +604,32 @@ class ChestImagenomeAlbumentationAdapter:
 
 class VinBigAlbumentationAdapter:
 
-    def __init__(self):
-        pass
+    def __init__(self, bbox_format='xyxy'):
+        self.bbox_format = bbox_format
+        assert self.bbox_format in ['xyxy', 'cxcywh']
     
     def encode(self, bbox_coords, bbox_classes):
         albumentation_bbox_coords = []
-        for i in range(len(bbox_coords)):
-            x_min = bbox_coords[i][0]
-            y_min = bbox_coords[i][1]
-            x_max = bbox_coords[i][2]
-            y_max = bbox_coords[i][3]
-            assert x_min <= x_max
-            assert y_min <= y_max
-            if x_min < x_max and y_min < y_max: # ignore invalid bboxes
-                albumentation_bbox_coords.append([
-                    bbox_coords[i][0],
-                    bbox_coords[i][1],
-                    bbox_coords[i][2],
-                    bbox_coords[i][3],
-                    bbox_classes[i],
-                ])
+        if self.bbox_format == 'xyxy':
+            for i in range(len(bbox_coords)):
+                x_min = bbox_coords[i][0]
+                y_min = bbox_coords[i][1]
+                x_max = bbox_coords[i][2]
+                y_max = bbox_coords[i][3]
+                assert x_min <= x_max
+                assert y_min <= y_max
+                if x_min < x_max and y_min < y_max: # ignore invalid bboxes
+                    albumentation_bbox_coords.append([x_min, y_min, x_max, y_max, bbox_classes[i]])
+        elif self.bbox_format == 'cxcywh':
+            for i in range(len(bbox_coords)):
+                x_c = bbox_coords[i][0]
+                y_c = bbox_coords[i][1]
+                w = bbox_coords[i][2]
+                h = bbox_coords[i][3]
+                assert w > 0
+                assert h > 0
+                albumentation_bbox_coords.append([x_c, y_c, w, h, bbox_classes[i]])
+        else: assert False
         return albumentation_bbox_coords
     
     def decode(self, albumentation_bbox_coords):

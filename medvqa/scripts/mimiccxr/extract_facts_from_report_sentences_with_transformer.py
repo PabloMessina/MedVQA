@@ -8,14 +8,14 @@ import numpy as np
 from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
 
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_CACHE_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
 from medvqa.datasets.text_data_utils import parse_facts
-from medvqa.utils.files import load_json, load_jsonl
+from medvqa.utils.files_utils import load_json, load_jsonl
 
 if __name__ == '__main__':
 

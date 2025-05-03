@@ -8,8 +8,8 @@ from tqdm import tqdm
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.constants import LABEL_BASED_FACTS, CXRLT2023_CLASSES
-from medvqa.utils.hashing import hash_string
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.hashing_utils import hash_string
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (
     MIMIC_CXR_LT_2023_TRAIN_CSV_PATH,
     MIMIC_CXR_LT_2023_DEV_CSV_PATH,
@@ -19,8 +19,8 @@ from medvqa.datasets.mimiccxr import (
     get_imageId2reportId,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl, load_pickle
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl, load_pickle
 
 INSTRUCTIONS = """Given a list of radiological factual statements (#F) and a hypothesis (#H), output "Reason: {reason}. Label: {label}" where {reason} is a short explanatory sentence and {label} is one of {definitely true, likely true, unknown, likely false, definitely false}."""
 

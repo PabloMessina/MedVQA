@@ -35,14 +35,14 @@ from medvqa.utils.constants import (
     VINBIG_LABELS,
     ReportEvalMode,
 )
-from medvqa.utils.files import load_pickle, save_pickle
-from medvqa.utils.logging import (
+from medvqa.utils.files_utils import load_pickle, save_pickle
+from medvqa.utils.logging_utils import (
     chest_imagenome_label_array_to_string,
     chexpert_label_array_to_string,
     print_blue, print_bold, print_magenta,
 )
 from medvqa.utils.common import CACHE_DIR, get_timestamp
-from medvqa.utils.metrics import f1_between_dicts, jaccard_between_dicts, precision_between_dicts, recall_between_dicts
+from medvqa.utils.metrics_utils import f1_between_dicts, jaccard_between_dicts, precision_between_dicts, recall_between_dicts
 
 _REPORT_LEVEL_METRICS_CACHE_PATH = os.path.join(CACHE_DIR, 'report_level_metrics_cache.pkl')
 _REPORT_LEVEL_METRIC_NAMES = ['bleu', 'ciderD', 'rougeL', 'meteor', 'medcomp', 'wmedcomp', 'chexpert_labels',

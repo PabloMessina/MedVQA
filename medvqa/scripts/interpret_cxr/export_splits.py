@@ -8,8 +8,8 @@ from medvqa.datasets.mimiccxr import (
     get_mimiccxr_train_dicom_ids,
     get_mimiccxr_val_dicom_ids,
 )
-from medvqa.utils.files import load_json, save_pickle
-from medvqa.utils.logging import print_blue, print_bold, print_magenta
+from medvqa.utils.files_utils import load_json, save_pickle
+from medvqa.utils.logging_utils import print_blue, print_bold, print_magenta
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -8,7 +8,7 @@ from medvqa.datasets.vinbig import (
     VINBIGDATA_CHALLENGE_CLASSES,
     VINBIGDATA_CHALLENGE_IOU_THRESHOLD,
 )
-from medvqa.utils.logging import print_bold
+from medvqa.utils.logging_utils import print_bold
 
 def stratified_multilabel_bootstrap_metrics(gt_labels, pred_probs, metric_fn, num_bootstraps=500):
     """

@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.files_utils import get_cached_json_file
 load_dotenv()
 
 from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, FAST_TMP_DIR, LARGE_FAST_CACHE_DIR

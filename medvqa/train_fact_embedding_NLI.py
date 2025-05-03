@@ -17,11 +17,11 @@ from medvqa.metrics import (
 from medvqa.models.checkpoint import load_metadata
 
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import get_checkpoint_folder_path
+from medvqa.utils.files_utils import get_checkpoint_folder_path
 from medvqa.training.nli import get_embedding_based_nli_engine
 from medvqa.datasets.dataloading_utils import embedding_based_nli_collate_batch_fn
 from medvqa.metrics.utils import get_merge_metrics_fn
-from medvqa.utils.logging import CountPrinter, print_blue
+from medvqa.utils.logging_utils import CountPrinter, print_blue
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

@@ -18,11 +18,11 @@ from medvqa.models.nlp.nli import EmbeddingBasedNLI
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.scripts.mimiccxr.find_pos_and_neg_facts_per_report_with_fact_embeddings import FactEmbeddingsDataset
 from medvqa.utils.data_structures import UnionFind
-from medvqa.utils.files import get_cached_jsonl_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.files_utils import get_cached_jsonl_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
 from medvqa.utils.constants import LABEL_BASED_FACTS
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_orange, print_red
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.logging_utils import print_blue, print_orange, print_red
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 
 class _Task:
     ASSIGN_GPT4_LABEL_BASED_FACTS_TO_REPORTS = 'assign_gpt4_label_based_facts_to_reports'

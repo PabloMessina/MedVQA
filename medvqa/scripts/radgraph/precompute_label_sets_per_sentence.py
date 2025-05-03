@@ -1,7 +1,7 @@
 import os
 from tqdm import tqdm
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import load_json, save_pickle
+from medvqa.utils.files_utils import load_json, save_pickle
 
 from medvqa.datasets.radgraph import (
     RADGRAPH_TRAIN_GRAPH_JSON_PATH,

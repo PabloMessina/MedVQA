@@ -14,12 +14,12 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import (
+from medvqa.utils.openai_api_utils import (
     GPT_IS_ACTING_WEIRD_REGEX,
     run_common_boilerplate_for_api_requests,
 )
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.files import load_jsonl, load_pickle
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.files_utils import load_jsonl, load_pickle
 
 INSTRUCTIONS = """Instructions:
 

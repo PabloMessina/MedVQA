@@ -1,5 +1,5 @@
 from sklearn.metrics import roc_auc_score
-from medvqa.utils.metrics import average_ignoring_nones_and_nans
+from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
 
 def roc_auc_fn(y_pred, y_true):
     try:

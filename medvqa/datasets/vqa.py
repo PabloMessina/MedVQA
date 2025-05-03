@@ -5,7 +5,7 @@ from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.utils import adapt_label_matrix_as_merged_findings, deduplicate_indices
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_pickle_file,
     load_pickle,
     get_cached_json_file,

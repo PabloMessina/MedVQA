@@ -1,9 +1,9 @@
 import argparse
 from medvqa.scripts.mimiccxr.extract_comparisons_from_facts_with_openai import _ALLOWED_CATEGORIES
-from medvqa.utils.files import load_jsonl, save_jsonl
+from medvqa.utils.files_utils import load_jsonl, save_jsonl
 from collections import Counter
 
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 if __name__ == '__main__':
 

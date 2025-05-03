@@ -10,6 +10,20 @@ load_dotenv()
 
 MS_CXR_LOCAL_ALIGNMENT_CSV_PATH = os.environ['MS_CXR_LOCAL_ALIGNMENT_V1.1.0_CSV_PATH']
 
+class MS_CXR_TrainingMode:
+    TRAIN = 'train'
+    VAL = 'val'
+    TEST = 'test'
+    ALL = 'all'
+    @staticmethod
+    def get_all():
+        return [
+            MS_CXR_TrainingMode.TRAIN,
+            MS_CXR_TrainingMode.VAL,
+            MS_CXR_TrainingMode.TEST,
+            MS_CXR_TrainingMode.ALL
+        ]
+    
 def _rescale_bounding_box_coordinates(x, y, w, h, image_width, image_height, actual_image_width, actual_image_height):
     x *= actual_image_width / image_width
     y *= actual_image_height / image_height
@@ -223,7 +237,7 @@ def get_ms_cxr_dicom_id_2_phrases_and_masks(mask_height, mask_width, flatten=Tru
         dicom_id_2_phrases_and_masks[dicom_id] = (phrases, masks)
     return dicom_id_2_phrases_and_masks
 
-def get_ms_cxr_dicom_id_2_phrases_and_bboxes():
+def get_ms_cxr_dicom_id_2_phrases_and_bboxes(bbox_format='xyxy'):
     df = pd.read_csv(MS_CXR_LOCAL_ALIGNMENT_CSV_PATH)
     dicom_id_2_rows = {}
     for _, row in df.iterrows():
@@ -250,7 +264,13 @@ def get_ms_cxr_dicom_id_2_phrases_and_bboxes():
             assert 0 <= y + h <= 1
             if phrase not in phrase2bboxes:
                 phrase2bboxes[phrase] = []
-            phrase2bboxes[phrase].append((x, y, x + w, y + h))
+            if bbox_format == 'xyxy':
+                phrase2bboxes[phrase].append((x, y, x + w, y + h))
+            elif bbox_format == 'cxcywh':
+                cx = x + w / 2
+                cy = y + h / 2
+                phrase2bboxes[phrase].append((cx, cy, w, h))
+            else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
         for phrase, bboxes in phrase2bboxes.items():
             phrases.append(phrase)
             bbox_lists.append(bboxes)

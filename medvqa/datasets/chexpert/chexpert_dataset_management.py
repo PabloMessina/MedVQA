@@ -29,8 +29,8 @@ from medvqa.utils.constants import (
     CHEXPERT_LABELS,
     CHEXPERT_ORIENTATION2ID,
 )
-from medvqa.utils.files import get_cached_pickle_file, load_pickle
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle
+from medvqa.utils.logging_utils import print_bold
 
 class CheXpertTrainingMode:
     TRAIN_VAL = 'train_val'

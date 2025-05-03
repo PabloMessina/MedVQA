@@ -30,8 +30,8 @@ from medvqa.datasets.interpret_cxr_challenge import (
     INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
 )
 from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
-from medvqa.utils.files import get_cached_jsonl_file, load_json, load_jsonl, load_pickle
-from medvqa.utils.logging import print_bold, print_magenta, print_orange
+from medvqa.utils.files_utils import get_cached_jsonl_file, load_json, load_jsonl, load_pickle
+from medvqa.utils.logging_utils import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
 
 _ALLOWED_COMPARISONS = set([

@@ -1,11 +1,14 @@
 import os
 from PIL import Image
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import imagesize
 from time import time
 from multiprocessing import Pool
+
+import torch
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES, CHEST_IMAGENOME_GOLD_BBOX_NAMES, CHEST_IMAGENOME_NUM_BBOX_CLASSES, CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
@@ -15,10 +18,10 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.datasets.image_processing import inv_normalize
 from medvqa.utils.constants import CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
-from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.files_utils import get_cached_json_file
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
-from medvqa.utils.logging import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
+from medvqa.utils.logging_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
 
 def inspect_chexpert_vision_trainer(chexpert_vision_trainer, i):
     instance = chexpert_vision_trainer.dataset[i]
@@ -243,35 +246,52 @@ def inspect_labels2report_trainer(trainer, dataset_name, i):
             chest_imagenome_label_array_to_string(instance['chest_imagenome'],
             chest_imagenome_label_names))
         
-def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
+def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True, grounding_only_mode=False,
+                          image_mean=(0.485, 0.456, 0.406), image_std=(0.229, 0.224, 0.225)):
     import os
     from medvqa.datasets.mimiccxr import get_detailed_metadata_for_dicom_id
-    from medvqa.utils.files import read_txt
-    from medvqa.utils.logging import print_bold
+    from medvqa.utils.files_utils import read_txt
+    from medvqa.utils.logging_utils import print_bold
     from medvqa.datasets.image_processing import inv_normalize
     from PIL import Image
     import numpy as np
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
+    import math
     if train:
         dataset = mimiccxr_trainer.mscxr_train_dataset
         idx = dataset.indices[i]
-        phrase_bboxes, phrase_classes = dataset.phrase_bboxes_and_classes[idx]
-        phrase_idxs = dataset.phrase_idxs[idx]
-        pos_fact_idxs = dataset.positive_fact_idxs[idx]
-        strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
-        weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
+        if grounding_only_mode:
+            phrase_bboxes = dataset.phrase_bboxes[idx]
+            phrase_idx = dataset.phrase_idxs[idx]
+        else:
+            phrase_bboxes, phrase_classes = dataset.phrase_bboxes_and_classes[idx]
+            phrase_idxs = dataset.phrase_idxs[idx]
+        if not grounding_only_mode:
+            pos_fact_idxs = dataset.positive_fact_idxs[idx]
+            strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
+            weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
         image_path = dataset.image_paths[idx]
         dicom_id = os.path.basename(image_path).split('.')[0]
         metadata = get_detailed_metadata_for_dicom_id(dicom_id)[0]
         report = read_txt(metadata['filepath'])
         instance = dataset[i]
         image_tensor = instance['i'] # (3, H, W)
-        phrase_embeddings = instance['pe'] # (num_phrases, 128)
-        phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
-        bbox_target_coords = instance['btc'] # (num_phrases, num_regions, 4)
-        bbox_target_presence = instance['btp'] # (num_phrases, num_regions)
-        gidxs = instance['gidxs'] # (num_phrases_with_bbox,)
+        if grounding_only_mode:
+            phrase_embedding = instance['pe'] # (128,)
+            target_bbox_coords = instance['tbc'] # (num_regions, 4)
+            target_bbox_presence = instance['tbp'] # (num_regions,)
+            target_prob_mask = instance['tpm'] # (num_regions,)
+        else:
+            phrase_embeddings = instance['pe'] # (num_phrases, 128)
+            phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
+            target_bbox_coords = instance['tbc'] # (num_phrases, num_regions, 4)
+            target_bbox_presence = instance['tbp'] # (num_phrases, num_regions)
+            gidxs = instance['gidxs'] # (num_phrases_with_bbox,)
+
+        num_regions = target_bbox_coords.shape[-2]
+        feat_W = feat_H = math.isqrt(num_regions)
+        assert feat_W * feat_H == num_regions
 
         print_bold('idx:', end=' '); print(idx)
         print_bold('dicom_id:', end=' '); print(dicom_id)
@@ -279,36 +299,125 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
         print_bold('report:'); print(report)
         print_bold('metadata:'); print(metadata)
         print_bold('image_tensor:', end=' '); print(image_tensor.shape)
-        print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
-        print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
-        print_bold('bbox_target_coords:', end=' '); print(bbox_target_coords.shape)
-        print_bold('bbox_target_presence:', end=' '); print(bbox_target_presence.shape)
-        print_bold('gidxs:', end=' '); print(gidxs.shape)
+        print_bold(f'num_regions: {num_regions}, feat_W: {feat_W}, feat_H: {feat_H}')
+        if grounding_only_mode:
+            print_bold('phrase_embedding:', end=' '); print(phrase_embedding.shape)
+            print_bold('target_bbox_coords:', end=' '); print(target_bbox_coords.shape)
+            print_bold('target_bbox_presence:', end=' '); print(target_bbox_presence.shape)
+            print_bold('target_prob_mask:', end=' '); print(target_prob_mask.shape)
+        else:
+            print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
+            print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
+            print_bold('target_bbox_coords:', end=' '); print(target_bbox_coords.shape)
+            print_bold('target_bbox_presence:', end=' '); print(target_bbox_presence.shape)
+            print_bold('gidxs:', end=' '); print(gidxs.shape)
 
         # Obtain bbox coordinates from target
-        bbox_target_coords = bbox_target_coords.view(-1, 4)
-        bbox_target_presence = bbox_target_presence.view(-1)
+        target_bbox_coords_ = target_bbox_coords.view(-1, 4)
+        target_bbox_presence_ = target_bbox_presence.view(-1)
         bbox_coords = set()
-        for i in range(len(bbox_target_presence)):
-            if bbox_target_presence[i] == 1:
-                bbox_coords.add(tuple(bbox_target_coords[i].tolist()))
+        for i in range(len(target_bbox_presence_)):
+            if target_bbox_presence_[i] == 1:
+                bbox_coords.add(tuple(target_bbox_coords_[i].tolist()))
         bbox_coords = list(bbox_coords)
+        bbox_format = dataset.bbox_format
         print_bold('bbox_coords:', end=' '); print(bbox_coords)
+        print_bold('bbox_format:', end=' '); print(bbox_format)
+
+        # Recover image from tensor
+        image_tensor.mul_(torch.tensor(image_std).view(3, 1, 1))
+        image_tensor.add_(torch.tensor(image_mean).view(3, 1, 1))
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+        img = Image.fromarray((image_tensor.permute(1,2,0) * 255).numpy().astype(np.uint8))
+        W_img = img.width
+        H_img = img.height
 
         # Display transformed image + bboxes
         print_bold('Transformed image:')
-        img = Image.fromarray((inv_normalize(image_tensor).permute(1,2,0) * 255).numpy().astype(np.uint8))
-        plt.imshow(img)
-        ax = plt.gca()
-        for bbox_coord in bbox_coords:
-            x1, y1, x2, y2 = bbox_coord
-            x1 *= img.width
-            y1 *= img.height
-            x2 *= img.width
-            y2 *= img.height
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
-            ax.add_patch(rect)
-        plt.show()
+        
+        if grounding_only_mode:
+            # Start visualization.
+            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+            # Compute grid lines positions based on the image size and feature map size.
+            cell_width = W_img / feat_W
+            cell_height = H_img / feat_H
+            # Grid lines (excluding image borders):
+            vlines = [cell_width * i for i in range(1, feat_W)]
+            hlines = [cell_height * i for i in range(1, feat_H)]
+
+            # Plot 1: Original image with bounding boxes.
+            axes[0].imshow(img)
+            axes[0].set_title("Image with Bounding Boxes")
+            for bbox_coord in bbox_coords:
+                if bbox_format == 'xyxy':
+                    x1, y1, x2, y2 = bbox_coord
+                elif bbox_format == 'cxcywh':
+                    cx, cy, w, h = bbox_coord
+                    x1 = cx - w/2
+                    y1 = cy - h/2
+                    x2 = cx + w/2
+                    y2 = cy + h/2
+                else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
+                x1 *= img.width
+                y1 *= img.height
+                x2 *= img.width
+                y2 *= img.height
+                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+                axes[0].add_patch(rect)
+            for x in vlines:
+                axes[0].axvline(x, color="white", linestyle="--", linewidth=1)
+            for y in hlines:
+                axes[0].axhline(y, color="white", linestyle="--", linewidth=1)
+
+            # Plot 2: Upsampled target presence heatmap with grid.
+            target_bbox_presence = target_bbox_presence.view(feat_H, feat_W)
+            up_presence = np.array(
+                Image.fromarray((target_bbox_presence.numpy() * 255).astype(np.uint8)).resize(
+                    (W_img, H_img), resample=Image.NEAREST
+                )
+            ) / 255.0
+            axes[1].imshow(up_presence, cmap="viridis")
+            axes[1].set_title("Target Presence Heatmap")
+            for x in vlines:
+                axes[1].axvline(x, color="white", linestyle="--", linewidth=1)
+            for y in hlines:
+                axes[1].axhline(y, color="white", linestyle="--", linewidth=1)
+
+            # Plot 3: Upsampled prob mask with grid.
+            target_prob_mask = target_prob_mask.view(feat_H, feat_W)
+            up_prob_mask = cv2.resize(
+                target_prob_mask.numpy(),
+                (W_img, H_img), interpolation=cv2.INTER_NEAREST,
+            )
+            axes[2].imshow(up_prob_mask, cmap="viridis")
+            axes[2].set_title("Target Prob Mask")
+            for x in vlines:
+                axes[2].axvline(x, color="white", linestyle="--", linewidth=1)
+            for y in hlines:
+                axes[2].axhline(y, color="white", linestyle="--", linewidth=1)
+
+            plt.show()
+        else:
+            plt.imshow(img)
+            ax = plt.gca()
+            for bbox_coord in bbox_coords:
+                if bbox_format == 'xyxy':
+                    x1, y1, x2, y2 = bbox_coord
+                elif bbox_format == 'cxcywh':
+                    cx, cy, w, h = bbox_coord
+                    x1 = cx - w/2
+                    y1 = cy - h/2
+                    x2 = cx + w/2
+                    y2 = cy + h/2
+                else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
+                x1 *= img.width
+                y1 *= img.height
+                x2 *= img.width
+                y2 *= img.height
+                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+                ax.add_patch(rect)
+            plt.show()
 
         # Display original image
         print_bold('Original image:')
@@ -317,46 +426,60 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
         plt.show()
 
         print_bold('Phrase bboxes:', end=' '); print(phrase_bboxes)
-        print_bold('Phrase classes:', end=' '); print(phrase_classes)
-        print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
-        print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
-        print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
-        print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
+        if grounding_only_mode:
+            print_bold('Phrase idx:', end=' '); print(phrase_idx)
+        else:
+            print_bold('Phrase classes:', end=' '); print(phrase_classes)
+            print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
+            print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
+            print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
+            print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
 
-        print_bold('Phrases:')
-        for i in phrase_idxs:
-            print(mimiccxr_trainer.mscxr_phrases[i])
+        if grounding_only_mode:
+            print_bold('Phrase:', end=' '); print(mimiccxr_trainer.mscxr_phrases[phrase_idx])
+        else:
+            print_bold('Phrases:')
+            for i in phrase_idxs:
+                print(mimiccxr_trainer.mscxr_phrases[i])
 
-        print_bold('Positive facts:')
-        for i in pos_fact_idxs:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Positive facts:')
+            for i in pos_fact_idxs:
+                print(mimiccxr_trainer.mscxr_facts[i])
 
-        print_bold('Strong negative facts:')
-        for i in strong_neg_fact_idxs:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Strong negative facts:')
+            for i in strong_neg_fact_idxs:
+                print(mimiccxr_trainer.mscxr_facts[i])
 
-        print_bold('Weak negative facts:')
-        for i in weak_neg_fact_idxs[:20]:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Weak negative facts:')
+            for i in weak_neg_fact_idxs[:20]:
+                print(mimiccxr_trainer.mscxr_facts[i])
     
     else:
 
         dataset = mimiccxr_trainer.mscxr_val_dataset
         idx = dataset.indices[i]
-        phrase_idxs = dataset.phrase_idxs[idx]
-        pos_fact_idxs = dataset.positive_fact_idxs[idx]
-        strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
-        weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
         image_path = dataset.image_paths[idx]
         dicom_id = os.path.basename(image_path).split('.')[0]
         metadata = get_detailed_metadata_for_dicom_id(dicom_id)[0]
         report = read_txt(metadata['filepath'])
         instance = dataset[i]
+        if grounding_only_mode:
+            phrase_idx = dataset.phrase_idxs[idx]
+        else:
+            phrase_idxs = dataset.phrase_idxs[idx]
+            pos_fact_idxs = dataset.positive_fact_idxs[idx]
+            strong_neg_fact_idxs = dataset.strong_neg_fact_idxs[idx]
+            weak_neg_fact_idxs = dataset.weak_neg_fact_idxs[idx]
         image_tensor = instance['i'] # (3, H, W)
-        phrase_embeddings = instance['pe'] # (num_phrases, 128)
-        phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
-        phrase_bboxes = instance['bboxes'] # (list of 4-tuples)
-        phrase_classes = instance['classes'] # (list of ints)
+        if grounding_only_mode:
+            phrase_embedding = instance['pe'] # (128,)
+            phrase_bboxes = instance['bboxes'] # (list of 4-tuples)
+        else:
+            phrase_embeddings = instance['pe'] # (num_phrases, 128)
+            phrase_classifier_labels = instance['pcl'] # (num_phrases, num_classes)
+            phrase_bboxes = instance['bboxes'] # (list of 4-tuples)
+            phrase_classes = instance['classes'] # (list of ints)
+        bbox_format = dataset.bbox_format
 
         print_bold('idx:', end=' '); print(idx)
         print_bold('dicom_id:', end=' '); print(dicom_id)
@@ -364,10 +487,15 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
         print_bold('report:'); print(report)
         print_bold('metadata:'); print(metadata)
         print_bold('image_tensor:', end=' '); print(image_tensor.shape)
-        print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
-        print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
-        print_bold('phrase_bboxes:', end=' '); print(phrase_bboxes)
-        print_bold('phrase_classes:', end=' '); print(phrase_classes)
+        if grounding_only_mode:
+            print_bold('phrase_embedding:', end=' '); print(phrase_embedding.shape)
+            print_bold('phrase_bboxes:', end=' '); print(phrase_bboxes)
+        else:
+            print_bold('phrase_embeddings:', end=' '); print(phrase_embeddings.shape)
+            print_bold('phrase_classifier_labels:', end=' '); print(phrase_classifier_labels.shape)
+            print_bold('phrase_bboxes:', end=' '); print(phrase_bboxes)
+            print_bold('phrase_classes:', end=' '); print(phrase_classes)
+        print_bold('bbox_format:', end=' '); print(bbox_format)
 
         # Display transformed image + bboxes
         print_bold('Transformed image:')
@@ -375,7 +503,15 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
         plt.imshow(img)
         ax = plt.gca()
         for bbox_coord in phrase_bboxes:
-            x1, y1, x2, y2 = bbox_coord
+            if bbox_format == 'xyxy':
+                x1, y1, x2, y2 = bbox_coord
+            elif bbox_format == 'cxcywh':
+                cx, cy, w, h = bbox_coord
+                x1 = cx - w/2
+                y1 = cy - h/2
+                x2 = cx + w/2
+                y2 = cy + h/2
+            else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
             x1 *= img.width
             y1 *= img.height
             x2 *= img.width
@@ -389,28 +525,31 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True):
         img = Image.open(image_path).convert('RGB')
         plt.imshow(img)
         plt.show()
-        
-        print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
-        print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
-        print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
-        print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
 
-        print_bold('Phrases:')
-        for i in phrase_idxs:
-            print(mimiccxr_trainer.mscxr_phrases[i])
+        if grounding_only_mode:
+            print_bold('Phrase idx:', end=' '); print(phrase_idx)
+            print_bold('Phrase:', end=' '); print(mimiccxr_trainer.mscxr_phrases[phrase_idx])
+        else:
+            print_bold('Phrase idxs:', end=' '); print(phrase_idxs)
+            print_bold('Positive fact idxs:', end=' '); print(pos_fact_idxs)
+            print_bold('Strong negative fact idxs:', end=' '); print(strong_neg_fact_idxs)
+            print_bold('Weak negative fact idxs:', end=' '); print(weak_neg_fact_idxs)
 
-        print_bold('Positive facts:')
-        for i in pos_fact_idxs:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Phrases:')
+            for i in phrase_idxs:
+                print(mimiccxr_trainer.mscxr_phrases[i])
 
-        print_bold('Strong negative facts:')
-        for i in strong_neg_fact_idxs:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Positive facts:')
+            for i in pos_fact_idxs:
+                print(mimiccxr_trainer.mscxr_facts[i])
 
-        print_bold('Weak negative facts:')
-        for i in weak_neg_fact_idxs[:20]:
-            print(mimiccxr_trainer.mscxr_facts[i])
+            print_bold('Strong negative facts:')
+            for i in strong_neg_fact_idxs:
+                print(mimiccxr_trainer.mscxr_facts[i])
 
+            print_bold('Weak negative facts:')
+            for i in weak_neg_fact_idxs[:20]:
+                print(mimiccxr_trainer.mscxr_facts[i])
 
 _shared_image_id_to_binary_labels = None
 def _count_labels(idx):

@@ -27,7 +27,7 @@ from medvqa.datasets.image_processing import (
     get_nearest_neighbors,
 )
 from medvqa.metrics.classification.multilabel_prf1 import MultiLabelPRF1
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_file_path_with_hashing_if_too_long,
     load_pickle,
@@ -38,7 +38,7 @@ from medvqa.datasets.preprocessing import (
     get_average_question_positions,
     get_question_frequencies,
 )
-from medvqa.utils.logging import print_red
+from medvqa.utils.logging_utils import print_red
 
 def _get_train_preprocessing_save_path(qa_adapted_reports_filename, tokenizer, use_chest_imagenome_compatible_data):
     tokenizer_string = f'{tokenizer.vocab_size},{tokenizer.hash[0]},{tokenizer.hash[1]}'

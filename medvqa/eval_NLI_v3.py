@@ -18,9 +18,9 @@ from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
 from medvqa.utils.constants import LABEL_BASED_FACTS
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
-from medvqa.utils.logging import print_blue, print_bold
-from medvqa.utils.metrics import best_threshold_and_f1_score
+from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, load_pickle, save_pickle
+from medvqa.utils.logging_utils import print_blue, print_bold
+from medvqa.utils.metrics_utils import best_threshold_and_f1_score
 
 _NLI_LABEL2ID = {'entailment': 1, 'neutral': 0, 'contradiction': -1}
 

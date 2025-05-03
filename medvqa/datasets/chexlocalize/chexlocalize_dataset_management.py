@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.chexlocalize import extract_images_segmentation_masks_and_binary_labels
-from medvqa.utils.files import get_cached_pickle_file, load_pickle
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle
+from medvqa.utils.logging_utils import print_bold
     
 class CheXLocalizePhraseGroundingDataset(Dataset):
 

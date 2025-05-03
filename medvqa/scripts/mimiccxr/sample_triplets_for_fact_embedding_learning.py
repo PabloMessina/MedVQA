@@ -7,14 +7,14 @@ from tqdm import tqdm
 from Levenshtein import distance as levenshtein_distance
 
 from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.files_utils import load_jsonl, load_pickle, save_pickle
 from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.metrics import jaccard_between_sets
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.metrics_utils import jaccard_between_sets
+from medvqa.utils.hashing_utils import hash_string
 
 MAX_TRIES = 10
 

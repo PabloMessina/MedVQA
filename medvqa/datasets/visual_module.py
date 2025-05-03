@@ -4,7 +4,7 @@ from PIL import Image
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.utils import deduplicate_indices
-from medvqa.utils.files import load_pickle
+from medvqa.utils.files_utils import load_pickle
 from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
     BatchedCompositeInfiniteDataset,

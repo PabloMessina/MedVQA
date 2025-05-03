@@ -8,15 +8,15 @@ from tqdm import tqdm
 from Levenshtein import distance as levenshtein_distance
 from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_CACHE_DIR,
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_LARGE_FAST_CACHE_DIR,
 )
 from medvqa.utils.nlp import sort_sentences
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import get_file_path_with_hashing_if_too_long, load_json, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, load_json, load_jsonl, load_pickle, save_pickle
 
 # INSTRUCTIONS = """Context: natural language inference.
 

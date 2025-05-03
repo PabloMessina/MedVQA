@@ -4,8 +4,8 @@ import numpy as np
 from nltk.tokenize import word_tokenize
 
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
-from medvqa.utils.files import load_json, save_pickle
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.files_utils import load_json, save_pickle
+from medvqa.utils.logging_utils import print_bold, print_magenta
 from tqdm import tqdm
 
 if __name__ == '__main__':

@@ -11,12 +11,12 @@ from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.scripts.mimiccxr.find_pos_neg_neutral_facts_per_report_v2 import _compute_mlp_fact_based_nli_softmaxes_per_report
 from medvqa.utils.constants import VINBIG_LABELS
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long, load_class_specific_regex,
     load_json, load_jsonl, load_pickle, save_pickle,
 )
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_red
+from medvqa.utils.logging_utils import print_blue, print_red
 
 class _Task:
     FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS = 'find_facts_relevant_to_anchor_facts'

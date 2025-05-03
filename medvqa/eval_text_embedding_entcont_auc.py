@@ -4,8 +4,8 @@ import pandas as pd
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
-from medvqa.utils.logging import print_blue
-from medvqa.utils.metrics import auc
+from medvqa.utils.logging_utils import print_blue
+from medvqa.utils.metrics_utils import auc
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

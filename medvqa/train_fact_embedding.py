@@ -26,7 +26,7 @@ from medvqa.metrics import (
 from medvqa.models.checkpoint import load_metadata
 
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import get_checkpoint_folder_path
+from medvqa.utils.files_utils import get_checkpoint_folder_path
 from medvqa.training.fact_embedding import get_engine
 from medvqa.datasets.dataloading_utils import (
     balanced_dataloaders_generator,
@@ -34,7 +34,7 @@ from medvqa.datasets.dataloading_utils import (
     multi_cyclic_dataloaders_generator,
 )
 from medvqa.metrics.utils import get_merge_metrics_fn
-from medvqa.utils.logging import CountPrinter, print_blue
+from medvqa.utils.logging_utils import CountPrinter, print_blue
 
 class _TripletRuleWeightsAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):

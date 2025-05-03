@@ -9,9 +9,9 @@ import json
 import numpy as np
 
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl
+from medvqa.utils.files_utils import load_jsonl
 
 _VALID_JSON_OBJECT_CONTENT_REGEX = re.compile(r"\s*\"anatomical location\"\s*:\s*\"[^\"]*\"\s*,\s*\"detailed observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"short observation\"\s*:\s*\"[^\"]*\"\s*,\s*\"category\"\s*:\s*\"[^\"]*\"\s*,\s*\"health status\"\s*:\s*\"[^\"]*\"\s*,\s*\"prev_study_comparison\?\"\s*:\s*\"[^\"]*\"\s*,\s*\"comparison status\"\s*:\s*\"[^\"]*\"\s*")
 

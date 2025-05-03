@@ -1,8 +1,10 @@
 import math
 import os
+from typing import Callable, List, Optional, Tuple
 import numpy as np
 import random
 import torch
+import logging
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.augmentation import ChestImagenomeAlbumentationAdapter, VinBigAlbumentationAdapter
@@ -25,9 +27,9 @@ from medvqa.datasets.dataloading_utils import (
 from medvqa.datasets.image_processing import (
     ImageFactBasedMultilabelClassificationDataset,
     ImageFactClassificationDataset,
-    convert_bboxes_into_target_tensors,
 )
 from medvqa.datasets.ms_cxr import (
+    MS_CXR_TrainingMode,
     get_ms_cxr_dicom_id_2_phrases_and_bboxes,
     get_ms_cxr_dicom_id_2_split,
     get_ms_cxr_test_dicom_ids,
@@ -45,9 +47,12 @@ from medvqa.datasets.mimiccxr import (
     get_mimiccxr_train_dicom_ids,
     load_mimiccxr_reports_detailed_metadata,
 )
+from medvqa.utils.bbox_utils import calculate_probabilistic_mask_from_bboxes, convert_bboxes_into_target_tensors
 from medvqa.utils.constants import LABEL_BASED_FACTS
-from medvqa.utils.files import get_cached_pickle_file, load_pickle, print_file_size, save_pickle
-from medvqa.utils.logging import print_bold, print_magenta, print_orange
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle, print_file_size, save_pickle
+from medvqa.utils.logging_utils import ANSI_BOLD, ANSI_MAGENTA_BOLD, ANSI_RESET
+
+logger = logging.getLogger(__name__)
 
 class MIMICCXR_FactClassificationDataset(ImageFactClassificationDataset):
 
@@ -96,12 +101,12 @@ class MIMICCXR_FactClassificationDataset(ImageFactClassificationDataset):
             output['pw'] = weights # phrase weights
         return output
     
-class MSCXR_PhraseGroundingDataset(Dataset):
+class MSCXR_PhraseGroundingAndClassificationDataset(Dataset):
 
     def __init__(self, image_paths, image_transform, phrase_idxs, phrase_embeddings, phrase_bboxes_and_classes,
                  positive_fact_idxs, strong_neg_fact_idxs, weak_neg_fact_idxs, fact_embeddings,
                  indices, num_facts_per_image, feature_map_size, shuffle_indices=False,
-                data_augmentation_enabled=False, for_training=True):
+                data_augmentation_enabled=False, for_training=True, bbox_format='xyxy'):
         assert num_facts_per_image >= 2
         self.image_paths = image_paths
         self.image_transform = image_transform
@@ -120,12 +125,14 @@ class MSCXR_PhraseGroundingDataset(Dataset):
         self.feature_map_size = feature_map_size
         self.data_augmentation_enabled = data_augmentation_enabled
         self.for_training = for_training
+        self.bbox_format = bbox_format
         assert self.num_neg_facts_per_image > 0
         assert self.num_pos_facts_per_image > 0
         if shuffle_indices:
             random.shuffle(self.indices)
         if data_augmentation_enabled:
-            self.albumentation_adapter = VinBigAlbumentationAdapter() # reuse VinBigAlbumentationAdapter for MSCXR
+            # Reuse VinBigAlbumentationAdapter for MSCXR
+            self.albumentation_adapter = VinBigAlbumentationAdapter(bbox_format=bbox_format)
 
     def __len__(self):
         return len(self.indices)
@@ -187,7 +194,7 @@ class MSCXR_PhraseGroundingDataset(Dataset):
             idxs_with_grounding = np.arange(len(phrase_idxs) + len(strong_neg_fact_idxs) + len(weak_neg_fact_idxs))
             bbox_target_coords, bbox_target_presence = convert_bboxes_into_target_tensors(
                 bboxes=phrase_bboxes, classes=phrase_classes, num_classes=len(idxs_with_grounding),
-                feature_map_size=self.feature_map_size
+                feature_map_size=self.feature_map_size, bbox_format=self.bbox_format,
             )
             return {
                 'i': image,
@@ -205,6 +212,199 @@ class MSCXR_PhraseGroundingDataset(Dataset):
                 'bboxes': phrase_bboxes,
                 'classes': phrase_classes,
             }
+        
+class MSCXR_PhraseGroundingDataset(Dataset):
+    """
+    Dataset class for phrase grounding on the MSCXR dataset.
+
+    This dataset handles loading images, applying transformations and
+    augmentations, and preparing data for phrase grounding tasks, including
+    generating target tensors for training.
+
+    Args:
+        image_paths: List of paths to the image files.
+        image_transform: A callable function to transform the images.
+                         This could be a simple normalization or a composition of transforms.
+        phrase_idxs: List of indices linking each image to its corresponding phrase embedding.
+        phrase_embeddings: A numpy array containing pre-computed phrase embeddings.
+                           Shape should be (num_phrases, embedding_size).
+        phrase_bboxes: A list where each element is a list of bounding boxes
+                       (coordinates) for the phrases within the corresponding image.
+        phrase_prob_masks: A list of numpy arrays, where each array is a probabilistic mask
+                           for the phrase in the corresponding image. Used for generating
+                           probabilistic target masks during training.
+        indices: A list of integers representing the mapping from dataset index
+                 to the index in the input lists (image_paths, etc.). This allows
+                 shuffling and subsetting the dataset easily.
+        feature_map_size: A tuple (height, width) representing the target
+                          feature map size for generating ground truth tensors.
+        shuffle_indices: If True, the dataset indices will be shuffled upon initialization.
+        data_augmentation_enabled: If True, data augmentation (using Albumentations)
+                                   will be applied to images and bounding boxes.
+        for_training: If True, the __getitem__ method will return target tensors
+                      suitable for training (e.g., target coordinates, presence,
+                      and probabilistic mask). If False, it will return the image,
+                      phrase embedding, and original bounding boxes for inference.
+        bbox_format: A string specifying the format of the bounding box coordinates
+                     (e.g., 'xyxy', 'xywh'). This is used for data augmentation
+                     and target tensor generation.
+    """
+    def __init__(self,
+                 image_paths: List[str],
+                 image_transform: Callable,
+                 phrase_idxs: List[int],
+                 phrase_embeddings: np.ndarray,
+                 phrase_bboxes: List[List[float]],
+                 indices: List[int],
+                 phrase_prob_masks: Optional[List[np.ndarray]] = None,
+                 feature_map_size: Optional[Tuple[int, int]] = None,
+                 shuffle_indices: bool = False,
+                 data_augmentation_enabled: bool = False,
+                 for_training: bool = True,
+                 bbox_format: str = 'xyxy'):
+
+        # Store the dataset input parameters as instance attributes.
+        self.image_paths = image_paths
+        self.image_transform = image_transform
+        self.phrase_idxs = phrase_idxs
+        self.phrase_embeddings = phrase_embeddings
+        self.phrase_bboxes = phrase_bboxes
+        self.phrase_prob_masks = phrase_prob_masks
+        self.indices = indices
+        # Determine the dimensionality of the phrase embeddings.
+        self.embedding_size = self.phrase_embeddings.shape[1]
+        self.feature_map_size = feature_map_size
+        self.data_augmentation_enabled = data_augmentation_enabled
+        self.for_training = for_training
+        self.bbox_format = bbox_format
+
+        # Optionally shuffle the internal indices to randomize sample order.
+        if shuffle_indices:
+            random.shuffle(self.indices)
+
+        # Sanity checks
+        if for_training:
+            assert self.feature_map_size is not None, "Feature map size must be provided for training."
+            assert self.phrase_prob_masks is not None, "Probabilistic masks must be provided for training."
+
+    def __len__(self) -> int:
+        """
+        Returns the total number of samples in the dataset.
+
+        This is determined by the number of entries in the indices list.
+        """
+        return len(self.indices)
+
+    def __getitem__(self, i: int) -> dict:
+        """
+        Retrieves a single data sample from the dataset.
+
+        Args:
+            i: The index of the sample to retrieve (corresponds to an index
+               in the internal self.indices list).
+
+        Returns:
+            A dictionary containing the data for the requested sample.
+            The content of the dictionary depends on the 'for_training' flag.
+            During training, it includes transformed image, phrase embedding,
+            and target tensors (coords, presence, probabilistic mask).
+            During inference, it includes transformed image, phrase embedding,
+            and the original bounding boxes.
+        """
+        data_index = self.indices[i]
+        image_path = self.image_paths[data_index]
+        phrase_idx = self.phrase_idxs[data_index]
+        phrase_bboxes = self.phrase_bboxes[data_index]
+        phrase_embedding = self.phrase_embeddings[phrase_idx]
+        phrase_embedding = torch.tensor(phrase_embedding, dtype=torch.float32)
+        
+        if self.for_training:
+            prob_mask = self.phrase_prob_masks[data_index]
+            if self.data_augmentation_enabled:
+                out = self.image_transform(
+                    image_path=image_path,
+                    bboxes=phrase_bboxes,
+                    bbox_labels=[0] * len(phrase_bboxes), # dummy labels for bounding boxes
+                    masks=[prob_mask], # Albumentations expects a list of masks
+                )
+                image = out['pixel_values']
+                prob_mask = out['masks'][0]
+                phrase_bboxes = out['bboxes']
+            else:
+                image = self.image_transform(image_path)['pixel_values']
+            # Convert the processed bounding boxes and probabilistic mask into
+            # target tensors for training a model that outputs predictions
+            # over a feature map.
+            (
+                target_coords,
+                target_presence,
+                target_prob_mask,
+            ) = convert_bboxes_into_target_tensors(
+                bboxes=phrase_bboxes,
+                probabilistic_mask=prob_mask,
+                feature_map_size=self.feature_map_size,
+                bbox_format=self.bbox_format,
+            )
+            return {
+                # 'i': Transformed image tensor, e.g., (C, H, W)
+                'i': image,
+                # 'pe': Phrase embedding, e.g., (Embedding Size,)
+                'pe': phrase_embedding,
+                # 'tbc': Target bounding box coordinates, e.g., (H_fm * W_fm, 4)
+                'tbc': target_coords,
+                # 'tbp': Target bounding box presence (binary), e.g., (H_fm * W_fm,)
+                'tbp': target_presence,
+                # 'tpm': Target probabilistic mask for loss, e.g., (H_fm * W_fm,)
+                'tpm': target_prob_mask,
+            }
+        else:
+            image = self.image_transform(image_path)['pixel_values']
+            return {
+                # 'i': Transformed image tensor, e.g., (C, H, W)
+                'i': image,
+                # 'pe': Phrase embedding, e.g., (Embedding Size,)
+                'pe': phrase_embedding,
+                # 'bboxes': Processed bounding boxes for the phrase(s) in the image, e.g., (Number of Bboxes, 4)
+                'bboxes': phrase_bboxes,
+            }
+        
+    def collate_fn(self, batch: List[dict]) -> dict:
+        """
+        Custom collate function for DataLoader to handle the variable-length
+        sequences and different data types in the dataset.
+
+        Args:
+            batch: A list of dictionaries, each representing a sample from the dataset.
+
+        Returns:
+            A dictionary containing the batched data.
+        """
+        if self.for_training:
+            # Collate the batch for training
+            images = torch.stack([item['i'] for item in batch])
+            phrase_embeddings = torch.stack([item['pe'] for item in batch])
+            target_bboxes = torch.stack([item['tbc'] for item in batch])
+            target_presence = torch.stack([item['tbp'] for item in batch])
+            target_prob_masks = torch.stack([item['tpm'] for item in batch])
+            batch = {
+                'i': images,
+                'pe': phrase_embeddings,
+                'tbc': target_bboxes,
+                'tbp': target_presence,
+                'tpm': target_prob_masks,
+            }
+        else:
+            # Collate the batch for inference
+            images = torch.stack([item['i'] for item in batch])
+            phrase_embeddings = torch.stack([item['pe'] for item in batch])
+            bboxes = [item['bboxes'] for item in batch]
+            batch = {
+                'i': images,
+                'pe': phrase_embeddings,
+                'bboxes': bboxes,
+            }
+        batch['dataset_name'] = 'mscxr'
+        return batch
     
 class MIMICCXR_CXRLT2024_ClassificationDataset(Dataset):
 
@@ -385,11 +585,11 @@ def _clean_bbox_coords_and_presence_and_compute_mask(dicom_id):
 def _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2bboxes, num_workers=None):
     save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR, f'bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)}).pkl')
     if os.path.exists(save_path):
-        print_bold(f'Loading precomputed bbox_coords_and_presence_and_mask from {save_path}...')
+        logger.info(f'Loading precomputed bbox_coords_and_presence_and_mask from {save_path}...')
         print_file_size(save_path)
         return get_cached_pickle_file(save_path)
 
-    print_bold(f'Precomputing bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)})...')
+    logger.info(f'Precomputing bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)})...')
     global _shared_mask_height, _shared_mask_width, _shared_did2bboxes
     _shared_mask_height = mask_height
     _shared_mask_width = mask_width
@@ -404,9 +604,9 @@ def _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2b
     bbox_coords = np.array([r[0] for r in results])
     bbox_presence = np.array([r[1] for r in results])
     phrase_grounding_masks = np.array([r[2] for r in results], dtype=np.uint8) # use uint8 in order to save memory
-    print(f'bbox_coords.shape = {bbox_coords.shape}')
-    print(f'bbox_presence.shape = {bbox_presence.shape}')
-    print(f'phrase_grounding_masks.shape = {phrase_grounding_masks.shape}')
+    logger.info(f'bbox_coords.shape = {bbox_coords.shape}')
+    logger.info(f'bbox_presence.shape = {bbox_presence.shape}')
+    logger.info(f'phrase_grounding_masks.shape = {phrase_grounding_masks.shape}')
     output = {
         'dicom_ids': dicom_ids, # sorted
         'bbox_coords': bbox_coords,
@@ -431,12 +631,12 @@ def _assign_distribution_classes_to_reports(report_fact_nli_integrated_data_file
                                             distribution_thresholds=(0.02, 0.05)):
     assert len(distribution_thresholds) == 2
     assert 0 < distribution_thresholds[0] < distribution_thresholds[1] < 1
-    print_bold(f'Assigning distribution classes to reports...')
+    logger.info('Assigning distribution classes to reports...')
     # Load the data
-    print(f'Loading mimiccxr_report_fact_nli_integrated_data from {report_fact_nli_integrated_data_filepath}...')
+    logger.info(f'Loading mimiccxr_report_fact_nli_integrated_data from {report_fact_nli_integrated_data_filepath}...')
     data = load_pickle(report_fact_nli_integrated_data_filepath)
     labels = data['label_based_nli_predictions']['nli_predictions']
-    print(f'labels.shape = {labels.shape}')
+    logger.info(f'labels.shape = {labels.shape}')
     n_reports = labels.shape[0]
     binary_labels = labels == 0
     count_per_class = binary_labels.sum(0)
@@ -464,13 +664,13 @@ def _assign_distribution_classes_to_reports(report_fact_nli_integrated_data_file
             assert is_short_tail[binary_labels[i]].all()
             distribution_classes[i] = _SHORT_TAIL
 
-    print(f'count_no_positives = {count_no_positives}')
-    print(f'number of long tail classes = {(is_long_tail).sum()}')
-    print(f'number of middle tail classes = {(is_middle_tail).sum()}')
-    print(f'number of short tail classes = {(is_short_tail).sum()}')
-    print(f'number of long tail reports = {(distribution_classes == _LONG_TAIL).sum()}')
-    print(f'number of middle tail reports = {(distribution_classes == _MIDDLE_TAIL).sum()}')
-    print(f'number of short tail reports = {(distribution_classes == _SHORT_TAIL).sum()}')
+    logger.info(f'count_no_positives = {count_no_positives}')
+    logger.info(f'number of long tail classes = {(is_long_tail).sum()}')
+    logger.info(f'number of middle tail classes = {(is_middle_tail).sum()}')
+    logger.info(f'number of short tail classes = {(is_short_tail).sum()}')
+    logger.info(f'number of long tail reports = {(distribution_classes == _LONG_TAIL).sum()}')
+    logger.info(f'number of middle tail reports = {(distribution_classes == _MIDDLE_TAIL).sum()}')
+    logger.info(f'number of short tail reports = {(distribution_classes == _SHORT_TAIL).sum()}')
 
     return distribution_classes
 
@@ -493,7 +693,9 @@ class MIMICCXR_PhraseGroundingTrainer:
                 use_mscxr_for_train=False,
                 use_mscxr_for_val=False,
                 use_mscxr_for_test=False,
+                mscxr_do_grounding_only=False,
                 mscxr_test_on_all_images=False, # test on all images
+                mscxr_training_data_mode=MS_CXR_TrainingMode.TRAIN,
                 mscxr_phrase2embedding_filepath=None,
                 use_chest_imagenome_for_train=False,
                 use_chest_imagenome_gold_for_test=False,
@@ -517,12 +719,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                 do_visual_grounding_with_bbox_regression=False,
                 data_augmentation_enabled=False,
                 replace_phrase_embeddings_with_random_vectors=False,
+                bbox_format='xyxy',
                 **unused_kwargs,
             ):
 
         if len(unused_kwargs) > 0:
-            # Print warning in orange and bold
-            print('\033[93m\033[1mWarning: unused kwargs in MIMICCXR_VisualModuleTrainer: {}\033[0m'.format(unused_kwargs))
+            logger.warning(f'unused kwargs in MIMICCXR_PhraseGroundingTrainer: {unused_kwargs}')
         # Sanity checks
         assert sum([use_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
                     use_mscxr_for_test, use_chest_imagenome_gold_for_test, use_cxrlt2024_challenge_split]) > 0 # at least one of them must be True
@@ -553,8 +755,8 @@ class MIMICCXR_PhraseGroundingTrainer:
             cxrlt2024_train_dicom_ids, cxrlt2024_dev_dicom_ids = get_cxrlt2024_train_dev_dicom_ids()
             cxrlt2024_train_dicom_ids = set(cxrlt2024_train_dicom_ids)
             cxrlt2024_dev_dicom_ids = set(cxrlt2024_dev_dicom_ids)
-            print(f'len(cxrlt2024_train_dicom_ids) = {len(cxrlt2024_train_dicom_ids)}')
-            print(f'len(cxrlt2024_dev_dicom_ids) = {len(cxrlt2024_dev_dicom_ids)}')
+            logger.info(f'len(cxrlt2024_train_dicom_ids) = {len(cxrlt2024_train_dicom_ids)}')
+            logger.info(f'len(cxrlt2024_dev_dicom_ids) = {len(cxrlt2024_dev_dicom_ids)}')
             forbidden_train_dicom_ids |= cxrlt2024_dev_dicom_ids # exclude dev set
 
         if use_cxrlt2024_official_labels:
@@ -575,11 +777,11 @@ class MIMICCXR_PhraseGroundingTrainer:
             gold_dicom_ids = set(load_gold_bbox_dicom_ids())
             forbidden_train_dicom_ids |= gold_dicom_ids
 
-        print(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
+        logger.info(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
 
         # Create train and dev datasets for CXR-LT-2024 challenge
         if use_cxrlt2024_challenge_split or self.use_cxrlt2024_custom_labels:
-            print_magenta('Preparing CXR-LT-2024 challenge datasets and dataloaders for training/testing...', bold=True)
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing CXR-LT-2024 challenge datasets and dataloaders for training/testing...', bold=True)
 
             imageId2PartPatientStudy = get_imageId2PartPatientStudy()
             image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
@@ -590,8 +792,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 assert cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath is not None
 
                 cxrlt2024_dicom_id_to_pos_neg_facts = load_pickle(cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath)
-                print(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["train"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["train"])}')
-                print(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"])}')
+                logger.info(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["train"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["train"])}')
+                logger.info(f'len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"]) = {len(cxrlt2024_dicom_id_to_pos_neg_facts["dev"])}')
 
                 BIG_ENOGUGH = 1000000
                 phrases = cxrlt2024_dicom_id_to_pos_neg_facts['class_sentences']
@@ -630,7 +832,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 else:
 
                     # Use MIMIC-CXR's original train/dev split by default
-                    print_orange('Using MIMIC-CXR\'s original train/dev split for CXR-LT-2024 challenge', bold=True)
+                    logger.info('Using MIMIC-CXR\'s original train/dev split for CXR-LT-2024 challenge', bold=True)
                     train_dicom_ids = set(get_mimiccxr_train_dicom_ids())
                     for key in ['train', 'dev']:
                         for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts[key].items():
@@ -653,13 +855,13 @@ class MIMICCXR_PhraseGroundingTrainer:
                                 dev_indices.append(idx)
                                 idx += 1
 
-                print(f'Total number of images: {idx}')
+                logger.info(f'Total number of images: {idx}')
                 image_paths = image_paths[:idx]
                 phrase_idxs = phrase_idxs[:idx]
                 phrase_classification_labels = phrase_classification_labels[:idx]
 
                 # Create dataset and dataloader for training
-                print_bold('Building cxrlt2024 train phrase classifier dataloader...')
+                logger.info(f'{ANSI_BOLD}Building cxrlt2024 train phrase classifier dataloader...{ANSI_RESET}')
                 num_phrases_2_idxs = {}
                 for idx in train_indices:
                     num_phrases = len(phrase_idxs[idx])
@@ -669,7 +871,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_phrases_2_idxs[num_phrases] = [idx]
                 train_dataloaders = []
                 for num_phrases, indices in num_phrases_2_idxs.items():
-                    print(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
+                    logger.info(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
                     dataset = MIMICCXR_CXRLT2024_ClassificationDataset(
                         image_paths=image_paths, image_transform=train_image_transform,
                         phrase_embeddings=phrase_embeddings, phrase_idxs=phrase_idxs,
@@ -687,7 +889,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 self.cxrlt2024_custom_train_dataloader = SequentialDataLoader(train_dataloaders)
 
                 # Create dataset and dataloader for dev
-                print_bold('Building cxrlt2024 dev phrase classifier dataloader...')
+                logger.info(f'{ANSI_BOLD}Building cxrlt2024 dev phrase classifier dataloader...{ANSI_RESET}')
                 num_phrases_2_idxs = {}
                 for idx in dev_indices:
                     num_phrases = len(phrase_idxs[idx])
@@ -697,7 +899,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_phrases_2_idxs[num_phrases] = [idx]
                 dev_dataloaders = []
                 for num_phrases, indices in num_phrases_2_idxs.items():
-                    print(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
+                    logger.info(f'num_phrases = {num_phrases}, len(indices) = {len(indices)}')
                     dataset = MIMICCXR_CXRLT2024_ClassificationDataset(
                         image_paths=image_paths, image_transform=test_image_transform,
                         phrase_embeddings=phrase_embeddings, phrase_idxs=phrase_idxs,
@@ -717,7 +919,7 @@ class MIMICCXR_PhraseGroundingTrainer:
             if self.use_cxrlt2024_official_labels:
                 # We will create an additional dataloader for training the fact classifier
                 # using the official training labels provided by the challenge organizers
-                print_bold('Building cxrlt2024 train/val dataloader for fact classifier using official labels...')
+                logger.info(f'{ANSI_BOLD}Building cxrlt2024 train/val dataloader for fact classifier using official labels...{ANSI_RESET}')
                 data = load_pickle(cxrlt2024_official_training_labels_for_fact_classification_filepath)
                 dicom_ids = data['dicom_ids']
                 labels = data['labels']
@@ -727,17 +929,17 @@ class MIMICCXR_PhraseGroundingTrainer:
                 class_embeddings = data['class_embeddings']
                 assert labels.shape == (len(dicom_ids), len(class_embeddings))
                 assert len(train_indices) + len(val_indices) == len(dicom_ids)
-                print(f'len(dicom_ids) = {len(dicom_ids)}')
-                print(f'len(train_indices) = {len(train_indices)}')
-                print(f'len(val_indices) = {len(val_indices)}')
-                print(f'labels.shape = {labels.shape}')
-                print(f'class_embeddings.shape = {class_embeddings.shape}')
+                logger.info(f'len(dicom_ids) = {len(dicom_ids)}')
+                logger.info(f'len(train_indices) = {len(train_indices)}')
+                logger.info(f'len(val_indices) = {len(val_indices)}')
+                logger.info(f'labels.shape = {labels.shape}')
+                logger.info(f'class_embeddings.shape = {class_embeddings.shape}')
                 if use_all_cxrlt2024_official_labels_for_training:
-                    print_orange('Using all CXR-LT-2024 official labels for training the fact classifier', bold=True)
+                    logger.info('Using all CXR-LT-2024 official labels for training the fact classifier', bold=True)
                     train_indices += val_indices
                     val_indices = []
-                    print(f'len(train_indices) = {len(train_indices)}')
-                    print(f'len(val_indices) = {len(val_indices)}')
+                    logger.info(f'len(train_indices) = {len(train_indices)}')
+                    logger.info(f'len(val_indices) = {len(val_indices)}')
                 image_paths = []
                 for dicom_id in dicom_ids:
                     part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
@@ -748,10 +950,10 @@ class MIMICCXR_PhraseGroundingTrainer:
                 train_indices = [i for i in train_indices if dicom_ids[i] not in forbidden_train_dicom_ids]
                 len_after = len(train_indices)
                 if len_before != len_after:
-                    print_orange(f'{len_before - len_after} train indices removed due to forbidden_train_dicom_ids')
+                    logger.info(f'{len_before - len_after} train indices removed due to forbidden_train_dicom_ids')
 
                 if cxrlt2024_do_balanced_sampling:
-                    print_orange('Balanced sampling is enabled for CXR-LT-2024 fact classifier training')
+                    logger.info('Balanced sampling is enabled for CXR-LT-2024 fact classifier training')
                     # Group train indices for balanced sampling
                     grouped_indices = group_indices_for_balanced_sampling(
                         label_matrix=labels, indices=train_indices, label_names=class_names, min_group_size=100)
@@ -772,7 +974,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         weight = math.log2(len(indices)) ** 3
                         train_datasets.append(dataset)
                         train_weights.append(weight)
-                        print(f'  len(indices) = {len(indices)}, weight = {weight}')
+                        logger.info(f'  len(indices) = {len(indices)}, weight = {weight}')
                     self.cxrlt2024_official_train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
                     batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(class_names)), 1) # at least 1 image per batch
                     self.cxrlt2024_official_train_dataloader = DataLoader(self.cxrlt2024_official_train_dataset,
@@ -782,7 +984,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                                                     collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
                                                     pin_memory=True)
                 else:
-                    print_orange('Normal sampling is enabled for CXR-LT-2024 fact classifier training')
+                    logger.info('Normal sampling is enabled for CXR-LT-2024 fact classifier training')
                     self.cxrlt2024_official_train_dataset = ImageFactBasedMultilabelClassificationDataset(
                         image_paths=image_paths,
                         image_transform=train_image_transform,
@@ -802,7 +1004,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 
                 # Create val dataset
                 if len(val_indices) > 0:
-                    print_orange('Creating CXR-LT-2024 official val dataset and dataloader...')
+                    logger.info('Creating CXR-LT-2024 official val dataset and dataloader...')
                     val_dataset = ImageFactBasedMultilabelClassificationDataset(
                         image_paths=image_paths,
                         image_transform=test_image_transform,
@@ -821,7 +1023,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
         # Create train mimiccxr facts dataset
         if use_facts_for_train or use_facts_for_test:
-            print_magenta('Preparing MIMIC-CXR-Facts datasets and dataloaders for training/testing...', bold=True)
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing MIMIC-CXR-Facts datasets and dataloaders for training/testing...', bold=True)
             assert dicom_id_to_pos_neg_facts_filepath is not None
             assert fact_grounding_collate_batch_fn is not None
             assert num_train_workers is not None
@@ -831,17 +1033,17 @@ class MIMICCXR_PhraseGroundingTrainer:
             fact_embeddings = tmp['embeddings']
 
             if replace_phrase_embeddings_with_random_vectors:
-                print_orange('NOTE: Replacing fact_embeddings with random vectors', bold=True)
+                logger.info('NOTE: Replacing fact_embeddings with random vectors', bold=True)
                 save_path = f'{dicom_id_to_pos_neg_facts_filepath}.random_vectors.pkl'
                 if os.path.exists(save_path):
-                    print_orange(f'Random vectors already saved at {save_path}')
+                    logger.info(f'Random vectors already saved at {save_path}')
                     fact_embeddings = load_pickle(save_path)['fact_embeddings']
                 else:
                     fact_embeddings = np.random.randn(*fact_embeddings.shape).astype(fact_embeddings.dtype) # replace with random vectors
                     fact_embeddings /= np.linalg.norm(fact_embeddings, axis=1, keepdims=True) # normalize
                     save_dict = {'fact_embeddings': fact_embeddings}
                     save_pickle(save_dict, save_path)
-                    print_orange(f'Saved random vectors at {save_path}')
+                    logger.info(f'Saved random vectors at {save_path}')
 
             try:
                 # Backward compatibility
@@ -854,9 +1056,9 @@ class MIMICCXR_PhraseGroundingTrainer:
                 dicom_id_to_weak_neg_facts = tmp['dicom_id_to_weak_neg_facts']
                 dicom_ids_with_facts = set(dicom_id_to_pos_facts.keys())
                 use_strong_and_weak_negatives = True
-                print_orange('NOTE: Using strong and weak negatives for training...', bold=True)
+                logger.info('NOTE: Using strong and weak negatives for training...', bold=True)
 
-            print(f'fact_embeddings.shape = {fact_embeddings.shape}')
+            logger.info(f'fact_embeddings.shape = {fact_embeddings.shape}')
 
             if balance_long_middle_short_tail and use_facts_for_train: # only for training
                 assert report_fact_nli_integrated_data_filepath is not None
@@ -884,7 +1086,7 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             if use_interpret_cxr_challenge_split:
                 assert interpret_cxr_challenge_split_filepath is not None
-                print_bold(f'Using split from {interpret_cxr_challenge_split_filepath}')
+                logger.info(f'Using split from {interpret_cxr_challenge_split_filepath}')
                 challenge_split = load_pickle(interpret_cxr_challenge_split_filepath)
                 challenge_train_dicom_ids = set(challenge_split['train'])
                 challenge_val_dicom_ids = set(challenge_split['val'])
@@ -945,7 +1147,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         report_idxs[idx] = ridx
                     idx += 1
 
-            print(f'Total number of images: {idx}')
+            logger.info(f'Total number of images: {idx}')
             image_paths = image_paths[:idx]
             positive_facts = positive_facts[:idx]
             if use_strong_and_weak_negatives:
@@ -956,15 +1158,15 @@ class MIMICCXR_PhraseGroundingTrainer:
             report_idxs = report_idxs[:idx]
             aux = 0
             if use_facts_for_train:
-                print(f'len(train_indices) = {len(train_indices)}')
+                logger.info(f'len(train_indices) = {len(train_indices)}')
                 aux += len(train_indices)
             if use_facts_for_test:
-                print(f'len(test_indices) = {len(test_indices)}')
+                logger.info(f'len(test_indices) = {len(test_indices)}')
                 aux += len(test_indices)
             assert aux == idx # sanity check
             if use_facts_for_train and use_facts_for_test:
                 intersection = len(set(train_indices) & set(test_indices))
-                print(f'len(set(train_indices) & set(test_indices)) = {intersection}')
+                logger.info(f'len(set(train_indices) & set(test_indices)) = {intersection}')
                 assert intersection == 0 # no intersection
 
             # Calculate the average number of facts per image
@@ -985,8 +1187,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                         aux += num_facts
                 avg_facts_per_image = aux / len(train_indices)
                 train_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
-                print(f'avg_facts_per_image = {avg_facts_per_image}')
-                print(f'train_num_facts_per_image = {train_num_facts_per_image}')
+                logger.info(f'avg_facts_per_image = {avg_facts_per_image}')
+                logger.info(f'train_num_facts_per_image = {train_num_facts_per_image}')
             if use_facts_for_test:
                 aux = 0
                 for i in test_indices:                    
@@ -1004,17 +1206,17 @@ class MIMICCXR_PhraseGroundingTrainer:
                         aux += num_facts
                 avg_facts_per_image = aux / len(test_indices)
                 test_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
-                print(f'avg_facts_per_image = {avg_facts_per_image}')
-                print(f'test_num_facts_per_image = {test_num_facts_per_image}')
+                logger.info(f'avg_facts_per_image = {avg_facts_per_image}')
+                logger.info(f'test_num_facts_per_image = {test_num_facts_per_image}')
 
             # Create dataset and dataloader for training
             if use_facts_for_train:
-                print_bold('Building train fact dataloader...')
+                logger.info(f'{ANSI_BOLD}Building train fact dataloader...{ANSI_RESET}')
                 batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
-                print(f'batch_size = {batch_size}')
+                logger.info(f'batch_size = {batch_size}')
 
                 if balance_long_middle_short_tail:
-                    print('Balancing long, middle, and short tail classes...')
+                    logger.info('Balancing long, middle, and short tail classes...')
                     long_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _LONG_TAIL]
                     middle_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _MIDDLE_TAIL]
                     short_tail_indices = [i for i in train_indices if distribution_classes[report_idxs[i]] == _SHORT_TAIL]
@@ -1052,7 +1254,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         pin_memory=True,
                     )
                 else:
-                    print('Normal (unbalanced) training...')
+                    logger.info('Normal (unbalanced) training...')
                     train_fact_dataset = MIMICCXR_FactClassificationDataset(
                         image_paths=image_paths, image_transform=train_image_transform,
                         fact_embeddings=fact_embeddings,
@@ -1074,11 +1276,11 @@ class MIMICCXR_PhraseGroundingTrainer:
                     )
                 self.train_fact_dataset = train_fact_dataset
                 self.train_fact_dataloader = train_fact_dataloader
-                print(f'len(self.train_fact_dataloader) = {len(self.train_fact_dataloader)}')
+                logger.info(f'len(self.train_fact_dataloader) = {len(self.train_fact_dataloader)}')
 
             # Create dataset and dataloader for testing
             if use_facts_for_test:
-                print_bold('Building test fact dataloaders...')
+                logger.info(f'{ANSI_BOLD}Building test fact dataloaders...{ANSI_RESET}')
                 test_fact_dataset = MIMICCXR_FactClassificationDataset(
                     image_paths=image_paths, image_transform=test_image_transform,
                     fact_embeddings=fact_embeddings,
@@ -1101,264 +1303,457 @@ class MIMICCXR_PhraseGroundingTrainer:
                 )
                 self.test_fact_dataset = test_fact_dataset
                 self.test_fact_dataloader = test_fact_dataloader
-                print(f'len(self.test_fact_dataloader) = {len(self.test_fact_dataloader)}')
+                logger.info(f'len(self.test_fact_dataloader) = {len(self.test_fact_dataloader)}')
 
         # Create mscxr train/val/test dataset and dataloader
         if use_mscxr_for_train or use_mscxr_for_val or use_mscxr_for_test:
-            assert mscxr_phrase2embedding_filepath is not None
-            assert mscxr_phrase_grounding_collate_batch_fn is not None
-            assert dicom_id_to_pos_neg_facts_filepath is not None
-            options = []
-            if use_mscxr_for_train: options.append('train')
-            if use_mscxr_for_val: options.append('val')
-            if use_mscxr_for_test: options.append('test')
-            print_magenta(f'Preparing MS-CXR dataset and dataloaders for {", ".join(options)} ...', bold=True)
-            if use_mscxr_for_train:
-                assert num_train_workers is not None
-                assert train_image_transform is not None
-            if use_mscxr_for_val or use_mscxr_for_test:
-                assert num_test_workers is not None
-                assert test_image_transform is not None
-            if mscxr_test_on_all_images:
-                assert use_mscxr_for_test
-            
-            dicom_id_2_phrases_and_bboxes = get_ms_cxr_dicom_id_2_phrases_and_bboxes()
-            print(f'len(dicom_id_2_phrases_and_bboxes) = {len(dicom_id_2_phrases_and_bboxes)}')
+            if mscxr_do_grounding_only:
+                assert mscxr_phrase2embedding_filepath is not None
+                options = []
+                if use_mscxr_for_train: options.append('train')
+                if use_mscxr_for_val: options.append('val')
+                if use_mscxr_for_test: options.append('test')
+                logger.info(f'{ANSI_MAGENTA_BOLD}Preparing MS-CXR dataset and dataloaders for {", ".join(options)} (grounding only) ...{ANSI_RESET}')
+                if use_mscxr_for_train:
+                    assert num_train_workers is not None
+                    assert train_image_transform is not None
+                if use_mscxr_for_val or use_mscxr_for_test:
+                    assert num_test_workers is not None
+                    assert test_image_transform is not None
+                if mscxr_test_on_all_images:
+                    assert use_mscxr_for_test
+                
+                dicom_id_2_phrases_and_bboxes = get_ms_cxr_dicom_id_2_phrases_and_bboxes(bbox_format=bbox_format)
+                logger.info(f'len(dicom_id_2_phrases_and_bboxes) = {len(dicom_id_2_phrases_and_bboxes)}')
 
-            phrase2embedding = load_pickle(mscxr_phrase2embedding_filepath)
-            print(f'len(phrase2embedding) = {len(phrase2embedding)}')
-            phrases = list(phrase2embedding.keys())
-            phrases.sort()
-            phrase2idx = {p: i for i, p in enumerate(phrases)}
-            phrase_embeddings = np.array([phrase2embedding[p] for p in phrases])
-            print(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
-            
-            self.mscxr_phrases = phrases
-            self.mscxr_phrase2idx = phrase2idx
-            self.mscxr_phrase_embeddings = phrase_embeddings
+                phrase2embedding = load_pickle(mscxr_phrase2embedding_filepath)
+                logger.info(f'len(phrase2embedding) = {len(phrase2embedding)}')
+                phrases = list(phrase2embedding.keys())
+                phrases.sort()
+                phrase2idx = {p: i for i, p in enumerate(phrases)}
+                phrase_embeddings = np.array([phrase2embedding[p] for p in phrases])
+                logger.info(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+                
+                self.mscxr_phrases = phrases
+                self.mscxr_phrase2idx = phrase2idx
+                self.mscxr_phrase_embeddings = phrase_embeddings
 
-            tmp = get_cached_pickle_file(dicom_id_to_pos_neg_facts_filepath)
-            fact_embeddings = tmp['embeddings']
-            dicom_id_to_pos_facts = tmp['dicom_id_to_pos_facts']
-            dicom_id_to_strong_neg_facts = tmp['dicom_id_to_strong_neg_facts']
-            dicom_id_to_weak_neg_facts = tmp['dicom_id_to_weak_neg_facts']
-            print(f'fact_embeddings.shape = {fact_embeddings.shape}')
-
-            self.mscxr_facts = tmp['facts']
-            self.mscxr_fact_embeddings = fact_embeddings
-
-            BIG_ENOGUGH = 1000000
-            image_paths = [None] * BIG_ENOGUGH
-            dicom_ids = [None] * BIG_ENOGUGH
-            phrase_idxs = [None] * BIG_ENOGUGH
-            phrase_bboxes_and_classes = [None] * BIG_ENOGUGH
-            pos_fact_idxs = [None] * BIG_ENOGUGH
-            strong_neg_fact_idxs = [None] * BIG_ENOGUGH
-            weak_neg_fact_idxs = [None] * BIG_ENOGUGH
-            if use_mscxr_for_train or mscxr_test_on_all_images:
+                BIG_ENOGUGH = 1000000
+                image_paths = [None] * BIG_ENOGUGH
+                dicom_ids = [None] * BIG_ENOGUGH
+                phrase_idxs = [None] * BIG_ENOGUGH
+                phrase_bboxes = [None] * BIG_ENOGUGH
                 train_indices = []
-            if use_mscxr_for_val or mscxr_test_on_all_images:
                 val_indices = []
-            if use_mscxr_for_test:
                 test_indices = []
+                if use_mscxr_for_train:
+                    phrase_prob_masks = [None] * BIG_ENOGUGH
 
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
-            mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-            dicom_id_2_split = get_ms_cxr_dicom_id_2_split()
+                image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
+                mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+                dicom_id_2_split = get_ms_cxr_dicom_id_2_split()
 
-            idx = 0
-            for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                    mimiccxr_metadata['subject_ids'],
-                    mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
-                for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id not in dicom_id_2_split:
-                        continue
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    phrases_, bboxes_list_ = dicom_id_2_phrases_and_bboxes[dicom_id]
-                    phrase_idxs_ = [phrase2idx[p] for p in phrases_]
-                    pos_fact_idxs_ = dicom_id_to_pos_facts[dicom_id]
-                    strong_neg_fact_idxs_ = dicom_id_to_strong_neg_facts[dicom_id]
-                    weak_neg_fact_idxs_ = dicom_id_to_weak_neg_facts[dicom_id]
-                    dicom_ids[idx] = dicom_id
-                    phrase_idxs[idx] = phrase_idxs_
-                    flattened_bboxes_ = []
-                    classes_ = []
-                    for i, bboxes_ in enumerate(bboxes_list_): # bboxes_: List[Tuple[float, float, float, float]]
-                        flattened_bboxes_.extend(bboxes_)
-                        classes_.extend([i] * len(bboxes_))
-                    phrase_bboxes_and_classes[idx] = (flattened_bboxes_, classes_)
-                    pos_fact_idxs[idx] = pos_fact_idxs_
-                    strong_neg_fact_idxs[idx] = strong_neg_fact_idxs_
-                    weak_neg_fact_idxs[idx] = weak_neg_fact_idxs_
-                    split = dicom_id_2_split[dicom_id]
-                    if split == 'train':
-                        if use_mscxr_for_train or mscxr_test_on_all_images:
-                            train_indices.append(idx)
-                        else:
+                idx = 0
+                for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
+                    tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
+                        mimiccxr_metadata['subject_ids'],
+                        mimiccxr_metadata['study_ids'],
+                        mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                    for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                        if dicom_id not in dicom_id_2_split:
                             continue
-                    elif split == 'val':
-                        if use_mscxr_for_val or mscxr_test_on_all_images:
-                            val_indices.append(idx)
-                        else:
-                            continue
-                    elif split == 'test':
-                        if use_mscxr_for_test:
-                            test_indices.append(idx)
-                        else:
-                            continue
-                    else:
-                        raise ValueError(f'Invalid split: {split}')
-                    idx += 1
+                        image_path = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        phrases_, bboxes_list_ = dicom_id_2_phrases_and_bboxes[dicom_id]
+                        split = dicom_id_2_split[dicom_id]
+                        for phrase_, bboxes_ in zip(phrases_, bboxes_list_):
+                            phrase_idx = phrase2idx[phrase_]
+                            image_paths[idx] = image_path
+                            dicom_ids[idx] = dicom_id
+                            phrase_idxs[idx] = phrase_idx
+                            phrase_bboxes[idx] = bboxes_
+                            if use_mscxr_for_train:
+                                phrase_prob_masks[idx] = calculate_probabilistic_mask_from_bboxes(
+                                    bboxes=bboxes_,
+                                    mask_resolution=(mask_height, mask_width),
+                                    bbox_format=bbox_format,
+                                )
+                            if split == 'train':
+                                train_indices.append(idx)
+                            elif split == 'val':
+                                val_indices.append(idx)
+                            elif split == 'test':
+                                test_indices.append(idx)
+                            else:
+                                raise ValueError(f'Invalid split: {split}')
+                            idx += 1
 
-            print(f'Total number of images: {idx}')
-            print(f'phrase_bboxes_and_classes[0] = {phrase_bboxes_and_classes[0]}')
-            assert idx > 0
-            image_paths = image_paths[:idx]
-            dicom_ids = dicom_ids[:idx]
-            phrase_idxs = phrase_idxs[:idx]
-            phrase_bboxes_and_classes = phrase_bboxes_and_classes[:idx]
-            pos_fact_idxs = pos_fact_idxs[:idx]
-            strong_neg_fact_idxs = strong_neg_fact_idxs[:idx]
-            
-            self.mscxr_phrase_idxs = phrase_idxs
-            self.mscxr_phrase_bboxes_and_classes = phrase_bboxes_and_classes
-            self.mscxr_pos_fact_idxs = pos_fact_idxs
-            self.mscxr_strong_neg_fact_idxs = strong_neg_fact_idxs
-            self.mscxr_weak_neg_fact_idxs = weak_neg_fact_idxs
-            if use_mscxr_for_train or mscxr_test_on_all_images:
+                assert idx > 0                
+                image_paths = image_paths[:idx]
+                dicom_ids = dicom_ids[:idx]
+                phrase_idxs = phrase_idxs[:idx]
+                phrase_bboxes = phrase_bboxes[:idx]
+                if use_mscxr_for_train:
+                    phrase_prob_masks = phrase_prob_masks[:idx]
+                logger.info(f'Total number of instances: {idx}')
+                
+                self.mscxr_phrase_idxs = phrase_idxs
+                self.mscxr_phrase_bboxes = phrase_bboxes
                 self.mscxr_train_indices = train_indices
-            if use_mscxr_for_val or mscxr_test_on_all_images:
                 self.mscxr_val_indices = val_indices
-            if use_mscxr_for_test:
                 self.mscxr_test_indices = test_indices
 
-            # Calculate the average number of facts per image
-            def _calc_avg_facts_per_image(indices):
-                aux = 0
-                for i in indices:
-                    num_facts = len(phrase_idxs[i]) + len(pos_fact_idxs[i]) + len(strong_neg_fact_idxs[i]) + len(weak_neg_fact_idxs[i])
-                    assert num_facts > 0
-                    aux += num_facts
-                return aux / len(indices)
-            if use_mscxr_for_train:
-                avg_facts_per_image = _calc_avg_facts_per_image(train_indices)
-                train_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
-                print(f'avg_facts_per_image = {avg_facts_per_image}')
-                print(f'train_num_facts_per_image = {train_num_facts_per_image}')
-            if use_mscxr_for_val:
-                avg_facts_per_image = _calc_avg_facts_per_image(val_indices)
-                val_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
-                print(f'avg_facts_per_image = {avg_facts_per_image}')
-                print(f'val_num_facts_per_image = {val_num_facts_per_image}')
-            if use_mscxr_for_test:
-                avg_facts_per_image = _calc_avg_facts_per_image(test_indices)
-                test_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
-                print(f'avg_facts_per_image = {avg_facts_per_image}')
-                print(f'test_num_facts_per_image = {test_num_facts_per_image}')
+                if use_mscxr_for_train:
+                    logger.info(f'len(train_indices) = {len(train_indices)}')
+                    assert len(train_indices) > 0
+                    # Create dataset and dataloader for training
+                    logger.info(f'{ANSI_BOLD}Building train fact dataloader...{ANSI_RESET}')
+                    batch_size = max_images_per_batch
+                    logger.info(f'batch_size = {batch_size}') 
+                    if mscxr_training_data_mode == MS_CXR_TrainingMode.TRAIN:
+                        actual_train_indices = train_indices
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.VAL:
+                        actual_train_indices = val_indices
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.TEST:
+                        actual_train_indices = test_indices
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.ALL:
+                        actual_train_indices = train_indices + val_indices + test_indices
+                    else: raise ValueError(f'Invalid training data mode: {mscxr_training_data_mode}')
+                    mscxr_train_dataset = MSCXR_PhraseGroundingDataset(
+                        image_paths=image_paths,
+                        image_transform=train_image_transform,
+                        phrase_idxs=phrase_idxs,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes=phrase_bboxes,
+                        phrase_prob_masks=phrase_prob_masks,
+                        indices=actual_train_indices,
+                        feature_map_size=(mask_height, mask_width),
+                        data_augmentation_enabled=data_augmentation_enabled,
+                        for_training=True,
+                        bbox_format=bbox_format)
+                    mscxr_train_dataloader = DataLoader(
+                        mscxr_train_dataset,
+                        batch_size=batch_size,
+                        shuffle=True,
+                        num_workers=num_train_workers,
+                        collate_fn=mscxr_train_dataset.collate_fn,
+                        pin_memory=True,
+                    )
+                    self.mscxr_train_dataset = mscxr_train_dataset
+                    self.mscxr_train_dataloader = mscxr_train_dataloader
+                    logger.info(f'len(self.mscxr_train_dataset) = {len(self.mscxr_train_dataset)}')
+                    logger.info(f'len(self.mscxr_train_dataloader) = {len(self.mscxr_train_dataloader)}')
 
-            if use_mscxr_for_train:
-                print(f'len(train_indices) = {len(train_indices)}')
-                assert len(train_indices) > 0
-                # Create dataset and dataloader for training
-                print_bold('Building train fact dataloader...')
-                batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
-                print(f'batch_size = {batch_size}')
-                mscxr_train_dataset = MSCXR_PhraseGroundingDataset(
-                    image_paths=image_paths, image_transform=train_image_transform,
-                    phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
-                    phrase_bboxes_and_classes=phrase_bboxes_and_classes,
-                    positive_fact_idxs=pos_fact_idxs,
-                    strong_neg_fact_idxs=strong_neg_fact_idxs,
-                    weak_neg_fact_idxs=weak_neg_fact_idxs,
-                    fact_embeddings=fact_embeddings,
-                    indices=train_indices,
-                    num_facts_per_image=train_num_facts_per_image,
-                    feature_map_size=(mask_height, mask_width),
-                    data_augmentation_enabled=data_augmentation_enabled,
-                    for_training=True)
-                mscxr_train_dataloader = DataLoader(
-                    mscxr_train_dataset,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=num_train_workers,
-                    collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=True),
-                    pin_memory=True,
-                )
-                self.mscxr_train_dataset = mscxr_train_dataset
-                self.mscxr_train_dataloader = mscxr_train_dataloader
-                print(f'len(self.mscxr_train_dataset) = {len(self.mscxr_train_dataset)}')
-                print(f'len(self.mscxr_train_dataloader) = {len(self.mscxr_train_dataloader)}')
+                if use_mscxr_for_val:
+                    logger.info(f'len(val_indices) = {len(val_indices)}')
+                    assert len(val_indices) > 0
+                    # Create dataset and dataloader for validation
+                    logger.info(f'{ANSI_BOLD}Building val fact dataloader...{ANSI_RESET}')
+                    batch_size = int(max_images_per_batch * test_batch_size_factor)
+                    logger.info(f'batch_size = {batch_size}')
+                    mscxr_val_dataset = MSCXR_PhraseGroundingDataset(
+                        image_paths=image_paths,
+                        image_transform=test_image_transform,
+                        phrase_idxs=phrase_idxs,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes=phrase_bboxes,
+                        indices=val_indices,
+                        bbox_format=bbox_format,
+                        for_training=False)
+                    mscxr_val_dataloader = DataLoader(
+                        mscxr_val_dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=mscxr_val_dataset.collate_fn,
+                        pin_memory=True,
+                    )
+                    self.mscxr_val_dataset = mscxr_val_dataset
+                    self.mscxr_val_dataloader = mscxr_val_dataloader
+                    logger.info(f'len(self.mscxr_val_dataset) = {len(self.mscxr_val_dataset)}')
+                    logger.info(f'len(self.mscxr_val_dataloader) = {len(self.mscxr_val_dataloader)}')
 
-            if use_mscxr_for_val:
-                print(f'len(val_indices) = {len(val_indices)}')
-                assert len(val_indices) > 0
-                # Create dataset and dataloader for validation
-                print_bold('Building val fact dataloader...')
-                batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // val_num_facts_per_image), 1) * test_batch_size_factor)
-                print(f'batch_size = {batch_size}')
-                mscxr_val_dataset = MSCXR_PhraseGroundingDataset(
-                    image_paths=image_paths, image_transform=test_image_transform,
-                    phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
-                    phrase_bboxes_and_classes=phrase_bboxes_and_classes,
-                    positive_fact_idxs=pos_fact_idxs,
-                    strong_neg_fact_idxs=strong_neg_fact_idxs,
-                    weak_neg_fact_idxs=weak_neg_fact_idxs,
-                    fact_embeddings=fact_embeddings,
-                    indices=val_indices,
-                    num_facts_per_image=val_num_facts_per_image,
-                    feature_map_size=(mask_height, mask_width),
-                    for_training=False)
-                mscxr_val_dataloader = DataLoader(
-                    mscxr_val_dataset,
-                    batch_size=batch_size,
-                    shuffle=False,
-                    num_workers=num_test_workers,
-                    collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
-                    pin_memory=True,
-                )
-                self.mscxr_val_dataset = mscxr_val_dataset
-                self.mscxr_val_dataloader = mscxr_val_dataloader
-                print(f'len(self.mscxr_val_dataset) = {len(self.mscxr_val_dataset)}')
-                print(f'len(self.mscxr_val_dataloader) = {len(self.mscxr_val_dataloader)}')
+                if use_mscxr_for_test:
+                    logger.info(f'len(test_indices) = {len(test_indices)}')
+                    assert len(test_indices) > 0
+                    # Create dataset and dataloader for testing
+                    logger.info(f'{ANSI_BOLD}Building test fact dataloader...{ANSI_RESET}')
+                    batch_size = int(max_images_per_batch * test_batch_size_factor)
+                    logger.info(f'batch_size = {batch_size}')
+                    mscxr_test_dataset = MSCXR_PhraseGroundingDataset(
+                        image_paths=image_paths,
+                        image_transform=test_image_transform,
+                        phrase_idxs=phrase_idxs,
+                        phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes=phrase_bboxes,
+                        indices=test_indices,
+                        bbox_format=bbox_format,
+                        for_training=False)
+                    mscxr_test_dataloader = DataLoader(
+                        mscxr_test_dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=mscxr_test_dataset.collate_fn,
+                        pin_memory=True,
+                    )
+                    self.mscxr_test_dataset = mscxr_test_dataset
+                    self.mscxr_test_dataloader = mscxr_test_dataloader
+                    logger.info(f'len(self.mscxr_test_dataset) = {len(self.mscxr_test_dataset)}')
+                    logger.info(f'len(self.mscxr_test_dataloader) = {len(self.mscxr_test_dataloader)}')
+            else:
+                assert mscxr_phrase2embedding_filepath is not None
+                assert mscxr_phrase_grounding_collate_batch_fn is not None
+                assert dicom_id_to_pos_neg_facts_filepath is not None
+                options = []
+                if use_mscxr_for_train: options.append('train')
+                if use_mscxr_for_val: options.append('val')
+                if use_mscxr_for_test: options.append('test')
+                logger.info(f'{ANSI_MAGENTA_BOLD}Preparing MS-CXR dataset and dataloaders for {", ".join(options)} ...{ANSI_RESET}')
+                if use_mscxr_for_train:
+                    assert num_train_workers is not None
+                    assert train_image_transform is not None
+                if use_mscxr_for_val or use_mscxr_for_test:
+                    assert num_test_workers is not None
+                    assert test_image_transform is not None
+                if mscxr_test_on_all_images:
+                    assert use_mscxr_for_test
+                
+                dicom_id_2_phrases_and_bboxes = get_ms_cxr_dicom_id_2_phrases_and_bboxes(bbox_format=bbox_format)
+                logger.info(f'len(dicom_id_2_phrases_and_bboxes) = {len(dicom_id_2_phrases_and_bboxes)}')
 
-            if use_mscxr_for_test:
-                print(f'len(test_indices) = {len(test_indices)}')
-                assert len(test_indices) > 0
-                # Create dataset and dataloader for testing
-                print_bold('Building test fact dataloader...')
-                batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // test_num_facts_per_image), 1) * test_batch_size_factor)
-                print(f'batch_size = {batch_size}')
-                mscxr_test_dataset = MSCXR_PhraseGroundingDataset(
-                    image_paths=image_paths, image_transform=test_image_transform,
-                    phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
-                    phrase_bboxes_and_classes=phrase_bboxes_and_classes,
-                    positive_fact_idxs=pos_fact_idxs,
-                    strong_neg_fact_idxs=strong_neg_fact_idxs,
-                    weak_neg_fact_idxs=weak_neg_fact_idxs,
-                    fact_embeddings=fact_embeddings,
-                    indices=(train_indices + val_indices + test_indices) if mscxr_test_on_all_images else test_indices,
-                    num_facts_per_image=test_num_facts_per_image,
-                    feature_map_size=(mask_height, mask_width),
-                    for_training=False)
-                mscxr_test_dataloader = DataLoader(
-                    mscxr_test_dataset,
-                    batch_size=batch_size,
-                    shuffle=False,
-                    num_workers=num_test_workers,
-                    collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
-                    pin_memory=True,
-                )
-                self.mscxr_test_dataset = mscxr_test_dataset
-                self.mscxr_test_dataloader = mscxr_test_dataloader
-                print(f'len(self.mscxr_test_dataset) = {len(self.mscxr_test_dataset)}')
-                print(f'len(self.mscxr_test_dataloader) = {len(self.mscxr_test_dataloader)}')
+                phrase2embedding = load_pickle(mscxr_phrase2embedding_filepath)
+                logger.info(f'len(phrase2embedding) = {len(phrase2embedding)}')
+                phrases = list(phrase2embedding.keys())
+                phrases.sort()
+                phrase2idx = {p: i for i, p in enumerate(phrases)}
+                phrase_embeddings = np.array([phrase2embedding[p] for p in phrases])
+                logger.info(f'phrase_embeddings.shape = {phrase_embeddings.shape}')
+                
+                self.mscxr_phrases = phrases
+                self.mscxr_phrase2idx = phrase2idx
+                self.mscxr_phrase_embeddings = phrase_embeddings
 
+                tmp = get_cached_pickle_file(dicom_id_to_pos_neg_facts_filepath)
+                fact_embeddings = tmp['embeddings']
+                dicom_id_to_pos_facts = tmp['dicom_id_to_pos_facts']
+                dicom_id_to_strong_neg_facts = tmp['dicom_id_to_strong_neg_facts']
+                dicom_id_to_weak_neg_facts = tmp['dicom_id_to_weak_neg_facts']
+                logger.info(f'fact_embeddings.shape = {fact_embeddings.shape}')
+
+                self.mscxr_facts = tmp['facts']
+                self.mscxr_fact_embeddings = fact_embeddings
+
+                BIG_ENOGUGH = 1000000
+                image_paths = [None] * BIG_ENOGUGH
+                dicom_ids = [None] * BIG_ENOGUGH
+                phrase_idxs = [None] * BIG_ENOGUGH
+                phrase_bboxes_and_classes = [None] * BIG_ENOGUGH
+                pos_fact_idxs = [None] * BIG_ENOGUGH
+                strong_neg_fact_idxs = [None] * BIG_ENOGUGH
+                weak_neg_fact_idxs = [None] * BIG_ENOGUGH
+                if use_mscxr_for_train or mscxr_test_on_all_images:
+                    train_indices = []
+                if use_mscxr_for_val or mscxr_test_on_all_images:
+                    val_indices = []
+                if use_mscxr_for_test:
+                    test_indices = []
+
+                image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
+                mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
+                dicom_id_2_split = get_ms_cxr_dicom_id_2_split()
+
+                idx = 0
+                for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
+                    tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
+                        mimiccxr_metadata['subject_ids'],
+                        mimiccxr_metadata['study_ids'],
+                        mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                    for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                        if dicom_id not in dicom_id_2_split:
+                            continue
+                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        phrases_, bboxes_list_ = dicom_id_2_phrases_and_bboxes[dicom_id]
+                        phrase_idxs_ = [phrase2idx[p] for p in phrases_]
+                        pos_fact_idxs_ = dicom_id_to_pos_facts[dicom_id]
+                        strong_neg_fact_idxs_ = dicom_id_to_strong_neg_facts[dicom_id]
+                        weak_neg_fact_idxs_ = dicom_id_to_weak_neg_facts[dicom_id]
+                        dicom_ids[idx] = dicom_id
+                        phrase_idxs[idx] = phrase_idxs_
+                        flattened_bboxes_ = []
+                        classes_ = []
+                        for i, bboxes_ in enumerate(bboxes_list_): # bboxes_: List[Tuple[float, float, float, float]]
+                            flattened_bboxes_.extend(bboxes_)
+                            classes_.extend([i] * len(bboxes_))
+                        phrase_bboxes_and_classes[idx] = (flattened_bboxes_, classes_)
+                        pos_fact_idxs[idx] = pos_fact_idxs_
+                        strong_neg_fact_idxs[idx] = strong_neg_fact_idxs_
+                        weak_neg_fact_idxs[idx] = weak_neg_fact_idxs_
+                        split = dicom_id_2_split[dicom_id]
+                        if split == 'train':
+                            if use_mscxr_for_train or mscxr_test_on_all_images:
+                                train_indices.append(idx)
+                            else:
+                                continue
+                        elif split == 'val':
+                            if use_mscxr_for_val or mscxr_test_on_all_images:
+                                val_indices.append(idx)
+                            else:
+                                continue
+                        elif split == 'test':
+                            if use_mscxr_for_test:
+                                test_indices.append(idx)
+                            else:
+                                continue
+                        else:
+                            raise ValueError(f'Invalid split: {split}')
+                        idx += 1
+
+                logger.info(f'Total number of images: {idx}')
+                logger.info(f'phrase_bboxes_and_classes[0] = {phrase_bboxes_and_classes[0]}')
+                assert idx > 0
+                image_paths = image_paths[:idx]
+                dicom_ids = dicom_ids[:idx]
+                phrase_idxs = phrase_idxs[:idx]
+                phrase_bboxes_and_classes = phrase_bboxes_and_classes[:idx]
+                pos_fact_idxs = pos_fact_idxs[:idx]
+                strong_neg_fact_idxs = strong_neg_fact_idxs[:idx]
+                
+                self.mscxr_phrase_idxs = phrase_idxs
+                self.mscxr_phrase_bboxes_and_classes = phrase_bboxes_and_classes
+                self.mscxr_pos_fact_idxs = pos_fact_idxs
+                self.mscxr_strong_neg_fact_idxs = strong_neg_fact_idxs
+                self.mscxr_weak_neg_fact_idxs = weak_neg_fact_idxs
+                if use_mscxr_for_train or mscxr_test_on_all_images:
+                    self.mscxr_train_indices = train_indices
+                if use_mscxr_for_val or mscxr_test_on_all_images:
+                    self.mscxr_val_indices = val_indices
+                if use_mscxr_for_test:
+                    self.mscxr_test_indices = test_indices
+
+                # Calculate the average number of facts per image
+                def _calc_avg_facts_per_image(indices):
+                    aux = 0
+                    for i in indices:
+                        num_facts = len(phrase_idxs[i]) + len(pos_fact_idxs[i]) + len(strong_neg_fact_idxs[i]) + len(weak_neg_fact_idxs[i])
+                        assert num_facts > 0
+                        aux += num_facts
+                    return aux / len(indices)
+                if use_mscxr_for_train:
+                    avg_facts_per_image = _calc_avg_facts_per_image(train_indices)
+                    train_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
+                    logger.info(f'avg_facts_per_image = {avg_facts_per_image}')
+                    logger.info(f'train_num_facts_per_image = {train_num_facts_per_image}')
+                if use_mscxr_for_val:
+                    avg_facts_per_image = _calc_avg_facts_per_image(val_indices)
+                    val_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
+                    logger.info(f'avg_facts_per_image = {avg_facts_per_image}')
+                    logger.info(f'val_num_facts_per_image = {val_num_facts_per_image}')
+                if use_mscxr_for_test:
+                    avg_facts_per_image = _calc_avg_facts_per_image(test_indices)
+                    test_num_facts_per_image = min(max_phrases_per_image, int(avg_facts_per_image))
+                    logger.info(f'avg_facts_per_image = {avg_facts_per_image}')
+                    logger.info(f'test_num_facts_per_image = {test_num_facts_per_image}')
+
+                if use_mscxr_for_train:
+                    logger.info(f'len(train_indices) = {len(train_indices)}')
+                    assert len(train_indices) > 0
+                    # Create dataset and dataloader for training
+                    logger.info(f'{ANSI_BOLD}Building train fact dataloader...{ANSI_RESET}')
+                    batch_size = max(min(max_images_per_batch, max_phrases_per_batch // train_num_facts_per_image), 1) # at least 1
+                    logger.info(f'batch_size = {batch_size}')
+                    mscxr_train_dataset = MSCXR_PhraseGroundingAndClassificationDataset(
+                        image_paths=image_paths, image_transform=train_image_transform,
+                        phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes_and_classes=phrase_bboxes_and_classes,
+                        positive_fact_idxs=pos_fact_idxs,
+                        strong_neg_fact_idxs=strong_neg_fact_idxs,
+                        weak_neg_fact_idxs=weak_neg_fact_idxs,
+                        fact_embeddings=fact_embeddings,
+                        indices=train_indices,
+                        num_facts_per_image=train_num_facts_per_image,
+                        feature_map_size=(mask_height, mask_width),
+                        data_augmentation_enabled=data_augmentation_enabled,
+                        for_training=True, bbox_format=bbox_format)
+                    mscxr_train_dataloader = DataLoader(
+                        mscxr_train_dataset,
+                        batch_size=batch_size,
+                        shuffle=True,
+                        num_workers=num_train_workers,
+                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=True),
+                        pin_memory=True,
+                    )
+                    self.mscxr_train_dataset = mscxr_train_dataset
+                    self.mscxr_train_dataloader = mscxr_train_dataloader
+                    logger.info(f'len(self.mscxr_train_dataset) = {len(self.mscxr_train_dataset)}')
+                    logger.info(f'len(self.mscxr_train_dataloader) = {len(self.mscxr_train_dataloader)}')
+
+                if use_mscxr_for_val:
+                    logger.info(f'len(val_indices) = {len(val_indices)}')
+                    assert len(val_indices) > 0
+                    # Create dataset and dataloader for validation
+                    logger.info(f'{ANSI_BOLD}Building val fact dataloader...{ANSI_RESET}')
+                    batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // val_num_facts_per_image), 1) * test_batch_size_factor)
+                    logger.info(f'batch_size = {batch_size}')
+                    mscxr_val_dataset = MSCXR_PhraseGroundingAndClassificationDataset(
+                        image_paths=image_paths, image_transform=test_image_transform,
+                        phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes_and_classes=phrase_bboxes_and_classes,
+                        positive_fact_idxs=pos_fact_idxs,
+                        strong_neg_fact_idxs=strong_neg_fact_idxs,
+                        weak_neg_fact_idxs=weak_neg_fact_idxs,
+                        fact_embeddings=fact_embeddings,
+                        indices=val_indices,
+                        num_facts_per_image=val_num_facts_per_image,
+                        feature_map_size=(mask_height, mask_width),
+                        for_training=False, bbox_format=bbox_format)
+                    mscxr_val_dataloader = DataLoader(
+                        mscxr_val_dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
+                        pin_memory=True,
+                    )
+                    self.mscxr_val_dataset = mscxr_val_dataset
+                    self.mscxr_val_dataloader = mscxr_val_dataloader
+                    logger.info(f'len(self.mscxr_val_dataset) = {len(self.mscxr_val_dataset)}')
+                    logger.info(f'len(self.mscxr_val_dataloader) = {len(self.mscxr_val_dataloader)}')
+
+                if use_mscxr_for_test:
+                    logger.info(f'len(test_indices) = {len(test_indices)}')
+                    assert len(test_indices) > 0
+                    # Create dataset and dataloader for testing
+                    logger.info(f'{ANSI_BOLD}Building test fact dataloader...{ANSI_RESET}')
+                    batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // test_num_facts_per_image), 1) * test_batch_size_factor)
+                    logger.info(f'batch_size = {batch_size}')
+                    mscxr_test_dataset = MSCXR_PhraseGroundingAndClassificationDataset(
+                        image_paths=image_paths, image_transform=test_image_transform,
+                        phrase_idxs=phrase_idxs, phrase_embeddings=phrase_embeddings,
+                        phrase_bboxes_and_classes=phrase_bboxes_and_classes,
+                        positive_fact_idxs=pos_fact_idxs,
+                        strong_neg_fact_idxs=strong_neg_fact_idxs,
+                        weak_neg_fact_idxs=weak_neg_fact_idxs,
+                        fact_embeddings=fact_embeddings,
+                        indices=(train_indices + val_indices + test_indices) if mscxr_test_on_all_images else test_indices,
+                        num_facts_per_image=test_num_facts_per_image,
+                        feature_map_size=(mask_height, mask_width),
+                        for_training=False, bbox_format=bbox_format)
+                    mscxr_test_dataloader = DataLoader(
+                        mscxr_test_dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        num_workers=num_test_workers,
+                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
+                        pin_memory=True,
+                    )
+                    self.mscxr_test_dataset = mscxr_test_dataset
+                    self.mscxr_test_dataloader = mscxr_test_dataloader
+                    logger.info(f'len(self.mscxr_test_dataset) = {len(self.mscxr_test_dataset)}')
+                    logger.info(f'len(self.mscxr_test_dataloader) = {len(self.mscxr_test_dataloader)}')
 
         # Create train chest imagenome dataset
         if use_chest_imagenome_for_train:
-            print_magenta('Preparing Chest Imagenome dataset and dataloader for training...', bold=True)
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome dataset and dataloader for training...{ANSI_RESET}')
 
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
             assert mask_width is not None
@@ -1367,15 +1762,15 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert num_train_workers is not None
             assert train_image_transform is not None
 
-            print(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
+            logger.info(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']
             assert bbox_phrase_embeddings.shape[0] == len(bbox_phrases)
-            print(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
-            print(f'len(bbox_phrases) = {len(bbox_phrases)}')
+            logger.info(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
+            logger.info(f'len(bbox_phrases) = {len(bbox_phrases)}')
             for phrase in bbox_phrases:
-                print('\t', phrase)
+                logger.info('\t', phrase)
 
             BIG_ENOGUGH = 1000000
             image_paths = [None] * BIG_ENOGUGH
@@ -1417,7 +1812,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     phrase_grounding_masks[idx] = phrase_grounding_masks_array[i]
                     idx += 1
 
-            print(f'Total number of images: {idx}')
+            logger.info(f'Total number of images: {idx}')
             image_paths = image_paths[:idx]
             chest_imagenome_bbox_coords = chest_imagenome_bbox_coords[:idx]
             chest_imagenome_bbox_presence = chest_imagenome_bbox_presence[:idx]
@@ -1460,7 +1855,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         
         # Create chest imagenome test dataset and dataloader
         if use_chest_imagenome_gold_for_test:
-            print_magenta('Preparing Chest Imagenome dataset and dataloader for testing...', bold=True)
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome dataset and dataloader for testing...{ANSI_RESET}')
             assert mask_width is not None
             assert mask_height is not None
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
@@ -1470,17 +1865,17 @@ class MIMICCXR_PhraseGroundingTrainer:
 
             _, gold_pres_indices = get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices()
 
-            print(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
+            logger.info(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
             tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
             bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
             bbox_phrases = tmp['bbox_phrases']
             bbox_phrase_embeddings = bbox_phrase_embeddings[gold_pres_indices] # use only gold subset
             bbox_phrases = [bbox_phrases[i] for i in gold_pres_indices] # use only gold subset
             assert bbox_phrase_embeddings.shape[0] == len(bbox_phrases)
-            print(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
-            print(f'len(bbox_phrases) = {len(bbox_phrases)}')
+            logger.info(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
+            logger.info(f'len(bbox_phrases) = {len(bbox_phrases)}')
             for phrase in bbox_phrases:
-                print('\t', phrase)
+                logger.info('\t', phrase)
             self.test_chest_imagenome_gold_bbox_phrases = bbox_phrases
 
             BIG_ENOGUGH = 1000000
@@ -1516,7 +1911,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     phrase_classification_labels[idx] = bbox_presence # use bbox_presence as classification labels, use only gold subset
                     idx += 1
 
-            print(f'Total number of images: {idx}')
+            logger.info(f'Total number of images: {idx}')
             image_paths = image_paths[:idx]
             chest_imagenome_bbox_coords = chest_imagenome_bbox_coords[:idx]
             chest_imagenome_bbox_presence = chest_imagenome_bbox_presence[:idx]

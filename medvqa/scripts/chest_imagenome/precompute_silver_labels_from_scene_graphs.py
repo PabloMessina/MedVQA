@@ -2,8 +2,8 @@ import argparse
 import os
 import numpy as np
 from tqdm import tqdm
-from medvqa.utils.hashing import hash_string
-from medvqa.utils.files import load_pickle, save_pickle
+from medvqa.utils.hashing_utils import hash_string
+from medvqa.utils.files_utils import load_pickle, save_pickle
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_CACHE_DIR
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     extract_labels_from_scene_graph,

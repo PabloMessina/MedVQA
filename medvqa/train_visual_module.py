@@ -70,7 +70,7 @@ from medvqa.metrics import (
 )
 from medvqa.models.checkpoint import load_metadata
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_checkpoint_folder_path,
 )
 from medvqa.training.vision import get_engine
@@ -83,8 +83,8 @@ from medvqa.metrics.utils import get_merge_metrics_fn
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
 from medvqa.datasets.iuxray.iuxray_vision_dataset_management import IUXRAY_VisualModuleTrainer
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta
-from medvqa.utils.metrics import average_ignoring_nones_and_nans
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_magenta
+from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

@@ -4,7 +4,7 @@ from imagesize import get as get_image_size
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_LABELS
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 load_dotenv()
 
 import os

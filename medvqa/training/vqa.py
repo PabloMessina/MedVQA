@@ -14,7 +14,7 @@ from medvqa.utils.constants import (
     VINBIG_DATASET_ID,
     MetricNames,
 )
-from medvqa.utils.logging import print_magenta
+from medvqa.utils.logging_utils import print_magenta
 
 def get_step_fn(model, optimizer, nlg_criterion, tokenizer, training, device,
         use_visual_module_only=False,

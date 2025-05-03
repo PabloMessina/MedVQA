@@ -80,7 +80,7 @@ from medvqa.datasets.dataloading_utils import (
     SequentialDataLoader,
 )
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_cached_pickle_file,
     get_file_path_with_hashing_if_too_long,
@@ -88,8 +88,8 @@ from medvqa.utils.files import (
     load_jsonl, load_pickle,
     read_lines_from_txt, save_pickle,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_orange, print_red, print_green
-from medvqa.utils.metrics import best_threshold_and_f1_score, f1_between_dicts
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_orange, print_red, print_green
+from medvqa.utils.metrics_utils import best_threshold_and_f1_score, f1_between_dicts
 
 class _EvalModes:
     MIMICCXR_TEST_SET_LABEL_BASED = 'mimiccxr_test_set_label_based'
@@ -4653,7 +4653,7 @@ class CXRLT2024EnsemblePredictionsInspector:
         dicom_id2ridx = get_imageId2reportId()
         ridx = dicom_id2ridx[dicom_id]
         report_filepath = self.metadata['filepaths'][ridx]
-        from medvqa.utils.files import read_txt
+        from medvqa.utils.files_utils import read_txt
         print(read_txt(report_filepath))
         print()
         print_bold('Ground truth image paths:')

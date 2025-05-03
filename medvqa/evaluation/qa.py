@@ -1,5 +1,5 @@
-from medvqa.utils.files import get_cached_json_file
-from medvqa.utils.metrics import chexpert_label_array_to_string
+from medvqa.utils.files_utils import get_cached_json_file
+from medvqa.utils.metrics_utils import chexpert_label_array_to_string
 import random
 
 class QAExamplePlotter:

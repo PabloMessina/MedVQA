@@ -1,4 +1,4 @@
-from medvqa.utils.files import save_to_json
+from medvqa.utils.files_utils import save_to_json
 from medvqa.datasets.qa_pairs_extractor import QuestionAnswerExtractor
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.datasets.mimiccxr.preprocessing import (

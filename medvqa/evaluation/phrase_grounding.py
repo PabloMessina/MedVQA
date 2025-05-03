@@ -1,6 +1,6 @@
 from tqdm import tqdm
 import pandas as pd
-from medvqa.utils.files import get_cached_pickle_file
+from medvqa.utils.files_utils import get_cached_pickle_file
 
 _empty_dict = {}
 

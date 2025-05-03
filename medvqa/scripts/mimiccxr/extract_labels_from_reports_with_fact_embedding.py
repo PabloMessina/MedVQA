@@ -11,7 +11,7 @@ from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_jsonl_file,
     get_cached_json_file,
     get_file_path_with_hashing_if_too_long,
@@ -20,7 +20,7 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_bold, print_magenta, print_orange
+from medvqa.utils.logging_utils import print_blue, print_bold, print_magenta, print_orange
 
 class SentenceRarenessScorer:
     

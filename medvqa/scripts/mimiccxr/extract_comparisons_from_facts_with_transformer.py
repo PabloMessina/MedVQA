@@ -8,9 +8,9 @@ from tqdm import tqdm
 
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.scripts.mimiccxr.extract_comparisons_from_facts_with_openai import _ALLOWED_CATEGORIES
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl
+from medvqa.utils.files_utils import load_jsonl
 
 if __name__ == '__main__':
 

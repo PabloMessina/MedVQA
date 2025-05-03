@@ -25,7 +25,7 @@ from medvqa.evaluation.bootstrapping import (
     stratified_vinbig_bootstrap_iou_map,
 )
 from medvqa.metrics.bbox.utils import (
-    calculate_exact_iou_union,
+    compute_mean_bbox_union_iou,
     compute_iou_with_nms,
     compute_mAP__yolov11,
     compute_mean_iou_per_class__yolov11,
@@ -36,8 +36,8 @@ from medvqa.metrics.bbox.utils import (
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn, prc_auc_score
 from medvqa.models.vision.visual_modules import RawImageEncoding
-from medvqa.utils.files import get_results_folder_path, save_pickle
-from medvqa.utils.handlers import (
+from medvqa.utils.files_utils import get_results_folder_path, save_pickle
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handler,
     get_log_iteration_handler,
@@ -76,7 +76,7 @@ from medvqa.datasets.dataloading_utils import (
     get_phrase_grounding_collate_batch_fn,
 )
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_orange
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_orange
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -96,6 +96,7 @@ def parse_args(args=None):
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
     parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
     parser.add_argument('--checkpoint_folder_path_to_borrow_metadata_from', type=str, default=None, help='Path to metadata file to borrow trainer kwargs from')
+    parser.add_argument('--override_bbox_format', type=str, default=None, choices=['xyxy', 'cxcywh'], help='Override the bbox format used in the dataset')
 
     # Evaluation arguments
     parser.add_argument('--eval_chest_imagenome_gold', action='store_true')
@@ -138,6 +139,7 @@ def _evaluate_model(
     use_amp,
     use_classifier_confs_for_map,
     checkpoint_folder_path_to_borrow_metadata_from,
+    override_bbox_format,
 ):
     count_print = CountPrinter()
     
@@ -176,7 +178,11 @@ def _evaluate_model(
             metadata = load_metadata(checkpoint_folder_path_to_borrow_metadata_from)
             collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
             mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
-            val_image_transform_kwargs = metadata['val_image_transform_kwargs']
+        
+        try: 
+            image_transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]
+        except KeyError:
+            image_transform_kwargs = next(iter(val_image_transform_kwargs.values())) # get the first value
 
         count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
         if eval_chest_imagenome_gold:
@@ -200,9 +206,12 @@ def _evaluate_model(
         mimiccxr_trainer_kwargs['use_chest_imagenome_gold_for_test'] = eval_chest_imagenome_gold
         if mscxr_phrase2embedding_filepath is not None:
             mimiccxr_trainer_kwargs['mscxr_phrase2embedding_filepath'] = mscxr_phrase2embedding_filepath
+        if override_bbox_format:
+            print_orange('Overriding bbox format to', override_bbox_format)
+            mimiccxr_trainer_kwargs['bbox_format'] = override_bbox_format
 
         mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
-            test_image_transform = get_image_transform(**val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]),
+            test_image_transform = get_image_transform(**image_transform_kwargs),
             max_images_per_batch=max_images_per_batch,
             max_phrases_per_batch=max_phrases_per_batch,
             max_phrases_per_image=max_phrases_per_image,
@@ -365,7 +374,7 @@ def _evaluate_model(
                         if pred_bboxes[i][j] is None:
                             iou = 0
                         else:
-                            iou = calculate_exact_iou_union(pred_bboxes[i][j][0], gt_bboxes[i][j])
+                            iou = compute_mean_bbox_union_iou(pred_bboxes[i][j][0], gt_bboxes[i][j])
                         output['image_paths'].append(image_paths[i])
                         output['phrases'].append(phrases[j])
                         output['pred_bboxes'].append(pred_bboxes[i][j][0].cpu().numpy() if pred_bboxes[i][j] is not None else None)
@@ -548,10 +557,11 @@ def _evaluate_model(
             tmp = find_optimal_probability_map_conf_threshold(
                 prob_maps=np.array(preds_and_gt['pred_bbox_prob_maps']), # (N, H, W)
                 gt_bboxes_list=preds_and_gt['gt_bbox_coords'],
+                bbox_format=dataset.bbox_format,
             )
             print(tmp)
             best_conf_th = tmp['best_conf_th']
-            ious = [compute_probability_map_iou(prob_map, gt_bboxes, best_conf_th) for\
+            ious = [compute_probability_map_iou(prob_map, gt_bboxes, best_conf_th, bbox_format=dataset.bbox_format) for\
                         prob_map, gt_bboxes in zip(preds_and_gt['pred_bbox_prob_maps'],
                                                     preds_and_gt['gt_bbox_coords'])]
             classes = [category_name_to_idx[phrase_to_category_name[phrase]] for phrase in preds_and_gt['phrases']]
@@ -588,15 +598,17 @@ def _evaluate_model(
                 pred_confs_list=preds_and_gt['pred_bbox_prob_maps'],
                 iou_thresholds=candidate_iou_thresholds,
                 conf_thresholds=candidate_conf_thresholds,
-                pre_nms_max_det=100,
                 verbose=False,
+                bbox_format=dataset.bbox_format,
             )
             best_iou_th = tmp['best_iou_threshold']
             best_conf_th = tmp['best_conf_threshold']
-            best_max_det = tmp['best_max_det']
+            best_pre_nms_max_det = tmp['best_pre_nms_max_det']
+            best_post_nms_max_det = tmp['best_post_nms_max_det']
             print(f'{split}_best_iou_threshold = {best_iou_th}')
             print(f'{split}_best_conf_threshold = {best_conf_th}')
-            print(f'{split}_best_max_det = {best_max_det}')
+            print(f'{split}_best_pre_nms_max_det = {best_pre_nms_max_det}')
+            print(f'{split}_best_post_nms_max_det = {best_post_nms_max_det}')            
             ious = []
             for pred_bbox_coord_map, pred_bbox_prob_map, gt_bbox_coords in zip(preds_and_gt['pred_bbox_coord_maps'],
                                                                             preds_and_gt['pred_bbox_prob_maps'],
@@ -607,8 +619,9 @@ def _evaluate_model(
                     pred_bbox_probs=pred_bbox_prob_map.reshape(-1),
                     iou_th=best_iou_th,
                     conf_th=best_conf_th,
-                    pre_nms_max_det=100,
-                    post_nms_max_det=best_max_det,
+                    pre_nms_max_det=best_pre_nms_max_det,
+                    post_nms_max_det=best_post_nms_max_det,
+                    bbox_format=dataset.bbox_format,
                 )
                 ious.append(iou)
             iou_with_boostrapping = apply_stratified_bootstrapping(
@@ -616,18 +629,21 @@ def _evaluate_model(
                 class_names=category_names, metric_name='iou', num_bootstraps=500, num_processes=6)
             print_bold(f'{split.capitalize()} IoU with bootstrapping:')
             pprint(iou_with_boostrapping)
-            return best_iou_th, best_conf_th, best_max_det, ious, iou_with_boostrapping
+            return best_iou_th, best_conf_th, best_pre_nms_max_det, best_post_nms_max_det, ious, iou_with_boostrapping
 
         # Train
-        train_best_iou_th_2, train_best_conf_th_2, train_best_max_det_2, train_ious_2, train_iou_with_boostrapping_2 =\
+        train_best_iou_th_2, train_best_conf_th_2, train_best_pre_nms_max_det_2, train_best_post_nms_max_det_2,\
+            train_ious_2, train_iou_with_boostrapping_2 =\
             _compute_iou_2('train', train_preds_and_gt, train_class_to_indices)
         train_preds_and_gt['ious_2'] = train_ious_2
         # Val
-        val_best_iou_th_2, val_best_conf_th_2, val_best_max_det_2, val_ious_2, val_iou_with_boostrapping_2 =\
+        val_best_iou_th_2, val_best_conf_th_2, val_best_pre_nms_max_det_2, val_best_post_nms_max_det_2,\
+            val_ious_2, val_iou_with_boostrapping_2 =\
             _compute_iou_2('val', val_preds_and_gt, val_class_to_indices)
         val_preds_and_gt['ious_2'] = val_ious_2
         # Test
-        test_best_iou_th_2, test_best_conf_th_2, test_best_max_det_2, test_ious_2, test_iou_with_boostrapping_2 =\
+        test_best_iou_th_2, test_best_conf_th_2, test_best_pre_nms_max_det_2, test_best_post_nms_max_det_2,\
+            test_ious_2, test_iou_with_boostrapping_2 =\
             _compute_iou_2('test', test_preds_and_gt, test_class_to_indices)
         test_preds_and_gt['ious_2'] = test_ious_2
 
@@ -678,9 +694,12 @@ def _evaluate_model(
             train_best_conf_th_2=train_best_conf_th_2,
             val_best_conf_th_2=val_best_conf_th_2,
             test_best_conf_th_2=test_best_conf_th_2,
-            train_best_max_det_2=train_best_max_det_2,
-            val_best_max_det_2=val_best_max_det_2,
-            test_best_max_det_2=test_best_max_det_2,
+            train_best_pre_nms_max_det_2=train_best_pre_nms_max_det_2,
+            val_best_pre_nms_max_det_2=val_best_pre_nms_max_det_2,
+            test_best_pre_nms_max_det_2=test_best_pre_nms_max_det_2,
+            train_best_post_nms_max_det_2=train_best_post_nms_max_det_2,
+            val_best_post_nms_max_det_2=val_best_post_nms_max_det_2,
+            test_best_post_nms_max_det_2=test_best_post_nms_max_det_2,
         )
         save_pickle(output, save_path)
         print_bold(f'Saved metrics to {save_path}')
@@ -1285,6 +1304,7 @@ def evaluate(
     use_amp,
     use_classifier_confs_for_map,
     checkpoint_folder_path_to_borrow_metadata_from,
+    override_bbox_format,
 ):  
     # Force deterministic behavior
     activate_determinism()
@@ -1337,6 +1357,7 @@ def evaluate(
                 use_amp=use_amp,
                 use_classifier_confs_for_map=use_classifier_confs_for_map,
                 checkpoint_folder_path_to_borrow_metadata_from=checkpoint_folder_path_to_borrow_metadata_from,
+                override_bbox_format=override_bbox_format,
             )
 
 

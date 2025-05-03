@@ -3,8 +3,8 @@ import os
 
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
 from medvqa.datasets.mimiccxr.report_utils import integrate_reports_facts_and_metadata, _FACT_METADATA_FIELDS
-from medvqa.utils.files import save_jsonl
-from medvqa.utils.logging import print_red
+from medvqa.utils.files_utils import save_jsonl
+from medvqa.utils.logging_utils import print_red
 
 if __name__ == '__main__':
 

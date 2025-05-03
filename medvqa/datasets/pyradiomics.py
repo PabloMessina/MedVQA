@@ -8,7 +8,7 @@ from skimage.color import rgb2gray
 import SimpleITK as sitk
 import radiomics
 from radiomics import featureextractor
-from medvqa.utils.files import load_pickle, save_to_pickle
+from medvqa.utils.files_utils import load_pickle, save_to_pickle
 
 class PyradiomicsFeatureExtractor:
     

@@ -2,9 +2,9 @@ import os
 import argparse
 import random
 from medvqa.datasets.iuxray import IUXRAY_FAST_CACHE_DIR, IUXRAY_FAST_TMP_DIR, IUXRAY_REPORTS_MIN_JSON_PATH
-from medvqa.utils.logging import get_console_logger
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_json, load_jsonl
+from medvqa.utils.logging_utils import get_console_logger
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_json, load_jsonl
 
 INSTRUCTIONS = """Given a tag extracted from a IU X-ray report, generate a short factual statement conveying the same information contained in the tag. Keep sentences simple. Avoid unnecessary verbosity.
 

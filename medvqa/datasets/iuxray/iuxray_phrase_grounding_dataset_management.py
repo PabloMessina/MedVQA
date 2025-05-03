@@ -1,8 +1,8 @@
 from torch.utils.data import DataLoader
 from medvqa.datasets.image_processing import ImageFactClassificationDataset
 from medvqa.datasets.iuxray import get_invalid_images, get_iuxray_image_path
-from medvqa.utils.files import load_pickle
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files_utils import load_pickle
+from medvqa.utils.logging_utils import print_bold
 
 class IUXRayPhraseGroundingTrainer:
 

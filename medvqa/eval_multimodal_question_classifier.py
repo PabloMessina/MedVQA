@@ -23,17 +23,17 @@ from medvqa.models.checkpoint import (
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handlers,
     get_log_iteration_handler,
 )
 from medvqa.datasets.tokenizer import Tokenizer
-from medvqa.utils.files import get_results_folder_path, load_json_file, save_to_pickle
+from medvqa.utils.files_utils import get_results_folder_path, load_json_file, save_to_pickle
 from medvqa.training.multimodal import get_engine
 from medvqa.datasets.dataloading_utils import get_multimodal_collate_batch_fn
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue
+from medvqa.utils.logging_utils import CountPrinter, print_blue
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

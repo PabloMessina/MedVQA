@@ -1,6 +1,6 @@
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from medvqa.utils.files import load_pickle
+from medvqa.utils.files_utils import load_pickle
 from medvqa.datasets.dataloading_utils import (
     BatchedCompositeInfiniteDataset,
     get_imbalance_reduced_weights,

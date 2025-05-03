@@ -9,7 +9,7 @@ from medvqa.datasets.iuxray import (
     get_invalid_images,
     get_iuxray_image_path,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     get_cached_json_file,
 )

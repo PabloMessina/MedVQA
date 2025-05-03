@@ -10,14 +10,14 @@ import numpy as np
 from tqdm import tqdm
 
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 from medvqa.utils.nlp import sort_sentences
 from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
-from medvqa.utils.files import load_jsonl
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, run_common_boilerplate_for_api_requests
+from medvqa.utils.files_utils import load_jsonl
 
 INSTRUCTIONS = """Given an anchor, output a list of positives and a list of negatives.
 The anchor will come from a chest X-ray report. The positives must be 6 paraphrases of the anchor,

@@ -1,4 +1,4 @@
-from medvqa.metrics.bbox.utils import calculate_exact_iou_union, compute_iou
+from medvqa.metrics.bbox.utils import compute_bbox_union_iou, compute_iou
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
 
@@ -109,7 +109,7 @@ class ConditionAwareBboxIOU(ConditionAwareMetric):
                     # Compute IOU for each class present in the image
                     for cls in range(self.nc):
                         if len(gt_coords_per_class[cls]) > 0:
-                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score += iou
                             self._count += 1
             else:
@@ -131,7 +131,7 @@ class ConditionAwareBboxIOU(ConditionAwareMetric):
                     # Compute IOU for each class present in the image
                     for cls in range(self.nc):
                         if len(gt_coords_per_class[cls]) > 0:
-                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score += iou
                             self._count += 1
         else:
@@ -165,12 +165,39 @@ class ConditionAwareBboxIOU(ConditionAwareMetric):
                                 iou = 0
                             else:
                                 # print(f'len(predicted_bboxes[i][j][0])={len(predicted_bboxes[i][j][0])}, len(gt_coords[i][j])={len(gt_coords[i][j])}')
-                                iou = calculate_exact_iou_union(predicted_bboxes[i][j][0], gt_coords[i][j])
+                                iou = compute_bbox_union_iou(predicted_bboxes[i][j][0], gt_coords[i][j])
                             self._acc_score += iou
                             self._count += 1
                         elif predicted_bboxes[i][j] is not None:
                             self._acc_score += 0
                             self._count += 1
+
+    def compute(self):
+        if self._count == 0:
+            print('WARNING: Bbox IOU defaulting to 0 since self._count is 0')
+            return 0
+        return self._acc_score / self._count
+    
+class ConditionAwareBboxIOUClassAgnostic(ConditionAwareMetric):
+
+    def __init__(self, output_transform, bbox_format, condition_function=lambda _: True):
+        super().__init__(output_transform, condition_function)
+        self._acc_score = 0
+        self._count = 0
+        self._bbox_format = bbox_format
+
+    def reset(self):
+        self._acc_score = 0
+        self._count = 0
+
+    def update(self, output):
+        predicted_bboxes, gt_bboxes = output
+        bs = len(gt_bboxes) # Batch size
+        for i in range(bs): # For each image in the batch
+            if len(gt_bboxes[i]) > 0:
+                iou = compute_bbox_union_iou(predicted_bboxes[i][0], gt_bboxes[i], bbox_format=self._bbox_format)
+                self._acc_score += iou
+                self._count += 1
 
     def compute(self):
         if self._count == 0:
@@ -219,7 +246,7 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                     # Compute IOU for each class present in the image
                     for cls in range(self.nc):
                         if len(gt_coords_per_class[cls]) > 0:
-                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
             elif self._use_fact_conditioned_yolo:
@@ -237,7 +264,7 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                     for cls in range(self.nc):
                         if len(gt_coords_per_class[cls]) > 0:
                             pred_coords = yolo_predictions[i][cls][:, :4] # Extract coordinates
-                            iou = calculate_exact_iou_union(pred_coords, gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords, gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
             else:
@@ -259,7 +286,7 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                     # Compute IOU for each class present in the image
                     for cls in range(self.nc):
                         if len(gt_coords_per_class[cls]) > 0:
-                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
         else:
@@ -284,7 +311,7 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                         if self._class_mask is not None and self._class_mask[cls] == 0:
                             continue # Skip if class is masked
                         if len(gt_coords_per_class[cls]) > 0:
-                            iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                            iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
             else:
@@ -302,7 +329,7 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
                             if predicted_bboxes[i][cls] is None:
                                 iou = 0
                             else:
-                                iou = calculate_exact_iou_union(predicted_bboxes[i][cls][0], gt_coords[i][cls])
+                                iou = compute_bbox_union_iou(predicted_bboxes[i][cls][0], gt_coords[i][cls])
                             self._acc_score[cls] += iou
                             self._count[cls] += 1
                         elif predicted_bboxes[i][cls] is not None:
@@ -349,7 +376,7 @@ class ConditionAwareBboxIOUOpenClass(ConditionAwareMetric):
             # Compute IOU for each class present in the image
             for cls in range(nc):
                 assert len(gt_coords_per_class[cls]) > 0
-                iou = calculate_exact_iou_union(pred_coords_per_class[cls], gt_coords_per_class[cls])
+                iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
                 self._acc_score += iou
                 self._count += 1
 

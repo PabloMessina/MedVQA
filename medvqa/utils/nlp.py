@@ -4,7 +4,7 @@ from nltk import word_tokenize
 from tqdm import tqdm
 
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import load_pickle, save_pickle
+from medvqa.utils.files_utils import load_pickle, save_pickle
 
 _shared_sentences = None
 

@@ -23,8 +23,8 @@ from medvqa.models.nlp.nli import EmbeddingBasedNLI
 from medvqa.scripts.mimiccxr.generate_fact_based_report_nli_examples_with_openai import LABEL_BASED_FACTS
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
-from medvqa.utils.logging import print_blue, print_bold
-from medvqa.utils.metrics import best_threshold_and_f1_score
+from medvqa.utils.logging_utils import print_blue, print_bold
+from medvqa.utils.metrics_utils import best_threshold_and_f1_score
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

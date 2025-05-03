@@ -48,12 +48,12 @@ from medvqa.utils.common import (
     WORKSPACE_DIR,
     parsed_args_to_dict,
 )    
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     get_log_metrics_handler,
     get_log_iteration_handler,
     attach_accumulator,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_cached_pickle_file,
     get_checkpoint_folder_path,
@@ -63,7 +63,7 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_orange
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_orange
 from medvqa.evaluation.report_generation import (
     TemplateBasedModes,
     compute_report_level_metrics,

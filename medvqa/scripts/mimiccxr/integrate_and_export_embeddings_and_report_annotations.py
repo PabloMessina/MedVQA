@@ -6,7 +6,7 @@ from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_jsonl_file,
     get_file_path_with_hashing_if_too_long,
     load_json,
@@ -14,7 +14,7 @@ from medvqa.utils.files import (
     get_cached_pickle_file,
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_bold
+from medvqa.utils.logging_utils import print_blue, print_bold
 
 def main():
     parser = argparse.ArgumentParser()

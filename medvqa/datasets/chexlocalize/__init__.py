@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import load_json
+from medvqa.utils.files_utils import load_json
 import os
 import pandas as pd
 import numpy as np

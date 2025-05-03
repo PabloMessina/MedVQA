@@ -30,15 +30,15 @@ from medvqa.training.utils import append_metric_name
 
 from medvqa.utils.common import WORKSPACE_DIR, parsed_args_to_dict
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CXR14_DATASET_ID, IUXRAY_DATASET_ID, MIMICCXR_DATASET_ID, PADCHEST_DATASET_ID, VINBIG_DATASET_ID, MetricNames
-from medvqa.utils.files import get_checkpoint_folder_path
-from medvqa.utils.handlers import (
+from medvqa.utils.files_utils import get_checkpoint_folder_path
+from medvqa.utils.handlers_utils import (
     get_checkpoint_handler,
     get_log_epoch_started_handler,
     get_log_iteration_handler,
     get_log_metrics_handlers,
     get_lr_sch_handler,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_red
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_red
 from medvqa.training.mae import get_engine
 
 def parse_args(args=None):

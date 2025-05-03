@@ -4,7 +4,7 @@ load_dotenv()
 import os
 import re
 from nltk.tokenize import sent_tokenize
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing_utils import hash_string
 
 RADGRAPH_MODEL_CHECKPOINT_PATH = os.environ['RADGRAPH_MODEL_CHECKPOINT_PATH']
 DYGIE_PACKAGE_PARENT_FOLDER =  os.environ['DYGIE_PACKAGE_PARENT_FOLDER']

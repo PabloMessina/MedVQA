@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from medvqa.utils.logging import get_console_logger
+from medvqa.utils.logging_utils import get_console_logger
 load_dotenv()
 
 import os
@@ -16,8 +16,8 @@ from medvqa.datasets.mimiccxr import (
     MIMICCXR_FAST_TMP_DIR,
     MIMICCXR_FAST_CACHE_DIR,
 )
-from medvqa.utils.openai_api import GPT_IS_ACTING_WEIRD_REGEX, process_api_requests_from_file
-from medvqa.utils.files import load_jsonl, save_jsonl
+from medvqa.utils.openai_api_utils import GPT_IS_ACTING_WEIRD_REGEX, process_api_requests_from_file
+from medvqa.utils.files_utils import load_jsonl, save_jsonl
 from medvqa.utils.common import get_timestamp
 
 INSTRUCTIONS = """Given a sentence referring to an anatomical location in the context of a chest X-ray, output a JSON array of strings paraphrasing it,

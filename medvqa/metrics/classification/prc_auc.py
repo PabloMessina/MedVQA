@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.metrics import auc, precision_recall_curve
 
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
-from medvqa.utils.metrics import average_ignoring_nones_and_nans
+from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
 
 def prc_auc_score(gt, probs):
     assert ((gt == 0) | (gt == 1)).all() # gt must be binary

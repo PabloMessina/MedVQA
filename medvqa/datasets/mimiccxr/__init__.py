@@ -1,17 +1,19 @@
 from dotenv import load_dotenv
-from pathlib import Path
-from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle, read_txt, save_pickle
 load_dotenv()
-
-from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR, FAST_TMP_DIR
 
 import os
 import re
 import glob
+import logging
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from pathlib import Path
+from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
+from medvqa.utils.files_utils import get_cached_json_file, get_cached_pickle_file, load_pickle, read_txt, save_pickle
+from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR, FAST_TMP_DIR
+
+logger = logging.getLogger(__name__)
 
 MIMICCXR_DATASET_DIR = os.environ['MIMICCXR_DATASET_DIR']
 MIMICCXR_DATASET_AUX_DIR = os.environ['MIMICCXR_DATASET_AUX_DIR']
@@ -106,7 +108,7 @@ def get_image_path_getter(image_size_mode, verbose=False):
     else:
         raise ValueError(f'Unknown source image size mode: {image_size_mode}')
     if verbose:
-        print(f'Using image size mode: {image_size_mode}')
+        logger.info(f'Using image size mode: {image_size_mode}')
     return image_path_getter
 
 class MIMICCXR_ViewModes:
@@ -242,7 +244,7 @@ def get_reports_txt_paths():
         report_paths[i] = rp.as_posix()
     report_paths = report_paths[:i+1]
     save_pickle(report_paths, MIMICCXR_REPORTS_TXT_PATHS)
-    print('reports txt paths saved to', MIMICCXR_REPORTS_TXT_PATHS)
+    logger.info(f'reports txt paths saved to {MIMICCXR_REPORTS_TXT_PATHS}')
     return report_paths
 
 def get_path_to_report_text_dict():
@@ -465,7 +467,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
     
-    print('Computing detailed metadata...')
+    logger.info('Computing detailed metadata...')
 
     if qa_adapted_reports_filename is not None:
         qa_adapted_reports = get_cached_json_file(os.path.join(MIMICCXR_CACHE_DIR, qa_adapted_reports_filename))
@@ -552,7 +554,7 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
             filepaths[i] = report_path
 
     save_pickle(report_metadata, cache_path)
-    print(f'Saved detailed metadata to {cache_path}')
+    logger.info(f'Saved detailed metadata to {cache_path}')
     return report_metadata
 
 def get_number_of_reports():
@@ -664,9 +666,9 @@ def get_mimic_cxr_lt_2023_ridx2labels():
     df_train = pd.read_csv(MIMIC_CXR_LT_2023_TRAIN_CSV_PATH)
     df_dev = pd.read_csv(MIMIC_CXR_LT_2023_DEV_CSV_PATH)
     df_test = pd.read_csv(MIMIC_CXR_LT_2023_TEST_CSV_PATH)
-    print(f"len(df_train): {len(df_train)}")
-    print(f"len(df_dev): {len(df_dev)}")
-    print(f"len(df_test): {len(df_test)}")
+    logger.info(f"len(df_train): {len(df_train)}")
+    logger.info(f"len(df_dev): {len(df_dev)}")
+    logger.info(f"len(df_test): {len(df_test)}")
 
     n_reports = len(metadata['study_ids'])
     report_labels = [None] * n_reports

@@ -2,7 +2,7 @@ from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 from medvqa.utils.common import CACHE_DIR
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     load_json_file,
     read_lines_from_txt,
     save_to_pickle,

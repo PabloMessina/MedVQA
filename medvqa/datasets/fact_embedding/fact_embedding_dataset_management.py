@@ -19,9 +19,9 @@ from medvqa.datasets.radgraph import (
 from medvqa.datasets.radgraph.spert_dataset import JsonInputReader, collate_fn_padding as spert_collate_fn_padding
 from medvqa.datasets.tokenizer import BasicTokenizer
 from medvqa.utils.common import CACHE_DIR, DictWithDefault
-from medvqa.utils.files import get_cached_pickle_file, load_jsonl, load_pickle, save_pickle
-from medvqa.utils.hashing import hash_string
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.files_utils import get_cached_pickle_file, load_jsonl, load_pickle, save_pickle
+from medvqa.utils.hashing_utils import hash_string
+from medvqa.utils.logging_utils import print_bold, print_magenta
 
 _GROUP_NAME_TO_SHORT = {
     'anatomical_locations': 'al',

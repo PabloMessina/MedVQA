@@ -20,13 +20,13 @@ from medvqa.metrics.medical.radgraph import RadGraphLabeler, RadGraphLabelerOrig
 from medvqa.metrics.nlp.cider import CiderD
 from medvqa.metrics.nlp.meteor import Meteor
 from medvqa.metrics.nlp.rouge import RougeL
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.hashing_utils import hash_string
 
 from medvqa.utils.common import CACHE_DIR, get_timestamp, LARGE_FAST_CACHE_DIR
-from medvqa.utils.files import load_jsonl, load_pickle, save_pickle
-from medvqa.utils.logging import print_bold
+from medvqa.utils.files_utils import load_jsonl, load_pickle, save_pickle
+from medvqa.utils.logging_utils import print_bold
 from medvqa.metrics.nlp import Bleu
-from medvqa.utils.metrics import auc, f1_between_dicts, jaccard_between_dicts
+from medvqa.utils.metrics_utils import auc, f1_between_dicts, jaccard_between_dicts
 
 def cache_matrix_to_file(alias, uses_sentences=True, uses_labels=False, uses_obs_anat_labels=False, use_checkpoint_folder_path=False):
     def decorator(func):

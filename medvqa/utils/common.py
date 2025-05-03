@@ -5,6 +5,9 @@ load_dotenv()
 from datetime import datetime
 import time
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 SOURCE_DIR = os.environ['MEDVQA_SOURCE_DIR']
 WORKSPACE_DIR = os.environ['MEDVQA_WORKSPACE_DIR']
@@ -33,9 +36,10 @@ def parsed_args_to_dict(args, verbose=True):
     # args = {k : v for k, v in vars(args).items() if v is not None}
     args = {k : v for k, v in vars(args).items()}
     if verbose:
-        print('script\'s arguments:')
+        string_to_log = '\nscript\'s arguments:'
         for k, v in args.items():
-            print(f'   {k}: {v}')
+            string_to_log += f'\n   {k}: {v}'
+        logger.info(string_to_log)
     return args
 
 class DictWithDefault:
@@ -51,7 +55,7 @@ class DictWithDefault:
     
 def activate_determinism(seed=42, verbose=True):
     if verbose:
-        from medvqa.utils.logging import print_red
+        from medvqa.utils.logging_utils import print_red
         print_red(f'Activating determinism(seed={seed})...', bold=True)
     import torch
     import random

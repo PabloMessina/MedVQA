@@ -4,7 +4,7 @@ import pandas as pd
 from medvqa.models.checkpoint import get_checkpoint_filepath, get_model_training_history
 from medvqa.utils.common import RESULTS_DIR, WORKSPACE_DIR
 from medvqa.utils.constants import DATASET_NAME_TO_SHORT
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file
+from medvqa.utils.files_utils import get_cached_json_file, get_cached_pickle_file
 from medvqa.evaluation import report_generation, visual_module, phrase_grounding
 
 def collect_report_level_results(dataset_name):

@@ -89,7 +89,7 @@ from medvqa.models.checkpoint import (
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     get_log_metrics_handlers,
     get_log_iteration_handler,
     get_log_epoch_started_handler,
@@ -98,7 +98,7 @@ from medvqa.utils.handlers import (
 )
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.models.vqa import OpenEndedVQA
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     load_json_file,
     get_checkpoint_folder_path,
 )
@@ -116,7 +116,7 @@ from medvqa.metrics.utils import (
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Trainer
 from medvqa.datasets.iuxray.iuxray_vqa_dataset_management import IUXRAY_VQA_Trainer
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter, print_blue, print_red
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_red
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

@@ -4,7 +4,7 @@ from medvqa.datasets.mimiccxr.preprocessing import (
     extract_report_and_patient_background,
     get_reports_txt_paths
 )
-from medvqa.utils.files import make_dirs_in_filepath
+from medvqa.utils.files_utils import make_dirs_in_filepath
 from medvqa.utils.common import CACHE_DIR
 
 if __name__ == '__main__':

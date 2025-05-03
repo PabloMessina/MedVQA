@@ -12,7 +12,7 @@ from medvqa.utils.constants import (
     VINBIG_LABELS,
 )
 from medvqa.utils.data_structures import UnionFind
-from medvqa.utils.files import get_cached_json_file
+from medvqa.utils.files_utils import get_cached_json_file
 
 def deduplicate_indices(indices, report_ids):
     seen = set()

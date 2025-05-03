@@ -30,8 +30,8 @@ from medvqa.utils.common import (
     YOLOv5_RUNS_DETECT_DIR,
     parsed_args_to_dict,
 )
-from medvqa.utils.files import get_checkpoint_folder_path, get_results_folder_path, save_pickle
-from medvqa.utils.logging import print_blue, print_red, print_bold
+from medvqa.utils.files_utils import get_checkpoint_folder_path, get_results_folder_path, save_pickle
+from medvqa.utils.logging_utils import print_blue, print_red, print_bold
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'chest_imagenome__mimiccxr_test_set'

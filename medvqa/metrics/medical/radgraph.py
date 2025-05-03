@@ -3,8 +3,8 @@ import os
 # import subprocess
 from medvqa.datasets.text_data_utils import split_text_into_chunks
 from medvqa.utils.common import CACHE_DIR
-from medvqa.utils.files import get_cached_pickle_file, save_pickle
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.files_utils import get_cached_pickle_file, save_pickle
+from medvqa.utils.hashing_utils import hash_string
 # from medvqa.datasets.radgraph import RADGRAPH_MODEL_CHECKPOINT_PATH, DYGIE_PACKAGE_PARENT_FOLDER
 from radgraph import RadGraph
 from radgraph.rewards import (

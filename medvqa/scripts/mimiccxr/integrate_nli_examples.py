@@ -1,7 +1,7 @@
 import argparse
 import os
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR
-from medvqa.utils.files import save_jsonl, load_jsonl
+from medvqa.utils.files_utils import save_jsonl, load_jsonl
 from medvqa.datasets.nli import (
     MEDNLI_DEV_JSONL_PATH,
     MEDNLI_TEST_JSONL_PATH,

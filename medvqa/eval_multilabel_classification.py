@@ -59,12 +59,12 @@ from medvqa.utils.common import (
     RESULTS_DIR,
     parsed_args_to_dict,
 )    
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     get_log_metrics_handler,
     get_log_iteration_handler,
     attach_accumulator,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_checkpoint_folder_path,
     get_results_folder_path,
     load_pickle,
@@ -72,7 +72,7 @@ from medvqa.utils.files import (
 )
 from medvqa.training.vision import get_engine
 from medvqa.datasets.mimiccxr.mimiccxr_vision_dataset_management import MIMICCXR_VisualModuleTrainer
-from medvqa.utils.logging import CountPrinter, print_blue, print_magenta, print_orange
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_magenta, print_orange
 
 class EvalDatasets:
     MIMICCXR_TEST_SET = 'mimiccxr_test_set'

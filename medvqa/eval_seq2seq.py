@@ -15,8 +15,8 @@ from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.constants import LABEL_BASED_FACTS
-from medvqa.utils.files import load_pickle
-from medvqa.utils.logging import get_console_logger, print_blue, print_bold, print_orange
+from medvqa.utils.files_utils import load_pickle
+from medvqa.utils.logging_utils import get_console_logger, print_blue, print_bold, print_orange
 
 def parse_args():
     parser = argparse.ArgumentParser()

@@ -6,7 +6,11 @@ from medvqa.models.mlp import MLP
 from positional_encodings.torch_encodings import PositionalEncoding1D, PositionalEncoding2D, Summer
 from medvqa.models.vision.bbox_regression import MultiClassBoundingBoxRegressor
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule, RawImageEncoding
-from medvqa.utils.logging import print_orange
+import logging
+
+from medvqa.utils.logging_utils import ANSI_MAGENTA_BOLD, ANSI_RESET
+
+logger = logging.getLogger(__name__)
 
 class PhraseGroundingMode:
     SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER = 'sigmoid_attention_plus_custom_classifier'
@@ -83,6 +87,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
             huggingface_model_name=None,
             alignment_proj_size=None,
             device=None,
+            predict_relative_bbox_coords=False,
+            bbox_format='xyxy',
             # FiLM-based approach's hyperparameters
             visual_feature_proj_size=None,
             visual_grounding_hidden_size=None,
@@ -97,7 +103,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             ):
 
         if len(unused_kwargs) > 0:
-            print_orange(f'WARNING: Unused kwargs: {unused_kwargs}')
+            logger.warning(f'Unused kwargs: {unused_kwargs}')
         
         assert regions_width * regions_height == num_regions, f'width * height ({regions_width * regions_height}) != num_regions ({num_regions})'
 
@@ -227,7 +233,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             self.apply_positional_encoding = apply_positional_encoding
             if self.apply_positional_encoding:
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
-                print_orange('Using positional encoding for local features')
+                logger.info(f'{ANSI_MAGENTA_BOLD}Using positional encoding for local features{ANSI_RESET}')
 
             # Init alignment projection layers
             if predict_global_alignment:
@@ -255,7 +261,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             self.apply_positional_encoding = apply_positional_encoding
             if self.apply_positional_encoding:
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
-                print_orange('Using positional encoding for local features')
+                logger.info(f'{ANSI_MAGENTA_BOLD}Using positional encoding for local features{ANSI_RESET}')
 
             # Init alignment projection layers
             if predict_global_alignment:
@@ -294,10 +300,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
             self.apply_positional_encoding = apply_positional_encoding
             if self.apply_positional_encoding:
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
-                print_orange('Using positional encoding for local features')
+                logger.info(f'{ANSI_MAGENTA_BOLD}Using positional encoding for local features{ANSI_RESET}')
 
             if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
-                self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(local_feat_dim=visual_grounding_hidden_size)
+                self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(
+                    local_feat_dim=visual_grounding_hidden_size, bbox_format=bbox_format,
+                    predict_relative=predict_relative_bbox_coords)
             else:
                 self.local_attention_final_layer = nn.Linear(visual_grounding_hidden_size, 1) # hidden size -> scalar (local attention score)
 
@@ -363,6 +371,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         apply_nms=False,
         iou_threshold=0.1,
         conf_threshold=0.1,
+        max_det_per_class=20,
         max_det=10, # for YOLOv11
         batch=None, # for YOLOv11
         use_first_n_facts_for_detection=None, # for YOLOv11
@@ -669,11 +678,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
             elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
                 # Adaptive bbox regression
                 if apply_nms:
-                    predicted_bboxes, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(
-                        local_attention_logits, apply_nms=apply_nms, iou_threshold=iou_threshold, conf_threshold=conf_threshold)
+                    predicted_bboxes, visual_grounding_confidence_logits = self.visual_grounding_bbox_regressor(
+                        local_attention_logits, apply_nms=apply_nms, iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+                        max_det_per_class=max_det_per_class)
                 else:
-                    visual_grounding_bbox_logits, visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(local_attention_logits)
-                sigmoid_attention = torch.sigmoid(visual_grounding_binary_logits) # (batch_size, K, num_regions, 1)
+                    visual_grounding_bbox_logits, visual_grounding_confidence_logits = self.visual_grounding_bbox_regressor(local_attention_logits)
+                sigmoid_attention = torch.sigmoid(visual_grounding_confidence_logits) # (batch_size, K, num_regions, 1)
 
             # Weighted average of local features after FiLM layer
             weighted_sum = (sigmoid_attention * local_feat_after_film).sum(dim=-2) # (batch_size, K, local_feat_size)
@@ -691,7 +701,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 if apply_nms:
                     output['predicted_bboxes'] = predicted_bboxes # (batch_size, (coords, conf, class))
                 else:
-                    output['visual_grounding_binary_logits'] = visual_grounding_binary_logits # (batch_size, K, num_regions, 1)
+                    output['visual_grounding_confidence_logits'] = visual_grounding_confidence_logits # (batch_size, K, num_regions, 1)
                     output['visual_grounding_bbox_logits'] = visual_grounding_bbox_logits # (batch_size, K, num_regions, 4)
             if return_sigmoid_attention:
                 output['sigmoid_attention'] = sigmoid_attention

@@ -6,14 +6,14 @@ from medvqa.models.huggingface_utils import (
     CachedTextEmbeddingExtractor,
     SupportedHuggingfaceMedicalBERTModels,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     load_jsonl,
     save_pickle,
 )
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_LARGE_FAST_CACHE_DIR
-from medvqa.utils.logging import print_blue, print_bold
-from medvqa.utils.math import rank_vectors_by_dot_product
+from medvqa.utils.logging_utils import print_blue, print_bold
+from medvqa.utils.math_utils import rank_vectors_by_dot_product
 
 def main():
     parser = argparse.ArgumentParser()

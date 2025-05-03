@@ -1,8 +1,11 @@
 from torch.optim import Adam, AdamW, SGD
 from torch.nn.utils import clip_grad_norm_
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_optimizer(name, params, lr):
-    print(f'create_optimizer(): name = {name}')
+    logger.info(f'create_optimizer(): name = {name}, lr = {lr}')
     if name == 'adam':
         optimizer = Adam(params, lr=lr)
     elif name == 'adamw':
@@ -15,7 +18,7 @@ def create_optimizer(name, params, lr):
 
 class GradientAccumulator:
     def __init__(self, optimizer, scaler, num_accumulation_steps, max_grad_norm=None):
-        print(f'GradientAccumulator.__init__(): num_accumulation_steps = {num_accumulation_steps}, max_grad_norm = {max_grad_norm}')
+        logger.info(f'GradientAccumulator.__init__(): num_accumulation_steps = {num_accumulation_steps}, max_grad_norm = {max_grad_norm}')
         self.optimizer = optimizer
         self.scaler = scaler
         self.num_accumulation_steps = num_accumulation_steps

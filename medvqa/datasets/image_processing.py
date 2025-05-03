@@ -1,4 +1,6 @@
 import math
+import pydicom
+from pydicom.pixel_data_handlers.util import apply_voi_lut
 import torch
 import torchvision.transforms as T
 import torchxrayvision as xrv
@@ -23,8 +25,8 @@ from medvqa.models.vision.visual_modules import (
     CLIP_VERSION_2_IMAGE_MEAN_STD,
 )
 from medvqa.utils.common import CACHE_DIR
-from medvqa.utils.files import MAX_FILENAME_LENGTH, load_pickle, save_pickle
-from medvqa.utils.hashing import hash_string
+from medvqa.utils.files_utils import MAX_FILENAME_LENGTH, load_pickle, save_pickle
+from medvqa.utils.hashing_utils import hash_string
 from medvqa.datasets.augmentation import (
     ImageAugmentedTransforms,
     ImageBboxAugmentationTransforms,
@@ -63,6 +65,7 @@ def get_image_transform(
     for_yolov8=False,
     for_yolov11=False,
     for_vinbig=False,    
+    bbox_format='xyxy',
     # detectron2_cfg=None,
 ):
     print('get_image_transform()')
@@ -121,7 +124,14 @@ def get_image_transform(
 
     elif use_bbox_aware_transform:
         print(f'  Using bounding box aware transforms')
-        image_augmented_transforms = ImageAugmentedTransforms(image_size, mean, std)
+        assert bbox_format in ['xyxy', 'cxcywh']
+        # Map bbox_format to its equivalent name according to albumentations naming convention
+        if bbox_format == 'xyxy':
+            bbox_format = 'albumentations'
+        elif bbox_format == 'cxcywh':
+            bbox_format = 'yolo'
+        else: assert False
+        image_augmented_transforms = ImageAugmentedTransforms(image_size, mean, std, bbox_format=bbox_format)
         test_transform = image_augmented_transforms.get_test_transform(allow_returning_image_size=for_yolov8 or for_yolov11)
 
         if augmentation_mode is None: # no augmentation
@@ -537,27 +547,319 @@ def get_pretrain_vit_mae_image_transform(feature_extractor):
     )
     return transforms
 
-def resize_image(src_image_path, tgt_image_path, new_size, keep_aspect_ratio):
-    image = cv2.imread(src_image_path)
-    if keep_aspect_ratio:
-        # Resize image so that the smallest side is new_size
+# def resize_image(src_image_path, tgt_image_path, new_size, keep_aspect_ratio):
+#     image = cv2.imread(src_image_path)
+#     if keep_aspect_ratio:
+#         # Resize image so that the smallest side is new_size
+#         h, w, _ = image.shape
+#         if h < w:
+#             new_h = new_size
+#             new_w = int(w * new_size / h)
+#         else:
+#             new_w = new_size
+#             new_h = int(h * new_size / w)
+#         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+#     else:
+#         image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+#     # Save image to new path
+#     cv2.imwrite(tgt_image_path, image)
+
+def resize_image(
+    src_image_path,
+    tgt_image_path,
+    new_size,
+    keep_aspect_ratio=True,
+    jpeg_quality=95,
+    png_compression=3,
+    interpolation_enlarge=cv2.INTER_CUBIC, # Good default for enlarging
+    interpolation_shrink=cv2.INTER_AREA,   # Best default for shrinking
+    p_min=1.0, # Percentile min for 16-bit to JPEG windowing
+    p_max=99.0, # Percentile max for 16-bit to JPEG windowing
+    verbose=False, # Verbose output
+):
+    """
+    Resizes an image using OpenCV with smart interpolation and bit-depth handling.
+
+    Loads various image types (including 16-bit), resizes them while
+    optionally preserving aspect ratio (based on the smallest side),
+    automatically selects appropriate interpolation (shrinking vs enlarging),
+    and saves the output. Performs windowing when converting 16-bit to JPEG.
+
+    Args:
+        src_image_path (str): Path to the source image file.
+        tgt_image_path (str): Path to save the target resized image file.
+                              The format is determined by the extension.
+        new_size (int or tuple):
+            - If keep_aspect_ratio is True: An integer representing the desired
+              size of the *smallest* dimension after resizing.
+            - If keep_aspect_ratio is False: A tuple (width, height) representing
+              the exact desired output dimensions.
+        keep_aspect_ratio (bool, optional): If True, maintains the aspect ratio
+                                            by scaling the smallest side to
+                                            new_size. If False, resizes to the
+                                            exact (width, height) tuple given
+                                            in new_size. Defaults to True.
+        jpeg_quality (int, optional): Quality setting (0-100) if saving as
+                                      JPEG/JPG. Defaults to 95.
+        png_compression (int, optional): Compression level (0-9) if saving as
+                                         PNG. 0 is no compression, 9 is max.
+                                         Defaults to 3.
+        interpolation_enlarge (int, optional): OpenCV interpolation flag used
+                                               when enlarging the image.
+                                               Defaults to cv2.INTER_CUBIC.
+        interpolation_shrink (int, optional): OpenCV interpolation flag used
+                                              when shrinking the image.
+                                              Defaults to cv2.INTER_AREA.
+        p_min (float): Lower percentile for windowing when converting 16-bit
+                       source to 8-bit JPEG output (0.0-100.0, default 1.0).
+        p_max (float): Upper percentile for windowing when converting 16-bit
+                       source to 8-bit JPEG output (0.0-100.0, default 99.0).
+
+    Returns:
+        None: The function saves the resized image to tgt_image_path.
+
+    Raises:
+        FileNotFoundError: If the source image cannot be found.
+        ValueError: If new_size parameter is invalid for the chosen mode.
+        IOError: If the image cannot be saved.
+        Exception: For other potential OpenCV or processing errors.
+    """
+    # 1. Load image preserving original depth and channels
+    image = cv2.imread(src_image_path, cv2.IMREAD_UNCHANGED)
+
+    if image is None:
+        raise FileNotFoundError(f"Could not read source image: {src_image_path}")
+
+    # 2. Get original dimensions and data type
+    original_dtype = image.dtype
+    if image.ndim == 2:
+        h, w = image.shape
+        is_color = False
+    elif image.ndim == 3:
         h, w, _ = image.shape
-        if h < w:
-            new_h = new_size
-            new_w = int(w * new_size / h)
-        else:
-            new_w = new_size
-            new_h = int(h * new_size / w)
-        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        is_color = True
     else:
-        image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
-    # Save image to new path
-    cv2.imwrite(tgt_image_path, image)
+        raise ValueError(f"Unsupported image dimensions: {image.ndim}")
+
+    original_pixels = h * w
+    if verbose:
+        print(f"Loaded '{os.path.basename(src_image_path)}': {w}x{h}, "
+                f"Channels: {'Color/Alpha' if is_color else 'Grayscale'}, "
+                f"Dtype: {original_dtype}")
+
+    # 3. Calculate target dimensions
+    target_w, target_h = 0, 0
+    if keep_aspect_ratio:
+        if not isinstance(new_size, int) or new_size <= 0:
+            raise ValueError("If keep_aspect_ratio is True, new_size must be a positive integer for the smallest side.")
+        if h < w:
+            target_h = new_size
+            target_w = int(w * new_size / h)
+        else:
+            target_w = new_size
+            target_h = int(h * new_size / w)
+    else:
+        if not isinstance(new_size, tuple) or len(new_size) != 2 or \
+            not all(isinstance(d, int) and d > 0 for d in new_size):
+            raise ValueError("If keep_aspect_ratio is False, new_size must be a tuple of two positive integers (width, height).")
+        target_w, target_h = new_size
+
+    target_pixels = target_h * target_w
+    if target_w <= 0 or target_h <= 0:
+            raise ValueError(f"Calculated invalid target dimensions: ({target_w}x{target_h})")
+
+    # 4. Choose interpolation method
+    if target_pixels < original_pixels:
+        interpolation = interpolation_shrink
+        if verbose:
+            print(f"Shrinking image. Using interpolation: {interpolation} (INTER_AREA)")
+    elif target_pixels > original_pixels:
+        interpolation = interpolation_enlarge
+        if verbose:
+            print(f"Enlarging image. Using interpolation: {interpolation} (CUBIC/LANCZOS4)")
+    else:
+        interpolation = interpolation_enlarge
+        if verbose:
+            print("Target size is the same as original. No resize needed, but will re-save.")
+
+    # 5. Resize the image (same logic as before)
+    if (target_w, target_h) == (w, h):
+        resized_image = image
+    else:
+        if verbose:
+            print(f"Resizing to: {target_w}x{target_h}")
+        resized_image = cv2.resize(image, (target_w, target_h), interpolation=interpolation)
+        if resized_image.dtype != original_dtype:
+                if verbose:
+                    print(f"Warning: dtype changed during resize from {original_dtype} to {resized_image.dtype}. Attempting to cast back.")
+                resized_image = resized_image.astype(original_dtype)
+
+    # --- Prepare image for saving ---
+    image_to_save = resized_image
+    ext = os.path.splitext(tgt_image_path)[1].lower()
+
+    # 6. *** Apply windowing/scaling ONLY if saving 16-bit data as JPEG ***
+    if ext in ['.jpg', '.jpeg'] and resized_image.dtype == np.uint16:
+        if verbose:
+            print(f"Input is uint16 and output is JPEG. Applying windowing ({p_min}-{p_max} percentile) and scaling to uint8.")
+
+        # Perform windowing on the potentially resized 16-bit image
+        img_float = resized_image.astype(np.float32)
+        vmin = np.percentile(img_float, p_min)
+        vmax = np.percentile(img_float, p_max)
+
+        if vmax <= vmin: # Handle uniform image case
+            vmin = np.min(img_float)
+            vmax = np.max(img_float)
+            if vmax <= vmin:
+                img_norm = np.zeros_like(img_float)
+            else:
+                img_norm = (img_float - vmin) / (vmax - vmin)
+        else:
+            img_norm = (img_float - vmin) / (vmax - vmin)
+
+        img_norm = np.clip(img_norm, 0.0, 1.0) # Ensure range [0, 1]
+
+        # Scale to 8-bit [0, 255]
+        image_to_save = (img_norm * 255).astype(np.uint8)
+        if verbose:
+            print(f"Converted to uint8 for JPEG saving. New range approx [0, 255]")
+
+    elif ext in ['.jpg', '.jpeg'] and resized_image.dtype != np.uint8:
+        # Handle other non-uint8 types going to JPEG (e.g., float) - scale robustly
+        if verbose:
+            print(f"Input is {resized_image.dtype} and output is JPEG. Scaling to uint8.")
+        img_float = resized_image.astype(np.float32)
+        min_val = np.min(img_float)
+        max_val = np.max(img_float)
+        if max_val > min_val:
+            img_norm = (img_float - min_val) / (max_val - min_val)
+        else:
+            img_norm = np.zeros_like(img_float)
+        image_to_save = (np.clip(img_norm, 0.0, 1.0) * 255).astype(np.uint8)
+
+    # 7. Save the potentially converted image
+    os.makedirs(os.path.dirname(tgt_image_path), exist_ok=True)
+    params = []
+    if ext in ['.jpg', '.jpeg']:
+        params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
+        if verbose:
+            print(f"Saving as JPEG with quality={jpeg_quality}")
+    elif ext == '.png':
+        params = [cv2.IMWRITE_PNG_COMPRESSION, png_compression]
+        # Check if saving 16-bit PNG is intended
+        if verbose:
+            if image_to_save.dtype == np.uint16:
+                print(f"Saving as 16-bit PNG with compression={png_compression}")
+            else:
+                print(f"Saving as 8-bit PNG with compression={png_compression}")
+
+    success = cv2.imwrite(tgt_image_path, image_to_save, params)
+
+    if not success:
+        raise IOError(f"Failed to save image to {tgt_image_path}")
+
+    if verbose:
+        print(f"Successfully saved resized image to: {tgt_image_path}")
 
 inv_normalize = T.Normalize(
     mean=[-0.485/0.229, -0.456/0.224, -0.406/0.255],
     std=[1/0.229, 1/0.224, 1/0.255]
 )
+
+# Adapted from: https://www.kaggle.com/code/mrutyunjaybiswal/vbd-chest-x-ray-abnormalities-detection-eda
+def dicom_to_jpeg_high_quality(
+    dicom_path,
+    output_path=None,
+    voi_lut=True,
+    fix_monochrome=True,
+    quality=95,  # Default high-quality JPEG setting
+    verbose=False,
+):
+    """
+    Converts a DICOM file to a high-quality JPEG image.
+
+    This function reads a DICOM file, optionally applies Value of Interest (VOI)
+    Look-Up Table (LUT) for better visualization, corrects potential inversion
+    issues with MONOCHROME1 photometric interpretation, normalizes the pixel
+    data to an 8-bit grayscale range [0, 255], and saves the result as a
+    JPEG file with specified high-quality settings.
+
+    Args:
+        dicom_path (str): Path to the input DICOM file.
+        output_path (str, optional): Path to save the output JPEG file.
+                                    If None, simply returns the image.
+        voi_lut (bool, optional): If True, attempts to apply the VOI LUT
+                                  found in the DICOM tags. Defaults to True.
+        fix_monochrome (bool, optional): If True, checks for
+                                         PhotometricInterpretation == "MONOCHROME1"
+                                         and inverts the pixel values if found.
+                                         Defaults to True.
+        quality (int, optional): The quality setting for the output JPEG image,
+                                 ranging from 0 to 100. Higher values mean
+                                 better quality and larger file size.
+                                 Defaults to 95.
+        verbose (bool, optional): If True, prints a confirmation message upon
+                                  successful saving. Defaults to False.
+    """
+    # Read DICOM file
+    dcm_data = pydicom.dcmread(dicom_path)
+
+    # Apply VOI LUT if available (improves visualization)
+    pixel_array = dcm_data.pixel_array
+    if voi_lut:
+        try:
+            # Use apply_voi_lut which handles windowing etc.
+            data = apply_voi_lut(pixel_array, dcm_data)
+            if verbose:
+                print(f"Applied VOI LUT. Output dtype: {data.dtype}")
+        except Exception as e:
+            if verbose:
+                print(f"Could not apply VOI LUT: {e}. Using raw pixel array.")
+            data = pixel_array # Fallback to raw data if VOI LUT fails
+    else:
+        data = pixel_array
+
+    # Correct MONOCHROME1 images which are often inverted
+    if (fix_monochrome and hasattr(dcm_data, 'PhotometricInterpretation') and
+        dcm_data.PhotometricInterpretation == "MONOCHROME1"):
+        if verbose:
+            print("Correcting MONOCHROME1 inversion.")
+        # Use the max value of the *current* data for inversion
+        max_val = np.max(data)
+        data = max_val - data
+
+    # Normalize pixel values to 0-255 range and convert to uint8
+    # Convert to float for calculations first
+    data = data.astype(np.float32)
+    min_val = np.min(data)
+    max_val = np.max(data)
+    if max_val > min_val:
+        data = (data - min_val) / (max_val - min_val) # Scale to [0, 1]
+    else:
+        data = np.zeros_like(data) # Handle uniform image
+    data_uint8 = (data * 255).astype(np.uint8)
+
+    # Create PIL image explicitly in grayscale mode
+    im = Image.fromarray(data_uint8, mode='L')
+
+    if output_path is None:
+        # Return the image if no output path is specified
+        return im
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Save image as JPEG with high-quality parameters
+    im.save(
+        output_path,
+        format='JPEG',
+        quality=quality,
+        optimize=True, # Improves compression without quality loss
+        subsampling=0  # Disable chroma subsampling (best for grayscale)
+    )
+    if verbose:
+        print(f"Saved {dicom_path} as {output_path} with quality={quality}")
 
 class ImageDataset(Dataset):
     def __init__(self, image_paths, image_transform, use_yolov8=False):
@@ -957,3 +1259,215 @@ def convert_bboxes_into_target_tensors(bboxes, classes, num_classes, feature_map
     target_presence = target_presence.view(num_classes, H*W)
     
     return target_coords, target_presence
+
+
+def cxcywh_to_xyxy(bbox):
+    """
+    Convert a bounding box from (center_x, center_y, width, height) format 
+    to (x_min, y_min, x_max, y_max) format.
+
+    Args:
+        bbox: Tuple or list of 4 numbers (cx, cy, w, h).
+
+    Returns:
+        A tuple (x_min, y_min, x_max, y_max).
+    """
+    cx, cy, w, h = bbox
+    x_min = cx - w / 2.0
+    y_min = cy - h / 2.0
+    x_max = cx + w / 2.0
+    y_max = cy + h / 2.0
+    return x_min, y_min, x_max, y_max
+
+def _scale_bbox(bbox, scale):
+    """
+    Scales a bounding box (in xyxy format) about its center. A mild limitation is 
+    enforced, so that the extension or contraction does not exceed 7% of the original 
+    dimensions. This is helpful in cases where ground truth boxes might be noisy.
+
+    Args:
+        bbox: Tuple or list of 4 numbers (x_min, y_min, x_max, y_max) in normalized
+              coordinates [0,1].
+        scale: Scaling factor. For scale > 1, the bbox grows; for scale < 1, the 
+               bbox shrinks.
+
+    Returns:
+        The scaled bbox as a tuple (new_x_min, new_y_min, new_x_max, new_y_max).
+    """
+    x_min, y_min, x_max, y_max = bbox
+    cx = (x_min + x_max) / 2.0
+    cy = (y_min + y_max) / 2.0
+    w = x_max - x_min
+    h = y_max - y_min
+
+    # Limit the expansion or contraction to a maximum of 7% of the original width/height.
+    if scale > 1:
+        dw = min(w * (scale - 1), 0.07)
+        dh = min(h * (scale - 1), 0.07)
+    else:
+        dw = max(w * (scale - 1), -0.07)
+        dh = max(h * (scale - 1), -0.07)
+
+    w += dw
+    h += dh
+
+    new_x_min = cx - w / 2.0
+    new_y_min = cy - h / 2.0
+    new_x_max = cx + w / 2.0
+    new_y_max = cy + h / 2.0
+    return new_x_min, new_y_min, new_x_max, new_y_max
+
+def _bbox_coords_to_grid_cell_indices(x_min, y_min, x_max, y_max, w, h):
+    """
+    Converts normalized bounding box coordinates to discrete grid cell indices 
+    given a feature map of size (h, w).
+
+    Args:
+        x_min, y_min, x_max, y_max: Normalized bbox coordinates in the range [0,1].
+        w: Width (number of columns) of the feature map.
+        h: Height (number of rows) of the feature map.
+        
+    Returns:
+        A tuple of indices (x_min_idx, y_min_idx, x_max_idx, y_max_idx) representing 
+        the grid cell boundaries that overlap with the bounding box.
+    """
+    # Scale normalized coordinates by the number of cells (w, h)
+    x_min_idx = math.floor(x_min * w)
+    y_min_idx = math.floor(y_min * h)
+    x_max_idx = math.ceil(x_max * w)
+    y_max_idx = math.ceil(y_max * h)
+    
+    # Clamp indices within valid range [0, w] or [0, h]
+    x_min_idx = max(0, min(w, x_min_idx))
+    x_max_idx = max(0, min(w, x_max_idx))
+    y_min_idx = max(0, min(h, y_min_idx))
+    y_max_idx = max(0, min(h, y_max_idx))
+    
+    return (x_min_idx, y_min_idx, x_max_idx, y_max_idx)
+
+def convert_bboxes_into_target_tensors(
+    bboxes,
+    classes,
+    num_classes,
+    feature_map_size,
+    bbox_format="xyxy",
+    apply_ignore_band=False,
+    small_factor=0.8,
+    large_factor=1.2,
+):
+    """
+    Creates target tensors for bounding box regression and classification on a feature map.
+
+    This function maps provided bounding boxes (assumed normalized in [0,1]) into a
+    feature map grid. For each cell in the grid that overlaps a bounding box:
+      - target_coords: Contains the bounding box coordinates.
+      - target_presence: Binary tensor indicating cells with supervision (1)
+                         and background (0).
+      - loss_mask: If an ignore band is applied, cells within the uncertain region 
+                   are marked with 0 so that the loss function can ignore them, while 
+                   cells in the supervised region have a value of 1.
+
+    Args:
+        bboxes: List or tensor of shape (N, 4) containing bounding box coordinates.
+                Coordinates must be normalized to [0,1].
+        classes: List or tensor of shape (N,) with integer class labels for each box.
+        num_classes: Total number of classes.
+        feature_map_size: Tuple (H, W) defining the height and width of the feature map.
+        bbox_format: String specifying the format: either "xyxy" 
+                     (i.e., (x_min, y_min, x_max, y_max)) or "cxcywh" 
+                     (i.e., (x_center, y_center, w, h)).
+        apply_ignore_band: Boolean. When True, defines a band between a scaled-down 
+                           (B_s) and a scaled-up bounding box (B_l). The cells in B_s 
+                           get standard supervision (target_presence = 1), while cells 
+                           in the ring between B_l and B_s are ignored in the loss (loss_mask = 0).
+        small_factor: Scale factor used to compute the smaller (inner) bbox B_s.
+        large_factor: Scale factor used to compute the larger (outer) bbox B_l.
+                      
+    Returns:
+        target_coords: Tensor of shape (num_classes, H*W, 4) with copied bbox coordinates.
+        target_presence: Tensor of shape (num_classes, H*W) containing binary supervision labels.
+        loss_mask: Tensor of shape (num_classes, H*W) where 1 indicates cells to compute loss 
+                   and 0 indicates cells to ignore.
+    """
+    H, W = feature_map_size  # feature map dimensions (height, width)
+    N = len(bboxes)
+    assert len(classes) == N
+
+    # Initialize tensors. The bounding box coordinates are stored per cell.
+    target_coords = torch.zeros(num_classes, H, W, 4)
+    target_presence = torch.zeros(num_classes, H, W)
+
+    if not apply_ignore_band:
+        # Standard supervision: assign bbox info directly to all grid cells overlapping the bbox.
+        for i in range(N):
+            bbox = bboxes[i]
+            cls = classes[i]
+            # Convert bbox if necessary.
+            if bbox_format == "cxcywh":
+                x_min, y_min, x_max, y_max = cxcywh_to_xyxy(bbox)
+            elif bbox_format == "xyxy":
+                x_min, y_min, x_max, y_max = bbox
+            else:
+                raise ValueError("Unsupported bbox_format: use 'xyxy' or 'cxcywh'.")
+
+            # Map normalized bbox coordinates to grid cell indices.
+            x_min_idx, y_min_idx, x_max_idx, y_max_idx = _bbox_coords_to_grid_cell_indices(
+                x_min, y_min, x_max, y_max, W, H
+            )
+            # Fill target tensors for the active region.
+            target_coords[cls, y_min_idx:y_max_idx, x_min_idx:x_max_idx, :] = torch.tensor(bbox)
+            target_presence[cls, y_min_idx:y_max_idx, x_min_idx:x_max_idx] = 1
+
+    else:
+        # When apply_ignore_band is True, consider two regions:
+        #   B_s: the inner, reliable region (using small_factor).
+        #   B_l: the outer region defining uncertainty (using large_factor).
+        # Cells in B_s get standard supervision, while cells in B_l but not in B_s
+        # are marked to be ignored during loss computation.
+        
+        loss_mask_updates = []  # Will store indices to update loss_mask back to 1 for B_s.
+        loss_mask = torch.ones(num_classes, H, W)  # By default, all grid cells contribute to loss.
+
+        for i in range(N):
+            bbox = bboxes[i]
+            cls = classes[i]
+
+            # Convert bbox if provided in cxcywh format.
+            if bbox_format == "cxcywh":
+                x_min, y_min, x_max, y_max = cxcywh_to_xyxy(bbox)
+            elif bbox_format == "xyxy":
+                x_min, y_min, x_max, y_max = bbox
+            else:
+                raise ValueError("Unsupported bbox_format: use 'xyxy' or 'cxcywh'.")
+
+            # Compute the scaled bounding boxes.
+            bbox_s = _scale_bbox((x_min, y_min, x_max, y_max), small_factor)
+            bbox_l = _scale_bbox((x_min, y_min, x_max, y_max), large_factor)
+
+            # Convert scaled bboxes to grid cell indices.
+            x_min_s, y_min_s, x_max_s, y_max_s = _bbox_coords_to_grid_cell_indices(
+                *bbox_s, W, H
+            )
+            x_min_l, y_min_l, x_max_l, y_max_l = _bbox_coords_to_grid_cell_indices(
+                *bbox_l, W, H
+            )
+
+            # Mark all cells in the larger bbox (B_l) as "ignore" by setting loss_mask to 0.
+            loss_mask[cls, y_min_l:y_max_l, x_min_l:x_max_l] = 0
+
+            # For the inner region (B_s), update standard supervision.
+            loss_mask_updates.append((cls, y_min_s, y_max_s, x_min_s, x_max_s))
+            target_coords[cls, y_min_s:y_max_s, x_min_s:x_max_s, :] = torch.tensor(bbox)
+            target_presence[cls, y_min_s:y_max_s, x_min_s:x_max_s] = 1
+
+        # Restore loss_mask to 1 within the supervised (inner) region B_s.
+        for cls, y_min_s, y_max_s, x_min_s, x_max_s in loss_mask_updates:
+            loss_mask[cls, y_min_s:y_max_s, x_min_s:x_max_s] = 1
+
+    # Reshape the tensors to have shape (num_classes, H*W, ...) for downstream use.
+    target_coords = target_coords.view(num_classes, H * W, 4)
+    target_presence = target_presence.view(num_classes, H * W)
+    if apply_ignore_band:
+        loss_mask = loss_mask.view(num_classes, H * W)
+        return target_coords, target_presence, loss_mask # with loss mask
+    return target_coords, target_presence # no loss mask

@@ -2,7 +2,7 @@ import os
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from medvqa.utils.files import load_pickle, save_to_pickle
+from medvqa.utils.files_utils import load_pickle, save_to_pickle
 from medvqa.datasets.dataloading_utils import (
     CompositeInfiniteDataset,
     get_imbalance_reduced_weights,

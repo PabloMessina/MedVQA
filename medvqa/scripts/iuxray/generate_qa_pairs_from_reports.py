@@ -1,4 +1,4 @@
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     load_json_file,
     save_to_json,
 )

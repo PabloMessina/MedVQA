@@ -13,7 +13,7 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_BBOX_NAMES,
     CHEST_IMAGENOME_SILVER_BBOXES_FILEPATH,
 )
-from medvqa.utils.files import save_pickle
+from medvqa.utils.files_utils import save_pickle
 
 if __name__ == '__main__':
     # Parse arguments

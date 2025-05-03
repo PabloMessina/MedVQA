@@ -4,7 +4,7 @@ from transformers import AutoModel
 from medvqa.models.common import freeze_parameters
 from medvqa.models.huggingface_utils import SupportedHuggingfaceMedicalBERTModels
 from medvqa.models.mlp import MLP
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 class BertBasedNLI(nn.Module):
 

@@ -2,8 +2,8 @@ import argparse
 import os
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
-from medvqa.utils.hashing import hash_string_list
-from medvqa.utils.files import load_jsonl, save_pickle
+from medvqa.utils.hashing_utils import hash_string_list
+from medvqa.utils.files_utils import load_jsonl, save_pickle
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

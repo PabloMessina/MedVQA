@@ -7,8 +7,8 @@ from medvqa.datasets.nli import RADNLI_TEST_JSONL_PATH, MS_CXR_T_TEMPORAL_SENTEN
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor, SupportedHuggingfaceMedicalBERTModels
-from medvqa.utils.files import load_jsonl
-from medvqa.utils.logging import print_blue, print_bold, print_magenta
+from medvqa.utils.files_utils import load_jsonl
+from medvqa.utils.logging_utils import print_blue, print_bold, print_magenta
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

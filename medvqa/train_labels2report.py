@@ -51,7 +51,7 @@ from medvqa.models.checkpoint import (
 )
 from medvqa.models.checkpoint.model_wrapper import ModelWrapper
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handler,
     get_log_iteration_handler,
@@ -59,7 +59,7 @@ from medvqa.utils.handlers import (
     get_lr_sch_handler,
     get_checkpoint_handler,
 )
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_checkpoint_folder_path,
     get_file_path_with_hashing_if_too_long,
     get_results_folder_path,
@@ -78,7 +78,7 @@ from medvqa.metrics.utils import (
     get_merge_metrics_fn,
     get_hybrid_score_name,
 )
-from medvqa.utils.logging import CountPrinter, print_blue, print_bold, print_magenta, print_normal_and_bold, print_orange, print_red
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_normal_and_bold, print_orange, print_red
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()

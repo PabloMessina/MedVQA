@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from medvqa.models.nlp.text_decoder import TransformerTextDecoder
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 class Image2ReportModel(MultiPurposeVisualModule):
 

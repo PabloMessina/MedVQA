@@ -1,7 +1,7 @@
 from medvqa.utils.constants import METRIC2SHORT
 import numbers
 
-from medvqa.utils.logging import print_orange
+from medvqa.utils.logging_utils import print_orange
 
 def _default_metric_getter(metrics_dict, key):
     return metrics_dict[key]

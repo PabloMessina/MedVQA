@@ -2,11 +2,9 @@ import multiprocessing as mp
 import os
 import argparse
 import time
-import pydicom
-from pydicom.pixel_data_handlers.util import apply_voi_lut
-from PIL import Image
 from pprint import pprint
-import numpy as np
+
+from medvqa.datasets.image_processing import dicom_to_jpeg_high_quality
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -15,48 +13,6 @@ def parse_args():
     parser.add_argument('--save_folder', type=str, required=True)
     parser.add_argument('--num_workers', type=int, default=5)
     return parser.parse_args()
-
-# def dicom_to_jpeg(dicom_file, output_path):    
-#     # Read the DICOM file
-#     ds = pydicom.dcmread(dicom_file)
-
-#     # Extract pixel data
-#     pixel_array = ds.pixel_array
-
-#     # Normalize the pixel data
-#     image = (pixel_array / pixel_array.max()) * 255.0
-#     image = image.astype('uint8')
-
-#     # Create PIL Image object from pixel array
-#     img = Image.fromarray(image)
-
-#     # Save the image as JPEG
-#     img.save(output_path)
-
-# Adapted from: https://www.kaggle.com/code/mrutyunjaybiswal/vbd-chest-x-ray-abnormalities-detection-eda
-def dicom_to_jpeg(dicom_file, output_path, voi_lut=True, fix_monochrome=True):
-    dcm_data = pydicom.read_file(dicom_file)
-
-    # VOI LUT (if available by DICOM device) is used to transform raw DICOM data to "human-friendly" view
-    if voi_lut:
-        data = apply_voi_lut(dcm_data.pixel_array, dcm_data)
-    else:
-        data = dcm_data.pixel_array
-               
-    # depending on this value, X-ray may look inverted - fix that:
-    if fix_monochrome and dcm_data.PhotometricInterpretation == "MONOCHROME1":
-        data = np.amax(data) - data
-        
-    data = data - np.min(data)
-    data = data / np.max(data)
-    data = (data * 255).astype(np.uint8)
-    
-    # Create a PIL image object
-    im = Image.fromarray(data)
-
-    # Save the image as JPEG
-    im.save(output_path)
-
 
 if __name__ == '__main__':
     args = parse_args()
@@ -80,5 +36,5 @@ if __name__ == '__main__':
     # target_jpeg_filepaths = target_jpeg_filepaths[:3] # For testing
     start_time = time.time()
     with mp.Pool(args.num_workers) as pool:
-        pool.starmap(dicom_to_jpeg, zip(source_dicom_filepaths, target_jpeg_filepaths))
+        pool.starmap(dicom_to_jpeg_high_quality, zip(source_dicom_filepaths, target_jpeg_filepaths))
     print(f'Finished in {time.time() - start_time} seconds')

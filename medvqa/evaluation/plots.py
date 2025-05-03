@@ -11,9 +11,9 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
 
-from medvqa.utils.files import get_cached_pickle_file
-from medvqa.utils.metrics import average_ignoring_nones_and_nans
-from medvqa.utils.logging import print_blue, print_orange, print_bold, rgba_to_ansi
+from medvqa.utils.files_utils import get_cached_pickle_file
+from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
+from medvqa.utils.logging_utils import print_blue, print_orange, print_bold, rgba_to_ansi
 
 # List of 40 different colors
 _COLORS = []
@@ -769,17 +769,18 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
 #     plt.show()
 
-def visualize_visual_grounding_as_bboxes(image_path, phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
-                                         figsize, max_cols=3, gt_phrases_to_highlight=None, 
-                                         show_heatmaps=False, heatmaps=None):
+def visualize_visual_grounding_as_bboxes(phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
+                                         figsize, max_cols=3, gt_phrases_to_highlight=None, image=None, image_path=None,
+                                         show_heatmaps=False, heatmaps=None, bbox_format='xyxy'):
     """
     Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
     
     Args:
-        image_path (str): Path to the image file.
+        image (PIL.Image.Image, optional): Image object. Default is None.
+        image_path (str, optional): Path to the image file. Default is None.
         phrases (list of str): List of phrases corresponding to detected objects.
         phrase_classifier_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each phrase.
-        bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format (x1, y1, x2, y2).
+        bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format.
         bbox_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each bounding box.
         phrase_ids (numpy.ndarray): Array of shape (n,) containing indices mapping bounding boxes to phrases.
         figsize (tuple): Figure size for visualization.
@@ -787,7 +788,9 @@ def visualize_visual_grounding_as_bboxes(image_path, phrases, phrase_classifier_
         gt_phrases_to_highlight (list of str, optional): List of phrases to highlight in the visualization. Default is None.
         show_heatmaps (bool, optional): Whether to display heatmaps. Default is False.
         heatmaps (numpy.ndarray, optional): Array of shape (num_phrases, num_regions), where num_regions = H * W.
+        bbox_format (str, optional): Format of bounding box coordinates. Default is 'xyxy'.
     """
+    assert image is not None or image_path is not None, "Either image or image_path must be provided."
     assert len(phrases) == len(phrase_classifier_probs), "Mismatched dimensions between phrases and phrase classifier probabilities."
     assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], "Mismatched dimensions between bounding box arrays."
     assert bbox_coords.shape[1] == 4, "Bounding box coordinates must have shape (n, 4)."
@@ -808,14 +811,22 @@ def visualize_visual_grounding_as_bboxes(image_path, phrases, phrase_classifier_
     # Define wrap length for titles
     wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
 
-    # Load and process image
-    image = Image.open(image_path).convert('RGB')
+    # Load and process image if path is provided
+    if image is None:
+        assert image_path is not None, "Image path must be provided."
+        image = Image.open(image_path).convert('RGB')
     width, height = image.size
 
     # Infer heatmap dimensions
     if show_heatmaps:
-        H = W = int(math.sqrt(heatmaps.shape[1]))  # Assuming square heatmap regions
+        H = W = math.isqrt(heatmaps.shape[1])  # Assuming square heatmap regions
         assert H * W == heatmaps.shape[1], "Heatmap size mismatch: Expected H * W regions."
+        # Compute grid lines positions based on the image size and feature map size.
+        cell_width = width / W
+        cell_height = height / H
+        # Grid lines (excluding image borders):
+        vlines = [cell_width * i for i in range(1, W)]
+        hlines = [cell_height * i for i in range(1, H)]
 
     # Iterate through unique phrases
     for phrase_id in range(n_phrases):
@@ -829,11 +840,23 @@ def visualize_visual_grounding_as_bboxes(image_path, phrases, phrase_classifier_
             heatmap = heatmaps[phrase_id].reshape(H, W)
             heatmap_resized = np.array(Image.fromarray(heatmap).resize((width, height), Image.BILINEAR))
             ax[row, col].imshow(heatmap_resized, cmap='jet', alpha=0.5)
+            for x in vlines:
+                ax[row, col].axvline(x, color="white", linestyle="--", linewidth=1)
+            for y in hlines:
+                ax[row, col].axhline(y, color="white", linestyle="--", linewidth=1)
 
         # Filter bounding boxes for the current phrase
         mask = phrase_ids == phrase_id
         for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
-            x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
+            if bbox_format == 'xyxy':
+                x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
+            elif bbox_format == 'cxcywh':
+                cx, cy, w, h = bbox
+                x1 = (cx - w / 2) * width
+                y1 = (cy - h / 2) * height
+                x2 = (cx + w / 2) * width
+                y2 = (cy + h / 2) * height
+            else: raise ValueError(f"Unknown bbox_format: {bbox_format}")
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
             ax[row, col].add_patch(rect)
             ax[row, col].text(x1, y1, f'{prob:.2f}', color='red', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))

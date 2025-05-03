@@ -1,5 +1,5 @@
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
-from medvqa.utils.files import read_lines_from_txt
+from medvqa.utils.files_utils import read_lines_from_txt
 from medvqa.datasets.padchest import (
     PADCHEST_LABELS_CSV_PATH,
     PADCHEST_IMAGES_SMALL_DIR,

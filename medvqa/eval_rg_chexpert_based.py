@@ -44,14 +44,14 @@ from medvqa.utils.common import (
     WORKSPACE_DIR,
     parsed_args_to_dict,
 )    
-from medvqa.utils.handlers import (
+from medvqa.utils.handlers_utils import (
     get_log_metrics_handlers,
     get_log_iteration_handler,
     attach_accumulator,
 )
 from medvqa.datasets.tokenizer import Tokenizer
 from medvqa.models.vqa.open_ended_vqa import OpenEndedVQA
-from medvqa.utils.files import (
+from medvqa.utils.files_utils import (
     get_cached_json_file,
     get_results_folder_path,
     save_to_pickle,
@@ -60,7 +60,7 @@ from medvqa.training.vqa import get_engine
 from medvqa.datasets.dataloading_utils import get_vqa_collate_batch_fn
 from medvqa.datasets.mimiccxr.mimiccxr_vqa_dataset_management import MIMICCXR_VQA_Evaluator
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging import CountPrinter
+from medvqa.utils.logging_utils import CountPrinter
 from medvqa.evaluation.report_generation import recover_reports
 
 def parse_args():

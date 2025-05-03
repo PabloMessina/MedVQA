@@ -9,8 +9,8 @@ from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
 )
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR
 from medvqa.utils.constants import CHEXPERT_LABELS
-from medvqa.utils.files import load_pickle, load_json, save_pickle
-from medvqa.utils.logging import print_bold, print_magenta
+from medvqa.utils.files_utils import load_pickle, load_json, save_pickle
+from medvqa.utils.logging_utils import print_bold, print_magenta
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

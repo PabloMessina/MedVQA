@@ -52,8 +52,8 @@ from medvqa.datasets.mimiccxr import (
 )
 from medvqa.datasets.vqa import load_precomputed_visual_features
 from medvqa.utils.constants import CHEXPERT_DATASET_ID, CHEXPERT_LABELS
-from medvqa.utils.files import get_cached_json_file, get_cached_pickle_file, load_pickle
-from medvqa.utils.logging import print_magenta
+from medvqa.utils.files_utils import get_cached_json_file, get_cached_pickle_file, load_pickle
+from medvqa.utils.logging_utils import print_magenta
 
 class _BalancedSamplingMode:
     BALANCED_CHEST_IMAGENOME_GLOBAL_LABELS = 'balanced_chest_imagenome_global_labels'

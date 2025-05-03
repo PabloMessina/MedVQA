@@ -13,8 +13,8 @@ from medvqa.utils.constants import (
     METRIC2SHORT,
     MetricNames,
 )
-from medvqa.utils.files import get_cached_json_file
-from medvqa.utils.metrics import (
+from medvqa.utils.files_utils import get_cached_json_file
+from medvqa.utils.metrics_utils import (
     average_ignoring_nones,
     chexpert_label_array_to_string,
     question_label_array_to_string,
