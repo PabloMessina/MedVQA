@@ -187,7 +187,7 @@ class MSCXR_PhraseGroundingAndClassificationDataset(Dataset):
                 albumentation_adapter=self.albumentation_adapter,
             )
         else:
-            image = self.image_transform(image_path)
+            image = self.image_transform(image_path)['pixel_values']
 
         if self.for_training:
             # Create target tensors for bounding boxes
@@ -212,6 +212,40 @@ class MSCXR_PhraseGroundingAndClassificationDataset(Dataset):
                 'bboxes': phrase_bboxes,
                 'classes': phrase_classes,
             }
+    
+    def collate_fn(self, batch):
+        """
+        Custom collate function for DataLoader to handle the variable-length
+        sequences and different data types in the dataset.
+
+        Args:
+            batch: A list of dictionaries, each representing a sample from the dataset.
+
+        Returns:
+            A dictionary containing the batched data.
+        """
+        batch_dict = {'dataset_name': 'mscxr'}
+        if self.for_training:
+            batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+            batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+            batch_dict['btc'] = torch.cat([x['btc'] for x in batch], dim=0) # shape: (num_phrases_with_grounding, H*W, 4)
+            batch_dict['btp'] = torch.cat([x['btp'] for x in batch], dim=0) # shape: (num_phrases_with_grounding, H*W)
+            gidxs = []
+            offset = 0
+            for x in batch:
+                gidxs.append(x['gidxs'] + offset)
+                offset += x['gidxs'].shape[0]
+            batch_dict['gidxs'] = torch.tensor(np.concatenate(gidxs))
+            assert batch_dict['gidxs'].shape[0] == batch_dict['btc'].shape[0]
+            assert batch_dict['gidxs'].shape[0] == batch_dict['btp'].shape[0]
+        else:
+            batch_dict['i'] = torch.stack([x['i'] for x in batch])
+            batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
+            batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
+            batch_dict['bboxes'] = [x['bboxes'] for x in batch]
+            batch_dict['classes'] = [x['classes'] for x in batch]
+        return batch_dict
         
 class MSCXR_PhraseGroundingDataset(Dataset):
     """
@@ -695,7 +729,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                 use_mscxr_for_test=False,
                 mscxr_do_grounding_only=False,
                 mscxr_test_on_all_images=False, # test on all images
-                mscxr_training_data_mode=MS_CXR_TrainingMode.TRAIN,
+                mscxr_training_data_mode=MS_CXR_TrainingMode.TRAIN.value,
                 mscxr_phrase2embedding_filepath=None,
                 use_chest_imagenome_for_train=False,
                 use_chest_imagenome_gold_for_test=False,
@@ -1409,13 +1443,13 @@ class MIMICCXR_PhraseGroundingTrainer:
                     logger.info(f'{ANSI_BOLD}Building train fact dataloader...{ANSI_RESET}')
                     batch_size = max_images_per_batch
                     logger.info(f'batch_size = {batch_size}') 
-                    if mscxr_training_data_mode == MS_CXR_TrainingMode.TRAIN:
+                    if mscxr_training_data_mode == MS_CXR_TrainingMode.TRAIN.value:
                         actual_train_indices = train_indices
-                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.VAL:
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.VAL.value:
                         actual_train_indices = val_indices
-                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.TEST:
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.TEST.value:
                         actual_train_indices = test_indices
-                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.ALL:
+                    elif mscxr_training_data_mode == MS_CXR_TrainingMode.ALL.value:
                         actual_train_indices = train_indices + val_indices + test_indices
                     else: raise ValueError(f'Invalid training data mode: {mscxr_training_data_mode}')
                     mscxr_train_dataset = MSCXR_PhraseGroundingDataset(
@@ -1502,7 +1536,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                     logger.info(f'len(self.mscxr_test_dataloader) = {len(self.mscxr_test_dataloader)}')
             else:
                 assert mscxr_phrase2embedding_filepath is not None
-                assert mscxr_phrase_grounding_collate_batch_fn is not None
                 assert dicom_id_to_pos_neg_facts_filepath is not None
                 options = []
                 if use_mscxr_for_train: options.append('train')
@@ -1679,7 +1712,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         batch_size=batch_size,
                         shuffle=True,
                         num_workers=num_train_workers,
-                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=True),
+                        collate_fn=mscxr_train_dataset.collate_fn,
                         pin_memory=True,
                     )
                     self.mscxr_train_dataset = mscxr_train_dataset
@@ -1711,7 +1744,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         batch_size=batch_size,
                         shuffle=False,
                         num_workers=num_test_workers,
-                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
+                        collate_fn=mscxr_val_dataset.collate_fn,
                         pin_memory=True,
                     )
                     self.mscxr_val_dataset = mscxr_val_dataset
@@ -1743,7 +1776,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         batch_size=batch_size,
                         shuffle=False,
                         num_workers=num_test_workers,
-                        collate_fn=lambda batch: mscxr_phrase_grounding_collate_batch_fn(batch, training_mode=False),
+                        collate_fn=mscxr_test_dataset.collate_fn,
                         pin_memory=True,
                     )
                     self.mscxr_test_dataset = mscxr_test_dataset

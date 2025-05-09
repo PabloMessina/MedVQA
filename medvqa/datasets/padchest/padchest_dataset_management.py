@@ -1,6 +1,28 @@
+import os
+import re
+import random
+import logging
+import torch
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from typing import Dict, Any, Optional, Tuple, List, Literal
+from nltk.tokenize import wordpunct_tokenize
+from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+from medvqa.datasets.image_transforms_factory import create_image_transforms
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
-from medvqa.utils.files_utils import read_lines_from_txt
+from medvqa.utils.bbox_utils import (
+    calculate_probabilistic_mask_from_bboxes,
+    convert_bboxes_into_target_tensors,
+    xyxy_to_cxcywh,
+)
+from medvqa.utils.files_utils import load_json, load_pickle, read_lines_from_txt
 from medvqa.datasets.padchest import (
+    PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH,
+    PADCHEST_GR_JPG_DIR,
+    PADCHEST_GR_MASTER_TABLE_CSV_PATH,
     PADCHEST_LABELS_CSV_PATH,
     PADCHEST_IMAGES_SMALL_DIR,
     PADCHEST_BROKEN_IMAGES_TXT_PATH,
@@ -18,18 +40,8 @@ from medvqa.datasets.dataloading_utils import (
     get_imbalance_reduced_weights,
 )
 
-from torch.utils.data import Dataset, DataLoader
-from PIL import Image
+logger = logging.getLogger(__name__)
 
-import pandas as pd
-import os
-import numpy as np
-import random
-import re
-import os
-import matplotlib.pyplot as plt
-from nltk.tokenize import wordpunct_tokenize
-from tqdm import tqdm
 
 def _labels_localizations_by_sentence_to_answer_string(x):
     x = x.lower()
@@ -592,3 +604,526 @@ class PadChest_MAE_Trainer(MAETrainerBase):
             shuffle_indices=shuffle,
             infinite=infinite,
         )
+    
+
+class PadChestGRPhraseGroundingDataset(Dataset):
+    """
+    PyTorch Dataset for Phrase Grounding using the PadChest-GR dataset.
+
+    This dataset adapts PadChest-GR for phrase grounding tasks. Each sample
+    consists of an image paired with a single phrase (sentence) that has
+    associated bounding box annotations within that image.
+
+    Args:
+        image_transforms_kwargs: Dictionary of keyword arguments used to build the
+            image transformation function via `create_image_transforms`.
+            The created function is expected to handle images, bounding boxes,
+            and potentially masks (if `data_augmentation_enabled` is True).
+        phrase2embedding: A dictionary mapping cleaned sentence text (str) to
+            its corresponding embedding (e.g., numpy array).
+        feature_map_size: A tuple (height, width) representing the target
+            feature map size for generating ground truth tensors during training.
+            Required if `for_training` is True.
+        json_path: Path to the PadChest-GR JSON file containing report findings
+            and bounding boxes (xyxy format assumed).
+        csv_path: Path to the PadChest-GR master CSV file containing study
+            metadata and split information.
+        img_dir: Path to the directory containing the primary JPG/PNG images.
+        split: The dataset split to load ('train', 'validation', 'test', 'all').
+        language: The language of the reports to use ('en' or 'es').
+        bbox_format: The bounding box format expected by `image_transforms`
+            and used for target tensor generation ('cxcywh' or 'xyxy').
+            Coordinates are always normalized [0, 1].
+        image_format: The file extension of the images ('jpg' or 'png').
+        data_augmentation_enabled: If True, data augmentation (via the function
+            created from `image_transforms_kwargs`) will be applied to images,
+            bounding boxes, and probabilistic masks (if `for_training`).
+        for_training: If True, returns target tensors suitable for training.
+            If False, returns the image, phrase embedding, and original
+            bounding boxes for inference.
+    """
+    def __init__(
+        self,
+        image_transforms_kwargs: Dict[str, Any],
+        phrase2embedding: Dict[str, np.ndarray],
+        feature_map_size: Optional[Tuple[int, int]] = None,
+        json_path: str = PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH,
+        csv_path: str = PADCHEST_GR_MASTER_TABLE_CSV_PATH,
+        img_dir: str = PADCHEST_GR_JPG_DIR,
+        split: Literal["train", "validation", "test", "all"] = "train",
+        language: Literal["en", "es"] = "en",
+        bbox_format: str = "cxcywh",
+        image_format: Literal["jpg", "png"] = "jpg",
+        data_augmentation_enabled: bool = False,
+        for_training: bool = True,
+    ):
+        super().__init__()
+
+        # --- Input Validation ---
+        if not os.path.exists(json_path):
+            raise FileNotFoundError(f"JSON file not found: {json_path}")
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        if not os.path.isdir(img_dir):
+            raise NotADirectoryError(f"Image directory not found: {img_dir}")
+        assert split in ["train", "validation", "test", "all"], \
+            f"Invalid split '{split}'. Must be one of ['train', 'validation', 'test', 'all']."
+        assert language in ["en", "es"], \
+            f"Invalid language '{language}'. Must be one of ['en', 'es']."
+        assert bbox_format in ["cxcywh", "xyxy"], \
+            f"Invalid bbox_format '{bbox_format}'. Must be one of ['cxcywh', 'xyxy']."
+        if for_training:
+            assert feature_map_size is not None, \
+                "feature_map_size must be provided when for_training=True."
+            assert len(feature_map_size) == 2, \
+                "feature_map_size should be a tuple (height, width)."
+        if not phrase2embedding:
+            raise ValueError("phrase2embedding dictionary cannot be empty.")
+
+        self.img_dir = img_dir
+        self.image_format = image_format
+        self.language = language
+        self.bbox_format = bbox_format
+        self.feature_map_size = feature_map_size
+        self.data_augmentation_enabled = data_augmentation_enabled
+        self.for_training = for_training
+
+        # Create image transform function
+        self.image_transforms = create_image_transforms(**image_transforms_kwargs)
+
+        # --- Load and Filter Metadata ---
+        logger.info(f"Loading master CSV from: {csv_path}")
+        df = pd.read_csv(csv_path)
+        logger.info(f"Filtering dataset for split: {split}")
+        if split != "all":
+            df = df[df['split'] == split]
+        if df.empty:
+            raise ValueError(f"No data found for split '{split}' in {csv_path}")
+        study_ids_in_split = df['StudyID'].unique().tolist()
+        logger.info(
+            f"Found {len(study_ids_in_split)} unique studies for split '{split}'"
+        )
+
+        # --- Load Reports Data ---
+        logger.info(f"Loading reports JSON from: {json_path}")
+        reports_json_list = load_json(json_path)
+        reports_data = {item['StudyID']: item for item in reports_json_list}
+        logger.info(f"Loaded {len(reports_data)} reports from JSON.")
+
+        # --- Pre-process Data into Image-Phrase Pairs ---
+        logger.info("Processing data into image-phrase pairs...")
+        self.image_paths: List[str] = []
+        self.phrase_embeddings: List[torch.Tensor] = [] # Store as tensors directly
+        self.phrase_bboxes: List[List[List[float]]] = [] # List of lists of boxes per phrase
+        self.study_ids: List[str] = [] # Keep track of original study ID
+        self.image_ids: List[str] = [] # Keep track of original image ID
+        self.phrase_texts: List[str] = [] # Keep track of the phrase text
+
+        lang_key = f'sentence_{self.language}'
+        num_missing_embeddings = 0
+        num_grounded_phrases = 0
+
+        for study_id in tqdm(study_ids_in_split, desc="Processing Studies"):
+
+            report_info = reports_data[study_id]
+            image_id = report_info['ImageID']
+            base_name, _ = os.path.splitext(image_id)
+            image_id_with_ext = f"{base_name}.{self.image_format}"
+            image_path = os.path.join(self.img_dir, image_id_with_ext)
+
+            assert os.path.exists(image_path), f"Image not found: {image_path}"
+
+            findings = report_info.get('findings', [])
+            for finding in findings:
+                finding_phrases = []
+                # Clean sentence
+                sentence_text = finding.get(lang_key, "")
+                sentence_text = sentence_text.strip()
+                if sentence_text.endswith('.'):
+                    sentence_text = sentence_text[:-1]
+                finding_phrases.append(sentence_text)
+                # Collect labels
+                finding_phrases.extend(finding.get('labels', []))
+
+                # Check for bounding boxes
+                original_boxes_xyxy = finding.get('boxes')
+                if original_boxes_xyxy: # Must have boxes
+                    # Convert boxes to the required format (once)
+                    if self.bbox_format == "cxcywh":
+                        processed_boxes = [xyxy_to_cxcywh(box) for box in original_boxes_xyxy]
+                    else: # xyxy
+                        processed_boxes = original_boxes_xyxy
+                    
+                    for phrase in finding_phrases:
+                        # Check if embedding exists for this phrase
+                        if phrase not in phrase2embedding:
+                            logger.warning(
+                                f"Phrase '{phrase}' not found in phrase2embedding dictionary. "
+                                f"Skipping this phrase."
+                            )
+                            num_missing_embeddings += 1
+                            continue # Skip if no embedding is available
+                        
+                        # Add data point (image-phrase pair)
+                        self.image_paths.append(image_path)
+                        embedding = phrase2embedding[phrase]
+                        self.phrase_embeddings.append(torch.tensor(embedding, dtype=torch.float32))
+                        self.phrase_bboxes.append(processed_boxes)
+                        self.study_ids.append(study_id)
+                        self.image_ids.append(image_id)
+                        self.phrase_texts.append(phrase)
+                        num_grounded_phrases += 1
+
+        if num_missing_embeddings > 0:
+            logger.warning(
+                f"Skipped {num_missing_embeddings} phrases due to missing entries "
+                f"in phrase2embedding dictionary."
+            )
+        if not self.image_paths:
+            raise ValueError(
+                f"No grounded phrases found for split '{split}' with language "
+                f"'{language}' and available embeddings. Check data and "
+                f"phrase2embedding keys."
+            )
+
+        logger.info(f"Created {len(self.image_paths)} image-phrase grounding pairs.")
+
+        # Store embedding size
+        self.embedding_size = self.phrase_embeddings[0].shape[0]
+
+
+    def __len__(self) -> int:
+        """Returns the total number of image-phrase pairs."""
+        return len(self.image_paths)
+
+    def __getitem__(self, i: int) -> dict:
+        """
+        Retrieves a single image-phrase grounding sample.
+
+        Args:
+            i: The index of the sample to retrieve.
+
+        Returns:
+            A dictionary containing the data for the requested sample.
+            Structure depends on the `for_training` flag.
+        """
+        image_path = self.image_paths[i]
+        phrase_embedding = self.phrase_embeddings[i] # Already a tensor
+        # Get the list of boxes for this specific phrase
+        bboxes_for_phrase = self.phrase_bboxes[i]
+
+        # --- Apply Image Transformations / Augmentation ---
+        image: Optional[torch.Tensor] = None
+        augmented_bboxes = bboxes_for_phrase # Default to original if no aug
+        augmented_prob_mask: Optional[np.ndarray] = None
+
+        if self.for_training:
+            # 1. Calculate probabilistic mask from original boxes BEFORE augmentation
+            # Ensure mask_resolution matches feature_map_size for consistency
+            prob_mask = calculate_probabilistic_mask_from_bboxes(
+                bboxes=bboxes_for_phrase,
+                mask_resolution=self.feature_map_size, # Use feature map size for mask
+                bbox_format=self.bbox_format,
+            )
+
+            if self.data_augmentation_enabled:
+                # 2. Apply augmentation to image, boxes, and mask
+                # Assume self.image_transforms handles this structure
+                transform_input = {
+                    'image_path': image_path,
+                    'bboxes': bboxes_for_phrase,
+                    'bbox_labels': [0] * len(bboxes_for_phrase), # Dummy labels
+                    'masks': [prob_mask], # Pass mask in a list
+                }
+                transform_output = self.image_transforms(**transform_input)
+                image = transform_output['pixel_values']
+                augmented_bboxes = transform_output['bboxes']
+                augmented_prob_mask = transform_output['masks'][0]
+            else:
+                # 2. Apply transform to image only (no augmentation)
+                # Assume transform takes path and returns dict or tensor
+                transform_output = self.image_transforms(image_path)['pixel_values']
+                augmented_prob_mask = prob_mask # Use un-augmented mask
+
+            # 3. Convert augmented boxes and mask to target tensors
+            target_coords, target_presence, target_prob_mask = \
+                convert_bboxes_into_target_tensors(
+                    bboxes=augmented_bboxes,
+                    probabilistic_mask=augmented_prob_mask,
+                    feature_map_size=self.feature_map_size,
+                    bbox_format=self.bbox_format,
+                )
+
+            output = {
+                'i': image,                 # Image tensor
+                'pe': phrase_embedding,     # Phrase embedding tensor
+                'tbc': target_coords,       # Target bbox coordinates tensor
+                'tbp': target_presence,     # Target bbox presence tensor
+                'tpm': target_prob_mask,    # Target probabilistic mask tensor
+            }
+
+        else: # Inference mode
+            # Apply transform to image only (no augmentation expected)
+            transform_output = self.image_transforms(image_path)['pixel_values']
+
+            # Return image, embedding, and original (processed) bboxes
+            output = {
+                'i': image,
+                'pe': phrase_embedding,
+                'bboxes': bboxes_for_phrase, # Return original boxes for eval
+            }
+
+        return output
+
+    def collate_fn(self, batch: List[dict]) -> dict:
+        """
+        Custom collate function for DataLoader.
+
+        Args:
+            batch: A list of dictionaries, each from __getitem__.
+
+        Returns:
+            A dictionary containing the batched data.
+        """
+        if self.for_training:
+            # Collate the batch for training
+            images = torch.stack([item['i'] for item in batch])
+            phrase_embeddings = torch.stack([item['pe'] for item in batch])
+            target_bboxes = torch.stack([item['tbc'] for item in batch])
+            target_presence = torch.stack([item['tbp'] for item in batch])
+            target_prob_masks = torch.stack([item['tpm'] for item in batch])
+            collated_batch = {
+                'i': images,
+                'pe': phrase_embeddings,
+                'tbc': target_bboxes,
+                'tbp': target_presence,
+                'tpm': target_prob_masks,
+            }
+        else:
+            # Collate the batch for inference
+            images = torch.stack([item['i'] for item in batch])
+            phrase_embeddings = torch.stack([item['pe'] for item in batch])
+            # BBoxes are lists of lists, keep as a list of lists
+            bboxes = [item['bboxes'] for item in batch]
+            collated_batch = {
+                'i': images,
+                'pe': phrase_embeddings,
+                'bboxes': bboxes,
+            }
+
+        # Add dataset identifier
+        collated_batch['dataset_name'] = 'padchest_gr'
+        return collated_batch
+    
+
+class PadChestGRPhraseTrainer:
+    """
+    A wrapper class to facilitate the creation of DataLoaders for phrase
+    grounding tasks using the PadChestGRPhraseGroundingDataset.
+
+    This class handles:
+    - Loading phrase embeddings.
+    - Instantiating the PadChestGRPhraseGroundingDataset for train,
+      validation, and/or test splits based on configuration.
+    - Creating PyTorch DataLoaders for the instantiated datasets.
+    """
+
+    def __init__(
+        self,
+
+        # --- Task & Target Configuration ---
+        mask_height: int,
+        mask_width: int,
+
+        # --- Data Source Configuration ---
+        phrase_embeddings_filepath: str,
+        json_path: str = PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH,
+        csv_path: str = PADCHEST_GR_MASTER_TABLE_CSV_PATH,
+        img_dir: str = PADCHEST_GR_JPG_DIR,
+        language: Literal["en", "es"] = "en",
+        image_format: Literal["jpg", "png"] = "jpg",
+        bbox_format: Literal["xyxy", "cxcywh"] = "cxcywh",
+
+        # --- Split & DataLoader Configuration ---
+        use_training_set: bool = False,
+        use_validation_set: bool = False,
+        use_test_set: bool = False,
+        training_split: Literal["train", "all"] = "train",
+        max_images_per_batch: int = 32,
+        val_batch_size_factor: float = 1.5,
+        test_batch_size_factor: float = 1.5,
+        num_train_workers: Optional[int] = 2,
+        num_val_workers: Optional[int] = 2,
+        num_test_workers: Optional[int] = 2,
+
+        # --- Transforms & Augmentation ---
+        # Pass the *full kwargs dict* for create_image_transforms
+        train_image_transforms_kwargs: Optional[Dict[str, Any]] = None,
+        val_image_transforms_kwargs: Optional[Dict[str, Any]] = None,
+        test_image_transforms_kwargs: Optional[Dict[str, Any]] = None,
+        data_augmentation_enabled: bool = True, # Only affects training set
+    ):
+        """
+        Initializes the PadChestGRPhraseTrainer.
+
+        Args:
+            mask_height: Target height for grounding masks/feature maps.
+            mask_width: Target width for grounding masks/feature maps.
+            phrase_embeddings_filepath: Path to the .pkl file containing the
+                phrase-to-embedding dictionary. Expected key: 'phrase2embedding'.
+            json_path: Path to the PadChest-GR JSON file.
+            csv_path: Path to the PadChest-GR master CSV file.
+            img_dir: Path to the directory containing PadChest-GR images.
+            language: Language for report sentences ('en' or 'es').
+            image_format: Image file extension ('jpg' or 'png').
+            bbox_format: Bounding box format ('xyxy' or 'cxcywh').
+            use_training_set: If True, create training dataset and dataloader.
+            use_validation_set: If True, create validation dataset and dataloader.
+            use_test_set: If True, create test dataset and dataloader.
+            training_split: Which split(s) to use for training ('train' or 'all').
+            max_images_per_batch: Batch size for the training dataloader.
+            val_batch_size_factor: Multiplier for training batch size to get
+                validation batch size.
+            test_batch_size_factor: Multiplier for training batch size to get
+                test batch size.
+            num_train_workers: Number of workers for training DataLoader.
+            num_val_workers: Number of workers for validation DataLoader.
+            num_test_workers: Number of workers for test DataLoader.
+            train_image_transforms_kwargs: Keyword arguments dictionary for
+                `create_image_transforms` for the training set. Required if `use_training_set`.
+            val_image_transforms_kwargs: Keyword arguments dictionary for
+                `create_image_transforms` for the validation set. Required if `use_validation_set`.
+            test_image_transforms_kwargs: Keyword arguments dictionary for
+                `create_image_transforms` for the test set. Required if `use_test_set`.
+            data_augmentation_enabled: If True, enable data augmentation in the
+                training dataset.
+        """
+        logger.info("Initializing PadChestGRPhraseTrainer...")
+
+        # --- Argument Validation ---
+        if use_training_set:
+            assert train_image_transforms_kwargs is not None, \
+                "train_image_transforms_kwargs is required when use_training_set=True"
+            assert num_train_workers is not None, \
+                "num_train_workers must be specified when use_training_set=True"
+        if use_validation_set:
+            assert val_image_transforms_kwargs is not None, \
+                "val_image_transforms_kwargs is required when use_validation_set=True"
+            assert num_val_workers is not None, \
+                "num_val_workers must be specified when use_validation_set=True"
+        if use_test_set:
+            assert test_image_transforms_kwargs is not None, \
+                "test_image_transforms_kwargs is required when use_test_set=True"
+            assert num_test_workers is not None, \
+                "num_test_workers must be specified when use_test_set=True"
+        assert training_split in ["train", "all"], \
+            f"Invalid training_split '{training_split}'. Must be 'train' or 'all'."
+
+        self.feature_map_size = (mask_height, mask_width)
+
+        # --- Load Phrase Embeddings ---
+        logger.info(f"Loading phrase embeddings from: {phrase_embeddings_filepath}")
+        if not os.path.exists(phrase_embeddings_filepath):
+            raise FileNotFoundError(f"Phrase embedding file not found: {phrase_embeddings_filepath}")
+        self.phrase2embedding = load_pickle(phrase_embeddings_filepath)
+        if not isinstance(self.phrase2embedding, dict):
+            raise TypeError(f"Expected 'phrase2embedding' to be a dict, got {type(self.phrase2embedding)}")
+        if not self.phrase2embedding:
+            raise ValueError("'phrase2embedding' dictionary is empty.")
+        logger.info(f"Loaded {len(self.phrase2embedding)} phrase embeddings.")
+        # Extract details for potential external use
+        self.phrases = sorted(list(self.phrase2embedding.keys()))
+        # Note: self.phrase_embeddings array isn't directly stored here,
+        # as the dataset handles embedding lookup internally.
+
+        # --- Initialize Datasets and DataLoaders ---
+        self.train_dataset: Optional[PadChestGRPhraseGroundingDataset] = None
+        self.train_dataloader: Optional[DataLoader] = None
+        self.val_dataset: Optional[PadChestGRPhraseGroundingDataset] = None
+        self.val_dataloader: Optional[DataLoader] = None
+        self.test_dataset: Optional[PadChestGRPhraseGroundingDataset] = None
+        self.test_dataloader: Optional[DataLoader] = None
+
+        # Common dataset args
+        common_dataset_args = {
+            "phrase2embedding": self.phrase2embedding,
+            "json_path": json_path,
+            "csv_path": csv_path,
+            "img_dir": img_dir,
+            "language": language,
+            "bbox_format": bbox_format,
+            "image_format": image_format,
+        }
+
+        # --- Training Set ---
+        if use_training_set:
+            logger.info(f"Setting up TRAINING dataset (split: '{training_split}')...")
+            self.train_dataset = PadChestGRPhraseGroundingDataset(
+                image_transforms_kwargs=train_image_transforms_kwargs,
+                feature_map_size=self.feature_map_size,
+                split=training_split,
+                data_augmentation_enabled=data_augmentation_enabled,
+                for_training=True,
+                **common_dataset_args
+            )
+            self.train_dataloader = DataLoader(
+                dataset=self.train_dataset,
+                batch_size=max_images_per_batch,
+                shuffle=True, # Shuffle training data
+                num_workers=num_train_workers,
+                collate_fn=self.train_dataset.collate_fn,
+                pin_memory=True,
+            )
+            logger.info(f"  Training DataLoader ready (Batch size: {max_images_per_batch}, Workers: {num_train_workers}, Augmentation: {data_augmentation_enabled})")
+            logger.info(f"  Training dataset size: {len(self.train_dataset)}")
+
+        # --- Validation Set ---
+        if use_validation_set:
+            logger.info("Setting up VALIDATION dataset (split: 'validation')...")
+            self.val_dataset = PadChestGRPhraseGroundingDataset(
+                image_transforms_kwargs=val_image_transforms_kwargs,
+                feature_map_size=self.feature_map_size, # Needed even if for_training=False if mask calc happens
+                split="validation",
+                data_augmentation_enabled=False, # No augmentation for validation
+                for_training=False, # Return format for inference/evaluation
+                **common_dataset_args
+            )
+            val_batch_size = int(max_images_per_batch * val_batch_size_factor)
+            self.val_dataloader = DataLoader(
+                dataset=self.val_dataset,
+                batch_size=val_batch_size,
+                shuffle=False, # No shuffling for validation
+                num_workers=num_val_workers,
+                collate_fn=self.val_dataset.collate_fn,
+                pin_memory=True,
+            )
+            logger.info(f"  Validation DataLoader ready (Batch size: {val_batch_size}, Workers: {num_val_workers})")
+            logger.info(f"  Validation dataset size: {len(self.val_dataset)}")
+
+
+        # --- Test Set ---
+        if use_test_set:
+            logger.info("Setting up TEST dataset (split: 'test')...")
+            self.test_dataset = PadChestGRPhraseGroundingDataset(
+                image_transforms_kwargs=test_image_transforms_kwargs,
+                feature_map_size=self.feature_map_size, # Needed even if for_training=False
+                split="test",
+                data_augmentation_enabled=False, # No augmentation for test
+                for_training=False, # Return format for inference/evaluation
+                **common_dataset_args
+            )
+            test_batch_size = int(max_images_per_batch * test_batch_size_factor)
+            self.test_dataloader = DataLoader(
+                dataset=self.test_dataset,
+                batch_size=test_batch_size,
+                shuffle=False, # No shuffling for test
+                num_workers=num_test_workers,
+                collate_fn=self.test_dataset.collate_fn,
+                pin_memory=True,
+                drop_last=False,
+            )
+            logger.info(f"  Test DataLoader ready (Batch size: {test_batch_size}, Workers: {num_test_workers})")
+            logger.info(f"  Test dataset size: {len(self.test_dataset)}")
+
+
+        logger.info("PadChestGRPhraseTrainer initialization complete.")

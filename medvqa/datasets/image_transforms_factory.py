@@ -243,7 +243,7 @@ class ConfigurableAlbumentations:
                  apply_clahe: bool = True,
                  apply_spatial_train: bool = True,
                  apply_color_train: bool = True,
-                 p_test_in_train: float = 0.5, # i.e. 50% of train images use test pipeline
+                 p_test_in_train: float = 0.35, # i.e. 35% of train images will use test pipeline
                  # --- CLAHE Params ---
                  clahe_clip_limit: float = 4.0,
                  clahe_tile_grid_size: Tuple[int, int] = (8, 8),
@@ -589,7 +589,6 @@ def create_image_transforms(
             bboxes: Optional[List[List[float]]] = None,
             bbox_labels: Optional[List[Any]] = None,
             masks: Optional[List[Any]] = None,
-            **kwargs
         ) -> Dict[str, Any]:
             try:
                 # Step 1: Load image -> NumPy HWC RGB

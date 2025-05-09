@@ -6,6 +6,8 @@ from datetime import datetime
 import time
 import os
 import logging
+from enum import Enum
+from typing import List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,16 @@ class DictWithDefault:
         self.values[key] = value
     def items(self):
         return self.values.items()
+    
+class ChoiceEnum(Enum):
+    """
+    Base Enum class that provides a method to get member values as a list.
+    Useful for populating choices in argument parsers or similar scenarios.
+    """
+    @classmethod
+    def get_choices(cls) -> List[Any]:
+        """Returns a list of the values of the enum members."""
+        return [member.value for member in cls]
     
 def activate_determinism(seed=42, verbose=True):
     if verbose:

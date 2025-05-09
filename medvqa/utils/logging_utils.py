@@ -10,10 +10,10 @@ from medvqa.utils.constants import CHEXPERT_LABELS
 logger = logging.getLogger(__name__)
 
 # Keep the standard format for files or as a base
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 # Define the color log format
 COLOR_LOG_FORMAT = (
-    "%(log_color)s%(asctime)s - %(name)s - %(levelname)s%(reset)s"
+    "%(log_color)s%(asctime)s - %(levelname)s - %(name)s%(reset)s"
     " - %(message_log_color)s%(message)s" # Color the message too
 )
 LOG_LEVEL = logging.INFO # Default level
@@ -26,6 +26,7 @@ ANSI_BLACK_BOLD = "\033[1;30m"
 ANSI_RED_BOLD = "\033[1;31m"
 ANSI_BOLD = "\033[1m"
 ANSI_DARK_GREEN_BOLD = "\033[1;32m"
+ANSI_ORANGE_BOLD = "\033[1;33m"
 ANSI_RESET = "\033[0m"
 # --- End ANSI Codes ---
 

@@ -3,13 +3,9 @@ import argparse
 import torch
 import shlex
 import logging
-
-from medvqa.utils.logging_utils import ANSI_BLUE_BOLD, ANSI_RESET, log_title, setup_logging
-
-# Setup logging as early as possible
-setup_logging()
-logger = logging.getLogger(__name__)
-
+from medvqa.datasets.padchest.padchest_dataset_management import PadChestGRPhraseTrainer
+from medvqa.utils.logging_utils import log_title, setup_logging
+setup_logging() # Setup logging as early as possible
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
 from medvqa.datasets.chexpert.chexpert_dataset_management import CheXpertPhraseGroundingTrainer, CheXpertTrainingMode
 from medvqa.datasets.image_transforms_factory import create_image_transforms
@@ -17,33 +13,26 @@ from medvqa.datasets.iuxray.iuxray_phrase_grounding_dataset_management import IU
 from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.mimiccxr.mimiccxr_phrase_grounding_dataset_management import MIMICCXR_PhraseGroundingTrainer
 from medvqa.datasets.ms_cxr import MS_CXR_TrainingMode
-from medvqa.datasets.vinbig import VINBIG_NUM_BBOX_CLASSES__MODIFIED
-from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer, VinBigTrainingMode
-from medvqa.losses import BinaryMultiLabelClassificationLossNames
+from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseTaskMode, VinBigPhraseTrainer, VinBigTrainingMode
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
-
 from medvqa.models.phrase_grounding.phrase_grounder import PhraseGrounder, PhraseGroundingMode
-
 from medvqa.models.vision.visual_modules import comes_with_positional_encoding, inject_mean_std_for_image_normalization
 from medvqa.models.vqa.open_ended_vqa import RawImageEncoding
 from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
-from medvqa.utils.constants import DATASET_NAMES, VINBIG_NUM_BBOX_CLASSES
+from medvqa.utils.constants import DATASET_NAMES
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_accuracy,
     attach_condition_aware_bbox_iou_class_agnostic,
     attach_condition_aware_bbox_iou_open_class,
-    attach_condition_aware_bbox_iou_per_class,
     attach_condition_aware_chest_imagenome_bbox_iou,
     attach_condition_aware_class_averaged_prc_auc,
     attach_condition_aware_loss,
     attach_condition_aware_prc_auc,
     attach_condition_aware_segmask_iou,
 )
-from medvqa.models.checkpoint import (
-    load_metadata,
-)
+from medvqa.models.checkpoint import load_metadata
 from medvqa.utils.common import parsed_args_to_dict
 from medvqa.utils.files_utils import get_checkpoint_folder_path
 from medvqa.training.phrase_grounding import get_engine
@@ -55,7 +44,7 @@ from medvqa.datasets.dataloading_utils import (
 from medvqa.metrics.utils import get_merge_metrics_fn
 from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
 
-
+logger = logging.getLogger(__name__)
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -148,6 +137,7 @@ def parse_args(args=None):
     parser.add_argument('--vinbig_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--chexlocalize_class_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--chexpert_class_phrase_embeddings_filepath', type=str, default=None)
+    parser.add_argument('--padchest_gr_phrase_embeddings_filepath', type=str, default=None)
     parser.add_argument('--mimiccxr_exclude_noisy_images', action='store_true')
     parser.add_argument('--mimiccxr_facts_weight', type=float, default=1.0)
     parser.add_argument('--chest_imagenome_anatlocs_weight', type=float, default=1.0)
@@ -157,6 +147,7 @@ def parse_args(args=None):
     parser.add_argument('--chexlocalize_weight', type=float, default=1.0)
     parser.add_argument('--chexpert_weight', type=float, default=1.0)
     parser.add_argument('--iuxray_weight', type=float, default=1.0)
+    parser.add_argument('--padchest_gr_weight', type=float, default=1.0)
     parser.add_argument('--img_aug_mode', type=str, default=None, help='Image augmentation mode')
     parser.add_argument('--pos_area_prior', type=float, default=0.4, help='Prior for positive area')
     parser.add_argument('--neg_area_prior', type=float, default=0.0, help='Prior for negative area')
@@ -174,12 +165,18 @@ def parse_args(args=None):
     parser.add_argument('--use_chexpert_for_test', action='store_true')
     parser.add_argument('--use_iuxray_for_train', action='store_true')
     parser.add_argument('--use_iuxray_for_test', action='store_true')
+    parser.add_argument('--use_padchest_gr_for_train', action='store_true')
+    parser.add_argument('--use_padchest_gr_for_val', action='store_true')
     parser.add_argument('--use_cxrlt2024_challenge_split', action='store_true')
     parser.add_argument('--use_cxrlt2024_custom_labels', action='store_true')
     parser.add_argument('--use_cxrlt2024_official_labels', action='store_true')
     parser.add_argument('--use_all_cxrlt2024_official_labels_for_training', action='store_true')
-    parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN_ONLY, choices=VinBigTrainingMode.get_all())
-    parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL, choices=CheXpertTrainingMode.get_all())
+    parser.add_argument('--vinbig_training_data_mode', type=str, default=VinBigTrainingMode.TRAIN.value,
+                        choices=VinBigTrainingMode.get_choices())
+    parser.add_argument('--vinbig_task_mode', type=str, default=VinBigPhraseTaskMode.GROUNDING.value,
+                        choices=VinBigPhraseTaskMode.get_choices())
+    parser.add_argument('--chexpert_training_data_mode', type=str, default=CheXpertTrainingMode.ALL.value,
+                        choices=CheXpertTrainingMode.get_choices())
     parser.add_argument('--mimiccxr_balance_long_middle_short_tail', action='store_true')
     parser.add_argument('--mimiccxr_long_middle_short_tail_thresholds', nargs=2, type=float, default=(0.02, 0.05))
     parser.add_argument('--mimiccxr_report_fact_nli_integrated_data_filepath', type=str, default=None)
@@ -195,11 +192,12 @@ def parse_args(args=None):
     parser.add_argument('--cxrlt2024_official_training_labels_for_fact_classification_filepath', type=str, default=None)
     parser.add_argument('--cxrlt2024_do_balanced_sampling', action='store_true')
     parser.add_argument('--do_visual_grounding_with_bbox_regression', action='store_true')
-    parser.add_argument('--do_visual_grounding_with_segmentation', action='store_true')
     parser.add_argument('--replace_phrase_embeddings_with_random_vectors', action='store_true')
     parser.add_argument('--use_vinbig_with_modified_labels', action='store_true')
-    parser.add_argument('--mscxr_training_data_mode', type=str, default=MS_CXR_TrainingMode.TRAIN, choices=MS_CXR_TrainingMode.get_all())
+    parser.add_argument('--mscxr_training_data_mode', type=str, default=MS_CXR_TrainingMode.TRAIN.value,
+                        choices=MS_CXR_TrainingMode.get_choices())
     parser.add_argument('--mscxr_do_grounding_only', action='store_true')
+    parser.add_argument('--padchest_gr_training_split', type=str, default='train', choices=['train', 'val', 'test', 'all'])
     
     # Checkpoint saving arguments
     parser.add_argument('--save', dest='save', action='store_true')
@@ -230,11 +228,12 @@ def train_model(
     lr_scheduler_kwargs,
     mimiccxr_trainer_kwargs,
     vinbig_trainer_kwargs,
+    padchestgr_trainer_kwargs,
     chexlocalize_trainer_kwargs,
     chexpert_trainer_kwargs,
     iuxray_trainer_kwargs,
     dataloading_kwargs,
-    collate_batch_fn_kwargs,
+    # collate_batch_fn_kwargs,
     train_image_transform_kwargs,
     val_image_transform_kwargs,
     trainer_engine_kwargs,
@@ -267,6 +266,8 @@ def train_model(
     use_cxrlt2024_official_labels = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_cxrlt2024_official_labels', False)
     use_vinbig_for_train = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_training_set', False)
     use_vinbig_for_test = vinbig_trainer_kwargs is not None and vinbig_trainer_kwargs.get('use_validation_set', False)
+    use_padchest_gr_for_train = padchestgr_trainer_kwargs is not None and padchestgr_trainer_kwargs.get('use_training_set', False)
+    use_padchest_gr_for_val = padchestgr_trainer_kwargs is not None and padchestgr_trainer_kwargs.get('use_validation_set', False)
     use_chexlocalize_for_train = chexlocalize_trainer_kwargs is not None and chexlocalize_trainer_kwargs.get('use_training_set', False)
     use_chexlocalize_for_test = chexlocalize_trainer_kwargs is not None and chexlocalize_trainer_kwargs.get('use_validation_set', False)
     use_chexpert_for_train = chexpert_trainer_kwargs is not None and chexpert_trainer_kwargs.get('use_training_set', False)
@@ -277,10 +278,7 @@ def train_model(
     use_contrastive_phrase_grounding_loss = trainer_engine_kwargs['use_contrastive_phrase_grounding_loss']
     use_global_alignment_contrastive_loss = trainer_engine_kwargs['use_global_image_phrase_contrastive_loss']
     do_visual_grounding_with_bbox_regression = trainer_engine_kwargs['do_visual_grounding_with_bbox_regression']
-    do_visual_grounding_with_segmentation = trainer_engine_kwargs['do_visual_grounding_with_segmentation']
-    use_yolo = model_kwargs['raw_image_encoding'] in [RawImageEncoding.YOLOV8,
-                                                      RawImageEncoding.YOLOV11_FACT_CONDITIONED]
-    use_vinbig_with_modified_labels = trainer_engine_kwargs.get('use_vinbig_with_modified_labels', False)
+    vinbig_task_mode = vinbig_trainer_kwargs.get('task_mode') if vinbig_trainer_kwargs is not None else None
     bbox_format = model_kwargs['bbox_format']
 
     # Sanity checks
@@ -319,6 +317,10 @@ def train_model(
         if dataloading_kwargs['vinbig_weight'] == 0:
             logger.warning('use_vinbig_for_train is True but vinbig_weight is 0', bold=True)
             use_vinbig_for_train = False
+    if use_padchest_gr_for_train:
+        if dataloading_kwargs['padchest_gr_weight'] == 0:
+            logger.warning('use_padchest_gr is True but padchest_gr_weight is 0', bold=True)
+            use_padchest_gr = False
     if use_chexlocalize_for_train:
         if dataloading_kwargs['chexlocalize_weight'] == 0:
             logger.warning('use_chexlocalize_for_train is True but chexlocalize_weight is 0', bold=True)
@@ -338,6 +340,8 @@ def train_model(
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
 
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
+
+    use_padchest_gr = use_padchest_gr_for_train or use_padchest_gr_for_val
 
     use_chexpert = use_chexpert_for_train or use_chexpert_for_test
 
@@ -408,16 +412,25 @@ def train_model(
     # Create VINBIG trainer
     if use_vinbig:
         log_title(logger, 'Creating VinBig Phrase Grounding Trainer')
-        vinbig_trainer = VinBigPhraseGroundingTrainer(
+        vinbig_trainer = VinBigPhraseTrainer(
             train_image_transform=create_image_transforms(**train_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            val_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),
-            collate_batch_fn=get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['vbg']),
+            val_image_transform=create_image_transforms(**val_image_transform_kwargs[DATASET_NAMES.VINBIG]),            
             max_images_per_batch=max_images_per_batch,
-            max_phrases_per_batch=max_phrases_per_batch,
-            test_batch_size_factor=val_batch_size_factor,
+            val_batch_size_factor=val_batch_size_factor,
             num_train_workers=num_train_workers,
             num_val_workers=num_val_workers,
             **vinbig_trainer_kwargs,
+        )
+
+    # Create PadChest-GR trainer
+    if use_padchest_gr:
+        log_title(logger, 'Creating PadChest-GR Phrase Grounding Trainer')
+        padchestgr_trainer = PadChestGRPhraseTrainer(
+            max_images_per_batch=max_images_per_batch,
+            val_batch_size_factor=val_batch_size_factor,
+            num_train_workers=num_train_workers,
+            num_val_workers=num_val_workers,
+            **padchestgr_trainer_kwargs,
         )
 
     # Create MIMIC-CXR trainer
@@ -482,6 +495,8 @@ def train_model(
             output['mimiccxr_trainer'] = mimiccxr_trainer
         if use_vinbig:
             output['vinbig_trainer'] = vinbig_trainer
+        if use_padchest_gr:
+            output['padchestgr_trainer'] = padchestgr_trainer
         if use_chexlocalize:
             output['chexlocalize_trainer'] = chexlocalize_trainer
         if use_chexpert:
@@ -512,7 +527,7 @@ def train_model(
         _dataset_names.append('mscxr')
         _train_weights.append(dataloading_kwargs['mscxr_weight'])
         _train_dataloaders.append(mimiccxr_trainer.mscxr_train_dataloader)
-        logger.info(f'len(mimiccxr_trainer.mscxr_dataloader) = {len(mimiccxr_trainer.mscxr_train_dataloader)}')
+        logger.info(f'len(mimiccxr_trainer.mscxr_train_dataloader) = {len(mimiccxr_trainer.mscxr_train_dataloader)}')
 
     if use_mscxr_for_val:
         _val_dataloaders.append(mimiccxr_trainer.mscxr_val_dataloader)
@@ -563,6 +578,16 @@ def train_model(
     if use_vinbig_for_test:
         _val_dataloaders.append(vinbig_trainer.val_dataloader)
         logger.info(f'len(vinbig_trainer.val_dataloader) = {len(vinbig_trainer.val_dataloader)}')
+
+    if use_padchest_gr_for_train:
+        _dataset_names.append('padchest-gr')
+        _train_weights.append(dataloading_kwargs['padchest_gr_weight'])
+        _train_dataloaders.append(padchestgr_trainer.train_dataloader)
+        logger.info(f'len(padchestgr_trainer.train_dataloader) = {len(padchestgr_trainer.train_dataloader)}')
+
+    if use_padchest_gr_for_val:
+        _val_dataloaders.append(padchestgr_trainer.val_dataloader)
+        logger.info(f'len(padchestgr_trainer.val_dataloader) = {len(padchestgr_trainer.val_dataloader)}')
 
     if use_chexlocalize_for_train:
         _dataset_names.append('chexloc')
@@ -737,72 +762,66 @@ def train_model(
             append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'mscxr_prc_auc', train=in_train, val=in_val)
     
     if use_vinbig_for_train or use_vinbig_for_test:
-        _cond_func = lambda x: x['dataset_name'] == 'vbg'
+        _cond_func = lambda x: x['dataset_name'] == 'vinbig'
         in_train = use_vinbig_for_train
         in_val = use_vinbig_for_test
+        assert vinbig_task_mode is not None
 
         if in_train:
-            attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
-            attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+            if vinbig_task_mode != VinBigPhraseTaskMode.GROUNDING.value:
+                attach_condition_aware_loss(trainer_engine, 'phrase_classifier_loss', _cond_func, 'vbg_phrcls_loss')
+                attach_condition_aware_class_averaged_prc_auc(trainer_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+            if vinbig_task_mode != VinBigPhraseTaskMode.CLASSIFICATION.value:
+                attach_condition_aware_loss(trainer_engine, 'visual_grounding_confidence_loss', _cond_func, 'vbg_vgconf_loss')
+                attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
             if use_global_alignment_contrastive_loss:
                 attach_condition_aware_loss(trainer_engine, 'global_alignment_contrastive_loss', _cond_func, 'vbg_gac_loss')
             if use_attention_regularization_loss:
                 attach_condition_aware_loss(trainer_engine, 'attention_regularization_loss', _cond_func, 'vbg_att_reg_loss')
-            if do_visual_grounding_with_bbox_regression:
-                if use_yolo:
-                    attach_condition_aware_loss(trainer_engine, 'yolo_loss', _cond_func, 'vbg_yolo_loss')
-                    attach_condition_aware_loss(trainer_engine, 'yolo_box_loss', _cond_func, 'vbg_yolo_box_loss')
-                    attach_condition_aware_loss(trainer_engine, 'yolo_cls_loss', _cond_func, 'vbg_yolo_cls_loss')
-                    attach_condition_aware_loss(trainer_engine, 'yolo_dfl_loss', _cond_func , 'vbg_yolo_dfl_loss')
-                else:
-                    attach_condition_aware_loss(trainer_engine, 'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-                    attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'vbg_vgbbox_loss')
-            elif do_visual_grounding_with_segmentation:
-                attach_condition_aware_loss(trainer_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-                attach_condition_aware_segmask_iou(trainer_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
         if in_val:
-            attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
-            if do_visual_grounding_with_bbox_regression:
-                if use_vinbig_with_modified_labels:
-                    nc = VINBIG_NUM_BBOX_CLASSES__MODIFIED
-                else:
-                    nc = VINBIG_NUM_BBOX_CLASSES
-                if use_yolo:
-                    attach_condition_aware_bbox_iou_per_class(validator_engine,
-                                                        field_names=['yolo_predictions', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                        metric_name='vbg_bbox_iou', nc=nc, condition_function=_cond_func,
-                                                        for_vinbig=True, use_fact_conditioned_yolo=True)
-                else:
-                    attach_condition_aware_bbox_iou_per_class(validator_engine,
-                                                        field_names=['predicted_bboxes', 'vinbig_bbox_coords', 'vinbig_bbox_classes'],
-                                                        metric_name='vbg_bbox_iou', nc=nc, condition_function=_cond_func,
-                                                        for_vinbig=True)
-            elif do_visual_grounding_with_segmentation:
-                attach_condition_aware_loss(validator_engine,'attention_supervision_loss', _cond_func, 'vbg_att_sup_loss')
-                attach_condition_aware_segmask_iou(validator_engine, 'pred_mask', 'gt_mask', 'vbg_segmask_iou', _cond_func)
+            if vinbig_task_mode != VinBigPhraseTaskMode.GROUNDING.value:
+                attach_condition_aware_class_averaged_prc_auc(validator_engine, 'pred_probs', 'gt_labels', None, 'vbg_prc_auc', _cond_func)
+            if vinbig_task_mode != VinBigPhraseTaskMode.CLASSIFICATION.value:
+                attach_condition_aware_bbox_iou_class_agnostic(validator_engine,
+                                                    field_names=['predicted_bboxes', 'bbox_coords'],
+                                                    metric_name='vbg_bbox_iou', bbox_format=bbox_format,
+                                                    condition_function=_cond_func)
         # for logging
-        if do_visual_grounding_with_bbox_regression:
-            if in_train:
-                if use_yolo:
-                    metrics_to_print.append('vbg_yolo_loss')
-                    metrics_to_print.append('vbg_yolo_box_loss')
-                    metrics_to_print.append('vbg_yolo_cls_loss')
-                    metrics_to_print.append('vbg_yolo_dfl_loss')
-                else:
-                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgbbox_loss', train=in_train, val=False)
-                    append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=False)
-            if in_val:
-                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_bbox_iou', train=False)
-        elif do_visual_grounding_with_segmentation:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_att_sup_loss', train=in_train, val=in_val)
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_segmask_iou', train=in_train, val=in_val)
-        if use_global_alignment_contrastive_loss:
-            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_gac_loss', train=True, val=False)
         if in_train:
-            metrics_to_print.append('vbg_phrcls_loss')
+            if vinbig_task_mode != VinBigPhraseTaskMode.GROUNDING.value:
+                metrics_to_print.append('vbg_phrcls_loss')
+            if vinbig_task_mode != VinBigPhraseTaskMode.CLASSIFICATION.value:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgconf_loss', train=in_train, val=False)
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_vgbbox_loss', train=in_train, val=False)
             if use_attention_regularization_loss:
                 metrics_to_print.append('vbg_att_reg_loss')
-        append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=in_train, val=in_val)
+            if use_global_alignment_contrastive_loss:
+                metrics_to_print.append('vbg_gac_loss')
+        if in_val:
+            if vinbig_task_mode != VinBigPhraseTaskMode.CLASSIFICATION.value:
+                append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_bbox_iou', train=False)
+        if vinbig_task_mode != VinBigPhraseTaskMode.GROUNDING.value:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'vbg_prc_auc', train=in_train, val=in_val)
+
+    if use_padchest_gr_for_train or use_padchest_gr_for_val:
+        _cond_func = lambda x: x['dataset_name'] == 'padchest_gr'
+        in_train = use_padchest_gr_for_train
+        in_val = use_padchest_gr_for_val
+
+        if in_train:
+            attach_condition_aware_loss(trainer_engine, 'visual_grounding_confidence_loss', _cond_func, 'pchstgr_vgconf_loss')
+            attach_condition_aware_loss(trainer_engine,'visual_grounding_bbox_loss', _cond_func, 'pchstgr_vgbbox_loss')
+        if in_val:
+            attach_condition_aware_bbox_iou_class_agnostic(validator_engine,
+                                                field_names=['predicted_bboxes', 'bbox_coords'],
+                                                metric_name='pchstgr_bbox_iou', bbox_format=bbox_format,
+                                                condition_function=_cond_func)
+        # for logging
+        if in_train:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pchstgr_vgconf_loss', train=in_train, val=False)
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pchstgr_vgbbox_loss', train=in_train, val=False)
+        if in_val:
+            append_metric_name(train_metrics_to_merge, val_metrics_to_merge, metrics_to_print, 'pchstgr_bbox_iou', train=False)
 
     if use_chexlocalize:
         _cond_func = lambda x: x['dataset_name'] == 'cl'
@@ -975,11 +994,12 @@ def train_model(
             lr_scheduler_kwargs=lr_scheduler_kwargs,
             mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
             vinbig_trainer_kwargs=vinbig_trainer_kwargs,
+            padchestgr_trainer_kwargs=padchestgr_trainer_kwargs,
             chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
             chexpert_trainer_kwargs=chexpert_trainer_kwargs,
             iuxray_trainer_kwargs=iuxray_trainer_kwargs,
             dataloading_kwargs=dataloading_kwargs,
-            collate_batch_fn_kwargs=collate_batch_fn_kwargs,
+            # collate_batch_fn_kwargs=collate_batch_fn_kwargs,
             train_image_transform_kwargs=train_image_transform_kwargs,
             val_image_transform_kwargs=val_image_transform_kwargs,
             trainer_engine_kwargs=trainer_engine_kwargs,
@@ -1052,8 +1072,10 @@ def train_from_scratch(
     mscxr_phrase2embedding_filepath,
     chest_imagenome_bbox_phrase_embeddings_filepath,
     vinbig_phrase_embeddings_filepath,
+    vinbig_task_mode,
     chexlocalize_class_phrase_embeddings_filepath,
     chexpert_class_phrase_embeddings_filepath,
+    padchest_gr_phrase_embeddings_filepath,
     mimiccxr_exclude_noisy_images,
     mimiccxr_balance_long_middle_short_tail,
     mimiccxr_long_middle_short_tail_thresholds,
@@ -1078,6 +1100,7 @@ def train_from_scratch(
     chexlocalize_weight,
     chexpert_weight,
     iuxray_weight,
+    padchest_gr_weight,
     img_aug_mode,
     max_images_per_batch,
     max_phrases_per_batch,
@@ -1094,6 +1117,8 @@ def train_from_scratch(
     use_chest_imagenome_gold_for_test,
     use_vinbig_for_train,
     use_vinbig_for_test,
+    use_padchest_gr_for_train,
+    use_padchest_gr_for_val,
     use_chexlocalize_for_train,
     use_chexlocalize_for_test,
     use_chexpert_for_train,
@@ -1109,12 +1134,12 @@ def train_from_scratch(
     chexpert_training_data_mode,
     mscxr_training_data_mode,
     mscxr_do_grounding_only,
+    padchest_gr_training_split,
     use_amp,
     gradient_accumulation_steps,
     pos_area_prior,
     neg_area_prior,
     do_visual_grounding_with_bbox_regression,
-    do_visual_grounding_with_segmentation,
     replace_phrase_embeddings_with_random_vectors,
     use_vinbig_with_modified_labels,
     # Loss weights
@@ -1146,21 +1171,22 @@ def train_from_scratch(
     
     use_yolov8 = raw_image_encoding == RawImageEncoding.YOLOV8
     use_yolov11 = raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED
-    use_yolo = use_yolov8 or use_yolov11
     predict_bboxes_chest_imagenome = (use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test) and use_yolov8
     use_mimiccxr = use_mimiccxr_facts_for_train or use_mscxr_for_train or use_mscxr_for_val or\
                      use_chest_imagenome_for_train or use_chest_imagenome_gold_for_test or\
                      use_cxrlt2024_challenge_split # this challenge is built on top of MIMIC-CXR
     use_vinbig = use_vinbig_for_train or use_vinbig_for_test
+    use_padchest_gr = use_padchest_gr_for_train or use_padchest_gr_for_val
     use_chexlocalize = use_chexlocalize_for_train or use_chexlocalize_for_test
     use_chexpert = use_chexpert_for_train or use_chexpert_for_test
     use_iuxray = use_iuxray_for_train or use_iuxray_for_test
     predict_bboxes_vinbig = (use_vinbig_for_train or use_vinbig_for_test) and use_yolov8
     yolov8_use_multiple_detection_layers = predict_bboxes_chest_imagenome and predict_bboxes_vinbig
 
-    assert use_mimiccxr or use_vinbig or use_chexlocalize or use_chexpert or use_iuxray
+    assert use_mimiccxr or use_vinbig or use_padchest_gr or use_chexlocalize or use_chexpert or use_iuxray
     assert use_chest_imagenome_gold_for_test or use_mscxr_for_val or use_vinbig_for_test or use_chexlocalize_for_test or\
-           use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test or use_cxrlt2024_challenge_split
+           use_mimiccxr_facts_for_test or use_chexpert_for_test or use_iuxray_for_test or use_cxrlt2024_challenge_split or\
+           use_padchest_gr_for_val
     if use_chest_imagenome_gold_for_test:
         assert use_chest_imagenome_for_train
     if use_mscxr_for_val:
@@ -1242,16 +1268,18 @@ def train_from_scratch(
         chexlocalize_weight=chexlocalize_weight,
         chexpert_weight=chexpert_weight,
         iuxray_weight=iuxray_weight,
+        padchest_gr_weight=padchest_gr_weight,
     )
 
     # Image transforms
     train_image_transform_kwargs = {}
     val_image_transform_kwargs = {}
+    is_train = img_aug_mode is not None # True if augmentations are applied
     _train_kwargs = dict(
         use_model_specific_transforms=False,
         image_size=image_size,
-        is_train=True,
-        bbox_format=bbox_format, # In order to use bbox-aware augmentations
+        is_train=is_train,
+        bbox_format=bbox_format if is_train else None, # In order to use bbox-aware augmentations
     )
     _val_kwargs = dict(
         use_model_specific_transforms=False,
@@ -1274,36 +1302,39 @@ def train_from_scratch(
     if use_iuxray:
         train_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _train_kwargs.copy()
         val_image_transform_kwargs[DATASET_NAMES.IUXRAY] = _val_kwargs.copy()
+    if use_padchest_gr:
+        train_image_transform_kwargs[DATASET_NAMES.PADCHEST_GR] = _train_kwargs.copy()
+        val_image_transform_kwargs[DATASET_NAMES.PADCHEST_GR] = _val_kwargs.copy()
     
-    # Collate batch functions
-    _kwargs = dict(
-        use_yolo=use_yolo,
-    )
-    collate_batch_fn_kwargs = {}
-    if use_mimiccxr:
-        include_loss_weights = binary_multilabel_classif_loss_name in [
-            BinaryMultiLabelClassificationLossNames.WBCE,
-            BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
-        ]
-        logger.info(f'include_loss_weights = {include_loss_weights}')
-        # fact grounding
-        collate_batch_fn_kwargs['mimfg'] = { 'dataset_name': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
-        # MS-CXR phrase grounding
-        collate_batch_fn_kwargs['mscxr'] = { 'dataset_name': 'mscxr', **_kwargs }
-        # chest imagenome bbox grounding
-        collate_batch_fn_kwargs['cibg'] = { 'dataset_name': 'cibg', **_kwargs }
-        # cxrlt2024 challenge custom labels
-        collate_batch_fn_kwargs['cxrlt2024c'] = { 'dataset_name': 'cxrlt2024c', **_kwargs }
-        # cxrlt2024 challenge official labels
-        collate_batch_fn_kwargs['cxrlt2024o'] = { 'dataset_name': 'cxrlt2024o', **_kwargs }
-    if use_vinbig:
-        collate_batch_fn_kwargs['vbg'] = { 'dataset_name': 'vbg', **_kwargs }
-    if use_chexlocalize:
-        collate_batch_fn_kwargs['cl'] = { 'dataset_name': 'cl', **_kwargs }
-    if use_chexpert:
-        collate_batch_fn_kwargs['chxp'] = { 'dataset_name': 'chxp', **_kwargs }
-    if use_iuxray:
-        collate_batch_fn_kwargs['iufg'] = { 'dataset_name': 'iufg', **_kwargs }
+    # # Collate batch functions
+    # _kwargs = dict(
+    #     use_yolo=use_yolo,
+    # )
+    # collate_batch_fn_kwargs = {}
+    # if use_mimiccxr:
+    #     include_loss_weights = binary_multilabel_classif_loss_name in [
+    #         BinaryMultiLabelClassificationLossNames.WBCE,
+    #         BinaryMultiLabelClassificationLossNames.FOCAL_BCE_WBCE,
+    #     ]
+    #     logger.info(f'include_loss_weights = {include_loss_weights}')
+    #     # fact grounding
+    #     collate_batch_fn_kwargs['mimfg'] = { 'dataset_name': 'mimfg', 'include_loss_weights': include_loss_weights, **_kwargs }
+    #     # MS-CXR phrase grounding
+    #     collate_batch_fn_kwargs['mscxr'] = { 'dataset_name': 'mscxr', **_kwargs }
+    #     # chest imagenome bbox grounding
+    #     collate_batch_fn_kwargs['cibg'] = { 'dataset_name': 'cibg', **_kwargs }
+    #     # cxrlt2024 challenge custom labels
+    #     collate_batch_fn_kwargs['cxrlt2024c'] = { 'dataset_name': 'cxrlt2024c', **_kwargs }
+    #     # cxrlt2024 challenge official labels
+    #     collate_batch_fn_kwargs['cxrlt2024o'] = { 'dataset_name': 'cxrlt2024o', **_kwargs }
+    # if use_vinbig:
+    #     collate_batch_fn_kwargs['vbg'] = { 'dataset_name': 'vbg', **_kwargs }
+    # if use_chexlocalize:
+    #     collate_batch_fn_kwargs['cl'] = { 'dataset_name': 'cl', **_kwargs }
+    # if use_chexpert:
+    #     collate_batch_fn_kwargs['chxp'] = { 'dataset_name': 'chxp', **_kwargs }
+    # if use_iuxray:
+    #     collate_batch_fn_kwargs['iufg'] = { 'dataset_name': 'iufg', **_kwargs }
     
     if use_mimiccxr:
         x = image_size if type(image_size) is int else image_size[0]
@@ -1355,21 +1386,35 @@ def train_from_scratch(
 
     if use_vinbig:
         vinbig_trainer_kwargs = dict(
+            task_mode=vinbig_task_mode,
+            mask_height=regions_height,
+            mask_width=regions_width,
+            phrase_embeddings_filepath=vinbig_phrase_embeddings_filepath,
             training_data_mode=vinbig_training_data_mode,
             use_training_set=use_vinbig_for_train,
             use_validation_set=use_vinbig_for_test,
             data_augmentation_enabled=img_aug_mode is not None,
-            mask_height=regions_height,
-            mask_width=regions_width,
-            phrase_embeddings_filepath=vinbig_phrase_embeddings_filepath,
-            do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
-            do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
-            for_yolo=use_yolo,
             replace_phrase_embeddings_with_random_vectors=replace_phrase_embeddings_with_random_vectors,
-            use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
+            use_modified_labels=use_vinbig_with_modified_labels,
+            bbox_format=bbox_format,
         )
     else:
         vinbig_trainer_kwargs = None
+
+    if use_padchest_gr:
+        padchestgr_trainer_kwargs = dict(
+            mask_height=regions_height,
+            mask_width=regions_width,
+            phrase_embeddings_filepath=padchest_gr_phrase_embeddings_filepath,
+            bbox_format=bbox_format,
+            use_training_set=use_padchest_gr_for_train,
+            use_validation_set=use_padchest_gr_for_val,
+            training_split=padchest_gr_training_split,
+            train_image_transforms_kwargs=train_image_transform_kwargs[DATASET_NAMES.PADCHEST_GR],
+            val_image_transforms_kwargs=val_image_transform_kwargs[DATASET_NAMES.PADCHEST_GR],
+        )
+    else:
+        padchestgr_trainer_kwargs = None
 
     if use_chexlocalize:
         chexlocalize_trainer_kwargs = dict(
@@ -1416,6 +1461,7 @@ def train_from_scratch(
         pos_area_prior=pos_area_prior,
         neg_area_prior=neg_area_prior,
         max_grad_norm=max_grad_norm,
+        vinbig_task_mode=vinbig_task_mode,
         use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
         mscxr_do_grounding_only=mscxr_do_grounding_only,
         # loss weights
@@ -1433,7 +1479,6 @@ def train_from_scratch(
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
         do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
-        do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
     )
 
     validator_engine_kwargs = dict(
@@ -1454,7 +1499,6 @@ def train_from_scratch(
         use_global_image_phrase_contrastive_loss=predict_global_alignment,
         nt_xent_temperature=nt_xent_temperature,
         do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
-        do_visual_grounding_with_segmentation=do_visual_grounding_with_segmentation,
     )
 
     metrics_kwargs = dict()
@@ -1473,11 +1517,12 @@ def train_from_scratch(
                 lr_scheduler_kwargs=lr_scheduler_kwargs,
                 mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
+                padchestgr_trainer_kwargs=padchestgr_trainer_kwargs,
                 chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
                 chexpert_trainer_kwargs=chexpert_trainer_kwargs,
                 iuxray_trainer_kwargs=iuxray_trainer_kwargs,
                 dataloading_kwargs=dataloading_kwargs,
-                collate_batch_fn_kwargs=collate_batch_fn_kwargs,
+                # collate_batch_fn_kwargs=collate_batch_fn_kwargs,
                 train_image_transform_kwargs=train_image_transform_kwargs,
                 val_image_transform_kwargs=val_image_transform_kwargs,
                 trainer_engine_kwargs=trainer_engine_kwargs,
@@ -1529,6 +1574,7 @@ def resume_training(
     lr_scheduler_kwargs = metadata['lr_scheduler_kwargs']
     mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
     vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
+    padchestgr_trainer_kwargs = metadata['padchestgr_trainer_kwargs']
     chexlocalize_trainer_kwargs = metadata['chexlocalize_trainer_kwargs']
     chexpert_trainer_kwargs = metadata['chexpert_trainer_kwargs']
     iuxray_trainer_kwargs = metadata['iuxray_trainer_kwargs']
@@ -1561,6 +1607,7 @@ def resume_training(
                 lr_scheduler_kwargs=lr_scheduler_kwargs,
                 mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
+                padchestgr_trainer_kwargs=padchestgr_trainer_kwargs,
                 chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
                 chexpert_trainer_kwargs=chexpert_trainer_kwargs,
                 iuxray_trainer_kwargs=iuxray_trainer_kwargs,

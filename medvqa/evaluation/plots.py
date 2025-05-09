@@ -3,6 +3,8 @@ import random
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from typing import List, Optional, Callable, Tuple
+from PIL.Image import Image as PILImage
 from medvqa.datasets.chest_imagenome import (
     ANAXNET_BBOX_NAMES,
     CHEST_IMAGENOME_BBOX_NAMES,
@@ -10,7 +12,6 @@ from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
 )
-
 from medvqa.utils.files_utils import get_cached_pickle_file
 from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
 from medvqa.utils.logging_utils import print_blue, print_orange, print_bold, rgba_to_ansi
@@ -53,50 +54,120 @@ def _replace_nans_with_local_avgs(scores):
         scores_.append(x)
     return scores_
 
-def plot_train_val_curves(logs_path, metrics=None, metric_names=None, agg_fn=max, single_plot_figsize=(8, 6),
-                          use_min_with_these_metrics=None, use_max_with_these_metrics=None):
 
-    # load csv without index column    
+def plot_train_val_curves(
+    logs_path: str,
+    metrics: Optional[List[str]] = None,
+    metric_names: Optional[List[str]] = None,
+    agg_fn: Callable = max,
+    single_plot_figsize: Tuple[int, int] = (8, 6),
+    use_min_with_these_metrics: Optional[List[str]] = None,
+    use_max_with_these_metrics: Optional[List[str]] = None,
+    train_color: Optional[str] = None,
+    val_color: Optional[str] = None,
+):
+    """
+    Plots training and validation curves for specified metrics from a CSV log
+    file. Training and validation lines will have consistent, distinct colors
+    across all subplots.
+
+    The CSV file is expected to have metrics logged in an alternating fashion
+    for training and validation (e.g., train_metric_epoch1,
+    val_metric_epoch1, train_metric_epoch2, val_metric_epoch2, ...).
+
+    Args:
+        logs_path (str): Path to the CSV file containing the training logs.
+        metrics (list of str, optional): A list of column names from the CSV
+            file to be plotted. If None, all columns in the CSV will be
+            treated as metrics and plotted. Defaults to None.
+        metric_names (list of str, optional): A list of display names for the
+            metrics specified in the `metrics` argument. Must be of the same
+            length as `metrics`. If None (and `metrics` is None), the original
+            column names are used. If `metrics` is provided and `metric_names`
+            is None, `metrics` will be used as display names. Defaults to None.
+        agg_fn (function, optional): The aggregation function (e.g., `min`,
+            `max`) used to determine the "best" score for a metric. This
+            function is applied to an iterable of (score, index) tuples.
+            Defaults to `max`.
+        single_plot_figsize (tuple, optional): A tuple `(width, height)`
+            specifying the size of each individual subplot.
+            Defaults to (8, 6).
+        use_min_with_these_metrics (list of str, optional): A list of metric
+            column names for which the `min` function should be used as the
+            aggregation function, overriding `agg_fn`. If None, it defaults
+            to metrics whose names contain 'loss'. Defaults to None.
+        use_max_with_these_metrics (list of str, optional): A list of metric
+            column names for which the `max` function should be used as the
+            aggregation function, overriding `agg_fn`. Defaults to None.
+        train_color (str, optional): Color for the training curves. If None,
+            defaults to the first color in Matplotlib's default cycle.
+        val_color (str, optional): Color for the validation curves. If None,
+            defaults to the second color in Matplotlib's default cycle.
+    """
+    # Load CSV log file, assuming no index column is stored in the CSV
     logs = pd.read_csv(logs_path, index_col=False)
 
     if metrics is None:
-        assert metric_names is None
-        metrics = logs.columns
+        assert metric_names is None, (
+            "metric_names should be None if metrics is None"
+        )
+        metrics = logs.columns.tolist()
+        metric_names = metrics
+    elif metric_names is None:
         metric_names = metrics
 
-    assert len(metrics) == len(metric_names)
-    assert len(metrics) > 0
-    n = len(metrics)    
+    assert len(metrics) == len(metric_names), (
+        "metrics and metric_names must have the same length"
+    )
+    assert len(metrics) > 0, "At least one metric must be specified"
+
+    n = len(metrics)
     ncols = 2 if n > 1 else 1
     nrows = n // ncols + bool(n % ncols)
 
     figsize = (single_plot_figsize[0] * ncols, single_plot_figsize[1] * nrows)
     plt.figure(figsize=figsize)
 
+    # Define colors for train and validation
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    default_colors = prop_cycle.by_key()["color"]
+
+    _train_color = train_color if train_color else default_colors[0]
+    _val_color = (
+        val_color if val_color else default_colors[1 % len(default_colors)]
+    ) # Ensure val_color is different if only 1 default color
+
     if use_min_with_these_metrics is None:
-        use_min_with_these_metrics = [x for x in metrics if x.endswith('loss')]
+        use_min_with_these_metrics = [
+            x for x in metrics if "loss" in x.lower()
+        ]
 
     for j in range(n):
-
         metric = metrics[j]
         metric_name = metric_names[j]
 
-        if use_min_with_these_metrics is not None and metric in use_min_with_these_metrics:
+        _agg_fn = agg_fn
+        if (
+            use_min_with_these_metrics is not None
+            and metric in use_min_with_these_metrics
+        ):
             _agg_fn = min
-        elif use_max_with_these_metrics is not None and metric in use_max_with_these_metrics:
+        elif (
+            use_max_with_these_metrics is not None
+            and metric in use_max_with_these_metrics
+        ):
             _agg_fn = max
-        else:
-            _agg_fn = agg_fn
 
-        metric_scores = logs[metric]
+        metric_scores_all = logs[metric]
         train_scores = []
         val_scores = []
-        for i in range(len(metric_scores)):
-            if i % 2 == 0:
-                train_scores.append(metric_scores[i])
+
+        for i_score in range(len(metric_scores_all)):
+            if i_score % 2 == 0:
+                train_scores.append(metric_scores_all[i_score])
             else:
-                val_scores.append(metric_scores[i])
-            
+                val_scores.append(metric_scores_all[i_score])
+
         train_has_only_nans = all(np.isnan(x) for x in train_scores)
         train_has_some_nans = any(np.isnan(x) for x in train_scores)
         val_has_only_nans = all(np.isnan(x) for x in val_scores)
@@ -104,43 +175,471 @@ def plot_train_val_curves(logs_path, metrics=None, metric_names=None, agg_fn=max
 
         if train_has_some_nans and not train_has_only_nans:
             train_scores = _replace_nans_with_local_avgs(train_scores)
-            print(f'WARNING: {metric_name} train_scores has some nans, but not all. Replacing nans with nearest non-nan values')
-
+            print_orange(
+                f"WARNING: {metric_name} train_scores had NaNs. "
+                "Attempted replacement.",
+                bold=True,
+            )
         if val_has_some_nans and not val_has_only_nans:
             val_scores = _replace_nans_with_local_avgs(val_scores)
-            print(f'WARNING: {metric_name} val_scores has some nans, but not all. Replacing nans with nearest non-nan values')
-        
+            print_orange(
+                f"WARNING: {metric_name} val_scores had NaNs. "
+                "Attempted replacement.",
+                bold=True,
+            )
+
         if len(train_scores) != len(val_scores):
-            print(f'WARNING: {metric_name} train_scores and val_scores have different lengths ({len(train_scores)} vs {len(val_scores)}). Truncating the longer one.')
+            print_orange(
+                f"WARNING: {metric_name} train_scores and val_scores have "
+                f"different lengths ({len(train_scores)} vs "
+                f"{len(val_scores)}). Truncating the longer one.",
+                bold=True,
+            )
             min_len = min(len(train_scores), len(val_scores))
             train_scores = train_scores[:min_len]
             val_scores = val_scores[:min_len]
-        
-        epochs = list(range(1, len(train_scores)+1))        
-        
-        eps = 0.9
-        
-        ax = plt.subplot(nrows, ncols, j+1)
-        ax.set_xlim(epochs[0]-eps, epochs[-1]+eps)
-        ax.set_title(f'{metric_name} per epoch')
-        if not train_has_only_nans:
-            ax.plot(epochs, train_scores, label=f'{metric_name} (Training)')
-        if not val_has_only_nans:
-            ax.plot(epochs, val_scores, label=f'{metric_name} (Validation)')
-        ax.set_xlabel('Epoch')
+
+        num_epochs = len(train_scores)
+        epochs = list(range(1, num_epochs + 1))
+
+        ax = plt.subplot(nrows, ncols, j + 1)
+        if epochs:
+            eps = 0.9
+            ax.set_xlim(epochs[0] - eps, epochs[-1] + eps)
+        ax.set_title(f"{metric_name} per epoch")
+
+        if not train_has_only_nans and train_scores:
+            ax.plot(
+                epochs,
+                train_scores,
+                label=f"{metric_name} (Training)",
+                color=_train_color,
+                linestyle="-",
+            )
+            valid_train_scores = [
+                (s, idx)
+                for idx, s in enumerate(train_scores)
+                if not np.isnan(s)
+            ]
+            if valid_train_scores:
+                best_train_score, best_train_i = _agg_fn(valid_train_scores)
+                ax.hlines(
+                    best_train_score,
+                    epochs[0],
+                    epochs[-1],
+                    colors=_train_color, # Use train_color
+                    linestyles="dashed",
+                    label=(
+                        f"Best Train {metric_name}={best_train_score:.3f}, "
+                        f"Epoch={best_train_i + 1}"
+                    ),
+                )
+
+        if not val_has_only_nans and val_scores:
+            ax.plot(
+                epochs,
+                val_scores,
+                label=f"{metric_name} (Validation)",
+                color=_val_color,
+                linestyle="--",
+            )
+            valid_val_scores = [
+                (s, idx)
+                for idx, s in enumerate(val_scores)
+                if not np.isnan(s)
+            ]
+            if valid_val_scores:
+                best_val_score, best_val_i = _agg_fn(valid_val_scores)
+                ax.hlines(
+                    best_val_score,
+                    epochs[0],
+                    epochs[-1],
+                    colors=_val_color, # Use val_color
+                    linestyles="dotted",
+                    label=(
+                        f"Best Val {metric_name}={best_val_score:.3f}, "
+                        f"Epoch={best_val_i + 1}"
+                    ),
+                )
+
+        ax.set_xlabel("Epoch")
         ax.set_ylabel(metric_name)
         ax.legend()
-        if not train_has_only_nans:
-            best_train_score, best_train_i = _agg_fn((a,i) for i,a in enumerate(train_scores))
-            ax.hlines(best_train_score, epochs[0], epochs[-1], colors=('green',), linestyles='dashed',
-                    label=f'best train {metric_name}={best_train_score:.3f}, epoch={best_train_i+1}')
-        if not val_has_only_nans:
-            best_val_score, best_val_i = _agg_fn((a,i) for i,a in enumerate(val_scores))
-            ax.hlines(best_val_score, epochs[0], epochs[-1], colors=('red',), linestyles='dashed',
-                    label=f'best val {metric_name}={best_val_score:.3f}, epoch={best_val_i+1}')
-        ax.legend()
-    
+
+    plt.tight_layout()
     plt.show()
+
+
+def plot_multiple_experiment_curves(
+    logs_paths: List[str],
+    experiment_names: List[str],
+    target_metrics: Optional[List[str]] = None,
+    metric_display_names: Optional[List[str]] = None,
+    agg_fn: Callable = max,
+    single_plot_figsize: Tuple[float, float] = (6.5, 5.0),
+    use_min_with_these_metrics: Optional[List[str]] = None,
+    use_max_with_these_metrics: Optional[List[str]] = None,
+    sort_experiments_by_best_score: bool = False,
+    metric_name_to_sort_by: Optional[str] = None,
+    draw_point_on_best_score: bool = False,
+    point_markersize: int = 5,
+):
+    """
+    Plots training and validation curves for multiple experiments on shared
+    subplots, one subplot per metric. Each experiment maintains a consistent
+    color across all subplots. Experiments can optionally be sorted by their
+    best validation score on a specified metric.
+
+    Each CSV log file is expected to have metrics logged in an alternating
+    fashion for training and validation (e.g., train_metric_epoch1,
+    val_metric_epoch1, ...).
+
+    Args:
+        logs_paths (List[str]): Paths to CSV log files.
+        experiment_names (List[str]): Names for the experiments.
+        target_metrics (Optional[List[str]]): Metrics to plot. If None,
+            all unique metrics are plotted.
+        metric_display_names (Optional[List[str]]): Display names for
+            target_metrics.
+        agg_fn (Callable): Aggregation function (e.g., `min`, `max`) for
+            finding the best score on plots. Applied to (score, index) tuples.
+            Defaults to `max`.
+        single_plot_figsize (Tuple[float, float]): Size `(width, height)` for
+            each subplot. Defaults to (6.5, 5.0).
+        use_min_with_these_metrics (Optional[List[str]]): Metrics for which
+            `min` is better (e.g., losses).
+        use_max_with_these_metrics (Optional[List[str]]): Metrics for which
+            `max` is better (overrides `use_min` if conflicting).
+        sort_experiments_by_best_score (bool): If True, experiments are
+            sorted based on their best validation score for the
+            `metric_name_to_sort_by`. Defaults to False.
+        metric_name_to_sort_by (Optional[str]): The metric column name to use
+            for sorting if `sort_experiments_by_best_score` is True.
+            Performance is judged on validation scores.
+        draw_point_on_best_score (bool): If True, a point is drawn on the
+            best score for each experiment. Defaults to False.
+        point_markersize (int): Size of the point drawn on the best score.
+            Defaults to 5.
+    """
+    if not logs_paths:
+        print("No log paths provided. Nothing to plot.")
+        return
+    assert len(logs_paths) == len(experiment_names), (
+        "logs_paths and experiment_names must have the same length."
+    )
+
+    # Load experiment data first, without colors
+    experiment_data_temp = []
+    all_metric_columns = set()
+
+    for path, name in zip(logs_paths, experiment_names):
+        try:
+            logs_df = pd.read_csv(path, index_col=False)
+            if logs_df.empty:
+                print(
+                    f"WARNING: Log file for experiment '{name}' at {path} "
+                    "is empty. Skipping."
+                )
+                continue
+            experiment_data_temp.append(
+                {"name": name, "logs": logs_df, "path": path}
+            )
+            all_metric_columns.update(logs_df.columns)
+        except FileNotFoundError:
+            print(
+                f"WARNING: Log file not found for experiment '{name}' at "
+                f"{path}. Skipping."
+            )
+        except pd.errors.EmptyDataError:
+            print(
+                f"WARNING: Log file for experiment '{name}' at {path} "
+                "is empty. Skipping."
+            )
+        except Exception as e:
+            print(
+                f"WARNING: Could not load log file for experiment '{name}' "
+                f"at {path} due to: {e}. Skipping."
+            )
+
+    if not experiment_data_temp:
+        print("No valid log data could be loaded. Nothing to plot.")
+        return
+
+    # Sort experiments if requested
+    if sort_experiments_by_best_score:
+        if not metric_name_to_sort_by:
+            print(
+                "WARNING: sort_experiments_by_best_score is True, but "
+                "metric_name_to_sort_by is not specified. Skipping sorting."
+            )
+        elif metric_name_to_sort_by not in all_metric_columns:
+            print(
+                f"WARNING: metric_name_to_sort_by '{metric_name_to_sort_by}' "
+                "not found in any loaded experiment logs. Skipping sorting."
+            )
+        else:
+            # Determine aggregation logic for the sorting metric
+            sort_metric_is_minimized = False
+            if use_min_with_these_metrics and (
+                metric_name_to_sort_by in use_min_with_these_metrics
+            ):
+                sort_metric_is_minimized = True
+            elif "loss" in metric_name_to_sort_by.lower() and not (
+                use_max_with_these_metrics
+                and metric_name_to_sort_by in use_max_with_these_metrics
+            ):
+                # Default for 'loss' unless explicitly in use_max
+                sort_metric_is_minimized = True
+
+            if use_max_with_these_metrics and (
+                metric_name_to_sort_by in use_max_with_these_metrics
+            ): # Explicit max overrides
+                sort_metric_is_minimized = False
+
+            default_worst_score = (
+                np.inf if sort_metric_is_minimized else -np.inf
+            )
+
+            for exp in experiment_data_temp:
+                exp["sort_score"] = default_worst_score  # Initialize
+                if metric_name_to_sort_by in exp["logs"].columns:
+                    metric_values = exp["logs"][metric_name_to_sort_by]
+                    val_scores_for_sort = [
+                        metric_values[i]
+                        for i in range(len(metric_values))
+                        if i % 2 != 0 # Odd indices for validation
+                    ]
+                    # Handle NaNs for sorting scores
+                    val_scores_for_sort = _replace_nans_with_local_avgs(
+                        val_scores_for_sort
+                    )
+                    valid_scores = [
+                        s for s in val_scores_for_sort if not np.isnan(s)
+                    ]
+
+                    if valid_scores:
+                        if sort_metric_is_minimized:
+                            exp["sort_score"] = min(valid_scores)
+                        else:
+                            exp["sort_score"] = max(valid_scores)
+            
+            # Sort: if minimizing, ascending (reverse=False). If maximizing, descending (reverse=True).
+            experiment_data_temp.sort(
+                key=lambda x: x.get("sort_score", default_worst_score),
+                reverse=not sort_metric_is_minimized,
+            )
+            print(
+                f"INFO: Experiments sorted by best validation "
+                f"'{metric_name_to_sort_by}'. "
+                f"Order: {[e['name'] for e in experiment_data_temp]}"
+            )
+
+    # Assign colors after potential sorting
+    experiment_data = []
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    default_colors = prop_cycle.by_key()["color"]
+    for i, exp_dict_temp in enumerate(experiment_data_temp):
+        exp_dict_temp["color"] = default_colors[i % len(default_colors)]
+        experiment_data.append(exp_dict_temp)
+
+
+    if target_metrics is None:
+        metrics_to_plot = sorted(list(all_metric_columns))
+        _metric_display_names = metrics_to_plot
+        if not metrics_to_plot:
+            print("No metrics found in any of the provided log files.")
+            return
+    else:
+        metrics_to_plot = target_metrics
+        if metric_display_names is None:
+            _metric_display_names = target_metrics
+        else:
+            assert len(target_metrics) == len(metric_display_names), (
+                "target_metrics and metric_display_names length mismatch."
+            )
+            _metric_display_names = metric_display_names
+
+    if not metrics_to_plot:
+        print("No metrics selected or available to plot.")
+        return
+
+    n_metrics = len(metrics_to_plot)
+    ncols = 2 if n_metrics > 1 else 1
+    nrows = n_metrics // ncols + bool(n_metrics % ncols)
+    fig_width = single_plot_figsize[0] * ncols
+    fig_height = single_plot_figsize[1] * nrows
+    plt.figure(figsize=(fig_width, fig_height))
+
+    # Determine default for use_min_with_these_metrics if not provided
+    _use_min_with_these_metrics = use_min_with_these_metrics
+    if _use_min_with_these_metrics is None:
+        _use_min_with_these_metrics = [
+            m for m in metrics_to_plot if "loss" in m.lower()
+        ]
+
+    for i_metric, metric_col_name in enumerate(metrics_to_plot):
+        metric_disp_name = _metric_display_names[i_metric]
+        ax = plt.subplot(nrows, ncols, i_metric + 1)
+        ax.set_title(f"{metric_disp_name} per Epoch")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(metric_disp_name)
+
+        max_epochs_across_exps = 0
+
+        # Determine aggregation function for the current PLOTTED metric
+        current_plot_agg_fn = agg_fn # Default from function args
+
+        if _use_min_with_these_metrics and (
+            metric_col_name in _use_min_with_these_metrics
+        ):
+            current_plot_agg_fn = min
+        
+        if use_max_with_these_metrics and (
+            metric_col_name in use_max_with_these_metrics
+        ):
+            current_plot_agg_fn = max
+
+        for exp in experiment_data: # Iterate through (potentially sorted) experiments
+            exp_name = exp["name"]
+            logs_df = exp["logs"]
+            exp_color = exp["color"]
+
+            if metric_col_name not in logs_df.columns:
+                continue
+
+            metric_scores_all = logs_df[metric_col_name]
+            train_scores, val_scores = [], []
+            for k_score, score_val in enumerate(metric_scores_all):
+                if k_score % 2 == 0:
+                    train_scores.append(score_val)
+                else:
+                    val_scores.append(score_val)
+
+            # NaN Handling for plotting
+            train_has_only_nans = all(np.isnan(s) for s in train_scores)
+            train_has_some_nans = any(np.isnan(s) for s in train_scores)
+            val_has_only_nans = all(np.isnan(s) for s in val_scores)
+            val_has_some_nans = any(np.isnan(s) for s in val_scores)
+
+            if train_has_some_nans and not train_has_only_nans:
+                train_scores = _replace_nans_with_local_avgs(train_scores)
+                print(
+                    f"WARNING: {exp_name} - {metric_disp_name} train_scores "
+                    "had NaNs. Attempted replacement."
+                )
+            if val_has_some_nans and not val_has_only_nans:
+                val_scores = _replace_nans_with_local_avgs(val_scores)
+                print(
+                    f"WARNING: {exp_name} - {metric_disp_name} val_scores "
+                    "had NaNs. Attempted replacement."
+                )
+
+            min_len = min(len(train_scores), len(val_scores))
+            train_scores = train_scores[:min_len]
+            val_scores = val_scores[:min_len]
+
+            num_epochs = len(train_scores)
+            if num_epochs == 0:
+                continue
+
+            epochs = list(range(1, num_epochs + 1))
+            max_epochs_across_exps = max(max_epochs_across_exps, num_epochs)
+
+            # Plotting train scores
+            if not all(np.isnan(s) for s in train_scores):
+                # agg_fn expects (value, index) tuples
+                valid_train_s_tuples = [
+                    (s, idx)
+                    for idx, s in enumerate(train_scores)
+                    if not np.isnan(s)
+                ]
+                if valid_train_s_tuples:
+                    best_s_val_tuple = current_plot_agg_fn(valid_train_s_tuples)
+                    best_s_val, best_s_idx = best_s_val_tuple[0], best_s_val_tuple[1]
+
+                    ax.plot(
+                        epochs,
+                        train_scores,
+                        color=exp_color,
+                        linestyle="-",
+                        label=(
+                            f"{exp_name} - Train. Best Score: "
+                            r"$\mathbf{" + f"{best_s_val:.3f}" + r"}$ "
+                            f"(Ep. {best_s_idx + 1})"
+                        ),
+                    )
+
+                    ax.hlines(
+                        best_s_val,
+                        epochs[0],
+                        epochs[-1],
+                        colors=exp_color,
+                        linestyles="dashed",
+                        alpha=0.9,
+                    )
+
+                    if draw_point_on_best_score:
+                        # Draw point on best score with a black border
+                        ax.plot(
+                            epochs[best_s_idx],
+                            best_s_val,
+                            "o",
+                            color=exp_color,
+                            markersize=point_markersize,
+                            alpha=0.9,
+                            markeredgecolor="black",
+                        )
+
+            # Plotting validation scores
+            if not all(np.isnan(s) for s in val_scores):
+                valid_val_s_tuples = [
+                    (s, idx)
+                    for idx, s in enumerate(val_scores)
+                    if not np.isnan(s)
+                ]
+                if valid_val_s_tuples:
+                    best_s_val_tuple = current_plot_agg_fn(valid_val_s_tuples)
+                    best_s_val, best_s_idx = best_s_val_tuple[0], best_s_val_tuple[1]
+
+                    ax.plot(
+                        epochs,
+                        val_scores,
+                        color=exp_color,
+                        linestyle="--",
+                        label=(
+                            f"{exp_name} - Val. Best Score: "
+                            r"$\mathbf{" + f"{best_s_val:.3f}" + r"}$ "
+                            f"(Ep. {best_s_idx + 1})"
+                        ),
+                    )
+
+                    ax.hlines(
+                        best_s_val,
+                        epochs[0],
+                        epochs[-1],
+                        colors=exp_color,
+                        linestyles="dotted",
+                        alpha=0.9,
+                    )
+                    
+                    if draw_point_on_best_score:
+                        ax.plot(
+                            epochs[best_s_idx],
+                            best_s_val,
+                            "o",
+                            color=exp_color,
+                            markersize=point_markersize,
+                            alpha=0.9,
+                            markeredgecolor="black",
+                        )
+
+        if max_epochs_across_exps > 0:
+            ax.set_xlim(1 - 0.9, max_epochs_across_exps + 0.9)
+        ax.legend(fontsize="small")
+
+    plt.tight_layout()
+    plt.show()
+
 
 def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliases, metric_name, metric_alias,
                                                   dataset_name, thresholds=[0.5, 0.6, 0.7, 0.8, 0.9], figsize=(8, 6)):
@@ -726,149 +1225,311 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
     plt.show()
 
-# def visualize_visual_grounding_as_bboxes(image_path, phrases, bboxes, figsize, max_cols=3):
+
+# def visualize_visual_grounding_as_bboxes(phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
+#                                          figsize, max_cols=3, gt_phrases_to_highlight=None, image=None, image_path=None,
+#                                          show_heatmaps=False, heatmaps=None, bbox_format='xyxy'):
+#     """
+#     Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
+    
+#     Args:
+#         image (PIL.Image.Image, optional): Image object. Default is None.
+#         image_path (str, optional): Path to the image file. Default is None.
+#         phrases (list of str): List of phrases corresponding to detected objects.
+#         phrase_classifier_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each phrase.
+#         bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format.
+#         bbox_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each bounding box.
+#         phrase_ids (numpy.ndarray): Array of shape (n,) containing indices mapping bounding boxes to phrases.
+#         figsize (tuple): Figure size for visualization.
+#         max_cols (int, optional): Maximum number of columns in the grid. Default is 3.
+#         gt_phrases_to_highlight (list of str, optional): List of phrases to highlight in the visualization. Default is None.
+#         show_heatmaps (bool, optional): Whether to display heatmaps. Default is False.
+#         heatmaps (numpy.ndarray, optional): Array of shape (num_phrases, num_regions), where num_regions = H * W.
+#         bbox_format (str, optional): Format of bounding box coordinates. Default is 'xyxy'.
+#     """
+#     assert image is not None or image_path is not None, "Either image or image_path must be provided."
+#     assert len(phrases) == len(phrase_classifier_probs), "Mismatched dimensions between phrases and phrase classifier probabilities."
+#     assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], "Mismatched dimensions between bounding box arrays."
+#     assert bbox_coords.shape[1] == 4, "Bounding box coordinates must have shape (n, 4)."
+#     if show_heatmaps:
+#         assert heatmaps is not None, "Heatmaps must be provided when show_heatmaps is True."
+#         assert heatmaps.shape[0] == len(phrases), "Heatmaps should have the same first dimension as phrases."
+    
 #     from PIL import Image
 #     import matplotlib.patches as patches
 #     import textwrap
 
-#     assert len(phrases) == len(bboxes), f'len(phrases)={len(phrases)} != len(bboxes)={len(bboxes)}, phrases={phrases}, bboxes={bboxes}'
-
-#     # Create a grid of subplots
-#     n_cols = min(len(phrases), max_cols)
-#     n_rows = math.ceil(len(phrases) / n_cols)
+#     # Determine grid size
+#     n_phrases = len(phrases)
+#     n_cols = min(n_phrases, max_cols)
+#     n_rows = math.ceil(n_phrases / n_cols)
 #     fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
-#     assert ax.shape == (n_rows, n_cols)
-    
-#     # Define wrap length for titles based on number of columns and the figure size
+
+#     # Define wrap length for titles
 #     wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
 
-#     # Image
-#     image = Image.open(image_path)
-#     image = image.convert('RGB')
-#     width = image.size[0]
-#     height = image.size[1]
+#     # Load and process image if path is provided
+#     if image is None:
+#         assert image_path is not None, "Image path must be provided."
+#         image = Image.open(image_path).convert('RGB')
+#     width, height = image.size
 
-#     # Bounding boxes
-#     for k in range(len(phrases)):
-#         row = k // n_cols
-#         col = k % n_cols
-#         # show image in subplot
-#         ax[row, col].imshow(image) # show image in subplot
-#         for i in range(len(bboxes[k])):
-#             x1, y1, x2, y2 = bboxes[k][i]
-#             x1 *= width
-#             y1 *= height
-#             x2 *= width
-#             y2 *= height
-#             # draw bounding box rectangle
+#     # Infer heatmap dimensions
+#     if show_heatmaps:
+#         H = W = math.isqrt(heatmaps.shape[1])  # Assuming square heatmap regions
+#         assert H * W == heatmaps.shape[1], "Heatmap size mismatch: Expected H * W regions."
+#         # Compute grid lines positions based on the image size and feature map size.
+#         cell_width = width / W
+#         cell_height = height / H
+#         # Grid lines (excluding image borders):
+#         vlines = [cell_width * i for i in range(1, W)]
+#         hlines = [cell_height * i for i in range(1, H)]
+
+#     # Iterate through unique phrases
+#     for phrase_id in range(n_phrases):
+#         row, col = divmod(phrase_id, n_cols)
+#         ax[row, col].imshow(image)
+
+#         phrase_prob = phrase_classifier_probs[phrase_id]
+
+#         # Overlay heatmap if enabled
+#         if show_heatmaps:
+#             heatmap = heatmaps[phrase_id].reshape(H, W)
+#             heatmap_resized = np.array(Image.fromarray(heatmap).resize((width, height), Image.BILINEAR))
+#             ax[row, col].imshow(heatmap_resized, cmap='jet', alpha=0.5)
+#             for x in vlines:
+#                 ax[row, col].axvline(x, color="white", linestyle="--", linewidth=1)
+#             for y in hlines:
+#                 ax[row, col].axhline(y, color="white", linestyle="--", linewidth=1)
+
+#         # Filter bounding boxes for the current phrase
+#         mask = phrase_ids == phrase_id
+#         for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
+#             if bbox_format == 'xyxy':
+#                 x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
+#             elif bbox_format == 'cxcywh':
+#                 cx, cy, w, h = bbox
+#                 x1 = (cx - w / 2) * width
+#                 y1 = (cy - h / 2) * height
+#                 x2 = (cx + w / 2) * width
+#                 y2 = (cy + h / 2) * height
+#             else: raise ValueError(f"Unknown bbox_format: {bbox_format}")
 #             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
 #             ax[row, col].add_patch(rect)
-         
-#         wrapped_title = "\n".join(textwrap.wrap(phrases[k], wrap_length))
-#         ax[row, col].set_title(wrapped_title)
+#             ax[row, col].text(x1, y1, f'{prob:.2f}', color='red', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
+
+#         # Set subplot title with wrapped text
+#         title = f'{phrases[phrase_id]}\n({phrase_prob:.2f})'
+#         wrapped_title = "\n".join(textwrap.wrap(title, wrap_length))
+#         if gt_phrases_to_highlight is not None and phrases[phrase_id] in gt_phrases_to_highlight:
+#             ax[row, col].set_title(wrapped_title, color='red')
+#         else:
+#             ax[row, col].set_title(wrapped_title)
 
 #     plt.show()
-
-def visualize_visual_grounding_as_bboxes(phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
-                                         figsize, max_cols=3, gt_phrases_to_highlight=None, image=None, image_path=None,
-                                         show_heatmaps=False, heatmaps=None, bbox_format='xyxy'):
+    
+def visualize_visual_grounding_as_bboxes(
+    phrases: List[str],
+    phrase_classifier_probs: np.ndarray,
+    bbox_coords: np.ndarray,
+    bbox_probs: np.ndarray,
+    phrase_ids: np.ndarray,
+    figsize: Tuple[float, float],
+    max_cols: int = 3,
+    gt_phrases_to_highlight: Optional[List[str]] = None,
+    image: Optional[PILImage] = None,
+    image_path: Optional[str] = None,
+    show_heatmaps: bool = False,
+    heatmaps: Optional[np.ndarray] = None,
+    bbox_format: str = 'xyxy',
+    gt_bbox_coords: Optional[np.ndarray] = None  # New argument
+):
     """
     Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
     
     Args:
-        image (PIL.Image.Image, optional): Image object. Default is None.
-        image_path (str, optional): Path to the image file. Default is None.
-        phrases (list of str): List of phrases corresponding to detected objects.
-        phrase_classifier_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each phrase.
-        bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format.
-        bbox_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each bounding box.
-        phrase_ids (numpy.ndarray): Array of shape (n,) containing indices mapping bounding boxes to phrases.
-        figsize (tuple): Figure size for visualization.
+        phrases (List[str]): List of phrases corresponding to detected objects.
+        phrase_classifier_probs (np.ndarray): Array of shape (N,) containing confidence scores for each phrase.
+        bbox_coords (np.ndarray): Array of shape (M, 4) containing bounding box coordinates in normalized format.
+        bbox_probs (np.ndarray): Array of shape (M,) containing confidence scores for each bounding box.
+        phrase_ids (np.ndarray): Array of shape (M,) containing indices mapping bounding boxes to phrases (0 to N-1).
+        figsize (Tuple[float, float]): Figure size for visualization.
         max_cols (int, optional): Maximum number of columns in the grid. Default is 3.
-        gt_phrases_to_highlight (list of str, optional): List of phrases to highlight in the visualization. Default is None.
+        gt_phrases_to_highlight (Optional[List[str]], optional): List of phrases to highlight in the visualization. Default is None.
+        image (Optional[PILImage], optional): PIL Image object. Default is None.
+        image_path (Optional[str], optional): Path to the image file. Default is None.
         show_heatmaps (bool, optional): Whether to display heatmaps. Default is False.
-        heatmaps (numpy.ndarray, optional): Array of shape (num_phrases, num_regions), where num_regions = H * W.
-        bbox_format (str, optional): Format of bounding box coordinates. Default is 'xyxy'.
+        heatmaps (Optional[np.ndarray], optional): Array of shape (N, num_regions), where num_regions = H * W.
+        bbox_format (str, optional): Format of bounding box coordinates ('xyxy' or 'cxcywh'). Default is 'xyxy'.
+        gt_bbox_coords (Optional[np.ndarray], optional): Array of shape (K, 4) containing ground-truth
+                                                      bounding box coordinates in normalized format. Default is None.
     """
-    assert image is not None or image_path is not None, "Either image or image_path must be provided."
-    assert len(phrases) == len(phrase_classifier_probs), "Mismatched dimensions between phrases and phrase classifier probabilities."
-    assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], "Mismatched dimensions between bounding box arrays."
-    assert bbox_coords.shape[1] == 4, "Bounding box coordinates must have shape (n, 4)."
-    if show_heatmaps:
-        assert heatmaps is not None, "Heatmaps must be provided when show_heatmaps is True."
-        assert heatmaps.shape[0] == len(phrases), "Heatmaps should have the same first dimension as phrases."
-    
-    from PIL import Image
+    from PIL import Image as PILImageModule # For loading image from path and operations
+    import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     import textwrap
+    import math
 
-    # Determine grid size
-    n_phrases = len(phrases)
-    n_cols = min(n_phrases, max_cols)
-    n_rows = math.ceil(n_phrases / n_cols)
-    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    assert image is not None or image_path is not None, "Either image or image_path must be provided."
+    assert len(phrases) == len(phrase_classifier_probs), \
+        "Mismatched dimensions between phrases and phrase classifier probabilities."
+    if bbox_coords.size > 0: # Allow empty bbox_coords if no detections
+        assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], \
+            "Mismatched dimensions between bounding box arrays."
+        assert bbox_coords.ndim == 2 and bbox_coords.shape[1] == 4, \
+            "Bounding box coordinates must have shape (M, 4)."
+    elif not (bbox_probs.size == 0 and phrase_ids.size == 0):
+        raise ValueError("If bbox_coords is empty, bbox_probs and phrase_ids must also be empty.")
 
-    # Define wrap length for titles
-    wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
 
-    # Load and process image if path is provided
-    if image is None:
-        assert image_path is not None, "Image path must be provided."
-        image = Image.open(image_path).convert('RGB')
-    width, height = image.size
-
-    # Infer heatmap dimensions
     if show_heatmaps:
-        H = W = math.isqrt(heatmaps.shape[1])  # Assuming square heatmap regions
-        assert H * W == heatmaps.shape[1], "Heatmap size mismatch: Expected H * W regions."
-        # Compute grid lines positions based on the image size and feature map size.
-        cell_width = width / W
-        cell_height = height / H
-        # Grid lines (excluding image borders):
-        vlines = [cell_width * i for i in range(1, W)]
-        hlines = [cell_height * i for i in range(1, H)]
+        assert heatmaps is not None, "Heatmaps must be provided when show_heatmaps is True."
+        assert heatmaps.shape[0] == len(phrases), \
+            "Heatmaps should have the same first dimension as phrases."
+        if len(phrases) > 0 : # Only check heatmap content if there are phrases to map to
+             assert heatmaps.shape[1] > 0, "Heatmap has zero regions (heatmaps.shape[1] is 0)."
 
-    # Iterate through unique phrases
-    for phrase_id in range(n_phrases):
-        row, col = divmod(phrase_id, n_cols)
-        ax[row, col].imshow(image)
 
-        phrase_prob = phrase_classifier_probs[phrase_id]
+    if gt_bbox_coords is not None:
+        assert gt_bbox_coords.ndim == 2 and gt_bbox_coords.shape[1] == 4, \
+            "gt_bbox_coords must be a 2D array with shape (K, 4)."
 
-        # Overlay heatmap if enabled
-        if show_heatmaps:
-            heatmap = heatmaps[phrase_id].reshape(H, W)
-            heatmap_resized = np.array(Image.fromarray(heatmap).resize((width, height), Image.BILINEAR))
-            ax[row, col].imshow(heatmap_resized, cmap='jet', alpha=0.5)
-            for x in vlines:
-                ax[row, col].axvline(x, color="white", linestyle="--", linewidth=1)
-            for y in hlines:
-                ax[row, col].axhline(y, color="white", linestyle="--", linewidth=1)
-
-        # Filter bounding boxes for the current phrase
-        mask = phrase_ids == phrase_id
-        for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
-            if bbox_format == 'xyxy':
-                x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
-            elif bbox_format == 'cxcywh':
-                cx, cy, w, h = bbox
-                x1 = (cx - w / 2) * width
-                y1 = (cy - h / 2) * height
-                x2 = (cx + w / 2) * width
-                y2 = (cy + h / 2) * height
-            else: raise ValueError(f"Unknown bbox_format: {bbox_format}")
-            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
-            ax[row, col].add_patch(rect)
-            ax[row, col].text(x1, y1, f'{prob:.2f}', color='red', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
-
-        # Set subplot title with wrapped text
-        title = f'{phrases[phrase_id]}\n({phrase_prob:.2f})'
-        wrapped_title = "\n".join(textwrap.wrap(title, wrap_length))
-        if gt_phrases_to_highlight is not None and phrases[phrase_id] in gt_phrases_to_highlight:
-            ax[row, col].set_title(wrapped_title, color='red')
+    n_phrases = len(phrases)
+    
+    plot_single_gt_only = False
+    if n_phrases == 0:
+        if gt_bbox_coords is not None and (image is not None or image_path is not None):
+            plot_single_gt_only = True
+            n_rows_fig, n_cols_fig = 1, 1
         else:
-            ax[row, col].set_title(wrapped_title)
+            print("No phrases to visualize and no ground truth boxes to display on an image.")
+            return
+    else: # n_phrases > 0
+        n_cols_fig = min(n_phrases, max_cols)
+        n_rows_fig = math.ceil(n_phrases / n_cols_fig)
+    
+    fig, ax_array = plt.subplots(n_rows_fig, n_cols_fig, figsize=figsize, squeeze=False)
 
+    wrap_length = (figsize[0] / n_cols_fig) * (60 / 7.5) # Approx chars per line
+
+    if image is None:
+        assert image_path is not None, "Image path must be provided if image is None."
+        current_image = PILImageModule.open(image_path).convert('RGB')
+    else:
+        current_image = image.convert('RGB') if image.mode != 'RGB' else image
+    width, height = current_image.size
+
+    H, W = 0, 0 # Initialize H, W
+    vlines, hlines = [], []
+    if show_heatmaps and n_phrases > 0 and heatmaps is not None and heatmaps.shape[1] > 0:
+        # Ensure heatmaps is not None and has regions before trying to calculate H, W
+        H = W = math.isqrt(heatmaps.shape[1])
+        if not (H * W == heatmaps.shape[1]): # Check if perfect square
+            print(f"Warning: Heatmap regions {heatmaps.shape[1]} is not a perfect square. Heatmap display might be incorrect.")
+            # Fallback or error, for now, proceed with caution or disable heatmaps for this case
+            show_heatmaps = False # Disable heatmap if dimensions are problematic
+        else:
+            cell_width = width / W
+            cell_height = height / H
+            vlines = [cell_width * i for i in range(1, W)]
+            hlines = [cell_height * i for i in range(1, H)]
+
+
+    if plot_single_gt_only:
+        ax_current = ax_array[0, 0]
+        ax_current.imshow(current_image)
+        ax_current.set_title("Ground Truth Bounding Boxes")
+        ax_current.axis('off')
+
+        if gt_bbox_coords is not None:
+            for gt_bbox in gt_bbox_coords:
+                if bbox_format == 'xyxy':
+                    x1_gt, y1_gt, x2_gt, y2_gt = gt_bbox * np.array([width, height, width, height])
+                elif bbox_format == 'cxcywh':
+                    cx_gt, cy_gt, w_gt, h_gt = gt_bbox
+                    x1_gt = (cx_gt - w_gt / 2) * width
+                    y1_gt = (cy_gt - h_gt / 2) * height
+                    x2_gt = (cx_gt + w_gt / 2) * width
+                    y2_gt = (cy_gt + h_gt / 2) * height
+                else:
+                    raise ValueError(f"Unknown bbox_format: {bbox_format}")
+                gt_rect = patches.Rectangle(
+                    (x1_gt, y1_gt), x2_gt - x1_gt, y2_gt - y1_gt, 
+                    linewidth=2, edgecolor='lime', facecolor='none'
+                )
+                ax_current.add_patch(gt_rect)
+    else: # n_phrases > 0
+        for phrase_idx in range(n_phrases):
+            row, col = divmod(phrase_idx, n_cols_fig)
+            ax_current = ax_array[row, col]
+            ax_current.imshow(current_image)
+            ax_current.axis('off')
+
+            if gt_bbox_coords is not None:
+                for gt_bbox in gt_bbox_coords:
+                    if bbox_format == 'xyxy':
+                        x1_gt, y1_gt, x2_gt, y2_gt = gt_bbox * np.array([width, height, width, height])
+                    elif bbox_format == 'cxcywh':
+                        cx_gt, cy_gt, w_gt, h_gt = gt_bbox
+                        x1_gt = (cx_gt - w_gt / 2) * width
+                        y1_gt = (cy_gt - h_gt / 2) * height
+                        x2_gt = (cx_gt + w_gt / 2) * width
+                        y2_gt = (cy_gt + h_gt / 2) * height
+                    else:
+                        raise ValueError(f"Unknown bbox_format: {bbox_format}")
+                    gt_rect = patches.Rectangle(
+                        (x1_gt, y1_gt), x2_gt - x1_gt, y2_gt - y1_gt,
+                        linewidth=2, edgecolor='lime', facecolor='none'
+                    )
+                    ax_current.add_patch(gt_rect)
+            
+            phrase_prob = phrase_classifier_probs[phrase_idx]
+
+            if show_heatmaps and heatmaps is not None and phrase_idx < heatmaps.shape[0] and H > 0 and W > 0 :
+                heatmap_data = heatmaps[phrase_idx].reshape(H, W)
+                heatmap_contiguous = np.ascontiguousarray(heatmap_data)
+                heatmap_pil = PILImageModule.fromarray(heatmap_contiguous)
+                heatmap_resized = np.array(heatmap_pil.resize((width, height), PILImageModule.BILINEAR))
+                ax_current.imshow(heatmap_resized, cmap='jet', alpha=0.5)
+                for x_val in vlines:
+                    ax_current.axvline(x_val, color="white", linestyle="--", linewidth=0.8)
+                for y_val in hlines:
+                    ax_current.axhline(y_val, color="white", linestyle="--", linewidth=0.8)
+
+            mask = phrase_ids == phrase_idx
+            if bbox_coords.size > 0: # Process predicted boxes only if they exist
+                for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
+                    if bbox_format == 'xyxy':
+                        x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
+                    elif bbox_format == 'cxcywh':
+                        cx, cy, w_box, h_box = bbox # Renamed w, h to avoid conflict
+                        x1 = (cx - w_box / 2) * width
+                        y1 = (cy - h_box / 2) * height
+                        x2 = (cx + w_box / 2) * width
+                        y2 = (cy + h_box / 2) * height
+                    else: 
+                        raise ValueError(f"Unknown bbox_format: {bbox_format}")
+                    rect = patches.Rectangle(
+                        (x1, y1), x2 - x1, y2 - y1, 
+                        linewidth=2, edgecolor='yellow', facecolor='none'
+                    )
+                    ax_current.add_patch(rect)
+                    ax_current.text(x1, y1 - 2, f'{prob:.2f}', color='red', fontsize=8, 
+                                    bbox=dict(facecolor='black', alpha=0.5, pad=1))
+
+            title = f'{phrases[phrase_idx]}\n(prob: {phrase_prob:.2f})'
+            wrapped_title = "\n".join(textwrap.wrap(title, int(wrap_length)))
+            title_color = 'red' if gt_phrases_to_highlight and phrases[phrase_idx] in gt_phrases_to_highlight else 'black'
+            ax_current.set_title(wrapped_title, color=title_color, fontsize=10)
+
+        for i in range(n_phrases, n_rows_fig * n_cols_fig):
+            row, col = divmod(i, n_cols_fig)
+            if row < ax_array.shape[0] and col < ax_array.shape[1]:
+                 ax_array[row, col].axis('off')
+                 ax_array[row, col].set_frame_on(False)
+
+
+    plt.tight_layout()
     plt.show()
 
 

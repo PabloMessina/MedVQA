@@ -621,6 +621,7 @@ class DATASET_NAMES:
     VINBIG = 'vinbig'
     CXR14 = 'cxr14'
     PADCHEST = 'padchest'
+    PADCHEST_GR = 'padchest-gr'
     MIMICCXR_CHEST_IMAGENOME_MODE = 'mimic-cxr-chest-imagenome-mode'
     MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE = 'mimic-cxr-chest-imagenome-detectron2-mode'
     CHEXLOCALIZE = 'chexlocalize'
@@ -634,6 +635,7 @@ DATASET_NAME_TO_SHORT = {
     DATASET_NAMES.VINBIG: 'vnbg',
     DATASET_NAMES.CXR14: 'cxr14',
     DATASET_NAMES.PADCHEST: 'padch',
+    DATASET_NAMES.PADCHEST_GR: 'padch-gr',
     DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME_MODE: 'mim-chestimg',
     DATASET_NAMES.MIMICCXR_CHEST_IMAGENOME__DETECTRON2_MODE: 'mim-chestimg-d2',
 }

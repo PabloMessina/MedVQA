@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -6,13 +7,12 @@ from medvqa.models.mlp import MLP
 from positional_encodings.torch_encodings import PositionalEncoding1D, PositionalEncoding2D, Summer
 from medvqa.models.vision.bbox_regression import MultiClassBoundingBoxRegressor
 from medvqa.models.vision.visual_modules import MultiPurposeVisualModule, RawImageEncoding
-import logging
-
+from medvqa.utils.common import ChoiceEnum
 from medvqa.utils.logging_utils import ANSI_MAGENTA_BOLD, ANSI_RESET
 
 logger = logging.getLogger(__name__)
 
-class PhraseGroundingMode:
+class PhraseGroundingMode(ChoiceEnum):
     SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER = 'sigmoid_attention_plus_custom_classifier'
     TRANSFORMER_ENCODER_WITH_SEGMENTATION = 'transformer_encoder_with_segmentation'
     TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION = 'transformer_encoder_with_bbox_regression'
@@ -25,34 +25,18 @@ class PhraseGroundingMode:
     ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION = 'adaptive_film_based_pooling_mlp_with_bbox_regression'
     ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11 = 'adaptive_film_based_pooling_mlp_with_yolov11'
     
-    @staticmethod
-    def get_choices():
-        return [
-            PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER,
-            PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION,
-            PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION,
-            PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING,
-            PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER,
-            PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION,
-            PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING,
-            PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11,
-        ]
-    
 _mode2shortname = {
-    PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER: 'SigmoidAttention',
-    PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION: 'TransformerEncoder_Segmentation',
-    PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION: 'TransformerEncoder_BBoxRegression',
-    PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING: 'TransformerEncoder_NoGrounding',
-    PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER: 'FiLM_SigmoidAttention',
-    PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION: 'FiLM_SigmoidAttention_ObjectDetection',
-    PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING: 'GlobalPoolingConcatMLP',
-    PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING: 'GlobalPoolingFiLMMLP',
-    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING: 'AdaptiveFiLM_MLP',
-    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION: 'AdaptiveFiLM_MLP_BBoxRegression',
-    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11: 'AdaptiveFiLM_MLP_YOLOv11',
+    PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value: 'SigmoidAttention',
+    PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value: 'TransformerEncoder_Segmentation',
+    PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value: 'TransformerEncoder_BBoxRegression',
+    PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING.value: 'TransformerEncoder_NoGrounding',
+    PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value: 'FiLM_SigmoidAttention',
+    PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION.value: 'FiLM_SigmoidAttention_ObjectDetection',
+    PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING.value: 'GlobalPoolingConcatMLP',
+    PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING.value: 'GlobalPoolingFiLMMLP',
+    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value: 'AdaptiveFiLM_MLP',
+    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value: 'AdaptiveFiLM_MLP_BBoxRegression',
+    PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11.value: 'AdaptiveFiLM_MLP_YOLOv11',
 }
 
 class PhraseGrounder(MultiPurposeVisualModule):
@@ -82,7 +66,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             regions_height,
             qkv_size, # query, key, value size
             phrase_classifier_hidden_size,
-            phrase_grounding_mode=PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER,
+            phrase_grounding_mode=PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value,
             image_encoder_dropout_p=0,
             huggingface_model_name=None,
             alignment_proj_size=None,
@@ -107,7 +91,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         
         assert regions_width * regions_height == num_regions, f'width * height ({regions_width * regions_height}) != num_regions ({num_regions})'
 
-        if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+        if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11.value:
             assert raw_image_encoding == RawImageEncoding.YOLOV11_FACT_CONDITIONED
 
         # Init MultiPurposeVisualModule components (for image encoder and auxiliary tasks)
@@ -145,10 +129,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
         self.visual_feature_proj_size = visual_feature_proj_size
 
         if predict_global_alignment:
-            assert self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER, \
+            assert self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value, \
                 'predict_global_alignment is only supported in the FiLM-based approach'
 
-        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value:
             assert qkv_size is not None
             assert phrase_classifier_hidden_size is not None
 
@@ -170,9 +154,9 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if self.apply_positional_encoding:
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
 
-        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION or
-              self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION or
-              self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING):
+        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value or
+              self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value or
+              self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING.value):
             assert transf_d_model is not None
             assert transf_nhead is not None
             assert transf_dim_feedforward is not None
@@ -208,12 +192,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
             # Init positional encoding
             self.pos_encoding = Summer(PositionalEncoding1D(image_local_feat_size))
 
-            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION:
+            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value:
                 self.att_proj = nn.Linear(transf_d_model, 1) # hidden size -> scalar (segmentation score)
-            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION:
+            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value:
                 self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(local_feat_dim=transf_d_model) # hidden size -> bbox
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value:
             assert visual_feature_proj_size is not None
             assert visual_grounding_hidden_size is not None
             assert phrase_mlp_hidden_dims is not None
@@ -241,7 +225,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 self.global_vf_align_proj = nn.Linear(self.global_feat_size, alignment_proj_size)
                 self.phrase_emb_align_proj = nn.Linear(phrase_embedding_size, alignment_proj_size)
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION.value:
             assert visual_feature_proj_size is not None
             assert visual_grounding_hidden_size is not None
             assert phrase_mlp_hidden_dims is not None
@@ -269,7 +253,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 self.global_vf_align_proj = nn.Linear(self.global_feat_size, alignment_proj_size)
                 self.phrase_emb_align_proj = nn.Linear(phrase_embedding_size, alignment_proj_size)
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING.value:
             assert phrase_mlp_hidden_dims is not None
             self.use_global_features = True
             self.classifier_mlp = MLP(in_dim=self.global_feat_size + self.phrase_embedding_size, # global, phrase
@@ -277,7 +261,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
                                         hidden_dims=phrase_mlp_hidden_dims,
                                         activation=nn.GELU)
             
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING.value:
             assert phrase_mlp_hidden_dims is not None
             self.use_global_features = True
             self.global_film = LinearFiLM(self.global_feat_size, phrase_embedding_size)
@@ -286,8 +270,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
                                         hidden_dims=phrase_mlp_hidden_dims,
                                         activation=nn.GELU)
             
-        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING or \
-                self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value or \
+                self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
             
             self.local_film = LinearFiLM(self.local_feat_size, phrase_embedding_size)
             self.local_attention_hidden_layer = nn.Linear(self.local_feat_size, visual_grounding_hidden_size)
@@ -302,56 +286,56 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 self.pos_encoding = Summer(PositionalEncoding2D(image_local_feat_size))
                 logger.info(f'{ANSI_MAGENTA_BOLD}Using positional encoding for local features{ANSI_RESET}')
 
-            if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
+            if phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
                 self.visual_grounding_bbox_regressor = MultiClassBoundingBoxRegressor(
                     local_feat_dim=visual_grounding_hidden_size, bbox_format=bbox_format,
                     predict_relative=predict_relative_bbox_coords)
             else:
                 self.local_attention_final_layer = nn.Linear(visual_grounding_hidden_size, 1) # hidden size -> scalar (local attention score)
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11.value:
             pass
 
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {phrase_grounding_mode}')
 
     def get_name(self):
-        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value:
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.qkv_size},{self.phrase_classifier_1.out_features},'
                     f'{self.phrase_classifier_2.out_features})')
-        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION or
-                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION or
-                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING):
+        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value or
+                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value or
+                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING.value):
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.transf_d_model},{self.transf_nhead},'
                     f'{self.transf_dim_feedforward},{self.transf_num_layers})')
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value:
             mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.global_proj.out_features},{self.local_proj.out_features},'
                     f'{self.visual_grounding_layer_1.out_features},{self.visual_grounding_layer_2.out_features},'
                     f'{mlp_hidden_dims_str})')
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION.value:
             mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.visual_grounding_hidden_layer.out_features},'
                     f'{self.visual_grounding_bbox_regressor.local_feat_dim},{mlp_hidden_dims_str})')
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING.value:
             mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{mlp_hidden_dims_str})')
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING.value:
             mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{mlp_hidden_dims_str})')
-        elif (self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING or
-              self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION):
+        elif (self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value or
+              self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value):
             mlp_hidden_dims_str = '-'.join(map(str, self.classifier_mlp.hidden_dims))
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]},'
                     f'{self.phrase_embedding_size},{self.local_attention_hidden_layer.out_features},'
                     f'{mlp_hidden_dims_str})')
-        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11.value:
             return (f'PhraseGrounder({super().get_name()},{_mode2shortname[self.phrase_grounding_mode]})')
         else:
             raise ValueError(f'Unknown phrase_grounding_mode: {self.phrase_grounding_mode}')
@@ -396,12 +380,12 @@ class PhraseGrounder(MultiPurposeVisualModule):
             use_first_n_facts_for_detection=use_first_n_facts_for_detection,
         )
 
-        if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11:
+        if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_YOLOV11.value:
             return output # YOLOv11 fact-conditioned
 
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
 
-        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value:
             if self.apply_positional_encoding:
                 local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
                 local_feat = self.pos_encoding(local_feat) # apply positional encoding
@@ -443,9 +427,9 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 normalized_average_v = torch.nn.functional.normalize(average_v, p=2, dim=-1) # (batch_size, phrase_embedding_size)
                 output['normalized_average_v'] = normalized_average_v
         
-        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION or
-                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION or
-                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING):
+        elif (self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value or
+                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value or
+                self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER__NO_GROUNDING.value):
 
             batch_size, K, _ = phrase_embeddings.shape
 
@@ -460,13 +444,13 @@ class PhraseGrounder(MultiPurposeVisualModule):
             X = self.pos_encoding(X) # apply positional encoding
             X = self.transformer_encoder(X) # (batch_size * K, num_regions + 1, transf_d_model)
 
-            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION:
+            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value:
                 # Phrase grounding attention
                 image_representation = X[:, 1:, :] # (batch_size * K, num_regions, transf_d_model)
                 attention_logits = self.att_proj(image_representation) # (batch_size * K, num_regions, 1)
                 sigmoid_attention = torch.sigmoid(attention_logits) # (batch_size * K, num_regions, 1)
                 sigmoid_attention = sigmoid_attention.view(batch_size, K, self.num_regions) # (batch_size, K, num_regions)
-            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION:
+            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value:
                 # Phrase grounding bbox regression
                 image_representation = X[:, 1:, :] # (batch_size * K, num_regions, transf_d_model)
                 image_representation = image_representation.view(batch_size, K, self.num_regions, self.transf_d_model) # (batch_size, K, num_regions, transf_d_model)
@@ -486,9 +470,9 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 phrase_classifier_logits = phrase_classifier_logits.view(batch_size, K) # (batch_size, K)
 
             # Output
-            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION:
+            if self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_SEGMENTATION.value:
                 output['sigmoid_attention'] = sigmoid_attention # (batch_size, K, num_regions)
-            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION:
+            elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER_WITH_BBOX_REGRESSION.value:
                 output['sigmoid_attention'] = sigmoid_attention # (batch_size, K, num_regions)
                 if apply_nms:
                     output['predicted_bboxes'] = predicted_bboxes # (batch_size, K, list of bboxes)
@@ -498,7 +482,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if not skip_phrase_classifier:
                 output['phrase_classifier_logits'] = phrase_classifier_logits
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value:
 
             orig_global_feat = output['global_feat'] # (batch_size, global_feat_size)
             global_feat = self.global_proj(orig_global_feat) # (batch_size, visual_feature_proj_size)
@@ -555,7 +539,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if compute_global_alignment:
                 output['global_alignment_similarity'] = global_alignment_similarity
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_SIGMOID_ATTENTION_CUSTOM_CLASSIFIER_OBJECT_DETECTION.value:
 
             orig_global_feat = output['global_feat'] # (batch_size, global_feat_size)
             
@@ -623,7 +607,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if compute_global_alignment:
                 output['global_alignment_similarity'] = global_alignment_similarity
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_CONCAT_MLP__NO_GROUNDING.value:
 
             global_feat = output['global_feat'] # (batch_size, global_feat_size)
             global_feat = torch.nn.functional.normalize(global_feat, p=2, dim=-1) # (batch_size, global_feat_size)
@@ -637,7 +621,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             # Output
             output['phrase_classifier_logits'] = phrase_classifier_logits
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.GLOBAL_POOLING_FILM_MLP__NO_GROUNDING.value:
 
             global_feat = output['global_feat'] # (batch_size, global_feat_size)
             global_feat = torch.nn.functional.normalize(global_feat, p=2, dim=-1) # (batch_size, global_feat_size)
@@ -653,8 +637,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
             # Output
             output['phrase_classifier_logits'] = phrase_classifier_logits
 
-        elif (self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING or
-                self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION):              
+        elif (self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value or
+                self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value):              
 
             if self.apply_positional_encoding:
                 local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
@@ -671,11 +655,11 @@ class PhraseGrounder(MultiPurposeVisualModule):
             local_attention_logits = self.local_attention_hidden_layer(local_feat_after_film) # (batch_size, K, num_regions, visual_grounding_hidden_size)
             local_attention_logits = F.gelu(local_attention_logits) # (batch_size, K, num_regions, visual_grounding_hidden_size)
 
-            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING:
+            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value:
                 # Adaptive attention
                 local_attention_logits = self.local_attention_final_layer(local_attention_logits) # (batch_size, K, num_regions, 1)
                 sigmoid_attention = torch.sigmoid(local_attention_logits) # (batch_size, K, num_regions, 1)
-            elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
+            elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
                 # Adaptive bbox regression
                 if apply_nms:
                     predicted_bboxes, visual_grounding_confidence_logits = self.visual_grounding_bbox_regressor(
@@ -697,7 +681,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
 
             # Output
             output['phrase_classifier_logits'] = phrase_classifier_logits
-            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
+            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
                 if apply_nms:
                     output['predicted_bboxes'] = predicted_bboxes # (batch_size, (coords, conf, class))
                 else:
@@ -705,6 +689,9 @@ class PhraseGrounder(MultiPurposeVisualModule):
                     output['visual_grounding_bbox_logits'] = visual_grounding_bbox_logits # (batch_size, K, num_regions, 4)
             if return_sigmoid_attention:
                 output['sigmoid_attention'] = sigmoid_attention
+
+        else:
+            raise ValueError(f'Unknown phrase_grounding_mode: {self.phrase_grounding_mode}')
 
         return output
     
@@ -726,17 +713,17 @@ class PhraseGrounder(MultiPurposeVisualModule):
 
         local_feat = output['local_feat'] # (batch_size, num_regions, image_local_feat_size)
 
-        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value:
             if self.apply_positional_encoding:
                 local_feat = local_feat + self.pe # apply positional encoding
             assert local_feat.shape == (raw_images.shape[0], self.num_regions, self.image_local_feat_size)
             return { 'local_feat': local_feat }
         
-        # elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER:
+        # elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER.value:
         #     local_feat = self.image_proj(local_feat) # (batch_size, num_regions, transf_d_model)
         #     return { 'local_feat': local_feat }
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value:
             global_feat = output['global_feat'] # (batch_size, global_feat_size)
             global_feat = self.global_proj(global_feat) # (batch_size, visual_feature_proj_size)
             if self.apply_positional_encoding:
@@ -747,8 +734,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
             return { 'local_feat': local_feat, 'global_feat': global_feat }
         
         elif self.phrase_grounding_mode in [
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION,
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value,
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value,
         ]:
             if self.apply_positional_encoding:
                 local_feat = local_feat.view(-1, self.num_regions_sqrt, self.num_regions_sqrt, self.image_local_feat_size)
@@ -777,7 +764,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         
         output = {}
 
-        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER:
+        if self.phrase_grounding_mode == PhraseGroundingMode.SIGMOID_ATTENTION_PLUS_CUSTOM_CLASSIFIER.value:
 
             # Queries
             q = self.q_proj(phrase_embeddings) # (batch_size, K, qkv_size)
@@ -809,7 +796,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
             if not skip_phrase_classifier:
                 output['phrase_classifier_logits'] = phrase_classifier_logits.squeeze(-1) # (batch_size, K, 1) -> (batch_size, K)
         
-        # elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER:
+        # elif self.phrase_grounding_mode == PhraseGroundingMode.TRANSFORMER_ENCODER.value:
 
         #     batch_size, K, _ = phrase_embeddings.shape
 
@@ -842,7 +829,7 @@ class PhraseGrounder(MultiPurposeVisualModule):
         #     if not skip_phrase_classifier:
         #         output['phrase_classifier_logits'] = phrase_classifier_logits
 
-        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER:
+        elif self.phrase_grounding_mode == PhraseGroundingMode.FILM_LAYERS_PLUS_SIGMOID_ATTENTION_AND_CUSTOM_CLASSIFIER.value:
             
             assert global_feat is not None
 
@@ -882,8 +869,8 @@ class PhraseGrounder(MultiPurposeVisualModule):
                 # assert output['phrase_classifier_logits'].shape == (raw_images.shape[0], phrase_embeddings.shape[1])
 
         elif self.phrase_grounding_mode in [
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING,
-            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION,
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value,
+            PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value,
         ]:
 
             # FiLM layer (local features)
@@ -896,10 +883,10 @@ class PhraseGrounder(MultiPurposeVisualModule):
             local_attention_logits = self.local_attention_hidden_layer(local_feat_after_film) # (batch_size, K, num_regions, visual_grounding_hidden_size)
             local_attention_logits = F.gelu(local_attention_logits) # (batch_size, K, num_regions, visual_grounding_hidden_size)
 
-            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING:
+            if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP__NO_GROUNDING.value:
                 local_attention_logits = self.local_attention_final_layer(local_attention_logits) # (batch_size, K, num_regions, 1)
                 sigmoid_attention = torch.sigmoid(local_attention_logits) # (batch_size, K, num_regions, 1)
-            elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION:
+            elif self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
                 visual_grounding_binary_logits = self.visual_grounding_bbox_regressor(local_attention_logits, predict_coords=False)
                 sigmoid_attention = torch.sigmoid(visual_grounding_binary_logits) # (batch_size, K, num_regions, 1)
 

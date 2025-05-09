@@ -1,15 +1,33 @@
 import os
 import numpy as np
 import torch
+import logging
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 from sklearn.cluster import KMeans
-from medvqa.datasets.text_data_utils import create_text_dataset_and_dataloader, remove_consecutive_repeated_words_from_text, sentence_tokenize_texts_in_parallel
+from medvqa.datasets.text_data_utils import (
+    create_text_dataset_and_dataloader,
+    remove_consecutive_repeated_words_from_text,
+    sentence_tokenize_texts_in_parallel,
+)
 from medvqa.models.checkpoint import load_model_state_dict, get_checkpoint_filepath
 from medvqa.utils.common import LARGE_FAST_CACHE_DIR
-from medvqa.utils.files_utils import get_cached_pickle_file, get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle
-from medvqa.utils.hashing_utils import compute_hashes_in_parallel, hash_string, hash_string_list, update_hash
-from medvqa.utils.logging_utils import print_bold
+from medvqa.utils.files_utils import (
+    get_cached_pickle_file,
+    get_file_path_with_hashing_if_too_long,
+    load_jsonl,
+    load_pickle,
+    save_pickle,
+)
+from medvqa.utils.hashing_utils import (
+    compute_hashes_in_parallel,
+    hash_string,
+    hash_string_list,
+    update_hash,
+)
+from medvqa.utils.logging_utils import ANSI_BOLD, ANSI_RESET
+
+logger = logging.getLogger(__name__)
 
 class SupportedHuggingfaceMedicalBERTModels:
     BiomedVLP_CXR_BERT_specialized = 'microsoft/BiomedVLP-CXR-BERT-specialized'
@@ -92,7 +110,7 @@ def compute_text_embeddings(model_name, get_tokenizer_func, texts, device, batch
         if model_checkpoint_folder_path is not None:
             model_checkpoint_filepath = get_checkpoint_filepath(model_checkpoint_folder_path)
     if model_checkpoint_filepath is not None:
-        print(f'Loading model weights from {model_checkpoint_filepath}')
+        logger.info(f'Loading model weights from {model_checkpoint_filepath}')
         checkpoint = torch.load(model_checkpoint_filepath, map_location=device)
         load_model_state_dict(model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
 
@@ -209,7 +227,7 @@ def generate_text_with_T5(input_texts, model_name, model_checkpoint_folder_path,
     model = T5ForConditionalGeneration.from_pretrained(model_name)
     model.to(device)
     model.eval()
-    print(f'Loading model weights from {model_checkpoint_filepath}')
+    logger.info(f'Loading model weights from {model_checkpoint_filepath}')
     checkpoint = torch.load(model_checkpoint_filepath, map_location=device)
     load_model_state_dict(model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
 
@@ -339,10 +357,10 @@ class CachedTextEmbeddingExtractor:
 
     def _load_cache(self):
         if os.path.exists(self.cache_path):
-            print(f'Loading cached text embeddings from {self.cache_path}')
+            logger.info(f'Loading cached text embeddings from {self.cache_path}')
             self._cache = load_pickle(self.cache_path)
-            print(f'len(self.cache["hashes"]) = {len(self.cache["hashes"])}')
-            print(f'self.cache["embeddings"].shape = {self.cache["embeddings"].shape}')
+            logger.info(f'len(self.cache["hashes"]) = {len(self.cache["hashes"])}')
+            logger.info(f'self.cache["embeddings"].shape = {self.cache["embeddings"].shape}')
             self._hash2index = { h:i for i,h in enumerate(self.cache['hashes']) }
             assert len(self.hash2index) == len(self.cache['hashes'])
         else:
@@ -396,7 +414,7 @@ class CachedTextEmbeddingExtractor:
             self.hash2index[h] = i
         # Update cache on disk
         if update_cache_on_disk:
-            print(f'Saving updated cache to {self.cache_path}')
+            logger.info(f'Saving updated cache to {self.cache_path}')
             save_pickle(self.cache, self.cache_path)
 
     def compute_text_embeddings(self, texts, update_cache_on_disk=True):
@@ -415,7 +433,7 @@ class CachedTextEmbeddingExtractor:
                 hash_index_pairs.append((h, i))
         if len(new_texts_set) > 0:
             new_texts = list(new_texts_set)
-            print(f'Computing embeddings for {len(new_texts)} new texts')
+            logger.info(f'Computing embeddings for {len(new_texts)} new texts')
             new_embeddings = self._compute_embeddings(new_texts)
             assert new_embeddings.shape == (len(new_texts), self.embedding_size)
             self._add_to_cache(new_texts, new_embeddings, update_cache_on_disk=update_cache_on_disk)
@@ -440,20 +458,20 @@ class CachedTextEmbeddingExtractor:
             if save_path in self.cache:
                 return self.cache[save_path]
             if os.path.exists(save_path):
-                print(f'Loading cached kmeans labels from {save_path}')
+                logger.info(f'Loading cached kmeans labels from {save_path}')
                 output = self.cache[save_path] = load_pickle(save_path)
                 return output
         if embeddings is None:
             embeddings = self.compute_text_embeddings(texts, update_cache_on_disk=update_cache_on_disk)
         else:
             assert embeddings.shape[0] == len(texts) # Sanity check
-        print(f'Running KMeans clustering with k={num_clusters}')
+        logger.info(f'Running KMeans clustering with k={num_clusters}')
         kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init='auto', verbose=verbose, max_iter=num_iterations).fit(embeddings)
         labels = kmeans.labels_
         if cache_kmeans_labels:
             self.cache[save_path] = labels
             save_pickle(labels, save_path)
-            print(f'Saved kmeans labels to {save_path}')
+            logger.info(f'Saved kmeans labels to {save_path}')
         return labels
     
 class CachedT5FactExtractor:
@@ -475,7 +493,7 @@ class CachedT5FactExtractor:
             self._model = T5ForConditionalGeneration.from_pretrained(self.model_name)
             self._model.to(self.device)
             self._model.eval()
-            print(f'Loading model weights from {self.model_checkpoint_filepath}')
+            logger.info(f'Loading model weights from {self.model_checkpoint_filepath}')
             checkpoint = torch.load(self.model_checkpoint_filepath, map_location=self.device)
             load_model_state_dict(self._model, _adapt_checkpoint_keys(checkpoint['model']), strict=False)
         return self._model
@@ -484,7 +502,7 @@ class CachedT5FactExtractor:
     def cache(self):
         if self._cache is None:
             if os.path.exists(self._cache_path):
-                print(f'Loading cached T5 facts from {self._cache_path}')
+                logger.info(f'Loading cached T5 facts from {self._cache_path}')
                 self._cache = load_pickle(self._cache_path)
             else:
                 # Load environment variables from .env file
@@ -492,7 +510,7 @@ class CachedT5FactExtractor:
                 load_dotenv()
                 INTEGRATED_SENTENCE_FACTS_JSONL_PATH = os.getenv('INTEGRATED_SENTENCE_FACTS_JSONL_PATH_v2')
                 # Populate cache with facts from integrated sentence facts
-                print(f'Populating cache with facts from {INTEGRATED_SENTENCE_FACTS_JSONL_PATH}')
+                logger.info(f'Populating cache with facts from {INTEGRATED_SENTENCE_FACTS_JSONL_PATH}')
                 rows = load_jsonl(INTEGRATED_SENTENCE_FACTS_JSONL_PATH)
                 cache = {}
                 for row in tqdm(rows, mininterval=2):
@@ -500,7 +518,7 @@ class CachedT5FactExtractor:
                 # Save cache to disk
                 self._cache = cache
                 save_pickle(cache, self._cache_path)
-                print(f'Saved T5 facts to {self._cache_path}')
+                logger.info(f'Saved T5 facts to {self._cache_path}')
         return self._cache
     
     def _extract_facts(self, sentences):
@@ -586,8 +604,8 @@ class CachedT5FactExtractor:
                 cache[hashes[idx]] = facts # update cache with new facts
             if update_cache_on_disk and not skip_cache:
                 save_pickle(cache, self._cache_path)
-                print(f'Saved updated T5 facts to {self._cache_path}')
-                print(f'New cache size = {len(cache)}')
+                logger.info(f'Saved updated T5 facts to {self._cache_path}')
+                logger.info(f'New cache size = {len(cache)}')
         assert None not in facts_per_sentence
         output = [None] * len(texts)
         for i, sentences in enumerate(sentences_per_text):
@@ -597,7 +615,7 @@ class CachedT5FactExtractor:
 class TripletRankingEvaluator:
     def __init__(self, triplets_filepath, model_name, device='GPU', model_checkpoint_folder_path=None, batch_size=32, num_workers=0,
                  average_token_embeddings=False):
-        print(f'Loading triplets from {triplets_filepath}')
+        logger.info(f'Loading triplets from {triplets_filepath}')
         self.triplets_data = get_cached_pickle_file(triplets_filepath)
         if model_name == 'CheXbert':
             from medvqa.metrics.medical.chexbert import CheXbertLabeler            
@@ -620,8 +638,8 @@ class TripletRankingEvaluator:
         sentences = self.triplets_data['sentences']
         rule = self.triplets_data[split][category][rule_index]['rule']
         triplets = self.triplets_data[split][category][rule_index]['triplets']
-        print(f'Evaluating triplet ranking on {split} split with category {category} and rule "{rule}"')
-        print(f'triplets.shape = {triplets.shape}')
+        logger.info(f'Evaluating triplet ranking on {split} split with category {category} and rule "{rule}"')
+        logger.info(f'triplets.shape = {triplets.shape}')
         anchors = [sentences[i] for i in triplets.T[0]]
         positives = [sentences[i] for i in triplets.T[1]]
         negatives = [sentences[i] for i in triplets.T[2]]
@@ -662,8 +680,8 @@ class TripletRankingEvaluator:
             for rule_index in range(len(self.triplets_data[split][category])):
                 triplets = self.triplets_data[split][category][rule_index]['triplets']
                 rule = self.triplets_data[split][category][rule_index]['rule']
-                print(f'Category: {category}, Rule: {rule}')
-                print(f'triplets.shape = {triplets.shape}')
+                logger.info(f'Category: {category}, Rule: {rule}')
+                logger.info(f'triplets.shape = {triplets.shape}')
                 anchors = [idx2i[i] for i in triplets.T[0]]
                 positives = [idx2i[i] for i in triplets.T[1]]
                 negatives = [idx2i[i] for i in triplets.T[2]]
@@ -674,6 +692,6 @@ class TripletRankingEvaluator:
                 AN = np.sum(A * N, axis=1)
                 correct = AP > AN
                 accuracy = np.mean(correct)
-                print_bold(f'accuracy = {accuracy}')
-                print('-'*80)
+                logger.info(f'{ANSI_BOLD}accuracy = {accuracy}{ANSI_RESET}')
+                logger.info('-'*80)
 

@@ -22,6 +22,7 @@ from medvqa.datasets.image_processing import ImageFactBasedMultilabelClassificat
 from medvqa.datasets.visual_module import BasicImageDataset, MAETrainerBase
 from medvqa.datasets.vqa import LabelBasedVQAClass, load_precomputed_visual_features
 from medvqa.models.report_generation.templates.chexpert import TEMPLATES_CHEXPERT_v1
+from medvqa.utils.common import ChoiceEnum
 from medvqa.utils.constants import (
     CHEXPERT_DATASET_ID,
     CHEXPERT_GENDER2ID,
@@ -32,19 +33,11 @@ from medvqa.utils.constants import (
 from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle
 from medvqa.utils.logging_utils import print_bold
 
-class CheXpertTrainingMode:
+class CheXpertTrainingMode(ChoiceEnum):
     TRAIN_VAL = 'train_val'
     VAL_TEST = 'val_test'
     TEST = 'test'
     ALL = 'all'
-    @staticmethod
-    def get_all():
-        return [
-            CheXpertTrainingMode.TRAIN_VAL,
-            CheXpertTrainingMode.VAL_TEST,
-            CheXpertTrainingMode.TEST,
-            CheXpertTrainingMode.ALL,
-        ]
 
 class CheXpertTrainerBase(LabelBasedVQAClass):
 

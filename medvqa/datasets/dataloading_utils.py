@@ -1252,8 +1252,7 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             return batch_dict
     elif flag == 'vbg': # vinbig bbox grounding
         def collate_batch_fn(batch, training_mode=True,
-                             do_visual_grounding_with_bbox_regression=False,
-                             do_visual_grounding_with_segmentation=False):
+                             do_visual_grounding_with_bbox_regression=False):
             # We expect:
             # if visual grounding with bbox regression:
             #   if use_yolo:
@@ -1277,11 +1276,6 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
             #     - 'pcl': phrase classification labels
             #     - 'bboxes': bounding boxes coordinates
             #     - 'classes': bounding boxes classes
-            # elif visual grounding with segmentation:
-            #   - 'i': images
-            #   - 'pe': phrase embeddings
-            #   - 'pgm': phrase grounding masks
-            #   - 'pcl': phrase classification labels
             # else:
             #   - 'i': images
             #   - 'pe': phrase embeddings
@@ -1338,11 +1332,6 @@ def get_phrase_grounding_collate_batch_fn(flag, include_loss_weights=False, use_
                         batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
                         batch_dict['bboxes'] = [x['bboxes'] for x in batch]
                         batch_dict['classes'] = [x['classes'] for x in batch]
-            elif do_visual_grounding_with_segmentation:
-                batch_dict['i'] = torch.stack([x['i'] for x in batch])
-                batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))
-                batch_dict['pgm'] = torch.tensor(np.array([x['pgm'] for x in batch]))
-                batch_dict['pcl'] = torch.tensor(np.array([x['pcl'] for x in batch]))
             else:
                 batch_dict['i'] = torch.stack([x['i'] for x in batch])
                 batch_dict['pe'] = torch.tensor(np.array([x['pe'] for x in batch]))

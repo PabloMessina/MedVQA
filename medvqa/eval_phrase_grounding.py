@@ -4,12 +4,13 @@ import os
 from pprint import pprint
 import torch
 import numpy as np
-
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
 from tqdm import tqdm
 from medvqa.datasets.chexlocalize import CHEXLOCALIZE_CLASS_NAMES
 from medvqa.datasets.chexlocalize.chexlocalize_dataset_management import CheXlocalizePhraseGroundingTrainer
+from medvqa.datasets.image_transforms_factory import create_image_transforms
+from medvqa.datasets.mimiccxr import MIMICCXR_ImageSizeModes
 from medvqa.datasets.ms_cxr import get_ms_cxr_category_names, get_ms_cxr_phrase_to_category_name
 from medvqa.datasets.vinbig import (
     VINBIG_CHEX_CLASSES,
@@ -18,7 +19,7 @@ from medvqa.datasets.vinbig import (
     VINBIGDATA_CHALLENGE_CLASSES,
     VINBIGDATA_CHALLENGE_IOU_THRESHOLD,
 )
-from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
+# from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseGroundingTrainer
 from medvqa.evaluation.bootstrapping import (
     apply_stratified_bootstrapping,
     stratified_multilabel_bootstrap_metrics,
@@ -76,7 +77,9 @@ from medvqa.datasets.dataloading_utils import (
     get_phrase_grounding_collate_batch_fn,
 )
 from medvqa.datasets.image_processing import get_image_transform
-from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_orange
+from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_orange, setup_logging
+
+setup_logging()
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -94,6 +97,7 @@ def parse_args(args=None):
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
     parser.add_argument('--mscxr_phrase2embedding_filepath', type=str, default=None, help='Path to the MS-CXR phrase2embedding file')
+    parser.add_argument('--mimicxr_dicom_id_to_pos_neg_facts_filepath', type=str, default=None, help='Path to the MIMIC-CXR DICOM ID to pos/neg facts file')
     parser.add_argument('--vinbig_use_training_indices_for_validation', action='store_true')
     parser.add_argument('--checkpoint_folder_path_to_borrow_metadata_from', type=str, default=None, help='Path to metadata file to borrow trainer kwargs from')
     parser.add_argument('--override_bbox_format', type=str, default=None, choices=['xyxy', 'cxcywh'], help='Override the bbox format used in the dataset')
@@ -118,7 +122,6 @@ def _evaluate_model(
     mimiccxr_trainer_kwargs,
     chexlocalize_trainer_kwargs,
     vinbig_trainer_kwargs,
-    collate_batch_fn_kwargs,
     val_image_transform_kwargs,
     evaluation_engine_kwargs,
     max_images_per_batch,
@@ -130,6 +133,7 @@ def _evaluate_model(
     eval_chexlocalize,
     eval_vinbig,
     mscxr_phrase2embedding_filepath,
+    mimicxr_dicom_id_to_pos_neg_facts_filepath,
     device,
     vinbig_use_training_indices_for_validation,
     optimize_thresholds,
@@ -172,54 +176,54 @@ def _evaluate_model(
 
     # Create phrase grounding trainers
 
-    if eval_chest_imagenome_gold or eval_mscxr:
+    # if eval_chest_imagenome_gold or eval_mscxr:
 
-        if checkpoint_folder_path_to_borrow_metadata_from is not None:
-            metadata = load_metadata(checkpoint_folder_path_to_borrow_metadata_from)
-            collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
-            mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
+    #     if checkpoint_folder_path_to_borrow_metadata_from is not None:
+    #         metadata = load_metadata(checkpoint_folder_path_to_borrow_metadata_from)
+    #         # collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
+    #         mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
         
-        try: 
-            image_transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]
-        except KeyError:
-            image_transform_kwargs = next(iter(val_image_transform_kwargs.values())) # get the first value
+    #     try: 
+    #         image_transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]
+    #     except KeyError:
+    #         image_transform_kwargs = next(iter(val_image_transform_kwargs.values())) # get the first value
 
-        count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
-        if eval_chest_imagenome_gold:
-            bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
-        else:
-            bbox_grounding_collate_batch_fn = None
-        if eval_mscxr:
-            mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
-        else:
-            mscxr_phrase_grounding_collate_batch_fn = None
-        mimiccxr_trainer_kwargs['use_facts_for_train'] = False
-        mimiccxr_trainer_kwargs['use_facts_for_test'] = False
-        mimiccxr_trainer_kwargs['use_mscxr_for_train'] = False
-        mimiccxr_trainer_kwargs['use_mscxr_for_val'] = False
-        mimiccxr_trainer_kwargs['use_mscxr_for_test'] = eval_mscxr
-        mimiccxr_trainer_kwargs['mscxr_test_on_all_images'] = eval_mscxr # if True, test on all MSCXR
-        mimiccxr_trainer_kwargs['use_cxrlt2024_challenge_split'] = False 
-        mimiccxr_trainer_kwargs['use_cxrlt2024_official_labels'] = False
-        mimiccxr_trainer_kwargs['use_cxrlt2024_custom_labels'] = False
-        mimiccxr_trainer_kwargs['use_chest_imagenome_for_train'] = False
-        mimiccxr_trainer_kwargs['use_chest_imagenome_gold_for_test'] = eval_chest_imagenome_gold
-        if mscxr_phrase2embedding_filepath is not None:
-            mimiccxr_trainer_kwargs['mscxr_phrase2embedding_filepath'] = mscxr_phrase2embedding_filepath
-        if override_bbox_format:
-            print_orange('Overriding bbox format to', override_bbox_format)
-            mimiccxr_trainer_kwargs['bbox_format'] = override_bbox_format
+    #     count_print('Creating MIMIC-CXR Phrase Grounding Trainer ...')
+    #     # if eval_chest_imagenome_gold:
+    #     #     bbox_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['cibg'])
+    #     # else:
+    #     #     bbox_grounding_collate_batch_fn = None
+    #     # if eval_mscxr:
+    #     #     mscxr_phrase_grounding_collate_batch_fn = get_phrase_grounding_collate_batch_fn(**collate_batch_fn_kwargs['mscxr'])
+    #     # else:
+    #     #     mscxr_phrase_grounding_collate_batch_fn = None
+    #     mimiccxr_trainer_kwargs['use_facts_for_train'] = False
+    #     mimiccxr_trainer_kwargs['use_facts_for_test'] = False
+    #     mimiccxr_trainer_kwargs['use_mscxr_for_train'] = False
+    #     mimiccxr_trainer_kwargs['use_mscxr_for_val'] = False
+    #     mimiccxr_trainer_kwargs['use_mscxr_for_test'] = eval_mscxr
+    #     mimiccxr_trainer_kwargs['mscxr_test_on_all_images'] = eval_mscxr # if True, test on all MSCXR
+    #     mimiccxr_trainer_kwargs['use_cxrlt2024_challenge_split'] = False 
+    #     mimiccxr_trainer_kwargs['use_cxrlt2024_official_labels'] = False
+    #     mimiccxr_trainer_kwargs['use_cxrlt2024_custom_labels'] = False
+    #     mimiccxr_trainer_kwargs['use_chest_imagenome_for_train'] = False
+    #     mimiccxr_trainer_kwargs['use_chest_imagenome_gold_for_test'] = eval_chest_imagenome_gold
+    #     if mscxr_phrase2embedding_filepath is not None:
+    #         mimiccxr_trainer_kwargs['mscxr_phrase2embedding_filepath'] = mscxr_phrase2embedding_filepath
+    #     if override_bbox_format:
+    #         print_orange('Overriding bbox format to', override_bbox_format)
+    #         mimiccxr_trainer_kwargs['bbox_format'] = override_bbox_format
 
-        mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
-            test_image_transform = get_image_transform(**image_transform_kwargs),
-            max_images_per_batch=max_images_per_batch,
-            max_phrases_per_batch=max_phrases_per_batch,
-            max_phrases_per_image=max_phrases_per_image,
-            bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
-            mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
-            num_test_workers=num_workers,
-            **mimiccxr_trainer_kwargs,
-        )
+    #     mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
+    #         test_image_transform = create_image_transforms(**image_transform_kwargs),
+    #         max_images_per_batch=max_images_per_batch,
+    #         max_phrases_per_batch=max_phrases_per_batch,
+    #         max_phrases_per_image=max_phrases_per_image,
+    #         # bbox_grounding_collate_batch_fn=bbox_grounding_collate_batch_fn,
+    #         # mscxr_phrase_grounding_collate_batch_fn=mscxr_phrase_grounding_collate_batch_fn,
+    #         num_test_workers=num_workers,
+    #         **mimiccxr_trainer_kwargs,
+    #     )
 
     if eval_chexlocalize:
 
@@ -418,6 +422,28 @@ def _evaluate_model(
         assert candidate_conf_thresholds is not None
         assert candidate_iou_thresholds is not None
 
+        # Get image transform kwargs
+        try: 
+            image_transform_kwargs = val_image_transform_kwargs[DATASET_NAMES.MIMICCXR]
+        except KeyError:
+            image_transform_kwargs = next(iter(val_image_transform_kwargs.values())) # get the first value
+
+        # Initialize trainer
+        mimiccxr_trainer = MIMICCXR_PhraseGroundingTrainer(
+            use_mscxr_for_test=True,
+            test_image_transform = create_image_transforms(**image_transform_kwargs),
+            max_images_per_batch=max_images_per_batch,
+            max_phrases_per_batch=max_phrases_per_batch,
+            max_phrases_per_image=max_phrases_per_image,
+            num_test_workers=num_workers,
+            mscxr_do_grounding_only=False,
+            mscxr_test_on_all_images=True,
+            bbox_format=override_bbox_format,
+            source_image_size_mode=MIMICCXR_ImageSizeModes.MEDIUM_512,
+            mscxr_phrase2embedding_filepath=mscxr_phrase2embedding_filepath,
+            dicom_id_to_pos_neg_facts_filepath=mimicxr_dicom_id_to_pos_neg_facts_filepath,
+        )
+
         # Get dataset and dataloader
         dataset = mimiccxr_trainer.mscxr_test_dataset
         dataloader = mimiccxr_trainer.mscxr_test_dataloader
@@ -482,7 +508,7 @@ def _evaluate_model(
                     apply_nms=False, # Skip NMS in order to get all predictions
                 )
                 phrase_classifier_logits = output['phrase_classifier_logits']
-                visual_grounding_bbox_prob_logits = output['visual_grounding_binary_logits'] # (B, N, H * W, 1)
+                visual_grounding_bbox_prob_logits = output['visual_grounding_confidence_logits'] # (B, N, H * W, 1)
                 visual_grounding_bbox_prob_logits = visual_grounding_bbox_prob_logits.squeeze(-1) # (B, N, H * W)
                 visual_grounding_bbox_coord_logits = output['visual_grounding_bbox_logits'] # (B, N, H * W, 4)
                 visual_grounding_bbox_coord_logits = visual_grounding_bbox_coord_logits.cpu().numpy()
@@ -1295,6 +1321,7 @@ def evaluate(
     eval_chexlocalize,
     eval_vinbig,
     mscxr_phrase2embedding_filepath,
+    mimicxr_dicom_id_to_pos_neg_facts_filepath,
     device,
     vinbig_use_training_indices_for_validation,
     optimize_thresholds,
@@ -1316,7 +1343,7 @@ def evaluate(
     mimiccxr_trainer_kwargs = metadata['mimiccxr_trainer_kwargs']
     chexlocalize_trainer_kwargs = metadata['chexlocalize_trainer_kwargs']
     vinbig_trainer_kwargs = metadata['vinbig_trainer_kwargs']
-    collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
+    # collate_batch_fn_kwargs = metadata['collate_batch_fn_kwargs']
     try:
         val_image_transform_kwargs = metadata['val_image_transform_kwargs']
     except KeyError: # HACK: when val_image_transform_kwargs is missing due to a bug
@@ -1336,7 +1363,7 @@ def evaluate(
                 mimiccxr_trainer_kwargs=mimiccxr_trainer_kwargs,
                 chexlocalize_trainer_kwargs=chexlocalize_trainer_kwargs,
                 vinbig_trainer_kwargs=vinbig_trainer_kwargs,
-                collate_batch_fn_kwargs=collate_batch_fn_kwargs,
+                # collate_batch_fn_kwargs=collate_batch_fn_kwargs,
                 val_image_transform_kwargs=val_image_transform_kwargs,
                 evaluation_engine_kwargs=validator_engine_kwargs,
                 max_images_per_batch=max_images_per_batch,
@@ -1348,6 +1375,7 @@ def evaluate(
                 eval_chexlocalize=eval_chexlocalize,
                 eval_vinbig=eval_vinbig,
                 mscxr_phrase2embedding_filepath=mscxr_phrase2embedding_filepath,
+                mimicxr_dicom_id_to_pos_neg_facts_filepath=mimicxr_dicom_id_to_pos_neg_facts_filepath,
                 device=device,
                 vinbig_use_training_indices_for_validation=vinbig_use_training_indices_for_validation,
                 optimize_thresholds=optimize_thresholds,

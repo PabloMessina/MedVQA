@@ -779,7 +779,11 @@ def run_sentence_autoencoder(sentences, vocab_filepath, model_folder_path=None, 
     torch.cuda.empty_cache()
 
 class PhraseGroundingVisualizer:
-    def __init__(self, text_embedding_model_name, text_embedding_model_checkpoint_folder_path, phrase_grounder_checkpoint_folder_path, device='GPU'):
+    def __init__(self,
+                 text_embedding_model_name,
+                 text_embedding_model_checkpoint_folder_path,
+                 phrase_grounder_checkpoint_folder_path,
+                 device='GPU'):
         
         import torch
 
@@ -812,7 +816,7 @@ class PhraseGroundingVisualizer:
 
         # Load image transform
         print_bold('Load image transform')
-        from medvqa.datasets.image_processing import get_image_transform
+        from medvqa.datasets.image_transforms_factory import create_image_transforms
         # try:
         self.train_image_transform_kwargs = self.metadata['train_image_transform_kwargs']
         self.val_image_transform_kwargs = self.metadata['val_image_transform_kwargs']
@@ -826,11 +830,11 @@ class PhraseGroundingVisualizer:
         #         )
         #     }
         if DATASET_NAMES.MIMICCXR in self.train_image_transform_kwargs:
-            self.mimiccxr_train_image_transform = get_image_transform(**self.train_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
-            self.mimiccxr_val_image_transform = get_image_transform(**self.val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+            self.mimiccxr_train_image_transform = create_image_transforms(**self.train_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
+            self.mimiccxr_val_image_transform = create_image_transforms(**self.val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
         if DATASET_NAMES.VINBIG in self.train_image_transform_kwargs:
-            self.vinbig_train_image_transform = get_image_transform(**self.train_image_transform_kwargs[DATASET_NAMES.VINBIG])
-            self.vinbig_val_image_transform = get_image_transform(**self.val_image_transform_kwargs[DATASET_NAMES.VINBIG])
+            self.vinbig_train_image_transform = create_image_transforms(**self.train_image_transform_kwargs[DATASET_NAMES.VINBIG])
+            self.vinbig_val_image_transform = create_image_transforms(**self.val_image_transform_kwargs[DATASET_NAMES.VINBIG])
 
     def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0,
                                    mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None,
@@ -979,7 +983,7 @@ class PhraseGroundingVisualizer:
             seed = int.from_bytes(os.urandom(4), "big")  # Generate a random seed using OS-level entropy
             np.random.seed(seed)
             random.seed(seed)
-        image = image_transform(image_path)
+        image = image_transform(image_path)['pixel_values']
         print(f'image.shape = {image.shape}')
 
         if apply_data_augmentation:

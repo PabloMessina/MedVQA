@@ -5,24 +5,17 @@ from dotenv import load_dotenv
 from zipfile import ZipFile
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_boxes
 from medvqa.datasets.mimiccxr import MIMICCXR_JPG_IMAGES_LARGE_DIR
+from medvqa.utils.common import ChoiceEnum
 
 load_dotenv()
 
 MS_CXR_LOCAL_ALIGNMENT_CSV_PATH = os.environ['MS_CXR_LOCAL_ALIGNMENT_V1.1.0_CSV_PATH']
 
-class MS_CXR_TrainingMode:
+class MS_CXR_TrainingMode(ChoiceEnum):
     TRAIN = 'train'
     VAL = 'val'
     TEST = 'test'
     ALL = 'all'
-    @staticmethod
-    def get_all():
-        return [
-            MS_CXR_TrainingMode.TRAIN,
-            MS_CXR_TrainingMode.VAL,
-            MS_CXR_TrainingMode.TEST,
-            MS_CXR_TrainingMode.ALL
-        ]
     
 def _rescale_bounding_box_coordinates(x, y, w, h, image_width, image_height, actual_image_width, actual_image_height):
     x *= actual_image_width / image_width

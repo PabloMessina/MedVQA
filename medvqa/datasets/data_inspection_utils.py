@@ -551,6 +551,273 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True, grounding_only_mode=F
             for i in weak_neg_fact_idxs[:20]:
                 print(mimiccxr_trainer.mscxr_facts[i])
 
+
+def inspect_vinbig_phrase_grounding_dataset(vinbig_trainer, i, train=True,
+                                            image_mean=(0.485, 0.456, 0.406), image_std=(0.229, 0.224, 0.225)):
+    import os
+    from medvqa.utils.logging_utils import print_bold
+    from PIL import Image
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import math
+    if train:
+        dataset = vinbig_trainer.train_dataset
+        idx = dataset.indices[i]
+        phrase_bboxes = dataset.phrase_bboxes[idx]
+        phrase_idx = dataset.phrase_idxs[idx]
+        image_path = dataset.image_paths[idx]
+        dicom_id = os.path.basename(image_path).split('.')[0]
+        instance = dataset[i]
+        image_tensor = instance['i'] # (3, H, W)
+        phrase_embedding = instance['pe'] # (128,)
+        target_bbox_coords = instance['tbc'] # (num_regions, 4)
+        target_bbox_presence = instance['tbp'] # (num_regions,)
+        target_prob_mask = instance['tpm'] # (num_regions,)
+
+        num_regions = target_bbox_coords.shape[-2]
+        feat_W = feat_H = math.isqrt(num_regions)
+        assert feat_W * feat_H == num_regions
+
+        print_bold('i:', end=' '); print(i)
+        print_bold('dicom_id:', end=' '); print(dicom_id)
+        print_bold('image_path:', end=' '); print(image_path)
+        print_bold('image_tensor:', end=' '); print(image_tensor.shape)
+        print_bold(f'num_regions: {num_regions}, feat_W: {feat_W}, feat_H: {feat_H}')
+        print_bold('phrase_embedding:', end=' '); print(phrase_embedding.shape)
+        print_bold('target_bbox_coords:', end=' '); print(target_bbox_coords.shape)
+        print_bold('target_bbox_presence:', end=' '); print(target_bbox_presence.shape)
+        print_bold('target_prob_mask:', end=' '); print(target_prob_mask.shape)
+
+        # Obtain bbox coordinates from target
+        target_bbox_coords_ = target_bbox_coords.view(-1, 4)
+        target_bbox_presence_ = target_bbox_presence.view(-1)
+        bbox_coords = set()
+        for i in range(len(target_bbox_presence_)):
+            if target_bbox_presence_[i] == 1:
+                bbox_coords.add(tuple(target_bbox_coords_[i].tolist()))
+        bbox_coords = list(bbox_coords)
+        bbox_format = vinbig_trainer.bbox_format
+        print_bold('bbox_coords:', end=' '); print(bbox_coords)
+        print_bold('bbox_format:', end=' '); print(bbox_format)
+
+        # Recover image from tensor
+        image_tensor.mul_(torch.tensor(image_std).view(3, 1, 1))
+        image_tensor.add_(torch.tensor(image_mean).view(3, 1, 1))
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+        img = Image.fromarray((image_tensor.permute(1,2,0) * 255).numpy().astype(np.uint8))
+        W_img = img.width
+        H_img = img.height
+
+        # Display transformed image + bboxes
+        print_bold('Transformed image:')
+            
+        # Start visualization.
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+        # Compute grid lines positions based on the image size and feature map size.
+        cell_width = W_img / feat_W
+        cell_height = H_img / feat_H
+        # Grid lines (excluding image borders):
+        vlines = [cell_width * i for i in range(1, feat_W)]
+        hlines = [cell_height * i for i in range(1, feat_H)]
+
+        # Plot 1: Original image with bounding boxes.
+        axes[0].imshow(img)
+        axes[0].set_title("Image with Bounding Boxes")
+        for bbox_coord in bbox_coords:
+            if bbox_format == 'xyxy':
+                x1, y1, x2, y2 = bbox_coord
+            elif bbox_format == 'cxcywh':
+                cx, cy, w, h = bbox_coord
+                x1 = cx - w/2
+                y1 = cy - h/2
+                x2 = cx + w/2
+                y2 = cy + h/2
+            else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
+            x1 *= img.width
+            y1 *= img.height
+            x2 *= img.width
+            y2 *= img.height
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+            axes[0].add_patch(rect)
+        for x in vlines:
+            axes[0].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[0].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        # Plot 2: Upsampled target presence heatmap with grid.
+        target_bbox_presence = target_bbox_presence.view(feat_H, feat_W)
+        up_presence = np.array(
+            Image.fromarray((target_bbox_presence.numpy() * 255).astype(np.uint8)).resize(
+                (W_img, H_img), resample=Image.NEAREST
+            )
+        ) / 255.0
+        axes[1].imshow(up_presence, cmap="viridis")
+        axes[1].set_title("Target Presence Heatmap")
+        for x in vlines:
+            axes[1].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[1].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        # Plot 3: Upsampled prob mask with grid.
+        target_prob_mask = target_prob_mask.view(feat_H, feat_W)
+        up_prob_mask = cv2.resize(
+            target_prob_mask.numpy(),
+            (W_img, H_img), interpolation=cv2.INTER_NEAREST,
+        )
+        axes[2].imshow(up_prob_mask, cmap="viridis")
+        axes[2].set_title("Target Prob Mask")
+        for x in vlines:
+            axes[2].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[2].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        plt.show()
+
+        # Display original image
+        print_bold('Original image:')
+        img = Image.open(image_path).convert('RGB')
+        plt.imshow(img)
+        plt.show()
+
+        print_bold('Phrase bboxes:', end=' '); print(phrase_bboxes)
+        print_bold('Phrase idx:', end=' '); print(phrase_idx)
+        print_bold('Phrase:', end=' '); print(vinbig_trainer.phrases[phrase_idx])
+
+
+def inspect_padchest_phrase_grounding_dataset(
+        padchestgr_trainer, i, train=True, image_mean=(0.485, 0.456, 0.406), image_std=(0.229, 0.224, 0.225)):
+    import os
+    from medvqa.utils.logging_utils import print_bold
+    from PIL import Image
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import math
+    if train:
+        dataset = padchestgr_trainer.train_dataset
+        phrase = dataset.phrase_texts[i]
+        phrase_bboxes = dataset.phrase_bboxes[i]
+        image_path = dataset.image_paths[i]
+        image_id = os.path.basename(image_path).split('.')[0]
+        instance = dataset[i]
+        image_tensor = instance['i'] # (3, H, W)
+        phrase_embedding = instance['pe'] # (128,)
+        target_bbox_coords = instance['tbc'] # (num_regions, 4)
+        target_bbox_presence = instance['tbp'] # (num_regions,)
+        target_prob_mask = instance['tpm'] # (num_regions,)
+
+        num_regions = target_bbox_coords.shape[-2]
+        feat_W = feat_H = math.isqrt(num_regions)
+        assert feat_W * feat_H == num_regions
+
+        print_bold('i:', end=' '); print(i)
+        print_bold('image_id:', end=' '); print(image_id)
+        print_bold('image_path:', end=' '); print(image_path)
+        print_bold('image_tensor:', end=' '); print(image_tensor.shape)
+        print_bold(f'num_regions: {num_regions}, feat_W: {feat_W}, feat_H: {feat_H}')
+        print_bold('phrase_embedding:', end=' '); print(phrase_embedding.shape)
+        print_bold('target_bbox_coords:', end=' '); print(target_bbox_coords.shape)
+        print_bold('target_bbox_presence:', end=' '); print(target_bbox_presence.shape)
+        print_bold('target_prob_mask:', end=' '); print(target_prob_mask.shape)
+
+        print_bold('Phrase bboxes:', end=' '); print(phrase_bboxes)
+        print_bold('Phrase:', end=' '); print(phrase)
+
+        # Obtain bbox coordinates from target
+        target_bbox_coords_ = target_bbox_coords.view(-1, 4)
+        target_bbox_presence_ = target_bbox_presence.view(-1)
+        bbox_coords = set()
+        for i in range(len(target_bbox_presence_)):
+            if target_bbox_presence_[i] == 1:
+                bbox_coords.add(tuple(target_bbox_coords_[i].tolist()))
+        bbox_coords = list(bbox_coords)
+        bbox_format = dataset.bbox_format
+        print_bold('bbox_coords:', end=' '); print(bbox_coords)
+        print_bold('bbox_format:', end=' '); print(bbox_format)
+
+        # Recover image from tensor
+        image_tensor.mul_(torch.tensor(image_std).view(3, 1, 1))
+        image_tensor.add_(torch.tensor(image_mean).view(3, 1, 1))
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+        img = Image.fromarray((image_tensor.permute(1,2,0) * 255).numpy().astype(np.uint8))
+        W_img = img.width
+        H_img = img.height
+
+        # Display transformed image + bboxes
+        print_bold('Transformed image:')
+            
+        # Start visualization.
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+        # Compute grid lines positions based on the image size and feature map size.
+        cell_width = W_img / feat_W
+        cell_height = H_img / feat_H
+        # Grid lines (excluding image borders):
+        vlines = [cell_width * i for i in range(1, feat_W)]
+        hlines = [cell_height * i for i in range(1, feat_H)]
+
+        # Plot 1: Original image with bounding boxes.
+        axes[0].imshow(img)
+        axes[0].set_title("Image with Bounding Boxes")
+        for bbox_coord in bbox_coords:
+            if bbox_format == 'xyxy':
+                x1, y1, x2, y2 = bbox_coord
+            elif bbox_format == 'cxcywh':
+                cx, cy, w, h = bbox_coord
+                x1 = cx - w/2
+                y1 = cy - h/2
+                x2 = cx + w/2
+                y2 = cy + h/2
+            else: raise ValueError(f'Invalid bbox_format: {bbox_format}')
+            x1 *= img.width
+            y1 *= img.height
+            x2 *= img.width
+            y2 *= img.height
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+            axes[0].add_patch(rect)
+        for x in vlines:
+            axes[0].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[0].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        # Plot 2: Upsampled target presence heatmap with grid.
+        target_bbox_presence = target_bbox_presence.view(feat_H, feat_W)
+        up_presence = np.array(
+            Image.fromarray((target_bbox_presence.numpy() * 255).astype(np.uint8)).resize(
+                (W_img, H_img), resample=Image.NEAREST
+            )
+        ) / 255.0
+        axes[1].imshow(up_presence, cmap="viridis")
+        axes[1].set_title("Target Presence Heatmap")
+        for x in vlines:
+            axes[1].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[1].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        # Plot 3: Upsampled prob mask with grid.
+        target_prob_mask = target_prob_mask.view(feat_H, feat_W)
+        up_prob_mask = cv2.resize(
+            target_prob_mask.numpy(),
+            (W_img, H_img), interpolation=cv2.INTER_NEAREST,
+        )
+        axes[2].imshow(up_prob_mask, cmap="viridis")
+        axes[2].set_title("Target Prob Mask")
+        for x in vlines:
+            axes[2].axvline(x, color="white", linestyle="--", linewidth=1)
+        for y in hlines:
+            axes[2].axhline(y, color="white", linestyle="--", linewidth=1)
+
+        plt.show()
+
+        # Display original image
+        print_bold('Original image:')
+        img = Image.open(image_path).convert('RGB')
+        plt.imshow(img)
+        plt.show()
+
+
 _shared_image_id_to_binary_labels = None
 def _count_labels(idx):
         count = 0
