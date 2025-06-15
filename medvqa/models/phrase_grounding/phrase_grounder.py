@@ -669,18 +669,21 @@ class PhraseGrounder(MultiPurposeVisualModule):
                     visual_grounding_bbox_logits, visual_grounding_confidence_logits = self.visual_grounding_bbox_regressor(local_attention_logits)
                 sigmoid_attention = torch.sigmoid(visual_grounding_confidence_logits) # (batch_size, K, num_regions, 1)
 
-            # Weighted average of local features after FiLM layer
-            weighted_sum = (sigmoid_attention * local_feat_after_film).sum(dim=-2) # (batch_size, K, local_feat_size)
-            weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-2) + 1e-8) # (batch_size, K, local_feat_size)
-            sigmoid_attention = sigmoid_attention.squeeze(-1) # (batch_size, K, num_regions)
+            if not skip_phrase_classifier:
+                # Weighted average of local features after FiLM layer
+                weighted_sum = (sigmoid_attention * local_feat_after_film).sum(dim=-2) # (batch_size, K, local_feat_size)
+                weighted_avg = weighted_sum / (sigmoid_attention.sum(dim=-2) + 1e-8) # (batch_size, K, local_feat_size)
+                sigmoid_attention = sigmoid_attention.squeeze(-1) # (batch_size, K, num_regions)
 
-            # Phrase classifier
-            mlp_input = torch.cat([weighted_avg, sigmoid_attention], dim=-1) # (batch_size, K, local_feat_size + num_regions)
-            phrase_classifier_logits = self.classifier_mlp(mlp_input) # (batch_size, K, 1)
-            phrase_classifier_logits = phrase_classifier_logits.squeeze(-1) # (batch_size, K)
+                # Phrase classifier
+                mlp_input = torch.cat([weighted_avg, sigmoid_attention], dim=-1) # (batch_size, K, local_feat_size + num_regions)
+                phrase_classifier_logits = self.classifier_mlp(mlp_input) # (batch_size, K, 1)
+                phrase_classifier_logits = phrase_classifier_logits.squeeze(-1) # (batch_size, K)
+
+                # Output
+                output['phrase_classifier_logits'] = phrase_classifier_logits
 
             # Output
-            output['phrase_classifier_logits'] = phrase_classifier_logits
             if self.phrase_grounding_mode == PhraseGroundingMode.ADAPTIVE_FILM_BASED_POOLING_MLP_WITH_BBOX_REGRESSION.value:
                 if apply_nms:
                     output['predicted_bboxes'] = predicted_bboxes # (batch_size, (coords, conf, class))

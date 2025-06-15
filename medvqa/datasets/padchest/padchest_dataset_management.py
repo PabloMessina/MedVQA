@@ -813,9 +813,6 @@ class PadChestGRPhraseGroundingDataset(Dataset):
         bboxes_for_phrase = self.phrase_bboxes[i]
 
         # --- Apply Image Transformations / Augmentation ---
-        image: Optional[torch.Tensor] = None
-        augmented_bboxes = bboxes_for_phrase # Default to original if no aug
-        augmented_prob_mask: Optional[np.ndarray] = None
 
         if self.for_training:
             # 1. Calculate probabilistic mask from original boxes BEFORE augmentation
@@ -841,8 +838,8 @@ class PadChestGRPhraseGroundingDataset(Dataset):
                 augmented_prob_mask = transform_output['masks'][0]
             else:
                 # 2. Apply transform to image only (no augmentation)
-                # Assume transform takes path and returns dict or tensor
-                transform_output = self.image_transforms(image_path)['pixel_values']
+                image = self.image_transforms(image_path)['pixel_values']
+                augmented_bboxes = bboxes_for_phrase # Default to original if no aug
                 augmented_prob_mask = prob_mask # Use un-augmented mask
 
             # 3. Convert augmented boxes and mask to target tensors
@@ -864,7 +861,7 @@ class PadChestGRPhraseGroundingDataset(Dataset):
 
         else: # Inference mode
             # Apply transform to image only (no augmentation expected)
-            transform_output = self.image_transforms(image_path)['pixel_values']
+            image = self.image_transforms(image_path)['pixel_values']
 
             # Return image, embedding, and original (processed) bboxes
             output = {
@@ -1073,6 +1070,7 @@ class PadChestGRPhraseTrainer:
                 num_workers=num_train_workers,
                 collate_fn=self.train_dataset.collate_fn,
                 pin_memory=True,
+                persistent_workers=True, # For better performance
             )
             logger.info(f"  Training DataLoader ready (Batch size: {max_images_per_batch}, Workers: {num_train_workers}, Augmentation: {data_augmentation_enabled})")
             logger.info(f"  Training dataset size: {len(self.train_dataset)}")
@@ -1096,6 +1094,7 @@ class PadChestGRPhraseTrainer:
                 num_workers=num_val_workers,
                 collate_fn=self.val_dataset.collate_fn,
                 pin_memory=True,
+                persistent_workers=True, # For better performance
             )
             logger.info(f"  Validation DataLoader ready (Batch size: {val_batch_size}, Workers: {num_val_workers})")
             logger.info(f"  Validation dataset size: {len(self.val_dataset)}")
@@ -1120,7 +1119,6 @@ class PadChestGRPhraseTrainer:
                 num_workers=num_test_workers,
                 collate_fn=self.test_dataset.collate_fn,
                 pin_memory=True,
-                drop_last=False,
             )
             logger.info(f"  Test DataLoader ready (Batch size: {test_batch_size}, Workers: {num_test_workers})")
             logger.info(f"  Test dataset size: {len(self.test_dataset)}")

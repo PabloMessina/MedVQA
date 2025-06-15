@@ -17,6 +17,14 @@ PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH = os.environ['PADCHEST_GR_GROUNDED_REPORT
 PADCHEST_GR_MASTER_TABLE_CSV_PATH = os.environ['PADCHEST_GR_MASTER_TABLE_CSV_PATH']
 PADCHEST_GR_JPG_DIR = os.environ['PADCHEST_GR_JPG_DIR']
 
+def _clean_sentence(sentence: str):
+    """
+    Cleans the sentence by removing leading and trailing spaces and dots.
+    """
+    sentence = sentence.strip()
+    if sentence.endswith('.'):
+        sentence = sentence[:-1]
+    return sentence
 
 def get_padchest_gr_sentences_from_reports(language: str = 'en'):
     lang_key = f'sentence_{language}'
@@ -26,10 +34,7 @@ def get_padchest_gr_sentences_from_reports(language: str = 'en'):
         findings = report_info['findings']
         for finding in findings:
             sentence = finding.get(lang_key, "")
-            # Clean sentence
-            sentence = sentence.strip()
-            if sentence.endswith('.'):
-                sentence = sentence[:-1]
+            sentence = _clean_sentence(sentence)
             # Skip empty sentences
             if not sentence:
                 continue
@@ -51,3 +56,22 @@ def get_padchest_gr_labels():
     # Sort the labels
     unique_labels = sorted(list(unique_labels))
     return unique_labels
+
+def get_padchest_gr_phrase_groundings(language: str = 'en'):
+    reports_json_list = load_json(PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH)
+    lang_key = f'sentence_{language}'
+    output = []
+    for report_info in reports_json_list:
+        image_id = report_info['ImageID']
+        findings = report_info['findings']
+        for finding in findings:
+            sentence = finding[lang_key]
+            sentence = _clean_sentence(sentence)
+            boxes = finding.get('boxes')
+            if boxes:
+                output.append({
+                    'image_id': image_id,
+                    'phrase': sentence,
+                    'boxes': boxes
+                })
+    return output

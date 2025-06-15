@@ -111,6 +111,16 @@ def get_image_path_getter(image_size_mode, verbose=False):
         logger.info(f'Using image size mode: {image_size_mode}')
     return image_path_getter
 
+class MIMICCXR_DicomIdToImagePath:
+    def __init__(self, image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256, verbose=False):
+        self.image_size_mode = image_size_mode
+        self.image_path_getter = get_image_path_getter(image_size_mode, verbose=verbose)
+        self.imageId2PartPatientStudy = get_imageId2PartPatientStudy()
+
+    def __call__(self, dicom_id):
+        part_id, subject_id, study_id = self.imageId2PartPatientStudy[dicom_id]
+        return self.image_path_getter(part_id, subject_id, study_id, dicom_id)
+
 class MIMICCXR_ViewModes:
     ALL = 'all'
     FRONT_ALL = 'front_all'

@@ -3,7 +3,7 @@ import torch.nn as nn
 from bert_score import BERTScorer
 
 class BertScore(nn.Module):
-    def __init__(self):
+    def __init__(self, device=None):
         super(BertScore, self).__init__()
         with torch.no_grad():
             self.bert_scorer = BERTScorer(model_type='distilbert-base-uncased',
@@ -12,7 +12,7 @@ class BertScore(nn.Module):
                                           nthreads=4,
                                           all_layers=False,
                                           idf=False,
-                                          device=None,
+                                          device=device,
                                           lang='en',
                                           rescale_with_baseline=True,
                                           baseline_path=None)

@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from medvqa.utils.logging_utils import print_bold
 
-_VALID_TYPES = [np.ndarray, list, torch.Tensor]
+_VALID_TYPES = [np.ndarray, list, torch.Tensor, tuple]
 
 def compute_bbox_union_iou(bboxes_A, bboxes_B, bbox_format='xyxy'):
     """
@@ -975,7 +975,8 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
                 best_pred_confs_list = truncated_pred_confs_list
 
             if verbose:
-                print(f"conf_th={conf_th:.2f}, iou_th={iou_th:.2f}, max_det={max_det}, mIoU={score:.4f}")
+                print(f"conf_th={conf_th:.2f}, iou_th={iou_th:.2f}, pre_nms_max_det={pre_nms_max_det}, "
+                      f"post_nms_max_det={post_nms_max_det}, mIoU={score:.4f}")
 
     # Return best thresholds and corresponding filtered predictions
     return {

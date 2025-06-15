@@ -820,21 +820,14 @@ class PhraseGroundingVisualizer:
         # try:
         self.train_image_transform_kwargs = self.metadata['train_image_transform_kwargs']
         self.val_image_transform_kwargs = self.metadata['val_image_transform_kwargs']
-        # except KeyError: # HACK: when val_image_transform_kwargs is missing due to a bug
-        #     self.image_transform_kwargs = {
-        #         DATASET_NAMES.MIMICCXR: dict(
-        #             image_size=(416, 416),
-        #             augmentation_mode=None,
-        #             use_bbox_aware_transform=True,
-        #             for_yolov8=True,
-        #         )
-        #     }
         if DATASET_NAMES.MIMICCXR in self.train_image_transform_kwargs:
             self.mimiccxr_train_image_transform = create_image_transforms(**self.train_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
             self.mimiccxr_val_image_transform = create_image_transforms(**self.val_image_transform_kwargs[DATASET_NAMES.MIMICCXR])
         if DATASET_NAMES.VINBIG in self.train_image_transform_kwargs:
             self.vinbig_train_image_transform = create_image_transforms(**self.train_image_transform_kwargs[DATASET_NAMES.VINBIG])
             self.vinbig_val_image_transform = create_image_transforms(**self.val_image_transform_kwargs[DATASET_NAMES.VINBIG])
+        self.image_mean = next(iter(self.train_image_transform_kwargs.values()))['image_mean']
+        self.image_std = next(iter(self.train_image_transform_kwargs.values()))['image_std']
 
     def visualize_phrase_grounding(self, phrases, image_path, bbox_figsize=(10, 10), attention_figsize=(3, 3), attention_factor=1.0,
                                    mimiccxr_forward=False, vinbig_forward=False, yolov8_detection_layer_index=None,
@@ -983,15 +976,17 @@ class PhraseGroundingVisualizer:
             seed = int.from_bytes(os.urandom(4), "big")  # Generate a random seed using OS-level entropy
             np.random.seed(seed)
             random.seed(seed)
-        image = image_transform(image_path)['pixel_values']
-        print(f'image.shape = {image.shape}')
-
         if apply_data_augmentation:
-            from PIL import Image
-            from medvqa.datasets.image_processing import inv_normalize
-            image_from_tensor = Image.fromarray((inv_normalize(image).permute(1,2,0) * 255).numpy().astype(np.uint8))
+            image = image_transform(image_path, bboxes=[], bbox_labels=[])['pixel_values']
         else:
-            image_from_tensor = None
+            image = image_transform(image_path)['pixel_values']
+        print(f'image.shape = {image.shape}')
+            
+        from PIL import Image
+        denorm_image = image.clone()
+        denorm_image.mul_(torch.tensor(self.image_std).view(3, 1, 1).to(image.device))
+        denorm_image.add_(torch.tensor(self.image_mean).view(3, 1, 1).to(image.device))
+        image_from_tensor = Image.fromarray((denorm_image.permute(1,2,0) * 255).numpy().astype(np.uint8))
 
         # Obtain text embeddings
         if phrases_and_embeddings_file_path is not None:
@@ -1036,12 +1031,13 @@ class PhraseGroundingVisualizer:
         # Visualize bounding boxes
         print_bold('Visualize bounding boxes')
         from medvqa.evaluation.plots import visualize_visual_grounding_as_bboxes
-        n_rows = int(np.ceil(len(phrases) / 3))
-        n_cols = min(len(phrases), 3)
+        num_subplots = len(phrases)+1 # +1 for the image
+        n_rows = int(np.ceil(num_subplots / 3))
+        n_cols = min(num_subplots, 3)
         figsize = (subfigsize[0] * n_cols, subfigsize[1] * n_rows)
+        print(f'figsize = {figsize}')
         visualize_visual_grounding_as_bboxes(
-            image=image_from_tensor, # Use image reconstructed from tensor when data augmentation is applied
-            image_path=image_path if not apply_data_augmentation else None,
+            image=image_from_tensor,
             phrases=phrases,
             gt_phrases_to_highlight=gt_phrases_to_highlight,
             phrase_classifier_probs=phrase_classifier_probs[0].cpu().numpy(),
@@ -1053,6 +1049,7 @@ class PhraseGroundingVisualizer:
             figsize=figsize,
             max_cols=3,
             bbox_format=self.phrase_grounder.visual_grounding_bbox_regressor.bbox_format,
+            display_raw_image=True,
         )
 
 class YOLOv11Visualizer:

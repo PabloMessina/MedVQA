@@ -833,7 +833,7 @@ def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metr
                                 bbox_to_anchor=None, show_std=False, xtick_rotation=90, xtick_ha='right',
                                 xlabel=None, ylabel=None, prepend_mean_score_to_legend=True, xlim=None, ylim=None,
                                 save_as_pdf=False, save_path=None, vertical_score_text_rotation=90, colors=_COLORS,
-                                hide_xticks=False, hide_yticks=False):
+                                hide_xticks=False, hide_yticks=False, max_score=None):
     n = len(method_dicts)
     assert n == len(method_aliases)
     assert n > 0
@@ -851,14 +851,14 @@ def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metr
         for j in range(m):
             upper_bound = scores_per_method[i][j] + std_per_method[i][j]
             lower_bound = scores_per_method[i][j] - std_per_method[i][j]
-            if upper_bound > 1.0:
-                delta = upper_bound - 1.0
-                upper_bound -= delta
-                lower_bound -= delta
             if lower_bound < 0.0:
                 delta = -lower_bound
                 upper_bound += delta
                 lower_bound += delta
+            elif max_score is not None and upper_bound > max_score:
+                delta = upper_bound - max_score
+                upper_bound -= delta
+                lower_bound -= delta
             upper_err_list.append(upper_bound - scores_per_method[i][j])
             lower_err_list.append(scores_per_method[i][j] - lower_bound)
         upper_err_per_method.append(upper_err_list)
@@ -1342,7 +1342,8 @@ def visualize_visual_grounding_as_bboxes(
     show_heatmaps: bool = False,
     heatmaps: Optional[np.ndarray] = None,
     bbox_format: str = 'xyxy',
-    gt_bbox_coords: Optional[np.ndarray] = None  # New argument
+    gt_bbox_coords: Optional[np.ndarray] = None,
+    display_raw_image: bool = False,
 ):
     """
     Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
@@ -1363,6 +1364,7 @@ def visualize_visual_grounding_as_bboxes(
         bbox_format (str, optional): Format of bounding box coordinates ('xyxy' or 'cxcywh'). Default is 'xyxy'.
         gt_bbox_coords (Optional[np.ndarray], optional): Array of shape (K, 4) containing ground-truth
                                                       bounding box coordinates in normalized format. Default is None.
+        display_raw_image (bool, optional): Whether to display the raw image without any bounding boxes. Default is False.
     """
     from PIL import Image as PILImageModule # For loading image from path and operations
     import matplotlib.pyplot as plt
@@ -1395,18 +1397,12 @@ def visualize_visual_grounding_as_bboxes(
             "gt_bbox_coords must be a 2D array with shape (K, 4)."
 
     n_phrases = len(phrases)
-    
-    plot_single_gt_only = False
-    if n_phrases == 0:
-        if gt_bbox_coords is not None and (image is not None or image_path is not None):
-            plot_single_gt_only = True
-            n_rows_fig, n_cols_fig = 1, 1
-        else:
-            print("No phrases to visualize and no ground truth boxes to display on an image.")
-            return
-    else: # n_phrases > 0
-        n_cols_fig = min(n_phrases, max_cols)
-        n_rows_fig = math.ceil(n_phrases / n_cols_fig)
+    assert n_phrases > 0, "No phrases provided for visualization."
+
+    num_subplots = len(phrases)
+    if display_raw_image: num_subplots += 1 # Add an extra subplot for the raw image
+    n_cols_fig = min(num_subplots, max_cols)
+    n_rows_fig = math.ceil(num_subplots / n_cols_fig)
     
     fig, ax_array = plt.subplots(n_rows_fig, n_cols_fig, figsize=figsize, squeeze=False)
 
@@ -1433,12 +1429,14 @@ def visualize_visual_grounding_as_bboxes(
             cell_height = height / H
             vlines = [cell_width * i for i in range(1, W)]
             hlines = [cell_height * i for i in range(1, H)]
-
-
-    if plot_single_gt_only:
-        ax_current = ax_array[0, 0]
+    
+    for phrase_idx in range(n_phrases):
+        if display_raw_image:
+            row, col = divmod(phrase_idx+1, n_cols_fig) # +1 to skip the first subplot for raw image
+        else:
+            row, col = divmod(phrase_idx, n_cols_fig)
+        ax_current = ax_array[row, col]
         ax_current.imshow(current_image)
-        ax_current.set_title("Ground Truth Bounding Boxes")
         ax_current.axis('off')
 
         if gt_bbox_coords is not None:
@@ -1454,79 +1452,62 @@ def visualize_visual_grounding_as_bboxes(
                 else:
                     raise ValueError(f"Unknown bbox_format: {bbox_format}")
                 gt_rect = patches.Rectangle(
-                    (x1_gt, y1_gt), x2_gt - x1_gt, y2_gt - y1_gt, 
+                    (x1_gt, y1_gt), x2_gt - x1_gt, y2_gt - y1_gt,
                     linewidth=2, edgecolor='lime', facecolor='none'
                 )
                 ax_current.add_patch(gt_rect)
-    else: # n_phrases > 0
-        for phrase_idx in range(n_phrases):
-            row, col = divmod(phrase_idx, n_cols_fig)
-            ax_current = ax_array[row, col]
-            ax_current.imshow(current_image)
-            ax_current.axis('off')
+        
+        phrase_prob = phrase_classifier_probs[phrase_idx]
 
-            if gt_bbox_coords is not None:
-                for gt_bbox in gt_bbox_coords:
-                    if bbox_format == 'xyxy':
-                        x1_gt, y1_gt, x2_gt, y2_gt = gt_bbox * np.array([width, height, width, height])
-                    elif bbox_format == 'cxcywh':
-                        cx_gt, cy_gt, w_gt, h_gt = gt_bbox
-                        x1_gt = (cx_gt - w_gt / 2) * width
-                        y1_gt = (cy_gt - h_gt / 2) * height
-                        x2_gt = (cx_gt + w_gt / 2) * width
-                        y2_gt = (cy_gt + h_gt / 2) * height
-                    else:
-                        raise ValueError(f"Unknown bbox_format: {bbox_format}")
-                    gt_rect = patches.Rectangle(
-                        (x1_gt, y1_gt), x2_gt - x1_gt, y2_gt - y1_gt,
-                        linewidth=2, edgecolor='lime', facecolor='none'
-                    )
-                    ax_current.add_patch(gt_rect)
-            
-            phrase_prob = phrase_classifier_probs[phrase_idx]
+        if show_heatmaps and heatmaps is not None and phrase_idx < heatmaps.shape[0] and H > 0 and W > 0 :
+            heatmap_data = heatmaps[phrase_idx].reshape(H, W)
+            heatmap_contiguous = np.ascontiguousarray(heatmap_data)
+            heatmap_pil = PILImageModule.fromarray(heatmap_contiguous)
+            heatmap_resized = np.array(heatmap_pil.resize((width, height), PILImageModule.BILINEAR))
+            ax_current.imshow(heatmap_resized, cmap='jet', alpha=0.5)
+            for x_val in vlines:
+                ax_current.axvline(x_val, color="white", linestyle="--", linewidth=0.8)
+            for y_val in hlines:
+                ax_current.axhline(y_val, color="white", linestyle="--", linewidth=0.8)
 
-            if show_heatmaps and heatmaps is not None and phrase_idx < heatmaps.shape[0] and H > 0 and W > 0 :
-                heatmap_data = heatmaps[phrase_idx].reshape(H, W)
-                heatmap_contiguous = np.ascontiguousarray(heatmap_data)
-                heatmap_pil = PILImageModule.fromarray(heatmap_contiguous)
-                heatmap_resized = np.array(heatmap_pil.resize((width, height), PILImageModule.BILINEAR))
-                ax_current.imshow(heatmap_resized, cmap='jet', alpha=0.5)
-                for x_val in vlines:
-                    ax_current.axvline(x_val, color="white", linestyle="--", linewidth=0.8)
-                for y_val in hlines:
-                    ax_current.axhline(y_val, color="white", linestyle="--", linewidth=0.8)
+        mask = phrase_ids == phrase_idx
+        if bbox_coords.size > 0: # Process predicted boxes only if they exist
+            for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
+                if bbox_format == 'xyxy':
+                    x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
+                elif bbox_format == 'cxcywh':
+                    cx, cy, w_box, h_box = bbox # Renamed w, h to avoid conflict
+                    x1 = (cx - w_box / 2) * width
+                    y1 = (cy - h_box / 2) * height
+                    x2 = (cx + w_box / 2) * width
+                    y2 = (cy + h_box / 2) * height
+                else: 
+                    raise ValueError(f"Unknown bbox_format: {bbox_format}")
+                rect = patches.Rectangle(
+                    (x1, y1), x2 - x1, y2 - y1, 
+                    linewidth=2, edgecolor='yellow', facecolor='none'
+                )
+                ax_current.add_patch(rect)
+                ax_current.text(x1, y1 - 2, f'{prob:.2f}', color='red', fontsize=8, 
+                                bbox=dict(facecolor='black', alpha=0.5, pad=1))
 
-            mask = phrase_ids == phrase_idx
-            if bbox_coords.size > 0: # Process predicted boxes only if they exist
-                for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
-                    if bbox_format == 'xyxy':
-                        x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
-                    elif bbox_format == 'cxcywh':
-                        cx, cy, w_box, h_box = bbox # Renamed w, h to avoid conflict
-                        x1 = (cx - w_box / 2) * width
-                        y1 = (cy - h_box / 2) * height
-                        x2 = (cx + w_box / 2) * width
-                        y2 = (cy + h_box / 2) * height
-                    else: 
-                        raise ValueError(f"Unknown bbox_format: {bbox_format}")
-                    rect = patches.Rectangle(
-                        (x1, y1), x2 - x1, y2 - y1, 
-                        linewidth=2, edgecolor='yellow', facecolor='none'
-                    )
-                    ax_current.add_patch(rect)
-                    ax_current.text(x1, y1 - 2, f'{prob:.2f}', color='red', fontsize=8, 
-                                    bbox=dict(facecolor='black', alpha=0.5, pad=1))
+        title = f'{phrases[phrase_idx]}\n(prob: {phrase_prob:.2f})'
+        wrapped_title = "\n".join(textwrap.wrap(title, int(wrap_length)))
+        title_color = 'red' if gt_phrases_to_highlight and phrases[phrase_idx] in gt_phrases_to_highlight else 'black'
+        ax_current.set_title(wrapped_title, color=title_color, fontsize=10)
 
-            title = f'{phrases[phrase_idx]}\n(prob: {phrase_prob:.2f})'
-            wrapped_title = "\n".join(textwrap.wrap(title, int(wrap_length)))
-            title_color = 'red' if gt_phrases_to_highlight and phrases[phrase_idx] in gt_phrases_to_highlight else 'black'
-            ax_current.set_title(wrapped_title, color=title_color, fontsize=10)
+    if display_raw_image:
+        # Display the raw image in the first subplot
+        ax_raw = ax_array[0, 0]
+        ax_raw.imshow(current_image)
+        ax_raw.axis('off')
+        ax_raw.set_title('Raw Image', fontsize=10)
 
-        for i in range(n_phrases, n_rows_fig * n_cols_fig):
-            row, col = divmod(i, n_cols_fig)
-            if row < ax_array.shape[0] and col < ax_array.shape[1]:
-                 ax_array[row, col].axis('off')
-                 ax_array[row, col].set_frame_on(False)
+    for i in range(num_subplots, n_rows_fig * n_cols_fig):
+        row, col = divmod(i, n_cols_fig)
+        if row < ax_array.shape[0] and col < ax_array.shape[1]:
+            ax_array[row, col].axis('off')
+            ax_array[row, col].set_frame_on(False)
 
 
     plt.tight_layout()

@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import multiprocessing as mp
 from sklearn.utils import resample
 from tqdm import tqdm
 from medvqa.datasets.vinbig import (
@@ -208,7 +209,6 @@ def stratified_vinbig_bootstrap_iou_map(
     all_indices = np.arange(N)
 
     # Perform bootstrapping with multiprocessing
-    import multiprocessing as mp
     global _shared_pred_boxes_list
     global _shared_pred_classes_list
     global _shared_pred_confs_list
@@ -330,7 +330,6 @@ def stratified_bootstrap_pos_neg_fact_classification_metrics(items, metric_fn, n
         gt_labels_list.append(gt_labels)
 
     # Perform bootstrapping with multiprocessing
-    import multiprocessing as mp
     global _shared_probs_list
     global _shared_gt_labels_list
     global _shared_metric_fn
@@ -376,7 +375,8 @@ def _bootstrap_metric_avg(seed):
     return _shared_metric_values[boot_indices].mean()
 
 def apply_stratified_bootstrapping(metric_values, class_to_indices, class_names, metric_name,
-                                   num_bootstraps=500, num_processes=None, seed_base=0):
+                                   num_bootstraps=500, num_processes=None, seed_base=0,
+                                   use_tqdm=True):
     """
     Apply bootstrapping to estimate the mean and standard deviation of metrics computed by a given function.
 
@@ -388,6 +388,7 @@ def apply_stratified_bootstrapping(metric_values, class_to_indices, class_names,
         num_bootstraps (int, optional): Number of bootstrap iterations (default: 500).
         num_processes (int, optional): Number of processes to use for parallel computation (default: None, don't use multiprocessing).
         seed_base (int, optional): Base seed for random number generator (default: 0).
+        use_tqdm (bool, optional): Whether to use tqdm for progress bar (default: True).
 
     Returns:
         dict: A dictionary where each metric name maps to another dictionary containing:
@@ -412,13 +413,18 @@ def apply_stratified_bootstrapping(metric_values, class_to_indices, class_names,
         _shared_indices = indices
         
         if num_processes is not None:
-            import multiprocessing
-            with multiprocessing.Pool(processes=num_processes) as pool:
-                avgs_list[i] = list(tqdm(pool.imap(_bootstrap_metric_avg, bootstrap_seeds),
-                                         total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+            with mp.Pool(processes=num_processes) as pool:
+                if use_tqdm:
+                    avgs_list[i] = list(tqdm(pool.imap(_bootstrap_metric_avg, bootstrap_seeds),
+                                            total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+                else:
+                    avgs_list[i] = pool.map(_bootstrap_metric_avg, bootstrap_seeds)
         else:
-            avgs_list[i] = list(tqdm(map(_bootstrap_metric_avg, bootstrap_seeds),
-                                     total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+            if use_tqdm:
+                avgs_list[i] = list(tqdm(map(_bootstrap_metric_avg, bootstrap_seeds),
+                                        total=num_bootstraps, desc="Bootstrapping", mininterval=2.0))
+            else:
+                avgs_list[i] = list(map(_bootstrap_metric_avg, bootstrap_seeds))
     
     # Compute mean and std deviation
     final_metrics = {}

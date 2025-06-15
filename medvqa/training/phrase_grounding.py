@@ -2,7 +2,6 @@ import torch
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.cuda.amp.autocast_mode import autocast
 from ignite.engine import Engine
-from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED
 from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseTaskMode
 from medvqa.losses import BinaryMultiLabelClassificationLossNames, get_binary_multilabel_loss
 from medvqa.losses.custom_bbox_loss import compute_bbox_loss
@@ -11,7 +10,7 @@ from medvqa.losses.optimizers import GradientAccumulator
 from medvqa.losses.segmentation_loss import compute_balanced_segmentation_loss
 from medvqa.losses.threshold_loss import ThresholdLoss
 from medvqa.losses.wbce import NegativePositiveBalancedBCELoss, WeightedNegativePositiveBalancedBCELoss
-from medvqa.utils.constants import VINBIG_NUM_BBOX_CLASSES
+from medvqa.losses.weakly_supervised_presence_loss import WeaklySupervisedPresenceLoss
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +24,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 balanced_binary_cross_entropy_criterion,
                 weighted_balanced_binary_cross_entropy_criterion,
                 threshold_criterion,
+                weakly_supervised_presence_criterion,
                 neg_area_prior,
                 gradient_accumulation_steps=1, # for gradient accumulation
                 max_grad_norm=None,
@@ -34,8 +34,6 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 using_yolov8=False,
                 yolov8_criterion=None,
                 yolov8_use_multiple_detection_layers=False,
-                # yolov11
-                using_yolov11=False,
                 # batchwise learning rate updates
                 update_lr_batchwise=False,
                 lr_scheduler=None,
@@ -51,40 +49,38 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 use_contrastive_phrase_grounding_loss=False,
                 use_global_image_phrase_contrastive_loss=False,
                 # other args
-                do_visual_grounding_with_bbox_regression=False,
                 skip_nms=False,
                 vinbig_task_mode=None,
-                use_vinbig_with_modified_labels=False,
                 mscxr_do_grounding_only=False,
                 ):
 
     scaler = GradScaler(enabled=use_amp)
 
-    using_yolo = using_yolov8 or using_yolov11
+    # using_yolo = using_yolov8 or using_yolov11
 
     if update_lr_batchwise:
         assert lr_scheduler is not None
 
     if yolov8_use_multiple_detection_layers:
         logger.info('Using multiple detection layers in yolov8')
-        mimiccxr_yolov8_index = 0
-        vinbig_yolov8_index = 1
+        # mimiccxr_yolov8_index = 0
+        # vinbig_yolov8_index = 1
 
     if using_yolov8 and training:
         assert yolov8_criterion is not None
-        if yolov8_use_multiple_detection_layers:
-            mimiccxr_yolov8_criterion = lambda *args: yolov8_criterion(*args, mimiccxr_yolov8_index)
-            vinbig_yolov8_criterion = lambda *args: yolov8_criterion(*args, vinbig_yolov8_index)
-        else:
-            mimiccxr_yolov8_criterion = vinbig_yolov8_criterion = yolov8_criterion
+        # if yolov8_use_multiple_detection_layers:
+        #     mimiccxr_yolov8_criterion = lambda *args: yolov8_criterion(*args, mimiccxr_yolov8_index)
+        #     vinbig_yolov8_criterion = lambda *args: yolov8_criterion(*args, vinbig_yolov8_index)
+        # else:
+        #     mimiccxr_yolov8_criterion = vinbig_yolov8_criterion = yolov8_criterion
 
     if training:
         gradient_accumulator = GradientAccumulator(optimizer, scaler, gradient_accumulation_steps, max_grad_norm)
 
-    if use_vinbig_with_modified_labels:
-        vinbig_num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED) # 23
-    else:
-        vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES # 22
+    # if use_vinbig_with_modified_labels:
+    #     vinbig_num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED) # 23
+    # else:
+    #     vinbig_num_bbox_classes = VINBIG_NUM_BBOX_CLASSES # 22
 
     def _step_fn__grounding_only__one_phrase_per_image(batch):
 
@@ -479,24 +475,73 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
         return output
     
-    def step_fn__chest_imagenome_bbox_grounding(batch):
+    def step_fn__chest_imagenome_phrase_grounding(batch):
 
         # Extract elements from batch
-        if do_visual_grounding_with_bbox_regression:
-            if training:
-                images = batch['i'].to(device)
-                phrase_embeddings = batch['pe'].to(device)
-                target_coords = batch['btc'].to(device) # (batch_size, num_boxes, num_regions, 4)
-                target_presence = batch['btp'].to(device) # (batch_size, num_boxes, num_regions)
-            else:
-                images = batch['i'].to(device)
-                phrase_embeddings = batch['pe'].to(device)
-                chest_imagenome_bbox_coords = batch['bc']
-                chest_imagenome_bbox_presence = batch['bp']
+        images = batch['i'].to(device) # (B, 3, H, W)
+        phrase_embeddings = batch['pe'].to(device) # (B, embedding_dim)
+        target_bbox_presence = batch['tbp'].to(device) # (B, num_regions)
+        target_area_ratio = batch['tar'].to(device) # (B)
+        
+        with torch.set_grad_enabled(training):
+
+            model.train(training)
+
+            # Prepare args for model forward
+            model_kwargs = {
+                'raw_images': images,
+                'phrase_embeddings': phrase_embeddings.unsqueeze(1), # (B, 1, embedding_dim), add a singleton dimension for num_facts
+                'only_compute_features': True,
+                'skip_phrase_classifier': True,
+            }
+
+            # Forward pass
+            with autocast(enabled=use_amp): # automatic mixed precision
+                model_output = model(**model_kwargs)
+                
+                visual_grounding_confidence_logits = model_output['visual_grounding_confidence_logits'] # (B, 1, num_regions, 1)
+                visual_grounding_confidence_logits = visual_grounding_confidence_logits.view(-1, visual_grounding_confidence_logits.shape[-2]) # (B, num_regions)
+                visual_grounding_confidence_probs = visual_grounding_confidence_logits.sigmoid() # (B, num_regions)
+
+                # Weakly supervised presence loss
+                assert visual_grounding_confidence_logits.shape == target_bbox_presence.shape, (
+                    f'{visual_grounding_confidence_logits.shape} != {target_bbox_presence.shape}'
+                )
+                visual_grounding_confidence_loss = weakly_supervised_presence_criterion(
+                    visual_grounding_confidence_logits=visual_grounding_confidence_logits,
+                    visual_grounding_confidence_probs=visual_grounding_confidence_probs,
+                    target_presence=target_bbox_presence,
+                    target_area_ratio=target_area_ratio,
+                )
+                visual_grounding_confidence_loss *= visual_grounding_confidence_loss_weight # weight
+
+                if training:
+                    batch_loss = visual_grounding_confidence_loss
+                    # Backward pass + optimizer step if training
+                    gradient_accumulator.step(batch_loss, model)
+
+        # Prepare output
+        output = {}
+
+        if training and batch_loss is not None:
+            output['loss'] = batch_loss.detach()
+        output['visual_grounding_confidence_loss'] = visual_grounding_confidence_loss.detach()
+
+        return output
+    
+    def step_fn__chest_imagenome_anatomical_location_grounding(batch):
+
+        # Extract elements from batch
+        images = batch['i'].to(device)  # (B, 3, H, W)
+        phrase_embeddings = batch['pe'].to(device) # (B, 36, embedding_dim)
+        if training:
+            target_bbox_coords = batch['tbc'].to(device) # (num_phrases_with_grounding, num_regions, 4)
+            target_bbox_presence = batch['tbp'].to(device) # (num_phrases_with_grounding, num_regions)
+            target_prob_mask = batch['tpm'].to(device) # (num_phrases_with_grounding, num_regions)
+            gidxs = batch['gidxs'] # (num_phrases_with_grounding)
         else:
-            images = batch['i'].to(device)
-            phrase_embeddings = batch['pe'].to(device)
-            phrase_grounding_masks = batch['pgm'].to(device)
+            bbox_coords = batch['bboxes'] # List of list of bboxes
+            bbox_classes = batch['classes'] # List of list of classes
         
         with torch.set_grad_enabled(training):
 
@@ -506,41 +551,54 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             model_kwargs = {
                 'raw_images': images,
                 'phrase_embeddings': phrase_embeddings,
-                'mimiccxr_forward': True,
-                'predict_bboxes': do_visual_grounding_with_bbox_regression,
-                'apply_nms': not training, # apply NMS during validation/testing
+                'only_compute_features': True,
+                'skip_phrase_classifier': True,
+                'apply_nms': not training and not skip_nms, # apply NMS during validation/testing
             }
-            # if using_yolov8 and yolov8_use_multiple_detection_layers:
-            #     model_kwargs['yolov8_detection_layer_index'] = mimiccxr_yolov8_index
 
             # Forward pass
             with autocast(enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
-                sigmoid_attention = model_output['sigmoid_attention']
-                if do_visual_grounding_with_bbox_regression:
-                    if training:
-                        visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits']
-                        visual_grounding_binary_logits = model_output['visual_grounding_binary_logits']
-                    else:
-                        predicted_bboxes = model_output['predicted_bboxes']
                 
+                if training or skip_nms:
+                    visual_grounding_bbox_logits = model_output['visual_grounding_bbox_logits'] # (B, 36, num_regions, 4)
+                    visual_grounding_confidence_logits = model_output['visual_grounding_confidence_logits'] # (B, 36, num_regions, 1)
+                else:
+                    predicted_bboxes_ = model_output['predicted_bboxes']
+                    predicted_bboxes = []
+                    for preds in predicted_bboxes_:
+                        assert len(preds) == 3 # coords, confs, classes
+                        coords, confs, classes = preds
+                        predicted_bboxes.append((coords, confs, classes))
+                        
                 if training:
                     # Compute losses
                     losses = []
 
-                    # 1. attention supervision loss
-                    if do_visual_grounding_with_bbox_regression:
-                        attention_supervision_loss = balanced_binary_cross_entropy_criterion(visual_grounding_binary_logits, target_presence)
-                    else:
-                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
-                                                                                        foreground_loss_weight, background_loss_weight)
-                    attention_supervision_loss *= attention_supervision_loss_weight # weight
-                    losses.append(attention_supervision_loss)
+                    # 1. Visual grounding confidence loss
+                    visual_grounding_confidence_logits = visual_grounding_confidence_logits.reshape(
+                        -1, visual_grounding_confidence_logits.shape[-2]) # (B*36, num_regions)
+                    visual_grounding_confidence_logits = visual_grounding_confidence_logits[gidxs] # (num_phrases_with_grounding, num_regions)
+                    assert visual_grounding_confidence_logits.shape == target_bbox_presence.shape, (
+                        f'{visual_grounding_confidence_logits.shape} != {target_bbox_presence.shape}'
+                    )
+                    visual_grounding_confidence_loss = weighted_balanced_binary_cross_entropy_criterion(
+                        output=visual_grounding_confidence_logits,
+                        target=target_bbox_presence,
+                        weights=target_prob_mask
+                    )
+                    visual_grounding_confidence_loss *= visual_grounding_confidence_loss_weight # weight
+                    losses.append(visual_grounding_confidence_loss)
 
-                    # 2. visual grounding bbox regression loss
-                    if do_visual_grounding_with_bbox_regression:
-                        visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_coords, target_presence)
-                        losses.append(visual_grounding_bbox_loss)
+                    # 2. Visual grounding bbox regression loss
+                    visual_grounding_bbox_logits = visual_grounding_bbox_logits.reshape(
+                        -1, visual_grounding_bbox_logits.shape[-2], visual_grounding_bbox_logits.shape[-1]) # (B*36, num_regions, 4)
+                    visual_grounding_bbox_logits = visual_grounding_bbox_logits[gidxs] # (num_phrases_with_grounding, num_regions, 4)
+                    assert visual_grounding_bbox_logits.shape == target_bbox_coords.shape, (
+                        f'{visual_grounding_bbox_logits.shape} != {target_bbox_coords.shape}'
+                    )
+                    visual_grounding_bbox_loss = compute_bbox_loss(visual_grounding_bbox_logits, target_bbox_coords, target_bbox_presence)
+                    losses.append(visual_grounding_bbox_loss)
 
                     if len(losses) > 0:
                         batch_loss = sum(losses)
@@ -549,31 +607,29 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
 
                     # Backward pass + optimizer step if training
                     gradient_accumulator.step(batch_loss, model)
-
+                
                 else:
-
-                    if not do_visual_grounding_with_bbox_regression:
-                        # Compute attention supervision loss for validation/testing
-                        attention_supervision_loss = compute_balanced_segmentation_loss(sigmoid_attention, phrase_grounding_masks,
-                                                                                        foreground_loss_weight, background_loss_weight)
+                    # Prepare output for validation/testing
+                    if skip_nms:
+                        visual_grounding_confidence_logits = visual_grounding_confidence_logits.squeeze(-1) # (B, 36, num_regions)
+        
 
         # Prepare output
         output = {}
 
         if training and batch_loss is not None:
             output['loss'] = batch_loss.detach()
-        if do_visual_grounding_with_bbox_regression:
-            if training:
-                output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
-                output['attention_supervision_loss'] = attention_supervision_loss.detach()
+        if training:
+            output['visual_grounding_bbox_loss'] = visual_grounding_bbox_loss.detach()
+            output['visual_grounding_confidence_loss'] = visual_grounding_confidence_loss.detach()
+        else:
+            if skip_nms:
+                output['pred_bbox_probs'] = visual_grounding_confidence_logits.detach().sigmoid()
+                output['pred_bbox_coords'] = visual_grounding_bbox_logits.detach()
             else:
                 output['predicted_bboxes'] = predicted_bboxes
-                output['chest_imagenome_bbox_coords'] = chest_imagenome_bbox_coords
-                output['chest_imagenome_bbox_presence'] = chest_imagenome_bbox_presence
-        else:
-            output['attention_supervision_loss'] = attention_supervision_loss.detach()
-            output['pred_mask'] = sigmoid_attention.detach()
-            output['gt_mask'] = phrase_grounding_masks.detach()
+            output['bbox_coords'] = bbox_coords
+            output['bbox_classes'] = bbox_classes
 
         return output
     
@@ -1198,7 +1254,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         'iufg': step_fn__iuxray_fact_grounding, # iuxray fact grounding (facts extracted from radiology reports)
         'pg': step_fn__phrase_grounding, # phrase grounding (this assumes ground truth masks are available)
         'mscxr': step_fn__mscxr_grounding, # MS-CXR phrase grounding
-        'cibg': step_fn__chest_imagenome_bbox_grounding, # chest imagenome bbox grounding
+        'chest-imagenome-pg': step_fn__chest_imagenome_phrase_grounding, # Chest Imagenome phrase grounding
+        'chest-imagenome-alg': step_fn__chest_imagenome_anatomical_location_grounding, # Chest Imagenome anatomical location grounding
         'vinbig': step_fn__vinbig, # vinbig bbox grounding
         'padchest_gr': step_fn__padchest_grounding, # padchest grounding
         'cl': step_fn__chexlocalize, # chexlocalize
@@ -1222,7 +1279,6 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                testing=False, optimizer=None,
                update_lr_batchwise=False, lr_scheduler=None,
                using_yolov8=False,
-               using_yolov11=False,
                yolov8_use_multiple_detection_layers=False,
                model_for_yolov8=None,
                pos_area_prior=0.2, neg_area_prior=0.0,
@@ -1240,16 +1296,14 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                use_contrastive_phrase_grounding_loss=False,
                use_global_image_phrase_contrastive_loss=False,
                nt_xent_temperature=0.1,
-               do_visual_grounding_with_bbox_regression=False,
                skip_nms=False,
                vinbig_task_mode=None,
-               use_vinbig_with_modified_labels=False,
                mscxr_do_grounding_only=False,
                **unused_kwargs,
             ):
     
     if unused_kwargs:
-        logger.warning(f'unused_kwargs: {unused_kwargs}', bold=True)
+        logger.warning(f'unused_kwargs: {unused_kwargs}')
 
     # Create multiple criterion objects
 
@@ -1304,6 +1358,9 @@ def get_engine(model, device, gradient_accumulation_steps=1,
     # Weighted binary cross-entropy loss
     weighted_balanced_binary_cross_entropy_criterion = WeightedNegativePositiveBalancedBCELoss()
 
+    # Weakly supervised presence loss
+    weakly_supervised_presence_criterion = WeaklySupervisedPresenceLoss()
+
     if training and using_yolov8:
         assert model_for_yolov8 is not None
         from ultralytics.yolo.utils.torch_utils import de_parallel
@@ -1330,6 +1387,7 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             balanced_binary_cross_entropy_criterion=balanced_binary_cross_entropy_criterion,
                             weighted_balanced_binary_cross_entropy_criterion=weighted_balanced_binary_cross_entropy_criterion,
                             threshold_criterion=threshold_criterion,
+                            weakly_supervised_presence_criterion=weakly_supervised_presence_criterion,
                             neg_area_prior=neg_area_prior,
                             gradient_accumulation_steps=gradient_accumulation_steps,
                             max_grad_norm=max_grad_norm, use_amp=use_amp,
@@ -1337,8 +1395,6 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             using_yolov8=using_yolov8,
                             yolov8_criterion=yolov8_criterion,
                             yolov8_use_multiple_detection_layers=yolov8_use_multiple_detection_layers,
-                            # yolov11
-                            using_yolov11=using_yolov11,
                             # batchwise learning rate updates
                             update_lr_batchwise=update_lr_batchwise,
                             lr_scheduler=lr_scheduler,
@@ -1353,10 +1409,8 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             use_attention_regularization_loss=use_attention_regularization_loss,
                             use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
                             use_global_image_phrase_contrastive_loss=use_global_image_phrase_contrastive_loss,
-                            do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression,
                             skip_nms=skip_nms,
                             vinbig_task_mode=vinbig_task_mode,
-                            use_vinbig_with_modified_labels=use_vinbig_with_modified_labels,
                             mscxr_do_grounding_only=mscxr_do_grounding_only,
                         )
     engine = Engine(step_fn)

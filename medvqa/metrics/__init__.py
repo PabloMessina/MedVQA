@@ -1,5 +1,6 @@
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, DatasetAwareBboxMeanF1
+from medvqa.metrics.bbox.bbox_cnr import ConditionAwareBboxCNR
 from medvqa.metrics.bbox.bbox_iou import (
     ConditionAwareBboxIOU,
     ConditionAwareBboxIOUClassAgnostic,
@@ -651,6 +652,19 @@ def attach_condition_aware_class_averaged_prc_auc(engine, pred_field_name, gt_fi
     )
     met.attach(engine, metric_name)
 
+# General purpose Contrast-to-Noise Ratio (CNR) metric
+def attach_condition_aware_bbox_cnr(engine, field_names, metric_name, feature_map_dimensions,
+                                    bbox_format, mask_resolution=(100, 100),
+                                    condition_function=lambda _: True):
+    H, W = feature_map_dimensions
+    met = ConditionAwareBboxCNR(
+        output_transform=_get_output_transform(*field_names),
+        output_len=len(field_names),
+        H=H, W=W, bbox_format=bbox_format,
+        mask_resolution=mask_resolution,
+        condition_function=condition_function,
+    )
+    met.attach(engine, metric_name)
 
 # ---------------------------------------------
 # Losses

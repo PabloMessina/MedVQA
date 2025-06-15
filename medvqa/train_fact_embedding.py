@@ -2,6 +2,7 @@ import  os
 import argparse
 import torch
 import ast
+import logging
 
 from medvqa.datasets.fact_embedding.fact_embedding_dataset_management import (
     _LABEL_TO_CATEGORY,
@@ -34,7 +35,11 @@ from medvqa.datasets.dataloading_utils import (
     multi_cyclic_dataloaders_generator,
 )
 from medvqa.metrics.utils import get_merge_metrics_fn
-from medvqa.utils.logging_utils import CountPrinter, print_blue
+from medvqa.utils.logging_utils import log_title, setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
 
 class _TripletRuleWeightsAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
@@ -181,7 +186,6 @@ def train_model(
         save=True,
         override_lr=False,
         ):
-    count_print = CountPrinter()
     
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
@@ -204,10 +208,10 @@ def train_model(
                 use_sentence_autoencoder]) > 0
     train_metrics_weight = training_kwargs.get('train_metrics_weight', 0.1)
     assert 0 <= train_metrics_weight <= 1
-    print(f'train_metrics_weight = {train_metrics_weight}')
+    logger.info(f'train_metrics_weight = {train_metrics_weight}')
     
     # Define collate batch functions
-    count_print('Defining collate batch functions ...')
+    log_title(logger, 'Defining collate batch functions')
     triplet_collate_batch_fn = get_fact_embedding_collate_batch_fn(**collate_batch_fn_kwargs['triplets']) \
         if use_triplets else None
     metadata_classification_collate_batch_fn = get_fact_embedding_collate_batch_fn(
@@ -282,10 +286,10 @@ def train_model(
     assert len(_train_dataloaders) > 0
     assert len(_train_weights) == len(_train_dataloaders)
     assert len(_val_dataloaders) > 0
-    print(f'len(_train_dataloaders) = {len(_train_dataloaders)}')
-    print(f'len(_train_weights) = {len(_train_weights)}')
-    print(f'_train_weights = {_train_weights}')
-    print(f'len(_val_dataloaders) = {len(_val_dataloaders)}')
+    logger.info(f'len(_train_dataloaders) = {len(_train_dataloaders)}')
+    logger.info(f'len(_train_weights) = {len(_train_weights)}')
+    logger.info(f'_train_weights = {_train_weights}')
+    logger.info(f'len(_val_dataloaders) = {len(_val_dataloaders)}')
     
     train_dataloader = balanced_dataloaders_generator(_train_dataloaders, _train_weights)
 
@@ -293,14 +297,14 @@ def train_model(
     val_dataloader_size = sum(len(d) for d in _val_dataloaders)
 
     trainer_name = fact_embedding_trainer.name
-    print('fact_embedding_trainer.name = ', trainer_name)
+    logger.info(f'fact_embedding_trainer.name = {trainer_name}')
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
-    count_print('device =', device)
+    logger.info(f'device = {device}')
 
     # Create model
-    count_print('Creating instance of FactEncoder ...')
+    log_title(logger, 'Creating instance of FactEncoder')
     if use_sentence_autoencoder: # if using sentence autoencoder, we need to pass special arguments to FactEncoder
         _tokenizer = fact_embedding_trainer.sentence_decoder_tokenizer
         model_kwargs['fact_decoder_start_idx'] = _tokenizer.token2id[_tokenizer.START_TOKEN]
@@ -309,21 +313,21 @@ def train_model(
     model = model.to(device)
 
     # Optimizer
-    count_print('Defining optimizer ...')
+    log_title(logger, 'Creating optimizer')
     optimizer = create_optimizer(params=model.parameters(), **optimizer_kwargs)
 
     # Learning rate scheduler
-    count_print('Defining scheduler ...')
+    log_title(logger, 'Creating learning rate scheduler')
     lr_scheduler, update_lr_batchwise = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
 
     # Create trainer and validator engines
-    count_print('Creating trainer and validator engines ...')
+    log_title(logger, 'Creating trainer and validator engines')
     trainer_engine = get_engine(model=model, optimizer=optimizer, device=device, 
                                 update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
     validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)
     
-    # Attach metrics, losses, timer and events to engines    
-    count_print('Attaching metrics, losses, timer and events to engines ...')
+    # Attach metrics, losses, timer and events to engines
+    log_title(logger, 'Attaching metrics, losses, timer and events to engines')
 
     train_metrics_to_merge = []
     val_metrics_to_merge = []
@@ -473,7 +477,6 @@ def train_model(
         batches_per_epoch=batches_per_epoch,
         val_dataloader_size=val_dataloader_size,
         model_kwargs=model_kwargs,
-        count_print=count_print,
         override_lr=override_lr,
     )
 
@@ -558,7 +561,7 @@ def train_from_scratch(
     # Other args
     save,
 ):
-    print_blue('----- Training model from scratch ------', bold=True)
+    log_title(logger, 'Training model from scratch')
 
     # Define boolean flags
     use_triplets = triplets_weight > 0
@@ -601,7 +604,7 @@ def train_from_scratch(
         from transformers import AutoTokenizer
         _tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
         _spert_cls_token = _tokenizer.convert_tokens_to_ids('[CLS]')        
-        print(f'_spert_cls_token = {_spert_cls_token}')
+        logger.info(f'_spert_cls_token = {_spert_cls_token}')
         model_kwargs['use_spert'] = True
         model_kwargs['spert_size_embedding'] = spert_size_embedding
         model_kwargs['spert_relation_types'] = RADGRAPH_CONLLFORMAT_RELATION_TYPE_COUNT
@@ -757,7 +760,8 @@ def resume_training(
         override_lr = False,
         **unused_kwargs,
         ):
-    print_blue('----- Resuming training ------', bold=True)
+    
+    log_title(logger, 'Resuming training from checkpoint')
 
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)

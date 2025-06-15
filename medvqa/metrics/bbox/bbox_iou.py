@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 from medvqa.metrics.bbox.utils import compute_bbox_union_iou, compute_iou
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
@@ -340,48 +341,110 @@ class ConditionAwareBboxIOUperClass(ConditionAwareMetric):
         return [self._acc_score[i] / self._count[i] if self._count[i] > 0 else 0 for i in range(self.nc)]
     
 
-class ConditionAwareBboxIOUOpenClass(ConditionAwareMetric):
+def _compute_iou_for_sample(args):
+    """
+    Computes the sum of IoUs and the count of classes for a single sample.
+    This function is designed to be called by a multiprocessing Pool.
+    """
+    predicted_bboxes, gt_coords, gt_classes = args
+    acc_score = 0
+    count = 0
 
-    def __init__(self, output_transform, condition_function=lambda _: True):
+    # Obtain number of classes for this sample
+    if not gt_classes:
+        return 0, 0
+    nc = max(gt_classes) + 1
+
+    # Group ground truth coordinates by class
+    gt_coords_per_class = [[] for _ in range(nc)]
+    for cls, box in zip(gt_classes, gt_coords):
+        gt_coords_per_class[cls].append(box)
+
+    # Group predictions by class
+    pred_coords_per_class = [[] for _ in range(nc)]
+    coords = predicted_bboxes[0]
+    classes = predicted_bboxes[1]
+    for j in range(len(coords)):
+        cls = classes[j]
+        if cls < nc:  # Skip classes not present in the ground truth
+            box = coords[j]
+            pred_coords_per_class[cls].append(box)
+
+    # Compute IOU for each class present in the image
+    for cls in range(nc):
+        if len(gt_coords_per_class[cls]) > 0:
+            iou = compute_bbox_union_iou(
+                pred_coords_per_class[cls], gt_coords_per_class[cls]
+            )
+            acc_score += iou
+            count += 1
+
+    return acc_score, count
+
+class ConditionAwareBboxIOUOpenClass(ConditionAwareMetric):
+    def __init__(self, output_transform, num_processes=8, condition_function=lambda _: True):
         super().__init__(output_transform, condition_function)
-        self._acc_score = 0
-        self._count = 0
+        self._predictions = []
+        self._ground_truths = []
+        self.num_processes = num_processes
 
     def reset(self):
-        self._acc_score = 0
-        self._count = 0
+        self._predictions = []
+        self._ground_truths = []
 
     def update(self, output):
-        predicted_bboxes, gt_coords, gt_classes = output        
+        """
+        Accumulates predictions and ground truths. This is a very fast operation.
+        """
+        predicted_bboxes, gt_coords, gt_classes = output
         # predicted_bboxes: List of tuples (coordinates, scores, classes)
         # gt_coords: List of lists of ground truth coordinates
         # gt_classes: List of lists of ground truth classes
-        bs = len(gt_classes) # Batch size
-        for i in range(bs): # For each image in the batch
-            # Obtain number of classes
-            nc = max(gt_classes[i]) + 1
-            # Group ground truth coordinates by class
-            gt_coords_per_class = [[] for _ in range(nc)]
-            for cls, box in zip(gt_classes[i], gt_coords[i]):
-                gt_coords_per_class[cls].append(box)
-            # Group predictions by class
-            pred_coords_per_class = [[] for _ in range(nc)]
-            coords = predicted_bboxes[i][0].detach()
-            classes = predicted_bboxes[i][2].detach()
-            for j in range(len(coords)):
-                cls = classes[j].item()
-                if cls < nc: # Skip classes not present in the ground truth
-                    box = coords[j]
-                    pred_coords_per_class[cls].append(box)
-            # Compute IOU for each class present in the image
-            for cls in range(nc):
-                assert len(gt_coords_per_class[cls]) > 0
-                iou = compute_bbox_union_iou(pred_coords_per_class[cls], gt_coords_per_class[cls])
-                self._acc_score += iou
-                self._count += 1
+
+        # Move data to CPU and convert to basic types to free GPU and prepare
+        # for multiprocessing (which requires picklable objects).
+        for i in range(len(gt_classes)):
+            # Detach tensors, move to CPU, and convert to lists
+            coords = predicted_bboxes[i][0].detach().cpu().tolist()
+            classes = predicted_bboxes[i][2].detach().cpu().tolist()
+
+            self._predictions.append((coords, classes))
+            self._ground_truths.append((gt_coords[i], gt_classes[i]))
 
     def compute(self):
-        if self._count == 0:
-            print('WARNING: Bbox IOU defaulting to 0 since self._count is 0')
+        """
+        Computes the metric using multiprocessing to parallelize the work.
+        """
+        if not self._predictions:
+            print(
+                "WARNING: Bbox IOU defaulting to 0 since no data was provided."
+            )
             return 0
-        return self._acc_score / self._count
+
+        # Prepare arguments for each process
+        num_samples = len(self._predictions)
+        args_list = [
+            (self._predictions[i], self._ground_truths[i][0], self._ground_truths[i][1])
+            for i in range(num_samples)
+        ]
+
+        total_acc_score = 0
+        total_count = 0
+
+        # Use a multiprocessing pool to compute the IoU for all samples in parallel
+        # The `with` statement ensures the pool is properly closed.
+        with Pool(processes=self.num_processes) as pool:
+            results = pool.map(_compute_iou_for_sample, args_list)
+
+        # Aggregate results from all processes
+        for acc_score, count in results:
+            total_acc_score += acc_score
+            total_count += count
+
+        if total_count == 0:
+            print(
+                "WARNING: Bbox IOU defaulting to 0 since total_count is 0."
+            )
+            return 0
+
+        return total_acc_score / total_count

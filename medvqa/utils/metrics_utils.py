@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 
 def average_ignoring_nones_and_nans(values):
@@ -139,3 +140,92 @@ def best_threshold_and_accuracy_score(gt, probs):
             best_acc = acc
             best_thrs = probs[i]
     return best_thrs, best_acc
+
+
+def calculate_cnr(mask: np.ndarray, prob_map: np.ndarray) -> float:
+    """
+    Computes the Contrast-to-Noise Ratio (CNR) between a foreground and
+    background region defined by a binary mask.
+
+    The formula is defined as:
+        CNR = |mu_A - mu_A_bar| / sqrt(sigma_A^2 + sigma_A_bar^2)
+
+    where:
+    - A is the interior (foreground) region (mask == 1).
+    - A_bar is the exterior (background) region (mask == 0).
+    - mu is the mean of probability values in a region.
+    - sigma^2 is the variance of probability values in a region.
+
+    Args:
+        mask (np.ndarray): A 2D binary numpy array (H, W) where 1s represent
+            the interior (foreground) and 0s represent the exterior (background).
+            The dtype should be integer-like (e.g., uint8, int).
+        prob_map (np.ndarray): A 2D numpy array (Hp, Wp) with probability
+            values (0 to 1). This map will be resized to match the mask's
+            dimensions if they differ.
+
+    Returns:
+        float: The calculated CNR value. Returns np.nan if either the
+            foreground or background region is empty. Returns np.inf if
+            there is contrast but zero variance (perfect, noiseless separation).
+    """
+    # --- 1. Validate Inputs ---
+    if mask.ndim != 2 or prob_map.ndim != 2:
+        raise ValueError("Input arrays must be 2-dimensional.")
+    if not np.all((mask == 0) | (mask == 1)):
+        raise ValueError("Mask must be binary (containing only 0s and 1s).")
+
+    # --- 2. Resize Probability Map to Match Mask Dimensions ---
+    # Ensure the mask is boolean for indexing later
+    binary_mask = mask.astype(bool)
+
+    if binary_mask.shape != prob_map.shape:
+        # Get target dimensions from the mask (H, W)
+        target_height, target_width = binary_mask.shape
+        # Resize prob_map. Note: cv2.resize expects (width, height) for dsize.
+        # We use bilinear interpolation as it's a good default for down/upsampling
+        # continuous-valued maps like probability maps.
+        resized_prob_map = cv2.resize(
+            prob_map,
+            (target_width, target_height),
+            interpolation=cv2.INTER_LINEAR,
+        )
+    else:
+        resized_prob_map = prob_map
+
+    # --- 3. Separate Interior (A) and Exterior (A_bar) Regions ---
+    # Use the boolean mask to select values from the resized probability map.
+    interior_probs = resized_prob_map[binary_mask]
+    exterior_probs = resized_prob_map[~binary_mask]
+
+    # --- 4. Handle Edge Cases ---
+    # If either region is empty, CNR is undefined.
+    if interior_probs.size == 0 or exterior_probs.size == 0:
+        # This can happen if the mask is all 1s or all 0s.
+        return np.nan
+
+    # --- 5. Calculate Statistics (Mean and Variance) ---
+    mu_A = np.mean(interior_probs)
+    mu_A_bar = np.mean(exterior_probs)
+
+    # Use ddof=0 for population variance, as we have all pixels in the region.
+    sigma_A_sq = np.var(interior_probs, ddof=0)
+    sigma_A_bar_sq = np.var(exterior_probs, ddof=0)
+
+    # --- 6. Compute CNR ---
+    numerator = np.abs(mu_A - mu_A_bar)
+    denominator = np.sqrt(sigma_A_sq + sigma_A_bar_sq)
+
+    # Handle division by zero: this occurs if both regions have zero variance
+    # (i.e., all pixels in the interior are identical, and all in the exterior
+    # are identical).
+    if denominator < 1e-9:  # Use a small epsilon for floating point comparison
+        if numerator < 1e-9:
+            # No contrast and no noise, CNR is 0.
+            return 0.0
+        else:
+            # Finite contrast but zero noise, CNR is infinite.
+            return np.inf
+
+    cnr = numerator / denominator
+    return cnr

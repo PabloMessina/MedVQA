@@ -1,3 +1,4 @@
+import math
 import os
 from PIL import Image
 import cv2
@@ -21,7 +22,7 @@ from medvqa.utils.constants import CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 from medvqa.utils.files_utils import get_cached_json_file
 from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
 from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
-from medvqa.utils.logging_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string
+from medvqa.utils.logging_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string, print_bold
 
 def inspect_chexpert_vision_trainer(chexpert_vision_trainer, i):
     instance = chexpert_vision_trainer.dataset[i]
@@ -204,6 +205,7 @@ def inspect_iuxray_vqa_trainer(iuxray_vqa_trainer, dataset_name, i):
 def inspect_mimiccxr_vqa_trainer(mimiccxr_vqa_trainer, dataset_name, i):
     _inspect_vqa_trainer(mimiccxr_vqa_trainer, MIMICCXR_CACHE_DIR, dataset_name, i)
 
+
 def inspect_labels2report_trainer(trainer, dataset_name, i):
 
     assert hasattr(trainer, dataset_name)
@@ -246,18 +248,11 @@ def inspect_labels2report_trainer(trainer, dataset_name, i):
             chest_imagenome_label_array_to_string(instance['chest_imagenome'],
             chest_imagenome_label_names))
         
+
 def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True, grounding_only_mode=False,
                           image_mean=(0.485, 0.456, 0.406), image_std=(0.229, 0.224, 0.225)):
-    import os
     from medvqa.datasets.mimiccxr import get_detailed_metadata_for_dicom_id
     from medvqa.utils.files_utils import read_txt
-    from medvqa.utils.logging_utils import print_bold
-    from medvqa.datasets.image_processing import inv_normalize
-    from PIL import Image
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    import math
     if train:
         dataset = mimiccxr_trainer.mscxr_train_dataset
         idx = dataset.indices[i]
@@ -497,9 +492,14 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True, grounding_only_mode=F
             print_bold('phrase_classes:', end=' '); print(phrase_classes)
         print_bold('bbox_format:', end=' '); print(bbox_format)
 
+        # Recover image from tensor
+        image_tensor.mul_(torch.tensor(image_std).view(3, 1, 1))
+        image_tensor.add_(torch.tensor(image_mean).view(3, 1, 1))
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+        img = Image.fromarray((image_tensor.permute(1,2,0) * 255).numpy().astype(np.uint8))
+
         # Display transformed image + bboxes
         print_bold('Transformed image:')
-        img = Image.fromarray((inv_normalize(image_tensor).permute(1,2,0) * 255).numpy().astype(np.uint8))
         plt.imshow(img)
         ax = plt.gca()
         for bbox_coord in phrase_bboxes:
@@ -554,13 +554,6 @@ def inspect_mscxr_dataset(mimiccxr_trainer, i, train=True, grounding_only_mode=F
 
 def inspect_vinbig_phrase_grounding_dataset(vinbig_trainer, i, train=True,
                                             image_mean=(0.485, 0.456, 0.406), image_std=(0.229, 0.224, 0.225)):
-    import os
-    from medvqa.utils.logging_utils import print_bold
-    from PIL import Image
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    import math
     if train:
         dataset = vinbig_trainer.train_dataset
         idx = dataset.indices[i]
@@ -816,6 +809,328 @@ def inspect_padchest_phrase_grounding_dataset(
         img = Image.open(image_path).convert('RGB')
         plt.imshow(img)
         plt.show()
+
+
+def inspect_chest_imagenome_alg_item(
+    item: dict,
+    dataset,
+    image_mean: tuple = (0.485, 0.456, 0.406),
+    image_std: tuple = (0.229, 0.224, 0.225),
+):
+    """
+    Visualizes a single item from a ChestImaGenome_AnatomicalLocationGroundingDataset.
+
+    - If the item is for training, it plots a grid where each row corresponds to a
+      grounded anatomical location and shows:
+      1. The image with the specific bounding box(es).
+      2. The upsampled target presence heatmap.
+      3. The upsampled target probabilistic mask.
+    - If the item is for validation/inference, it plots a single image with all
+      ground-truth bounding boxes and their labels.
+
+    Args:
+        item: A dictionary returned by the dataset's __getitem__ method.
+        dataset: The dataset instance, used to access metadata like bbox_format.
+        image_mean: The mean used for image normalization.
+        image_std: The standard deviation used for image normalization.
+    """
+    # --- 1. Common Setup: Recover Image from Tensor ---
+    image_tensor = item["i"].clone()
+    std = torch.tensor(image_std).view(3, 1, 1)
+    mean = torch.tensor(image_mean).view(3, 1, 1)
+    image_tensor.mul_(std).add_(mean)
+    image_tensor = torch.clamp(image_tensor, 0, 1)
+    img = Image.fromarray(
+        (image_tensor.permute(1, 2, 0) * 255).numpy().astype(np.uint8)
+    )
+    H_img, W_img = img.height, img.width
+
+    # --- 2. Check if it's a training or validation item ---
+    is_training_item = "tbc" in item
+
+    if is_training_item:
+        print_bold("Visualizing Training Item")
+        # --- 3a. Logic for Training Items ---
+        target_coords = item["tbc"]
+        target_presence = item["tbp"]
+        target_prob_masks = item["tpm"]
+        gt_indices = item["gidxs"]
+
+        bbox_format = dataset.bbox_format
+        feat_H, feat_W = dataset.feature_map_size
+        num_grounded_locs = len(gt_indices)
+
+        print(f"Found {num_grounded_locs} grounded locations in this sample.")
+
+        if num_grounded_locs == 0:
+            print("No grounded locations to visualize. Displaying image only.")
+            plt.imshow(img)
+            plt.show()
+            return
+
+        fig, axes = plt.subplots(
+            num_grounded_locs, 3, figsize=(18, 6 * num_grounded_locs)
+        )
+        if num_grounded_locs == 1:
+            axes = axes.reshape(1, -1)
+
+        cell_width = W_img / feat_W
+        cell_height = H_img / feat_H
+        vlines = [cell_width * i for i in range(1, feat_W)]
+        hlines = [cell_height * i for i in range(1, feat_H)]
+
+        for i, loc_idx in enumerate(gt_indices):
+            loc_name = CHEST_IMAGENOME_BBOX_NAMES[loc_idx]
+            coords_i = target_coords[i]
+            presence_i = target_presence[i]
+            prob_mask_i = target_prob_masks[i]
+
+            # --- MODIFICATION 1: Skeptical BBox Extraction ---
+            bbox_coords = set()
+            for j in range(len(presence_i)):
+                if presence_i[j] == 1:
+                    bbox_coords.add(tuple(coords_i[j].tolist()))
+            bbox_coords = list(bbox_coords)
+            if len(bbox_coords) > 1:
+                print(
+                    f"\033[93mWARNING: Found {len(bbox_coords)} unique bboxes for location '{loc_name}'. This might be unexpected.\033[0m"
+                )
+
+            # --- Plot 1: Image with Bounding Box(es) ---
+            ax1 = axes[i, 0]
+            ax1.imshow(img)
+            ax1.set_title(
+                f"Location: {loc_name} (idx: {loc_idx})\nImage with BBox(es)"
+            )
+            for bbox_coord in bbox_coords:
+                if bbox_format == "xyxy":
+                    x1, y1, x2, y2 = bbox_coord
+                elif bbox_format == "cxcywh":
+                    cx, cy, w, h = bbox_coord
+                    x1, y1 = cx - w / 2, cy - h / 2
+                    x2, y2 = cx + w / 2, cy + h / 2
+                else:
+                    raise ValueError(f"Invalid bbox_format: {bbox_format}")
+
+                x1, x2 = x1 * W_img, x2 * W_img
+                y1, y2 = y1 * H_img, y2 * H_img
+                rect = patches.Rectangle(
+                    (x1, y1),
+                    x2 - x1,
+                    y2 - y1,
+                    linewidth=2,
+                    edgecolor="lime",
+                    facecolor="none",
+                )
+                ax1.add_patch(rect)
+
+            # --- MODIFICATION 2: Upsampling Heatmaps ---
+            # Plot 2: Upsampled Target Presence Heatmap
+            ax2 = axes[i, 1]
+            presence_map = presence_i.view(feat_H, feat_W).numpy()
+            up_presence = (
+                np.array(
+                    Image.fromarray((presence_map * 255).astype(np.uint8)).resize(
+                        (W_img, H_img), resample=Image.NEAREST
+                    )
+                )
+                / 255.0
+            )
+            ax2.imshow(up_presence, cmap="viridis", vmin=0, vmax=1)
+            ax2.set_title("Upsampled Target Presence")
+
+            # Plot 3: Upsampled Probabilistic Mask
+            ax3 = axes[i, 2]
+            prob_map = prob_mask_i.view(feat_H, feat_W).numpy()
+            up_prob_mask = np.array(
+                Image.fromarray((prob_map * 255).astype(np.uint8)).resize(
+                    (W_img, H_img), resample=Image.NEAREST
+                )
+            ) / 255.0
+            ax3.imshow(up_prob_mask, cmap="magma", vmin=0, vmax=1)
+            ax3.set_title("Upsampled Probabilistic Mask")
+
+            # Add grid lines to all plots
+            for ax in [ax1, ax2, ax3]:
+                for x in vlines:
+                    ax.axvline(x, color="white", linestyle="--", linewidth=0.8)
+                for y in hlines:
+                    ax.axhline(y, color="white", linestyle="--", linewidth=0.8)
+                ax.axis("off")
+
+        plt.tight_layout(pad=3.0)
+        plt.show()
+
+    else:
+        print_bold("Visualizing Validation/Inference Item")
+        # --- 3b. Logic for Validation/Inference Items (Unchanged) ---
+        gt_bboxes = item["bboxes"]
+        gt_indices = item["classes"]
+        bbox_format = dataset.bbox_format
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        ax.imshow(img)
+        ax.set_title("Image with all Ground-Truth BBoxes")
+        ax.axis("off")
+
+        for bbox_coord, loc_idx in zip(gt_bboxes, gt_indices):
+            loc_name = CHEST_IMAGENOME_BBOX_NAMES[loc_idx]
+
+            if bbox_format == "xyxy":
+                x1, y1, x2, y2 = bbox_coord
+            elif bbox_format == "cxcywh":
+                cx, cy, w, h = bbox_coord
+                x1, y1 = cx - w / 2, cy - h / 2
+                x2, y2 = cx + w / 2, cy + h / 2
+            else:
+                raise ValueError(f"Invalid bbox_format: {bbox_format}")
+
+            x1, x2 = x1 * W_img, x2 * W_img
+            y1, y2 = y1 * H_img, y2 * H_img
+
+            rect = patches.Rectangle(
+                (x1, y1),
+                x2 - x1,
+                y2 - y1,
+                linewidth=2,
+                edgecolor="cyan",
+                facecolor="none",
+            )
+            ax.add_patch(rect)
+            ax.text(
+                x1,
+                y1 - 5,
+                loc_name,
+                color="black",
+                fontsize=8,
+                bbox=dict(facecolor="cyan", alpha=0.7, pad=1),
+            )
+
+        plt.show()
+
+
+def inspect_chest_imagenome_pg_item(
+    i: int,
+    dataset,  # Type hint would be ChestImaGenome_PhraseGroundingDataset
+    image_mean: tuple = (0.485, 0.456, 0.406),
+    image_std: tuple = (0.229, 0.224, 0.225),
+):
+    """
+    Visualizes a single item from a ChestImaGenome_PhraseGroundingDataset.
+
+    It displays a 1x3 grid:
+    1. The augmented image as seen by the model.
+    2. The original, un-augmented image with color-coded bounding boxes for
+       'original' and 'similar' groundings.
+    3. The upsampled target presence map.
+
+    Args:
+        i: The index of the item to visualize.
+        dataset: The dataset instance.
+        image_mean: The mean used for image normalization.
+        image_std: The standard deviation used for image normalization.
+    """
+
+    def _draw_bboxes(ax, bboxes, edgecolor, label, W_img, H_img):
+        """Helper function to draw a list of bounding boxes on an axis."""
+        for i, bbox_coord in enumerate(bboxes):
+            x_min, y_min, x_max, y_max = bbox_coord
+            x1, y1 = x_min * W_img, y_min * H_img
+            w, h = (x_max - x_min) * W_img, (y_max - y_min) * H_img
+
+            # Add label only to the first box to avoid duplicate legend entries
+            rect_label = label if i == 0 else None
+            rect = patches.Rectangle(
+                (x1, y1),
+                w,
+                h,
+                linewidth=1.5,
+                edgecolor=edgecolor,
+                facecolor="none",
+                alpha=0.9,
+                label=rect_label,
+            )
+            ax.add_patch(rect)
+
+    # --- 1. Data Retrieval ---
+    item = dataset[i]
+    image_path = dataset.image_paths[i]
+    phrase_text = dataset.phrases[i]
+    original_bboxes = dataset.phrase_original_bboxes[i]
+    similar_bboxes = dataset.phrase_similar_bboxes[i]
+    target_area_ratio = item["tar"]
+
+    print_bold("Visualizing Phrase Grounding Item")
+    print("-" * 40)
+    print_bold("Index:", i)
+    print_bold("Image Path:", image_path)
+    print_bold("Phrase Text:", phrase_text)
+    print_bold("Num Original BBoxes:", len(original_bboxes))
+    print_bold("Num Similar BBoxes:", len(similar_bboxes))
+    print_bold("Target Area Ratios:", target_area_ratio)
+
+    print("-" * 40)
+
+    # --- 2. Visualization Setup ---
+    fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+    feat_H, feat_W = dataset.feature_map_size
+
+    # --- Plot 1: Original Image with BBoxes ---
+    ax1 = axes[0]
+    orig_img = Image.open(image_path).convert("RGB")
+    H_img, W_img = orig_img.height, orig_img.width
+    ax1.imshow(orig_img)
+    ax1.set_title("2. Original Image with Ground-Truth BBoxes")
+    _draw_bboxes(ax1, original_bboxes, "lime", "Original BBox", W_img, H_img)
+    _draw_bboxes(ax1, similar_bboxes, "cyan", "Similar BBox", W_img, H_img)
+    ax1.legend()
+
+    # --- Plot 2: Augmented Image (from tensor) ---
+    ax2 = axes[1]
+    image_tensor = item["i"].clone()
+    std = torch.tensor(image_std).view(3, 1, 1)
+    mean = torch.tensor(image_mean).view(3, 1, 1)
+    image_tensor.mul_(std).add_(mean)
+    image_tensor = torch.clamp(image_tensor, 0, 1)
+    aug_img = Image.fromarray(
+        (image_tensor.permute(1, 2, 0) * 255).numpy().astype(np.uint8)
+    )
+    H_aug_img, W_aug_img = aug_img.height, aug_img.width
+    ax2.imshow(aug_img)
+    ax2.set_title("1. Augmented Image (Input to Model)")
+
+    # --- Plot 3: Upsampled Target Presence Map ---
+    ax3 = axes[2]
+    target_presence = item["tbp"]
+    presence_map = target_presence.view(feat_H, feat_W).numpy()
+    up_presence = (
+        np.array(
+            Image.fromarray((presence_map * 255).astype(np.uint8)).resize(
+                (W_aug_img, H_aug_img), resample=Image.NEAREST
+            )
+        )
+        / 255.0
+    )
+    ax3.imshow(up_presence, cmap="viridis", vmin=0, vmax=1)
+    ax3.set_title("3. Target Presence Map (Input to Loss)")
+
+    # --- Final Touches ---
+    cell_width = W_aug_img / feat_W
+    cell_height = H_aug_img / feat_H
+    vlines = [cell_width * i for i in range(1, feat_W)]
+    hlines = [cell_height * i for i in range(1, feat_H)]
+
+    for ax in [ax2, ax3]:  # Add grid lines to augmented image and heatmap
+        for x in vlines:
+            ax.axvline(x, color="white", linestyle="--", linewidth=0.8)
+        for y in hlines:
+            ax.axhline(y, color="white", linestyle="--", linewidth=0.8)
+
+    for ax in axes:
+        ax.axis("off")
+
+    plt.tight_layout()
+    plt.show()
 
 
 _shared_image_id_to_binary_labels = None

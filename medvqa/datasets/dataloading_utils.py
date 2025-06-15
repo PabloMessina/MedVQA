@@ -1,5 +1,7 @@
 from collections import OrderedDict
+import re
 import numpy as np
+import logging
 import math
 import random
 import torch
@@ -21,7 +23,10 @@ from medvqa.utils.constants import (
 )
 from medvqa.utils.logging_utils import print_bold, print_orange, print_red
 
+logger = logging.getLogger(__name__)
+
 INFINITE_DATASET_LENGTH = int(1e18)
+
 
 def _get_balancedly_distributed_class_indices(class_weights):
     assert len(class_weights) > 0
@@ -866,32 +871,121 @@ def get_seq2seq_collate_batch_fn(use_t5=False, use_flan_t5=False, use_bart=False
     
     return collate_batch_fn
 
-def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_ranking=False,
-                                        for_metadata_classification=False,
-                                        for_chest_imagenome_observation_classification=False,
-                                        for_chest_imagenome_anatomical_location_classification=False,
-                                        for_nli=False, for_entcon=False,
-                                        for_sentence_autoencoder=False,
-                                        ):
 
-    assert sum([for_triplet_ranking,
-                for_metadata_classification,
-                for_chest_imagenome_observation_classification,
-                for_chest_imagenome_anatomical_location_classification,
-                for_nli, for_entcon, for_sentence_autoencoder]) == 1 # only one of these should be true
+
+# This regex will split the sentence by spaces while keeping the delimiters.
+# This is crucial for reconstructing the sentence perfectly after modification.
+# e.g., "word1.  word2" -> ['word1.', '  ', 'word2']
+_SPLIT_PATTERN = re.compile(r"(\s+)")
+
+def _augment_sentence(
+    sentence: str,
+    prob: float,
+):
+    """
+    Applies augmentation to a single sentence with a given probability.
+
+    Args:
+        sentence: The input string.
+        prob: The probability of applying augmentation.
+        cache: A shared dictionary to cache intermediate results (e.g., indices
+               of alphabetic words) to speed up processing.
+    """
+    if random.random() >= prob:
+        return sentence
+
+    # 1. Remove trailing period
+    if sentence.endswith("."):
+        sentence = sentence[:-1]
+
+    # 2. Augment word capitalization/casing
+    parts = _SPLIT_PATTERN.split(sentence)
+    alphabetic_indices = [
+        i for i, part in enumerate(parts) if part.isalpha()
+    ]
+
+    if not alphabetic_indices:
+        return sentence  # No alphabetic words to augment
+
+    # Choose a random number of words to augment (from 1 to all)
+    k = random.randint(1, len(alphabetic_indices))
+    indices_to_change = random.sample(alphabetic_indices, k)
     
+    for i in indices_to_change:
+        if random.random() < 0.5:
+            parts[i] = parts[i].upper()
+        else:
+            parts[i] = parts[i].capitalize()
+            
+    sentence = "".join(parts)
+            
+    # 3. Augment trailing period
+    if random.random() < 0.5:
+        sentence += "."
+
+    return sentence
+
+def get_fact_embedding_collate_batch_fn(
+    huggingface_model_name,
+    for_triplet_ranking=False,
+    for_metadata_classification=False,
+    for_chest_imagenome_observation_classification=False,
+    for_chest_imagenome_anatomical_location_classification=False,
+    for_nli=False,
+    for_entcon=False,
+    for_sentence_autoencoder=False,
+    augmentation_prob: float = 0.5, # Probability of applying text augmentation. 50% by default.
+):
+    """
+    Factory function to create a collate_fn for different tasks, with
+    optional text augmentation.
+    """
+    task_flags = [
+        for_triplet_ranking,
+        for_metadata_classification,
+        for_chest_imagenome_observation_classification,
+        for_chest_imagenome_anatomical_location_classification,
+        for_nli,
+        for_entcon,
+        for_sentence_autoencoder,
+    ]
+    assert (
+        sum(task_flags) == 1
+    ), "Exactly one task flag must be set to True."
+
+    chosen_task_name = [
+        "triplet_ranking",
+        "metadata_classification",
+        "chest_imagenome_observation_classification",
+        "chest_imagenome_anatomical_location_classification",
+        "nli",
+        "entcon",
+        "sentence_autoencoder",
+    ][task_flags.index(True)]
+
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(huggingface_model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        huggingface_model_name, trust_remote_code=True
+    )
+    
+    logger.info(
+        f"Using tokenizer {huggingface_model_name} for collate_fn. Task: {chosen_task_name}. Augmentation probability: {augmentation_prob}"
+    )
+
+    def _augment_and_tokenize(text_list: list[str]):
+        """Helper to run augmentation and then tokenize."""
+        if augmentation_prob > 0:
+            augmented_texts = [_augment_sentence(s, augmentation_prob) for s in text_list]
+            return tokenizer(augmented_texts, padding="longest", return_tensors="pt")
+        # No augmentation, just tokenize
+        return tokenizer(text_list, padding="longest", return_tensors="pt")
 
     if for_triplet_ranking:
         def collate_batch_fn(batch):
             batch_dict = dict(flag='t') # t for triplet ranking
-            a_list = [x['a'] for x in batch]
-            p_list = [x['p'] for x in batch]
-            n_list = [x['n'] for x in batch]
-            a_encoding = tokenizer(a_list, padding="longest", return_tensors="pt")
-            p_encoding = tokenizer(p_list, padding="longest", return_tensors="pt")
-            n_encoding = tokenizer(n_list, padding="longest", return_tensors="pt")
+            a_encoding = _augment_and_tokenize([x['a'] for x in batch])
+            p_encoding = _augment_and_tokenize([x['p'] for x in batch])
+            n_encoding = _augment_and_tokenize([x['n'] for x in batch])
             batch_dict['a_input_ids'] = a_encoding.input_ids
             batch_dict['a_attention_mask'] = a_encoding.attention_mask
             batch_dict['p_input_ids'] = p_encoding.input_ids
@@ -906,7 +1000,7 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict = dict(flag='mc') # mc for metadata classification
             # facts
             facts = [x['f'] for x in batch]
-            facts_encoding = tokenizer(facts, padding="longest", return_tensors="pt")
+            facts_encoding = _augment_and_tokenize(facts)
             batch_dict['input_ids'] = facts_encoding.input_ids
             batch_dict['attention_mask'] = facts_encoding.attention_mask
             # labels
@@ -919,7 +1013,7 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict = dict(flag='cioc') # cioc for chest imagenome observation classification
             # phrases
             phrases = [x['p'] for x in batch]
-            phrases_encoding = tokenizer(phrases, padding="longest", return_tensors="pt")
+            phrases_encoding = _augment_and_tokenize(phrases)
             batch_dict['input_ids'] = phrases_encoding.input_ids
             batch_dict['attention_mask'] = phrases_encoding.attention_mask
             # labels
@@ -930,7 +1024,7 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict = dict(flag='cialc') # cialc for chest imagenome anatomical location classification
             # phrases
             phrases = [x['p'] for x in batch]
-            phrases_encoding = tokenizer(phrases, padding="longest", return_tensors="pt")
+            phrases_encoding = _augment_and_tokenize(phrases)
             batch_dict['input_ids'] = phrases_encoding.input_ids
             batch_dict['attention_mask'] = phrases_encoding.attention_mask
             # labels
@@ -941,22 +1035,22 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
             batch_dict = dict(flag='nli')
             premises = [x['p'] for x in batch]
             hypotheses = [x['h'] for x in batch]
-            batch_dict['tokenized_premises'] = tokenizer(premises, padding="longest", return_tensors="pt")
-            batch_dict['tokenized_hypotheses'] = tokenizer(hypotheses, padding="longest", return_tensors="pt")
+            batch_dict['tokenized_premises'] = _augment_and_tokenize(premises)
+            batch_dict['tokenized_hypotheses'] = _augment_and_tokenize(hypotheses)
             batch_dict['labels'] = torch.tensor([x['l'] for x in batch])
             return batch_dict
     elif for_entcon:
         def collate_batch_fn(batch):
             batch_dict = dict(flag='entcon')
-            batch_dict['tokenized_ent_p'] = tokenizer([x['ent_p'] for x in batch], padding="longest", return_tensors="pt")
-            batch_dict['tokenized_ent_h'] = tokenizer([x['ent_h'] for x in batch], padding="longest", return_tensors="pt")
-            batch_dict['tokenized_con_p'] = tokenizer([x['con_p'] for x in batch], padding="longest", return_tensors="pt")
-            batch_dict['tokenized_con_h'] = tokenizer([x['con_h'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['tokenized_ent_p'] = _augment_and_tokenize([x['ent_p'] for x in batch])
+            batch_dict['tokenized_ent_h'] = _augment_and_tokenize([x['ent_h'] for x in batch])
+            batch_dict['tokenized_con_p'] = _augment_and_tokenize([x['con_p'] for x in batch])
+            batch_dict['tokenized_con_h'] = _augment_and_tokenize([x['con_h'] for x in batch])
             return batch_dict
     elif for_sentence_autoencoder:
         def collate_batch_fn(batch):
             batch_dict = dict(flag='sae')
-            batch_dict['tokenized_sentences'] = tokenizer([x['s'] for x in batch], padding="longest", return_tensors="pt")
+            batch_dict['tokenized_sentences'] = _augment_and_tokenize([x['s'] for x in batch])
             batch_dict['decoder_ids'] = nn.utils.rnn.pad_sequence(
                         sequences = [torch.tensor(x['ids']) for x in batch],
                         batch_first=True,
@@ -964,8 +1058,10 @@ def get_fact_embedding_collate_batch_fn(huggingface_model_name, for_triplet_rank
                     )
             return batch_dict
     else: assert False
-    
+
     return collate_batch_fn
+
+
 
 def get_bert_based_nli_collate_batch_fn(huggingface_model_name, merged_input=False):
     

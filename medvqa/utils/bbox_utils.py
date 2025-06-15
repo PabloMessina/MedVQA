@@ -419,6 +419,37 @@ def convert_bboxes_into_target_tensors(
     return target_coords, target_presence, target_prob_mask
 
 
+def convert_bboxes_into_presence_map(
+    bboxes: List[BoundingBox], feature_map_size: Tuple[int, int]
+) -> np.ndarray:
+    """
+    Generates a binary presence map based on a list of bounding boxes.
+
+    This function creates a 2D numpy array where grid cells are marked as `1.0` if they
+    fall within any of the provided bounding boxes and `0.0` otherwise. 
+
+    Args:
+        bboxes: A list of bounding boxes in 'xyxy' format (x_min, y_min,
+                x_max, y_max), with coordinates normalized to [0, 1].
+        feature_map_size: A tuple (H, W) representing the height and width of
+                          the target feature map grid.
+
+    Returns:
+        np.ndarray: A 2D numpy array of shape (H, W) representing the presence map.
+    """
+    H, W = feature_map_size
+    presence_map = np.zeros((H, W), dtype=np.float32)
+
+    for bbox in bboxes:
+        x_min, y_min, x_max, y_max = bbox
+        x_min_idx, y_min_idx, x_max_idx, y_max_idx = _bbox_coords_to_grid_cell_indices(
+            x_min, y_min, x_max, y_max, W, H
+        )
+        presence_map[y_min_idx:y_max_idx, x_min_idx:x_max_idx] = 1.0
+
+    return presence_map
+
+
 def visualize_bbox_and_prob_mask_targets_tensors(
     target_coords: torch.Tensor,
     target_prob_mask: torch.Tensor,

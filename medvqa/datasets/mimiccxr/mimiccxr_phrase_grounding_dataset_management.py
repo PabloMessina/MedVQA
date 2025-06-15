@@ -1,22 +1,16 @@
 import math
+import multiprocessing
 import os
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import random
 import torch
 import logging
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from medvqa.datasets.augmentation import ChestImagenomeAlbumentationAdapter, VinBigAlbumentationAdapter
-from medvqa.datasets.chest_imagenome import (
-    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
-    CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
-    get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices,
-)
+from medvqa.datasets.augmentation import VinBigAlbumentationAdapter
+from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
-    load_chest_imagenome_gold_bboxes,
-    load_chest_imagenome_silver_bboxes,
-    load_gold_bbox_dicom_ids,
     load_nondecent_chest_imagenome_dicom_ids,
 )
 from medvqa.datasets.dataloading_utils import (
@@ -35,21 +29,24 @@ from medvqa.datasets.ms_cxr import (
     get_ms_cxr_test_dicom_ids,
     get_ms_cxr_val_dicom_ids,
 )
-from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.datasets.mimiccxr import (
-    MIMICCXR_LARGE_FAST_CACHE_DIR,
+    MIMICCXR_DicomIdToImagePath,
     MIMICCXR_ImageSizeModes,
     MIMICCXR_ViewModes,
     get_cxrlt2024_train_dev_dicom_ids,
     get_dicom_id_and_orientation_list,
-    get_image_path_getter,
-    get_imageId2PartPatientStudy,
     get_mimiccxr_train_dicom_ids,
+    get_split2imageIds,
     load_mimiccxr_reports_detailed_metadata,
 )
-from medvqa.utils.bbox_utils import calculate_probabilistic_mask_from_bboxes, convert_bboxes_into_target_tensors
+from medvqa.utils.bbox_utils import (
+    calculate_probabilistic_mask_from_bboxes,
+    convert_bboxes_into_presence_map,
+    convert_bboxes_into_target_tensors,
+    xyxy_to_cxcywh,
+)
 from medvqa.utils.constants import LABEL_BASED_FACTS
-from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle, print_file_size, save_pickle
+from medvqa.utils.files_utils import get_cached_pickle_file, load_pickle, save_pickle
 from medvqa.utils.logging_utils import ANSI_BOLD, ANSI_MAGENTA_BOLD, ANSI_RESET
 
 logger = logging.getLogger(__name__)
@@ -440,6 +437,547 @@ class MSCXR_PhraseGroundingDataset(Dataset):
         batch['dataset_name'] = 'mscxr'
         return batch
     
+
+class ChestImaGenome_PhraseGroundingDataset(Dataset):
+    """
+    Dataset for phrase grounding on the ChestImaGenome dataset.
+
+    This class loads and processes data from a pre-compiled 'augmented_data'
+    pickle file. It extracts image-phrase pairs, collects all associated
+    bounding boxes (from the image and similar groundings), and generates
+    target tensors for training a presence prediction model.
+
+    Args:
+        augmented_data: A list of dictionaries, where each dictionary contains
+                        grounding information for a single DICOM image.
+        image_transform: A callable function to transform the images.
+        phrase_to_embedding_idx: A dictionary mapping each unique phrase string
+                                 to its corresponding index in phrase_embeddings.
+        phrase_embeddings: A numpy array of pre-computed phrase embeddings.
+        feature_map_size: A tuple (H, W) for the target feature map size.
+        for_training: If True, returns tensors for training (image, embedding,
+                      target presence, target area). If False, returns data
+                      for inference.
+        data_augmentation_enabled: If True, applies data augmentation.
+    """
+
+    def __init__(
+        self,
+        augmented_data: List[Dict],
+        image_transform: Callable,
+        dicom_id_to_image_path: Callable,
+        phrase_to_embedding_idx: Dict[str, int],
+        phrase_embeddings: np.ndarray,
+        feature_map_size: Tuple[int, int],
+        for_training: bool = True,
+        data_augmentation_enabled: bool = False,
+    ):
+        self.image_transform = image_transform
+        self.dicom_id_to_image_path = dicom_id_to_image_path
+        self.phrase_to_embedding_idx = phrase_to_embedding_idx
+        self.phrase_embeddings = phrase_embeddings
+        self.feature_map_size = feature_map_size
+        self.for_training = for_training
+        self.data_augmentation_enabled = data_augmentation_enabled
+
+        # Lists to store the processed data points
+        self.image_paths = []
+        self.phrases = []
+        self.phrase_idxs = []
+        self.phrase_original_bboxes = []
+        self.phrase_similar_bboxes = []
+        self.phrase_presence_maps = []
+        self.target_area_ratios = []
+
+        self._parse_augmented_data(augmented_data)
+
+    def _parse_augmented_data(self, augmented_data: List[Dict]):
+        """
+        Parses the raw augmented data to create clean data points for the dataset.
+        """
+        logger.info("Parsing ChestImaGenome augmented data...")
+        
+        skipped_due_to_invalid_bboxes = 0
+        skipped_due_to_no_similar_groundings = 0
+        
+        for item in tqdm(augmented_data, desc="Parsing data", mininterval=1.0):
+            dicom_id = item["dicom_id"]
+            image_path = self.dicom_id_to_image_path(dicom_id)
+
+            # Iterate through each phrase in the current image's data
+            for phrase, locations in item["phrase2locations"].items():
+                # Condition: Only include phrases with similar groundings
+                similar_groundings = item["phrase2similar_grounding"][phrase]
+                if not similar_groundings:
+                    skipped_due_to_no_similar_groundings += 1
+                    continue
+
+                # Collect all bounding boxes for this phrase
+                original_bboxes = [] # to store bounding boxes from the primary image locations
+                similar_bboxes = [] # to store bounding boxes from similar groundings
+
+                # 1. Get bboxes from the primary image locations
+                for loc in locations:
+                    original_bboxes.append(item["location2bbox"][loc])
+
+                # 2. Validate the bounding boxes
+                valid = True
+                for i, box in enumerate(original_bboxes):
+                    x_min, y_min, x_max, y_max = box
+                    # Ensure coordinates are between 0 and 1
+                    x_min = max(0, min(1, x_min))
+                    y_min = max(0, min(1, y_min))
+                    x_max = max(0, min(1, x_max))
+                    y_max = max(0, min(1, y_max))
+                    # Ensure the bounding box is valid
+                    if x_min >= x_max or y_min >= y_max:
+                        valid = False
+                        break
+                    # Update the bounding box with validated coordinates
+                    original_bboxes[i] = [x_min, y_min, x_max, y_max]
+                if not valid:
+                    skipped_due_to_invalid_bboxes += 1
+                    continue
+
+                # 3. Get bboxes from similar groundings
+                for grounding in similar_groundings:
+                    for box in grounding["boxes"]:
+                        assert len(box) == 4, "Bounding box must have 4 coordinates."
+                        similar_bboxes.append(box)
+                
+                assert len(original_bboxes) > 0, (
+                    f"No bounding boxes found for the phrase '{phrase}' in DICOM ID {dicom_id}."
+                )
+                assert len(similar_bboxes) > 0, (
+                    f"No similar groundings found for the phrase '{phrase}' in DICOM ID {dicom_id}."
+                )
+ 
+                # 4. Convert bounding boxes to presence maps
+                all_bboxes = original_bboxes + similar_bboxes
+                presence_map = convert_bboxes_into_presence_map(
+                    bboxes=all_bboxes,
+                    feature_map_size=self.feature_map_size,
+                )
+                self.phrase_presence_maps.append(presence_map)
+
+                # 5. Precompute the ratio of the target area and the presence map area
+                target_area = item["phrase2target_area"][phrase]
+                presence_map_area = presence_map.sum().item() / (
+                    self.feature_map_size[0] * self.feature_map_size[1]
+                )
+                assert 0 < presence_map_area <= 1, (
+                    f"Presence map area for phrase '{phrase}' in DICOM ID {dicom_id} "
+                    f"is out of bounds: {presence_map_area:.4f}"
+                )
+                target_area_ratio = target_area / presence_map_area
+                assert 0 < target_area_ratio <= 1, (
+                    f"Target area ratio for phrase '{phrase}' in DICOM ID {dicom_id} "
+                    f"is out of bounds: {target_area_ratio:.4f}"
+                )
+
+                # 6. Append the processed data to the lists
+                self.image_paths.append(image_path)
+                self.phrases.append(phrase)
+                self.phrase_original_bboxes.append(original_bboxes)
+                self.phrase_similar_bboxes.append(similar_bboxes)
+                self.target_area_ratios.append(target_area_ratio)
+                self.phrase_idxs.append(
+                    self.phrase_to_embedding_idx[phrase]
+                )
+        if skipped_due_to_invalid_bboxes > 0:
+            logger.warning(
+                f"Skipped {skipped_due_to_invalid_bboxes} samples due to invalid bounding boxes."
+            )
+        if skipped_due_to_no_similar_groundings > 0:
+            logger.warning(
+                f"Skipped {skipped_due_to_no_similar_groundings} samples due to no similar groundings."
+            )
+        logger.info(f"Finished parsing. Found {len(self.image_paths)} valid samples.")
+
+    def __len__(self) -> int:
+        return len(self.image_paths)
+
+    def __getitem__(self, i: int) -> dict:
+        image_path = self.image_paths[i]
+        phrase_idx = self.phrase_idxs[i]
+        presence_map = self.phrase_presence_maps[i]
+        target_area_ratio = self.target_area_ratios[i]
+
+        phrase_embedding = self.phrase_embeddings[phrase_idx]
+        phrase_embedding = torch.tensor(phrase_embedding, dtype=torch.float32)
+
+        if self.for_training:
+            if self.data_augmentation_enabled:
+                # Apply augmentations to image and presence map
+                out = self.image_transform(
+                    image_path=image_path,
+                    masks=[presence_map],  # Albumentations expects a list of masks
+                )
+                image = out["pixel_values"]
+                augmented_presence_map = out["masks"][0]
+            else:
+                image = self.image_transform(image_path)["pixel_values"]
+                augmented_presence_map = presence_map
+
+            # Convert the presence map into target tensors
+            target_presence = torch.from_numpy(augmented_presence_map)
+        else:
+            # For inference, we just transform the image and keep the original presence map
+            image = self.image_transform(image_path)["pixel_values"]
+            # Convert the presence map into a tensor
+            target_presence = torch.from_numpy(presence_map)
+
+        return {
+            "i": image,  # Transformed image tensor
+            "pe": phrase_embedding,  # Phrase embedding tensor
+            "tbp": target_presence.view(-1),  # Target presence map (flattened)
+            "tar": target_area_ratio,  # Target area ratio
+        }
+    
+    def collate_fn(self, batch: List[dict]) -> dict:
+        """Custom collate function for the DataLoader."""
+        images = torch.stack([item["i"] for item in batch])
+        phrase_embeddings = torch.stack([item["pe"] for item in batch])
+        target_presence = torch.stack([item["tbp"] for item in batch])
+        target_area_ratios = torch.tensor(
+            [item["tar"] for item in batch], dtype=torch.float32
+        )
+        return {
+            "i": images,
+            "pe": phrase_embeddings,
+            "tbp": target_presence,
+            "tar": target_area_ratios,
+            "dataset_name": "chest-imagenome-pg",
+        }
+
+
+# Global variable for worker processes to avoid passing large data repeatedly
+_ALG_WORKER_DATA = {}
+
+def _init_alg_worker(shared_data: Dict):
+    """
+    Initializer for the multiprocessing pool.
+    Sets a global variable in each worker process with shared read-only data.
+    """
+    global _ALG_WORKER_DATA
+    _ALG_WORKER_DATA = shared_data
+
+def _process_chunk_worker(
+    data_chunk: List[Dict],
+) -> Tuple[List, List, List, int]:
+    """
+    Worker function that processes a chunk of the augmented_data.
+    It validates bboxes, creates probabilistic masks, and returns the results.
+    """
+    # Unpack shared data from the global variable
+    dicom_id_to_image_path = _ALG_WORKER_DATA["dicom_id_to_image_path"]
+    location_to_idx = _ALG_WORKER_DATA["location_to_idx"]
+    bbox_format = _ALG_WORKER_DATA["bbox_format"]
+    feature_map_size = _ALG_WORKER_DATA["feature_map_size"]
+
+    # Local lists to store results for this chunk
+    chunk_image_paths = []
+    chunk_grounded_locs = []
+    chunk_prob_masks = []
+    skipped_bboxes_count = 0
+
+    for item in data_chunk:
+        image_path = dicom_id_to_image_path(item["dicom_id"])
+        grounded_locs = {}
+
+        for loc_name, loc_idx in location_to_idx.items():
+            if loc_name in item["location2bbox"]:
+                bbox = item["location2bbox"][loc_name]  # Original format: xyxy
+                x_min, y_min, x_max, y_max = bbox
+                x_min, y_min = max(0, min(1, x_min)), max(0, min(1, y_min))
+                x_max, y_max = max(0, min(1, x_max)), max(0, min(1, y_max))
+                if x_min >= x_max or y_min >= y_max:
+                    skipped_bboxes_count += 1
+                    continue
+                bbox = [x_min, y_min, x_max, y_max]
+                if bbox_format == "cxcywh":
+                    bbox = xyxy_to_cxcywh(bbox)
+                grounded_locs[loc_idx] = bbox
+
+        if grounded_locs:
+            chunk_image_paths.append(image_path)
+            chunk_grounded_locs.append(grounded_locs)
+            prob_masks_dict = {}
+            for loc_idx, bbox in grounded_locs.items():
+                mask = calculate_probabilistic_mask_from_bboxes(
+                    bboxes=[bbox],
+                    mask_resolution=feature_map_size,
+                    bbox_format=bbox_format,
+                )
+                prob_masks_dict[loc_idx] = mask
+            chunk_prob_masks.append(prob_masks_dict)
+
+    return (
+        chunk_image_paths,
+        chunk_grounded_locs,
+        chunk_prob_masks,
+        skipped_bboxes_count,
+    )
+
+class ChestImaGenome_AnatomicalLocationGroundingDataset(Dataset):
+    """
+    Dataset for grounding a fixed set of anatomical locations on ChestImaGenome.
+
+    For each image and for each of its grounded anatomical locations, this dataset
+    pre-computes a specific probabilistic mask from the location's bounding box.
+    During training, the image, all its ground-truth bounding boxes, and all their
+    corresponding masks are augmented together.
+
+    Args:
+        augmented_data: List of dictionaries containing grounding info.
+        image_transform: A callable function to transform images, bboxes, and masks.
+        dicom_id_to_image_path: A function mapping a DICOM ID to its file path.
+        bbox_phrase_embeddings_data: A dictionary loaded from the output of the
+                                     precompute_bbox_phrase_embeddings.py script.
+        feature_map_size: A tuple (H, W) for the target feature map size.
+        for_training: If True, returns tensors for training.
+        data_augmentation_enabled: If True, applies data augmentation.
+        bbox_format: The format of bounding boxes (e.g., 'xyxy').
+        num_processes: Number of parallel processes for data parsing.
+    """
+
+    def __init__(
+        self,
+        augmented_data: List[Dict],
+        image_transform: Callable,
+        dicom_id_to_image_path: Callable,
+        bbox_phrase_embeddings_data: Dict,
+        feature_map_size: Tuple[int, int],
+        for_training: bool = True,
+        data_augmentation_enabled: bool = False,
+        bbox_format: str = "xyxy",
+        num_processes: int = 1,
+    ):
+        self.image_transform = image_transform
+        self.dicom_id_to_image_path = dicom_id_to_image_path
+        self.bbox_phrase_embeddings_data = bbox_phrase_embeddings_data
+        self.feature_map_size = feature_map_size
+        self.for_training = for_training
+        self.data_augmentation_enabled = data_augmentation_enabled
+        self.bbox_format = bbox_format
+        self.num_processes = num_processes
+
+        assert bbox_format in ["xyxy", "cxcywh"], (
+            f"Unsupported bbox format: {bbox_format}. "
+            "Supported formats are 'xyxy' and 'cxcywh'."
+        )
+
+        self.anatomical_locations = self.bbox_phrase_embeddings_data[
+            "bbox_phrases"
+        ]
+        assert self.anatomical_locations == CHEST_IMAGENOME_BBOX_NAMES
+        self.location_to_idx = {
+            name: i for i, name in enumerate(self.anatomical_locations)
+        }
+        self.num_locations = len(self.anatomical_locations)
+
+        self.image_paths = []
+        self.grounded_locations_per_image = []
+        self.prob_masks_per_image = []
+
+        self._parse_augmented_data(augmented_data)
+
+    def _parse_augmented_data(self, augmented_data: List[Dict]):
+        """
+        Parses raw data in parallel, pre-computing a probabilistic mask for each
+        grounded location's bounding box.
+        """
+        logger.info(
+            f"Parsing ChestImaGenome data with {self.num_processes} processes (augmented_data size: {len(augmented_data)})"
+        )
+
+        # if len(augmented_data) > 10000:
+        #     augmented_data = augmented_data[:10000]  # Limit to first 10k samples for faster debugging
+        #     logger.warning(
+        #         "Limiting augmented_data to first 10,000 samples for faster debugging. TODO: Remove this limit in production."
+        #     )
+
+        shared_data_payload = {
+            "dicom_id_to_image_path": self.dicom_id_to_image_path,
+            "location_to_idx": self.location_to_idx,
+            "bbox_format": self.bbox_format,
+            "feature_map_size": self.feature_map_size,
+        }
+
+        total_skipped_bboxes = 0
+
+        if self.num_processes == 1:
+            # Run in a single process (useful for debugging)
+            _init_alg_worker(shared_data_payload)
+            (
+                self.image_paths,
+                self.grounded_locations_per_image,
+                self.prob_masks_per_image,
+                total_skipped_bboxes,
+            ) = _process_chunk_worker(augmented_data)
+        else:
+            # Split data into chunks for parallel processing
+            chunk_size = math.ceil(len(augmented_data) / self.num_processes)
+            chunks = [
+                augmented_data[i : i + chunk_size]
+                for i in range(0, len(augmented_data), chunk_size)
+            ]
+
+            with multiprocessing.Pool(
+                processes=self.num_processes,
+                initializer=_init_alg_worker,
+                initargs=(shared_data_payload,),
+            ) as pool:
+                with tqdm(
+                    total=len(chunks), desc="Parsing data chunks"
+                ) as pbar:
+                    for (
+                        img_paths,
+                        grounded_locs,
+                        prob_masks,
+                        skipped_count,
+                    ) in pool.imap_unordered(_process_chunk_worker, chunks):
+                        self.image_paths.extend(img_paths)
+                        self.grounded_locations_per_image.extend(grounded_locs)
+                        self.prob_masks_per_image.extend(prob_masks)
+                        total_skipped_bboxes += skipped_count
+                        pbar.update(1)
+
+        if total_skipped_bboxes > 0:
+            logger.warning(
+                f"Skipped {total_skipped_bboxes} bboxes due to invalid coordinates."
+            )
+        logger.info(
+            f"Finished parsing. Found {len(self.image_paths)} valid samples."
+        )
+
+    def __len__(self) -> int:
+        return len(self.image_paths)
+
+    def __getitem__(self, i: int) -> dict:
+        image_path = self.image_paths[i]
+        grounded_locs = self.grounded_locations_per_image[i]
+        prob_masks_dict = self.prob_masks_per_image[i]
+
+        # 1. Prepare phrase embeddings for all 36 locations
+        embeddings = []
+        for loc_idx in range(self.num_locations):
+            if random.random() < 0.5:
+                similar_phrases = self.bbox_phrase_embeddings_data[
+                    "most_similar_anatomical_locations"
+                ][loc_idx]
+                similar_embeddings = self.bbox_phrase_embeddings_data[
+                    "most_similar_anatomical_location_embeddings"
+                ][loc_idx]
+                if similar_phrases:
+                    choice_idx = random.randint(0, len(similar_phrases) - 1)
+                    chosen_embedding = similar_embeddings[choice_idx]
+                else:
+                    chosen_embedding = self.bbox_phrase_embeddings_data[
+                        "bbox_phrase_embeddings"
+                    ][loc_idx]
+            else:
+                chosen_embedding = self.bbox_phrase_embeddings_data[
+                    "bbox_phrase_embeddings"
+                ][loc_idx]
+            embeddings.append(chosen_embedding)
+        phrase_embeddings = torch.tensor(
+            np.array(embeddings), dtype=torch.float32
+        )
+
+        # 2. Prepare ground truth bboxes, masks, and their class indices
+        gt_indices = sorted(grounded_locs.keys())
+        gt_bboxes = [grounded_locs[idx] for idx in gt_indices]
+        masks_to_augment = [prob_masks_dict[idx] for idx in gt_indices]
+
+        if self.for_training:
+            # 3. Apply data augmentation
+            if self.data_augmentation_enabled:
+                out = self.image_transform(
+                    image_path=image_path,
+                    bboxes=gt_bboxes,
+                    bbox_labels=gt_indices,
+                    masks=masks_to_augment,
+                )
+                image = out["pixel_values"]
+                augmented_bboxes = out["bboxes"]
+                augmented_bbox_labels = out["bbox_labels"]
+                augmented_masks = out["masks"]
+                assert len(augmented_masks) == len(masks_to_augment) # Ensure no masks were dropped
+                if len(augmented_bbox_labels) < len(gt_indices): # Some bboxes were dropped, should happen very rarely
+                    # Filter masks whose bounding boxes were dropped during augmentation
+                    valid_indices = [
+                        i for i, idx in enumerate(gt_indices)
+                        if idx in augmented_bbox_labels
+                    ]
+                    augmented_masks = [augmented_masks[i] for i in valid_indices]
+                    # Update gt_indices
+                    gt_indices = augmented_bbox_labels
+            else:
+                image = self.image_transform(image_path)["pixel_values"]
+                augmented_bboxes = gt_bboxes
+                augmented_masks = masks_to_augment
+
+            # 4. Generate target tensors for each grounded location
+            t_coords, t_presence, t_prob_masks = [], [], []
+            for j, bbox in enumerate(augmented_bboxes):
+                # Pair each augmented bbox with its corresponding augmented mask
+                augmented_mask = augmented_masks[j]
+                coords, presence, p_mask = convert_bboxes_into_target_tensors(
+                    bboxes=[bbox],
+                    probabilistic_mask=augmented_mask,
+                    feature_map_size=self.feature_map_size,
+                    bbox_format=self.bbox_format,
+                )
+                t_coords.append(coords)
+                t_presence.append(presence)
+                t_prob_masks.append(p_mask)
+
+            return {
+                "i": image,
+                "pe": phrase_embeddings,
+                "tbc": torch.stack(t_coords), # Target bounding box coordinates
+                "tbp": torch.stack(t_presence), # Target bounding box presence (binary)
+                "tpm": torch.stack(t_prob_masks), # Target probabilistic masks for loss
+                "gidxs": torch.tensor(gt_indices, dtype=torch.long), # Ground truth indices
+            }
+        else:  # For inference
+            image = self.image_transform(image_path)["pixel_values"]
+            return {
+                "i": image,
+                "pe": phrase_embeddings,
+                "bboxes": gt_bboxes,
+                "classes": gt_indices,
+            }
+
+    def collate_fn(self, batch: List[dict]) -> dict:
+        """Custom collate function to handle batching."""
+        batch_dict = {"dataset_name": "chest-imagenome-alg"} # alg stands for anatomical location grounding
+
+        if self.for_training:
+            batch_dict["i"] = torch.stack([x["i"] for x in batch]) # (B, C, H, W)
+            batch_dict["pe"] = torch.stack([x["pe"] for x in batch]) # (B, num_locations, embedding_size)
+            batch_dict["tbc"] = torch.cat([x["tbc"] for x in batch], dim=0) # (num_grounded_locations, H*W, 4)
+            batch_dict["tbp"] = torch.cat([x["tbp"] for x in batch], dim=0) # (num_grounded_locations, H*W)
+            batch_dict["tpm"] = torch.cat([x["tpm"] for x in batch], dim=0) # (num_grounded_locations, H*W)
+
+            gidxs_list = []
+            for i, x in enumerate(batch):
+                offset = i * self.num_locations
+                gidxs_list.append(x["gidxs"] + offset)
+            batch_dict["gidxs"] = torch.cat(gidxs_list) # (num_grounded_locations,)
+
+            assert batch_dict["gidxs"].shape[0] == batch_dict["tbc"].shape[0]
+            assert batch_dict["gidxs"].shape[0] == batch_dict["tbp"].shape[0]
+        else:
+            batch_dict["i"] = torch.stack([x["i"] for x in batch]) # (B, C, H, W)
+            batch_dict["pe"] = torch.stack([x["pe"] for x in batch]) # (B, num_locations, embedding_size)
+            batch_dict["bboxes"] = [x["bboxes"] for x in batch] # List of lists of bboxes
+            batch_dict["classes"] = [x["classes"] for x in batch] # List of lists of class indices
+
+        return batch_dict
+
+    
 class MIMICCXR_CXRLT2024_ClassificationDataset(Dataset):
 
     def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_idxs, phrase_classification_labels,
@@ -470,192 +1008,6 @@ class MIMICCXR_CXRLT2024_ClassificationDataset(Dataset):
             'pcl': phrase_classification_labels,
         }
     
-def _create_target_tensors(bbox_coords, bbox_presence, feature_map_size):
-    """
-    Creates a target tensor for bounding boxes on a feature map.
-    
-    Args:
-        bbox_coords: A tensor of shape (N, 4) representing bounding box coordinates.
-        bbox_presence: A tensor of shape (N,) representing the presence of bounding boxes.
-        feature_map_size: Tuple (H, W) representing the size of the feature map.
-    
-    Returns:
-        A tensor of shape (N, H*W, 4) representing the target tensor with bounding box coordinates (x_min, y_min, x_max, y_max).
-        A tensor of shape (N, H*W) representing the target tensor with bounding box presence.
-    """
-    H, W = feature_map_size
-    N = len(bbox_coords)
-    target_coords = torch.zeros(N, H, W, 4)
-    target_presence = torch.zeros(N, H, W)
-    
-    for i in range(N):
-        if bbox_presence[i] == 0:
-            continue
-        x_min, y_min, x_max, y_max = bbox_coords[i]
-        x_min_scaled = math.floor(x_min * W)
-        y_min_scaled = math.floor(y_min * H)
-        x_max_scaled = math.ceil(x_max * W)
-        y_max_scaled = math.ceil(y_max * H)
-        target_coords[i, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled, :] = torch.tensor([x_min, y_min, x_max, y_max])
-        target_presence[i, y_min_scaled:y_max_scaled, x_min_scaled:x_max_scaled] = 1
-
-    # Reshape target tensors
-    target_coords = target_coords.view(N, H*W, 4)
-    target_presence = target_presence.view(N, H*W)
-    
-    return target_coords, target_presence
-
-class MIMICCXR_BBoxGroundingDataset(Dataset):
-
-    def __init__(self, image_paths, image_transform, phrase_embeddings, phrase_classification_labels,
-                 predict_bboxes=False, num_bbox_classes=None, feature_map_size=None, bbox_coords=None, bbox_presence=None,
-                 phrase_grounding_masks=None, data_augmentation_enabled=False, for_training=True):
-        
-        self.image_paths = image_paths
-        self.image_transform = image_transform
-        self.phrase_embeddings = phrase_embeddings
-        self.phrase_classification_labels = phrase_classification_labels
-        self.predict_bboxes = predict_bboxes
-        self.data_augmentation_enabled = data_augmentation_enabled
-        self.for_training = for_training
-        if predict_bboxes:
-            assert num_bbox_classes is not None
-            assert feature_map_size is not None
-            assert bbox_coords is not None
-            assert bbox_presence is not None
-            self.num_bbox_classes = num_bbox_classes
-            self.feature_map_size = feature_map_size
-            self.bbox_coords = bbox_coords
-            self.bbox_presence = bbox_presence
-            if data_augmentation_enabled:
-                self.albumentation_adapter = ChestImagenomeAlbumentationAdapter(num_bbox_classes)
-        else:
-            assert phrase_grounding_masks is not None
-            self.phrase_grounding_masks = phrase_grounding_masks
-
-    def __len__(self):
-        return len(self.image_paths)
-    
-    def __getitem__(self, i):
-        image_path = self.image_paths[i]
-        phrase_embeddings = self.phrase_embeddings
-        phrase_classification_labels = self.phrase_classification_labels[i]
-        if self.predict_bboxes:
-            bbox_coords = self.bbox_coords[i]
-            bbox_presence = self.bbox_presence[i]
-            if self.data_augmentation_enabled:
-                image, bbox_coords, bbox_presence = self.image_transform(
-                    image_path=image_path,
-                    bboxes=bbox_coords,
-                    presence=bbox_presence,
-                    albumentation_adapter=self.albumentation_adapter,
-                )
-            else:
-                image = self.image_transform(image_path)
-            if self.for_training:
-                bbox_target_coords, bbox_target_presence = _create_target_tensors(bbox_coords, bbox_presence, self.feature_map_size)
-                return {
-                    'i': image,
-                    'pe': phrase_embeddings,
-                    'pcl': phrase_classification_labels,
-                    'btc': bbox_target_coords,
-                    'btp': bbox_target_presence,
-                }
-            else:
-                return {
-                    'i': image,
-                    'pe': phrase_embeddings,
-                    'pcl': phrase_classification_labels,
-                    'bc': bbox_coords,
-                    'bp': bbox_presence,
-                }
-        else:
-            phrase_grounding_masks = self.phrase_grounding_masks[i]
-            image, phrase_grounding_masks, phrase_classification_labels = self.image_transform(
-                image_path, phrase_grounding_masks, phrase_classification_labels)
-            return {
-                'i': image,
-                'pe': phrase_embeddings,
-                'pgm': phrase_grounding_masks,
-                'pcl': phrase_classification_labels,
-            }
-    
-def _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_presence):
-    assert len(bbox_coords.shape) == 2
-    assert bbox_coords.shape[1] == 4
-    assert len(bbox_presence.shape) == 1
-    assert bbox_presence.shape[0] == bbox_coords.shape[0]
-    mask = np.zeros((len(bbox_coords), mask_height * mask_width), dtype=np.float32)
-    for i in range(len(bbox_coords)):
-        if bbox_presence[i] == 1:
-            x1, y1, x2, y2 = bbox_coords[i]
-            mask[i] = compute_mask_from_bounding_box(mask_height, mask_width, x1, y1, x2, y2, flatten=True, binary=True)
-    return mask
-
-def _clean_bbox_coords_and_presence(bbox_coords, bbox_presence):
-    bbox_coords = bbox_coords.reshape(-1, 4)
-    assert len(bbox_coords) == len(bbox_presence)
-    bbox_coords.clip(0, 1, out=bbox_coords)
-    for i in range(len(bbox_coords)):
-        w = bbox_coords[i, 2] - bbox_coords[i, 0]
-        h = bbox_coords[i, 3] - bbox_coords[i, 1]
-        if w <= 0 or h <= 0:
-            bbox_presence[i] = 0
-        else:
-            assert bbox_presence[i] == 1
-    return bbox_coords, bbox_presence
-
-_shared_mask_height = None
-_shared_mask_width = None
-_shared_did2bboxes = None
-def _clean_bbox_coords_and_presence_and_compute_mask(dicom_id):
-    bboxes = _shared_did2bboxes[dicom_id]
-    bbox_coords = bboxes['coords']
-    bbox_presence = bboxes['presence']
-    bbox_coords, bbox_presence = _clean_bbox_coords_and_presence(bbox_coords, bbox_presence)
-    mask = _compute_mask_from_bounding_boxes(_shared_mask_height, _shared_mask_width, bbox_coords, bbox_presence)
-    return bbox_coords, bbox_presence, mask
-
-def _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2bboxes, num_workers=None):
-    save_path = os.path.join(MIMICCXR_LARGE_FAST_CACHE_DIR, f'bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)}).pkl')
-    if os.path.exists(save_path):
-        logger.info(f'Loading precomputed bbox_coords_and_presence_and_mask from {save_path}...')
-        print_file_size(save_path)
-        return get_cached_pickle_file(save_path)
-
-    logger.info(f'Precomputing bbox_coords_and_presence_and_mask({mask_height},{mask_width},{len(did2bboxes)})...')
-    global _shared_mask_height, _shared_mask_width, _shared_did2bboxes
-    _shared_mask_height = mask_height
-    _shared_mask_width = mask_width
-    _shared_did2bboxes = did2bboxes
-    dicom_ids = list(did2bboxes.keys())
-    dicom_ids.sort() # sort for reproducibility
-    import multiprocessing as mp
-    if num_workers is None:
-        num_workers = mp.cpu_count()
-    with mp.Pool(num_workers) as pool:
-        results = pool.map(_clean_bbox_coords_and_presence_and_compute_mask, dicom_ids)
-    bbox_coords = np.array([r[0] for r in results])
-    bbox_presence = np.array([r[1] for r in results])
-    phrase_grounding_masks = np.array([r[2] for r in results], dtype=np.uint8) # use uint8 in order to save memory
-    logger.info(f'bbox_coords.shape = {bbox_coords.shape}')
-    logger.info(f'bbox_presence.shape = {bbox_presence.shape}')
-    logger.info(f'phrase_grounding_masks.shape = {phrase_grounding_masks.shape}')
-    output = {
-        'dicom_ids': dicom_ids, # sorted
-        'bbox_coords': bbox_coords,
-        'bbox_presence': bbox_presence,
-        'phrase_grounding_masks': phrase_grounding_masks,
-    }
-    save_pickle(output, save_path)
-    return output
-
-def visualize_mask(mask, mask_height, mask_width): # for debugging
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(10, 10))
-    # use gray scale, where white = 1 and black = 0
-    plt.imshow(mask.reshape(mask_height, mask_width), cmap='gray', vmin=0, vmax=1)
-    plt.show()
 
 _LONG_TAIL = 0
 _MIDDLE_TAIL = 1
@@ -715,8 +1067,6 @@ class MIMICCXR_PhraseGroundingTrainer:
                 num_train_workers=None, num_test_workers=None,
                 train_image_transform=None, test_image_transform=None,
                 fact_grounding_collate_batch_fn=None,
-                bbox_grounding_collate_batch_fn=None,
-                mscxr_phrase_grounding_collate_batch_fn=None,
                 cxrlt2024_image_phrase_classifier_collate_batch_fn=None,
                 cxrlt2024_multilabel_classifier_collate_batch_fn=None,
                 test_batch_size_factor=1,
@@ -732,7 +1082,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                 mscxr_training_data_mode=MS_CXR_TrainingMode.TRAIN.value,
                 mscxr_phrase2embedding_filepath=None,
                 use_chest_imagenome_for_train=False,
-                use_chest_imagenome_gold_for_test=False,
+                use_chest_imagenome_for_val=False,
+                use_chest_imagenome_for_test=False,
+                # use_chest_imagenome_for_test=True, # TODO: set to False after done with debugging
+                # use_chest_imagenome_gold_for_test=False,
+                chest_imagenome_augmented_phrase_groundings_filepath=None,
+                chest_imagenome_phrase_embeddings_filepath=None,
                 chest_imagenome_bbox_phrase_embeddings_filepath=None,
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 exclude_noisy_images=False,
@@ -750,24 +1105,30 @@ class MIMICCXR_PhraseGroundingTrainer:
                 cxrlt2024_custom_dicom_id_to_pos_neg_facts_filepath=None,
                 cxrlt2024_official_training_labels_for_fact_classification_filepath=None,
                 cxrlt2024_do_balanced_sampling=False,
-                do_visual_grounding_with_bbox_regression=False,
                 data_augmentation_enabled=False,
                 replace_phrase_embeddings_with_random_vectors=False,
                 bbox_format='xyxy',
+                num_processes=10,
                 **unused_kwargs,
             ):
 
         if len(unused_kwargs) > 0:
             logger.warning(f'unused kwargs in MIMICCXR_PhraseGroundingTrainer: {unused_kwargs}')
         # Sanity checks
-        assert sum([use_facts_for_train, use_chest_imagenome_for_train, use_mscxr_for_train,
-                    use_mscxr_for_test, use_chest_imagenome_gold_for_test, use_cxrlt2024_challenge_split]) > 0 # at least one of them must be True
+        assert sum([use_facts_for_train,
+                    use_chest_imagenome_for_train,
+                    use_chest_imagenome_for_val,
+                    use_chest_imagenome_for_test,
+                    use_mscxr_for_train,
+                    use_mscxr_for_test,
+                    # use_chest_imagenome_gold_for_test,
+                    use_cxrlt2024_challenge_split]) > 0 # at least one of them must be True
         
         self.use_facts_for_train = use_facts_for_train
         self.use_chest_imagenome_for_train = use_chest_imagenome_for_train
         self.use_mscxr_for_train = use_mscxr_for_train
         self.use_mscxr_for_test = use_mscxr_for_test
-        self.use_chest_imagenome_gold_for_test = use_chest_imagenome_gold_for_test
+        # self.use_chest_imagenome_gold_for_test = use_chest_imagenome_gold_for_test
         self.use_cxrlt2024_challenge_split = use_cxrlt2024_challenge_split
         self.use_cxrlt2024_custom_labels = use_cxrlt2024_custom_labels
         self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
@@ -783,7 +1144,7 @@ class MIMICCXR_PhraseGroundingTrainer:
         if use_cxrlt2024_challenge_split:
             assert use_cxrlt2024_custom_labels or use_cxrlt2024_official_labels
             assert not use_mscxr_for_test # only for training
-            assert not use_chest_imagenome_gold_for_test # only for training
+            # assert not use_chest_imagenome_gold_for_test # only for training
             assert not use_facts_for_test # only for training
             assert not use_interpret_cxr_challenge_split
             cxrlt2024_train_dicom_ids, cxrlt2024_dev_dicom_ids = get_cxrlt2024_train_dev_dicom_ids()
@@ -807,18 +1168,17 @@ class MIMICCXR_PhraseGroundingTrainer:
             forbidden_train_dicom_ids |= set(get_ms_cxr_val_dicom_ids())
             forbidden_train_dicom_ids |= set(get_ms_cxr_test_dicom_ids())
 
-        if use_chest_imagenome_gold_for_test:
-            gold_dicom_ids = set(load_gold_bbox_dicom_ids())
-            forbidden_train_dicom_ids |= gold_dicom_ids
+        # if use_chest_imagenome_gold_for_test:
+        #     gold_dicom_ids = set(load_gold_bbox_dicom_ids())
+        #     forbidden_train_dicom_ids |= gold_dicom_ids
 
         logger.info(f'len(forbidden_train_dicom_ids) = {len(forbidden_train_dicom_ids)}')
+
+        dicom_id_to_image_path = MIMICCXR_DicomIdToImagePath(image_size_mode=source_image_size_mode, verbose=True)
 
         # Create train and dev datasets for CXR-LT-2024 challenge
         if use_cxrlt2024_challenge_split or self.use_cxrlt2024_custom_labels:
             logger.info(f'{ANSI_MAGENTA_BOLD}Preparing CXR-LT-2024 challenge datasets and dataloaders for training/testing...', bold=True)
-
-            imageId2PartPatientStudy = get_imageId2PartPatientStudy()
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
 
             if self.use_cxrlt2024_custom_labels:
 
@@ -846,8 +1206,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         if dicom_id in forbidden_train_dicom_ids:
                             continue
                         assert dicom_id in cxrlt2024_train_dicom_ids
-                        part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        image_paths[idx] = dicom_id_to_image_path(dicom_id)
                         phrase_idxs[idx] = neg_idxs + pos_idxs
                         phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
                                                                             np.ones(len(pos_idxs), dtype=np.int64)])
@@ -855,8 +1214,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         idx += 1
 
                     for dicom_id, (neg_idxs, pos_idxs) in cxrlt2024_dicom_id_to_pos_neg_facts['dev'].items():
-                        part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        image_paths[idx] = dicom_id_to_image_path(dicom_id)
                         phrase_idxs[idx] = neg_idxs + pos_idxs
                         phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
                                                                             np.ones(len(pos_idxs), dtype=np.int64)])
@@ -873,16 +1231,14 @@ class MIMICCXR_PhraseGroundingTrainer:
                             if dicom_id in train_dicom_ids:
                                 if dicom_id in forbidden_train_dicom_ids:
                                     continue
-                                part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                                image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                                image_paths[idx] = dicom_id_to_image_path(dicom_id)
                                 phrase_idxs[idx] = neg_idxs + pos_idxs
                                 phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
                                                                                     np.ones(len(pos_idxs), dtype=np.int64)])
                                 train_indices.append(idx)
                                 idx += 1
                             else:
-                                part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                                image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                                image_paths[idx] = dicom_id_to_image_path(dicom_id)
                                 phrase_idxs[idx] = neg_idxs + pos_idxs
                                 phrase_classification_labels[idx] = np.concatenate([np.zeros(len(neg_idxs), dtype=np.int64),
                                                                                     np.ones(len(pos_idxs), dtype=np.int64)])
@@ -918,6 +1274,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_train_workers,
                         collate_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster training
                     )
                     train_dataloaders.append(dataloader)
                 self.cxrlt2024_custom_train_dataloader = SequentialDataLoader(train_dataloaders)
@@ -946,6 +1303,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_test_workers,
                         collate_fn=cxrlt2024_image_phrase_classifier_collate_batch_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster evaluation
                     )
                     dev_dataloaders.append(dataloader)
                 self.cxrlt2024_custom_dev_dataloader = SequentialDataLoader(dev_dataloaders)
@@ -976,8 +1334,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     logger.info(f'len(val_indices) = {len(val_indices)}')
                 image_paths = []
                 for dicom_id in dicom_ids:
-                    part_id, subject_id, study_id = imageId2PartPatientStudy[dicom_id]
-                    image_paths.append(image_path_getter(part_id, subject_id, study_id, dicom_id))
+                    image_paths.append(dicom_id_to_image_path(dicom_id))
 
                 # Clean train_indices
                 len_before = len(train_indices)
@@ -1016,7 +1373,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                                                     shuffle=False,
                                                     num_workers=num_train_workers,
                                                     collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
-                                                    pin_memory=True)
+                                                    pin_memory=True,
+                                                    persistent_workers=True)
                 else:
                     logger.info('Normal sampling is enabled for CXR-LT-2024 fact classifier training')
                     self.cxrlt2024_official_train_dataset = ImageFactBasedMultilabelClassificationDataset(
@@ -1034,7 +1392,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                                                     shuffle=False,
                                                     num_workers=num_train_workers,
                                                     collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
-                                                    pin_memory=True)
+                                                    pin_memory=True,
+                                                    persistent_workers=True)
                 
                 # Create val dataset
                 if len(val_indices) > 0:
@@ -1053,7 +1412,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                                                     shuffle=False,
                                                     num_workers=num_test_workers,
                                                     collate_fn=cxrlt2024_multilabel_classifier_collate_batch_fn,
-                                                    pin_memory=True)
+                                                    pin_memory=True,
+                                                    persistent_workers=True)
 
         # Create train mimiccxr facts dataset
         if use_facts_for_train or use_facts_for_test:
@@ -1109,7 +1469,6 @@ class MIMICCXR_PhraseGroundingTrainer:
             else:
                 negative_facts = [None] * BIG_ENOGUGH
             report_idxs = [None] * BIG_ENOGUGH
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
 
             mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
 
@@ -1127,13 +1486,10 @@ class MIMICCXR_PhraseGroundingTrainer:
                 # ignore test set because it is kept hidden in the challenge
 
             idx = 0
-            for ridx, (part_id, subject_id, study_id, dicom_id_view_pairs, split) in \
-                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                    mimiccxr_metadata['subject_ids'],
-                    mimiccxr_metadata['study_ids'],
+            for ridx, (dicom_id_view_pairs, split) in tqdm(enumerate(zip(
                     mimiccxr_metadata['dicom_id_view_pos_pairs'],
                     mimiccxr_metadata['splits'])), mininterval=2):
-                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
+                for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                     if dicom_id not in dicom_ids_with_facts:
                         continue
                     
@@ -1165,7 +1521,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                             continue
                     else:
                         raise ValueError(f'Invalid split: {split}')
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                    image_paths[idx] = dicom_id_to_image_path(dicom_id)
                     if use_strong_and_weak_negatives:
                         pos_facts = dicom_id_to_pos_facts[dicom_id]
                         strong_neg_facts = dicom_id_to_strong_neg_facts[dicom_id]
@@ -1286,6 +1642,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_train_workers,
                         collate_fn=fact_grounding_collate_batch_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster training
                     )
                 else:
                     logger.info('Normal (unbalanced) training...')
@@ -1307,6 +1664,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_train_workers,
                         collate_fn=fact_grounding_collate_batch_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster training
                     )
                 self.train_fact_dataset = train_fact_dataset
                 self.train_fact_dataloader = train_fact_dataloader
@@ -1334,6 +1692,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                     num_workers=num_test_workers,
                     collate_fn=fact_grounding_collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=True, # for faster evaluation
                 )
                 self.test_fact_dataset = test_fact_dataset
                 self.test_fact_dataloader = test_fact_dataloader
@@ -1383,20 +1742,15 @@ class MIMICCXR_PhraseGroundingTrainer:
                 if use_mscxr_for_train:
                     phrase_prob_masks = [None] * BIG_ENOGUGH
 
-                image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
                 mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
                 dicom_id_2_split = get_ms_cxr_dicom_id_2_split()
 
                 idx = 0
-                for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                    tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                        mimiccxr_metadata['subject_ids'],
-                        mimiccxr_metadata['study_ids'],
-                        mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                for dicom_id_view_pairs in tqdm(mimiccxr_metadata['dicom_id_view_pos_pairs'], mininterval=2):
                     for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                         if dicom_id not in dicom_id_2_split:
                             continue
-                        image_path = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        image_path = dicom_id_to_image_path(dicom_id)
                         phrases_, bboxes_list_ = dicom_id_2_phrases_and_bboxes[dicom_id]
                         split = dicom_id_2_split[dicom_id]
                         for phrase_, bboxes_ in zip(phrases_, bboxes_list_):
@@ -1471,6 +1825,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_train_workers,
                         collate_fn=mscxr_train_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster training
                     )
                     self.mscxr_train_dataset = mscxr_train_dataset
                     self.mscxr_train_dataloader = mscxr_train_dataloader
@@ -1500,6 +1855,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_test_workers,
                         collate_fn=mscxr_val_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster evaluation
                     )
                     self.mscxr_val_dataset = mscxr_val_dataset
                     self.mscxr_val_dataloader = mscxr_val_dataloader
@@ -1529,6 +1885,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_test_workers,
                         collate_fn=mscxr_test_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster evaluation
                     )
                     self.mscxr_test_dataset = mscxr_test_dataset
                     self.mscxr_test_dataloader = mscxr_test_dataloader
@@ -1591,20 +1948,15 @@ class MIMICCXR_PhraseGroundingTrainer:
                 if use_mscxr_for_test:
                     test_indices = []
 
-                image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
                 mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
                 dicom_id_2_split = get_ms_cxr_dicom_id_2_split()
 
                 idx = 0
-                for _, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                    tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                        mimiccxr_metadata['subject_ids'],
-                        mimiccxr_metadata['study_ids'],
-                        mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
+                for dicom_id_view_pairs in tqdm(mimiccxr_metadata['dicom_id_view_pos_pairs'], mininterval=2):
                     for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
                         if dicom_id not in dicom_id_2_split:
                             continue
-                        image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
+                        image_paths[idx] = dicom_id_to_image_path(dicom_id)
                         phrases_, bboxes_list_ = dicom_id_2_phrases_and_bboxes[dicom_id]
                         phrase_idxs_ = [phrase2idx[p] for p in phrases_]
                         pos_fact_idxs_ = dicom_id_to_pos_facts[dicom_id]
@@ -1714,6 +2066,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_train_workers,
                         collate_fn=mscxr_train_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster training
                     )
                     self.mscxr_train_dataset = mscxr_train_dataset
                     self.mscxr_train_dataloader = mscxr_train_dataloader
@@ -1746,6 +2099,7 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_test_workers,
                         collate_fn=mscxr_val_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster evaluation
                     )
                     self.mscxr_val_dataset = mscxr_val_dataset
                     self.mscxr_val_dataloader = mscxr_val_dataloader
@@ -1778,215 +2132,218 @@ class MIMICCXR_PhraseGroundingTrainer:
                         num_workers=num_test_workers,
                         collate_fn=mscxr_test_dataset.collate_fn,
                         pin_memory=True,
+                        persistent_workers=True, # for faster evaluation
                     )
                     self.mscxr_test_dataset = mscxr_test_dataset
                     self.mscxr_test_dataloader = mscxr_test_dataloader
                     logger.info(f'len(self.mscxr_test_dataset) = {len(self.mscxr_test_dataset)}')
                     logger.info(f'len(self.mscxr_test_dataloader) = {len(self.mscxr_test_dataloader)}')
 
-        # Create train chest imagenome dataset
-        if use_chest_imagenome_for_train:
-            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome dataset and dataloader for training...{ANSI_RESET}')
+        
+        # Create Chest ImaGenome train/val/test dataset and dataloader
+        if use_chest_imagenome_for_train or use_chest_imagenome_for_val or use_chest_imagenome_for_test:
+            
+            # ===================================
+            # 1) Chest Imagenome Phrase Grounding
+            # ===================================
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome Phrase Grounding datasets and dataloaders...{ANSI_RESET}')
 
+            assert chest_imagenome_augmented_phrase_groundings_filepath is not None
+            assert chest_imagenome_phrase_embeddings_filepath is not None
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
             assert mask_width is not None
             assert mask_height is not None
-            assert bbox_grounding_collate_batch_fn is not None
             assert num_train_workers is not None
-            assert train_image_transform is not None
+            
+            logger.info(f'Loading Chest Imagenome augmented phrase groundings from {chest_imagenome_augmented_phrase_groundings_filepath}...')
+            augmented_data = load_pickle(chest_imagenome_augmented_phrase_groundings_filepath)
+            logger.info(f'len(augmented_data) = {len(augmented_data)}')
 
-            logger.info(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
-            tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
-            bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
-            bbox_phrases = tmp['bbox_phrases']
-            assert bbox_phrase_embeddings.shape[0] == len(bbox_phrases)
-            logger.info(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
-            logger.info(f'len(bbox_phrases) = {len(bbox_phrases)}')
-            for phrase in bbox_phrases:
-                logger.info('\t', phrase)
+            logger.info(f'Loading Chest Imagenome phrase embeddings from {chest_imagenome_phrase_embeddings_filepath}...')
+            chest_imagenome_phrase_embeddings = get_cached_pickle_file(chest_imagenome_phrase_embeddings_filepath)            
+            phrases = chest_imagenome_phrase_embeddings['phrases']
+            chest_imagenome_phrase_embeddings = chest_imagenome_phrase_embeddings['embeddings']
+            phrase_to_embedding_idx = {phrase: idx for idx, phrase in enumerate(phrases)}
+            logger.info(f'len(phrases) = {len(phrases)}')
+            logger.info(f'chest_imagenome_phrase_embeddings.shape = {chest_imagenome_phrase_embeddings.shape}')
+            assert chest_imagenome_phrase_embeddings.shape[0] == len(phrases)
 
-            BIG_ENOGUGH = 1000000
-            image_paths = [None] * BIG_ENOGUGH
-            chest_imagenome_bbox_coords = [None] * BIG_ENOGUGH
-            chest_imagenome_bbox_presence = [None] * BIG_ENOGUGH
-            phrase_grounding_masks = [None] * BIG_ENOGUGH
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
-
-            mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-            did2bboxes = load_chest_imagenome_silver_bboxes()
-            tmp = _precompute_bbox_coords_and_presence_and_mask(mask_height, mask_width, did2bboxes)
-            dicom_ids = tmp['dicom_ids']
-            did2idx = {dicom_id: idx for idx, dicom_id in enumerate(dicom_ids)}
-            bbox_coords_array = tmp['bbox_coords']
-            bbox_presence_array = tmp['bbox_presence']
-            phrase_grounding_masks_array = tmp['phrase_grounding_masks']
-            assert phrase_grounding_masks_array.dtype == np.uint8
-            assert phrase_grounding_masks_array.min() == 0
-            assert phrase_grounding_masks_array.max() == 1
-
-            idx = 0
-            for part_id, subject_id, study_id, dicom_id_view_pairs in \
-                tqdm(zip(mimiccxr_metadata['part_ids'],
-                    mimiccxr_metadata['subject_ids'],
-                    mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs']), mininterval=2):
-                for dicom_id, _ in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id not in did2idx:
-                        continue
-                    if dicom_id in forbidden_train_dicom_ids:
-                        continue
-                    if use_cxrlt2024_challenge_split:
-                        if dicom_id not in cxrlt2024_train_dicom_ids: # it has to be in the challenge's official training set
-                            continue
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    i = did2idx[dicom_id]
-                    chest_imagenome_bbox_coords[idx] = bbox_coords_array[i]
-                    chest_imagenome_bbox_presence[idx] = bbox_presence_array[i]
-                    phrase_grounding_masks[idx] = phrase_grounding_masks_array[i]
-                    idx += 1
-
-            logger.info(f'Total number of images: {idx}')
-            image_paths = image_paths[:idx]
-            chest_imagenome_bbox_coords = chest_imagenome_bbox_coords[:idx]
-            chest_imagenome_bbox_presence = chest_imagenome_bbox_presence[:idx]
-            phrase_grounding_masks = phrase_grounding_masks[:idx]
+            split_to_image_ids = get_split2imageIds()
 
             # Create dataset and dataloader for training
-            if do_visual_grounding_with_bbox_regression:
-                self.train_chest_imagenome_dataset = MIMICCXR_BBoxGroundingDataset(
-                    image_paths=image_paths,
+            if use_chest_imagenome_for_train:
+                train_dicom_ids = set(split_to_image_ids['train'])
+                logger.info(f'len(train_dicom_ids) = {len(train_dicom_ids)}')
+                train_dicom_ids -= forbidden_train_dicom_ids # remove forbidden dicom ids
+                logger.info(f'len(train_dicom_ids) after removing forbidden ids = {len(train_dicom_ids)}')
+                train_augmented_data = [item for item in augmented_data if item['dicom_id'] in train_dicom_ids]
+                logger.info(f'len(train_augmented_data) = {len(train_augmented_data)}')
+
+                self.chest_imagenome_pg_train_dataset = ChestImaGenome_PhraseGroundingDataset(
+                    augmented_data=train_augmented_data,
                     image_transform=train_image_transform,
-                    phrase_embeddings=bbox_phrase_embeddings,
-                    phrase_classification_labels=chest_imagenome_bbox_presence, # use bbox_presence as classification labels
-                    predict_bboxes=do_visual_grounding_with_bbox_regression,
-                    num_bbox_classes=CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    phrase_to_embedding_idx=phrase_to_embedding_idx,
+                    phrase_embeddings=chest_imagenome_phrase_embeddings,
                     feature_map_size=(mask_height, mask_width),
-                    bbox_coords=chest_imagenome_bbox_coords,
-                    bbox_presence=chest_imagenome_bbox_presence,
+                    for_training=True,
                     data_augmentation_enabled=data_augmentation_enabled,
-                    for_training=True)
-            else:
-                self.train_chest_imagenome_dataset = MIMICCXR_BBoxGroundingDataset(
-                    image_paths=image_paths,
+                )
+                self.chest_imagenome_pg_train_dataloader = DataLoader(
+                    self.chest_imagenome_pg_train_dataset,
+                    batch_size=max_images_per_batch,
+                    shuffle=True,
+                    num_workers=num_train_workers,
+                    collate_fn=self.chest_imagenome_pg_train_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster training
+                )
+                logger.info(f'len(self.chest_imagenome_pg_train_dataset) = {len(self.chest_imagenome_pg_train_dataset)}')
+
+            # Create dataset and dataloader for validation
+            if use_chest_imagenome_for_val:
+                val_dicom_ids = set(split_to_image_ids['validate'])
+                val_augmented_data = [item for item in augmented_data if item['dicom_id'] in val_dicom_ids]
+                logger.info(f'len(val_augmented_data) = {len(val_augmented_data)}')
+                
+                self.chest_imagenome_pg_val_dataset = ChestImaGenome_PhraseGroundingDataset(
+                    augmented_data=val_augmented_data,
+                    image_transform=test_image_transform,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    phrase_to_embedding_idx=phrase_to_embedding_idx,
+                    phrase_embeddings=chest_imagenome_phrase_embeddings,
+                    feature_map_size=(mask_height, mask_width),
+                    for_training=False,
+                    data_augmentation_enabled=False,
+                )
+                self.chest_imagenome_pg_val_dataloader = DataLoader(
+                    self.chest_imagenome_pg_val_dataset,
+                    batch_size=int(max_images_per_batch * test_batch_size_factor),
+                    shuffle=False,
+                    num_workers=num_test_workers,
+                    collate_fn=self.chest_imagenome_pg_val_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster evaluation
+                )
+                logger.info(f'len(self.chest_imagenome_pg_val_dataset) = {len(self.chest_imagenome_pg_val_dataset)}')
+            
+            # Create dataset and dataloader for testing
+            if use_chest_imagenome_for_test:
+                test_dicom_ids = set(split_to_image_ids['test'])
+                test_augmented_data = [item for item in augmented_data if item['dicom_id'] in test_dicom_ids]
+                logger.info(f'len(test_augmented_data) = {len(test_augmented_data)}')
+
+                self.chest_imagenome_pg_test_dataset = ChestImaGenome_PhraseGroundingDataset(
+                    augmented_data=test_augmented_data,
+                    image_transform=test_image_transform,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    phrase_to_embedding_idx=phrase_to_embedding_idx,
+                    phrase_embeddings=chest_imagenome_phrase_embeddings,
+                    feature_map_size=(mask_height, mask_width),
+                    for_training=False,
+                    data_augmentation_enabled=False,
+                )
+                self.chest_imagenome_pg_test_dataloader = DataLoader(
+                    self.chest_imagenome_pg_test_dataset,
+                    batch_size=int(max_images_per_batch * test_batch_size_factor),
+                    shuffle=False,
+                    num_workers=num_test_workers,
+                    collate_fn=self.chest_imagenome_pg_test_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster evaluation
+                )
+                logger.info(f'len(self.chest_imagenome_pg_test_dataset) = {len(self.chest_imagenome_pg_test_dataset)}')
+
+            # ================================================
+            # 2) Chest Imagenome Anatomical Location Grounding
+            # ================================================
+            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome Anatomical Location Grounding datasets and dataloaders...{ANSI_RESET}')
+
+            bbox_phrase_embeddings_data = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
+            train_batch_size = max(min(max_images_per_batch,
+                                       max_phrases_per_batch // len(CHEST_IMAGENOME_BBOX_NAMES)), 1) # at least 1 image per batch
+
+            # Create dataset and dataloader for training
+            if use_chest_imagenome_for_train:
+                train_dicom_ids = set(split_to_image_ids['train'])
+                logger.info(f'len(train_dicom_ids) = {len(train_dicom_ids)}')
+                train_dicom_ids -= forbidden_train_dicom_ids # remove forbidden dicom ids
+                logger.info(f'len(train_dicom_ids) after removing forbidden ids = {len(train_dicom_ids)}')
+                train_augmented_data = [item for item in augmented_data if item['dicom_id'] in train_dicom_ids]
+                logger.info(f'len(train_augmented_data) = {len(train_augmented_data)}')
+
+                self.chest_imagenome_alg_train_dataset = ChestImaGenome_AnatomicalLocationGroundingDataset(
+                    augmented_data=train_augmented_data,
                     image_transform=train_image_transform,
-                    phrase_embeddings=bbox_phrase_embeddings,
-                    phrase_classification_labels=chest_imagenome_bbox_presence, # use bbox_presence as classification labels
-                    predict_bboxes=do_visual_grounding_with_bbox_regression,
-                    phrase_grounding_masks=phrase_grounding_masks,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    bbox_phrase_embeddings_data=bbox_phrase_embeddings_data,
+                    feature_map_size=(mask_height, mask_width),
+                    for_training=True,
                     data_augmentation_enabled=data_augmentation_enabled,
-                    for_training=True)
-            batch_size = max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) # at least 1 image per batch
-            self.train_chest_imagenome_dataloader = DataLoader(
-                self.train_chest_imagenome_dataset,
-                batch_size=batch_size,
-                shuffle=True,
-                num_workers=num_train_workers,
-                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(
-                    batch, training_mode=True, do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
-                pin_memory=True,
-            )
-        
-        # Create chest imagenome test dataset and dataloader
-        if use_chest_imagenome_gold_for_test:
-            logger.info(f'{ANSI_MAGENTA_BOLD}Preparing Chest Imagenome dataset and dataloader for testing...{ANSI_RESET}')
-            assert mask_width is not None
-            assert mask_height is not None
-            assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
-            assert bbox_grounding_collate_batch_fn is not None
-            assert num_test_workers is not None
-            assert test_image_transform is not None
+                    bbox_format=bbox_format,
+                    num_processes=num_processes,
+                )
+                self.chest_imagenome_alg_train_dataloader = DataLoader(
+                    self.chest_imagenome_alg_train_dataset,
+                    batch_size=train_batch_size,
+                    shuffle=True,
+                    num_workers=num_train_workers,
+                    collate_fn=self.chest_imagenome_alg_train_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster training
+                )
+                logger.info(f'len(self.chest_imagenome_alg_train_dataset) = {len(self.chest_imagenome_alg_train_dataset)}')
 
-            _, gold_pres_indices = get_chest_imagenome_gold_bbox_coords_and_presence_sorted_indices()
+            # Create dataset and dataloader for validation
+            if use_chest_imagenome_for_val:
+                val_dicom_ids = set(split_to_image_ids['validate'])
+                val_augmented_data = [item for item in augmented_data if item['dicom_id'] in val_dicom_ids]
+                logger.info(f'len(val_augmented_data) = {len(val_augmented_data)}')
 
-            logger.info(f'Loading bbox_phrase_embeddings and bbox_phrases from {chest_imagenome_bbox_phrase_embeddings_filepath}...')
-            tmp = get_cached_pickle_file(chest_imagenome_bbox_phrase_embeddings_filepath)
-            bbox_phrase_embeddings = tmp['bbox_phrase_embeddings']
-            bbox_phrases = tmp['bbox_phrases']
-            bbox_phrase_embeddings = bbox_phrase_embeddings[gold_pres_indices] # use only gold subset
-            bbox_phrases = [bbox_phrases[i] for i in gold_pres_indices] # use only gold subset
-            assert bbox_phrase_embeddings.shape[0] == len(bbox_phrases)
-            logger.info(f'bbox_phrase_embeddings.shape = {bbox_phrase_embeddings.shape}')
-            logger.info(f'len(bbox_phrases) = {len(bbox_phrases)}')
-            for phrase in bbox_phrases:
-                logger.info('\t', phrase)
-            self.test_chest_imagenome_gold_bbox_phrases = bbox_phrases
-
-            BIG_ENOGUGH = 1000000
-            image_paths = [None] * BIG_ENOGUGH
-            chest_imagenome_bbox_coords = [None] * BIG_ENOGUGH
-            chest_imagenome_bbox_presence = [None] * BIG_ENOGUGH
-            phrase_grounding_masks = [None] * BIG_ENOGUGH
-            phrase_classification_labels = [None] * BIG_ENOGUGH
-            image_path_getter = get_image_path_getter(source_image_size_mode, verbose=True)
-
-            mimiccxr_metadata = load_mimiccxr_reports_detailed_metadata()
-            did2bboxes = load_chest_imagenome_gold_bboxes()
-
-            idx = 0
-            for rid, (part_id, subject_id, study_id, dicom_id_view_pairs) in \
-                tqdm(enumerate(zip(mimiccxr_metadata['part_ids'],
-                    mimiccxr_metadata['subject_ids'],
-                    mimiccxr_metadata['study_ids'],
-                    mimiccxr_metadata['dicom_id_view_pos_pairs'])), mininterval=2):
-                for dicom_id, view in get_dicom_id_and_orientation_list(dicom_id_view_pairs, MIMICCXR_ViewModes.ALL):
-                    if dicom_id not in did2bboxes:
-                        continue
-                    image_paths[idx] = image_path_getter(part_id, subject_id, study_id, dicom_id)
-                    bboxes = did2bboxes[dicom_id]
-                    bbox_coords = bboxes['coords']
-                    bbox_presence = bboxes['presence']
-                    bbox_coords, bbox_presence = _clean_bbox_coords_and_presence(bbox_coords, bbox_presence)
-                    bbox_coords = bbox_coords[gold_pres_indices] # use only gold subset
-                    bbox_presence = bbox_presence[gold_pres_indices] # use only gold subset
-                    chest_imagenome_bbox_coords[idx] = bbox_coords
-                    chest_imagenome_bbox_presence[idx] = bbox_presence
-                    phrase_grounding_masks[idx] = _compute_mask_from_bounding_boxes(mask_height, mask_width, bbox_coords, bbox_presence)
-                    phrase_classification_labels[idx] = bbox_presence # use bbox_presence as classification labels, use only gold subset
-                    idx += 1
-
-            logger.info(f'Total number of images: {idx}')
-            image_paths = image_paths[:idx]
-            chest_imagenome_bbox_coords = chest_imagenome_bbox_coords[:idx]
-            chest_imagenome_bbox_presence = chest_imagenome_bbox_presence[:idx]
-            phrase_grounding_masks = phrase_grounding_masks[:idx]
-
-            # Sanity check
-            for i in range(idx):
-                assert chest_imagenome_bbox_presence[i].shape[0] == chest_imagenome_bbox_coords[i].shape[0] == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,\
-                    f'chest_imagenome_bbox_presence[{i}].shape[0] = {chest_imagenome_bbox_presence[i].shape[0]}, chest_imagenome_bbox_coords[{i}].shape[0] = {chest_imagenome_bbox_coords[i].shape[0]}'
+                self.chest_imagenome_alg_val_dataset = ChestImaGenome_AnatomicalLocationGroundingDataset(
+                    augmented_data=val_augmented_data,
+                    image_transform=test_image_transform,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    bbox_phrase_embeddings_data=bbox_phrase_embeddings_data,
+                    feature_map_size=(mask_height, mask_width),
+                    for_training=False,
+                    data_augmentation_enabled=False,
+                    bbox_format=bbox_format,
+                )
+                self.chest_imagenome_alg_val_dataloader = DataLoader(
+                    self.chest_imagenome_alg_val_dataset,
+                    batch_size=int(train_batch_size * test_batch_size_factor),
+                    shuffle=False,
+                    num_workers=num_test_workers,
+                    collate_fn=self.chest_imagenome_alg_val_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster evaluation
+                )
+                logger.info(f'len(self.chest_imagenome_alg_val_dataset) = {len(self.chest_imagenome_alg_val_dataset)}')
 
             # Create dataset and dataloader for testing
-            if do_visual_grounding_with_bbox_regression:
-                self.test_chest_imagenome_gold_dataset = MIMICCXR_BBoxGroundingDataset(
-                    image_paths=image_paths,
+            if use_chest_imagenome_for_test:
+                test_dicom_ids = set(split_to_image_ids['test'])
+                test_augmented_data = [item for item in augmented_data if item['dicom_id'] in test_dicom_ids]
+                logger.info(f'len(test_augmented_data) = {len(test_augmented_data)}')
+
+                self.chest_imagenome_alg_test_dataset = ChestImaGenome_AnatomicalLocationGroundingDataset(
+                    augmented_data=test_augmented_data,
                     image_transform=test_image_transform,
-                    phrase_embeddings=bbox_phrase_embeddings,
-                    phrase_classification_labels=phrase_classification_labels,
-                    predict_bboxes=do_visual_grounding_with_bbox_regression,
-                    num_bbox_classes=CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+                    dicom_id_to_image_path=dicom_id_to_image_path,
+                    bbox_phrase_embeddings_data=bbox_phrase_embeddings_data,
                     feature_map_size=(mask_height, mask_width),
-                    bbox_coords=chest_imagenome_bbox_coords,
-                    bbox_presence=chest_imagenome_bbox_presence,
+                    for_training=False,
                     data_augmentation_enabled=False,
-                    for_training=False)
-            else:
-                self.test_chest_imagenome_gold_dataset = MIMICCXR_BBoxGroundingDataset(
-                    image_paths=image_paths,
-                    image_transform=test_image_transform,
-                    phrase_embeddings=bbox_phrase_embeddings,
-                    phrase_classification_labels=phrase_classification_labels,
-                    predict_bboxes=do_visual_grounding_with_bbox_regression,
-                    phrase_grounding_masks=phrase_grounding_masks,
-                    data_augmentation_enabled=False,
-                    for_training=False)
-            
-            batch_size = int(max(min(max_images_per_batch, max_phrases_per_batch // len(bbox_phrases)), 1) * test_batch_size_factor)
-            self.test_chest_imagenome_gold_dataloader = DataLoader(
-                self.test_chest_imagenome_gold_dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=num_test_workers,
-                collate_fn=lambda batch: bbox_grounding_collate_batch_fn(
-                    batch, training_mode=False, do_visual_grounding_with_bbox_regression=do_visual_grounding_with_bbox_regression),
-                pin_memory=True,
-            )
+                    bbox_format=bbox_format,
+                )
+                self.chest_imagenome_alg_test_dataloader = DataLoader(
+                    self.chest_imagenome_alg_test_dataset,
+                    batch_size=int(train_batch_size * test_batch_size_factor),
+                    shuffle=False,
+                    num_workers=num_test_workers,
+                    collate_fn=self.chest_imagenome_alg_test_dataset.collate_fn,
+                    pin_memory=True,
+                    persistent_workers=True, # for faster evaluation
+                )
+                logger.info(f'len(self.chest_imagenome_alg_test_dataset) = {len(self.chest_imagenome_alg_test_dataset)}')

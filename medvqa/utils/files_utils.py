@@ -100,7 +100,9 @@ def read_txt(path):
         return f.read()
 
 def make_dirs_in_filepath(filepath):
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    dirpath = os.path.dirname(filepath)
+    if dirpath:  # Only make directories if dirpath is not empty
+        os.makedirs(dirpath, exist_ok=True)
 
 def save_pickle(obj, path, add_to_cache=False):
     make_dirs_in_filepath(path)

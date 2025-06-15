@@ -279,6 +279,7 @@ class FactEmbeddingTrainer():
                 num_workers=num_workers,
                 collate_fn=triplet_collate_batch_fn,
                 pin_memory=True,
+                persistent_workers=(num_workers > 0),
             )
 
         if use_metadata_classification:
@@ -420,6 +421,7 @@ class FactEmbeddingTrainer():
                 num_workers=num_workers,
                 collate_fn=metadata_classification_collate_batch_fn,
                 pin_memory=True,
+                persistent_workers=(num_workers > 0),
             )
 
         if use_chest_imagenome_anatomical_locations_classification or use_chest_imagenome_observations_classification:
@@ -530,6 +532,7 @@ class FactEmbeddingTrainer():
                     num_workers=num_workers,
                     collate_fn=collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=(num_workers > 0),
                 ))
 
         if use_nli or use_entcon:
@@ -576,6 +579,7 @@ class FactEmbeddingTrainer():
                     num_workers=num_workers,
                     collate_fn=nli_collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=(num_workers > 0),
                 )
 
             if use_entcon:
@@ -595,6 +599,7 @@ class FactEmbeddingTrainer():
                     num_workers=num_workers,
                     collate_fn=entcon_collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=(num_workers > 0),
                 )
                 print('Example entailment/contradiction samples:')
                 for i in range(4):
@@ -761,6 +766,7 @@ class FactEmbeddingTrainer():
                     num_workers=num_workers,
                     collate_fn=nli_collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=(num_workers > 0),
                 )
 
             if use_entcon:
@@ -789,6 +795,7 @@ class FactEmbeddingTrainer():
                     num_workers=num_workers,
                     collate_fn=entcon_collate_batch_fn,
                     pin_memory=True,
+                    persistent_workers=(num_workers > 0),
                 )
                 print('Example entailment/contradiction samples:')
                 for i in range(4):
@@ -826,6 +833,7 @@ class FactEmbeddingTrainer():
                 drop_last=True,
                 num_workers=num_workers,
                 collate_fn=_collate_fn,
+                persistent_workers=(num_workers > 0),
             )
 
         if use_sentence_autoencoder:
@@ -909,6 +917,7 @@ class FactEmbeddingTrainer():
                 num_workers=num_workers,
                 collate_fn=sentence_autoencoder_collate_batch_fn,
                 pin_memory=True,
+                persistent_workers=(num_workers > 0),
             )
             self.val_sentence_autoencoder_dataset = SentenceAutoencoderDataset(_val_idxs, sentences, sentence_ids, shuffle=False, infinite=False)
             self.val_sentence_autoencoder_dataloader = DataLoader(
@@ -918,6 +927,7 @@ class FactEmbeddingTrainer():
                 num_workers=num_workers,
                 collate_fn=sentence_autoencoder_collate_batch_fn,
                 pin_memory=True,
+                persistent_workers=(num_workers > 0),
             )
 
         if use_triplets or use_triplets_val:
@@ -945,6 +955,7 @@ class FactEmbeddingTrainer():
                 num_workers=num_workers,
                 collate_fn=triplet_collate_batch_fn,
                 pin_memory=True,
+                persistent_workers=(num_workers > 0),
             )
 
     @property

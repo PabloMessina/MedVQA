@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 from pprint import pprint
+from typing import Tuple
 import torch
 import numpy as np
 from ignite.engine import Events
@@ -37,7 +38,8 @@ from medvqa.metrics.bbox.utils import (
 )
 from medvqa.metrics.classification.prc_auc import prc_auc_fn, prc_auc_score
 from medvqa.models.vision.visual_modules import RawImageEncoding
-from medvqa.utils.files_utils import get_results_folder_path, save_pickle
+from medvqa.utils.bbox_utils import convert_bboxes_into_presence_map, cxcywh_to_xyxy
+from medvqa.utils.files_utils import get_results_folder_path, load_pickle, save_pickle
 from medvqa.utils.handlers_utils import (
     attach_accumulator,
     get_log_metrics_handler,
@@ -78,6 +80,7 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.image_processing import get_image_transform
 from medvqa.utils.logging_utils import CountPrinter, print_blue, print_bold, print_magenta, print_orange, setup_logging
+from medvqa.utils.metrics_utils import calculate_cnr
 
 setup_logging()
 
@@ -1309,6 +1312,95 @@ def _evaluate_model(
         
         save_pickle(output_to_save, save_path)
         print(f'Saved metrics to {save_path}')
+
+
+def add_cnr_to_mscxr_results_pickle(
+    filepath: str, mask_resolution: Tuple[int, int] = (100, 100)
+):
+    """
+    Loads a pickle file with predictions, computes CNR (Contrast-to-Noise Ratio)
+    for each sample, calculates bootstrapped statistics, and overwrites the file with
+    the new fields.
+
+    Args:
+        filepath (str): Path to the pickle file to be processed.
+        mask_resolution (Tuple[int, int]): The (H, W) resolution for the
+            generated ground-truth binary mask.
+    """
+    print(f"Processing file: {filepath}")
+    data = load_pickle(filepath)
+
+    splits = ["train", "val", "test"]
+    for split in splits:
+        preds_gt_key = f"{split}_preds_and_gt"
+        if preds_gt_key not in data:
+            print(f"Skipping split '{split}': key '{preds_gt_key}' not found.")
+            continue
+
+        print(f"--- Calculating CNR for '{split}' split ---")
+        split_data = data[preds_gt_key]
+        gt_bboxes_list = split_data["gt_bbox_coords"]
+        # Ensure prob maps are numpy arrays for processing
+        prob_maps_list = [
+            np.array(p) for p in split_data["pred_bbox_prob_maps"]
+        ]
+        categories_list = split_data["categories"]
+        num_samples = len(gt_bboxes_list)
+
+        # 1. Compute CNR for each sample
+        cnrs = []
+        for i in range(num_samples):
+            xyxy_bboxes = [
+                cxcywh_to_xyxy(bbox) for bbox in gt_bboxes_list[i]
+            ]
+            mask = convert_bboxes_into_presence_map(
+                xyxy_bboxes, mask_resolution
+            )
+            cnr = calculate_cnr(mask, prob_maps_list[i])
+            cnrs.append(cnr)
+
+        data[preds_gt_key]["cnrs"] = cnrs
+        print(f"Added 'cnrs' field to '{preds_gt_key}'.")
+
+        # 2. Prepare for and apply stratified bootstrapping
+        print(f"--- Applying bootstrapping for '{split}' split ---")
+        category_names = sorted(list(set(categories_list)))
+        category_to_idx = {name: i for i, name in enumerate(category_names)}
+
+        class_to_indices = [[] for _ in category_names]
+        for i, category in enumerate(categories_list):
+            class_idx = category_to_idx[category]
+            class_to_indices[class_idx].append(i)
+
+        cnr_with_bootstrapping = apply_stratified_bootstrapping(
+            metric_values=np.array(cnrs),
+            class_to_indices=class_to_indices,
+            class_names=category_names,
+            metric_name="cnr",
+            num_bootstraps=500,
+            num_processes=6,
+            use_tqdm=False,
+        )
+
+        bootstrap_key = f"{split}_cnr_with_boostrapping"
+        data[bootstrap_key] = cnr_with_bootstrapping
+        print(f"Added '{bootstrap_key}' field to the root dictionary.")
+
+    # 2. Print bootstrapped statistics
+    print("\nBootstrapped CNR statistics:")
+    for split in splits:
+        bootstrap_key = f"{split}_cnr_with_boostrapping"
+        if bootstrap_key in data:
+            cnr_stats = data[bootstrap_key]
+            print(f"\n{split} split:")
+            print(f"  Mean CNR: {cnr_stats['cnr']['mean']}")
+            print(f"  Std CNR: {cnr_stats['cnr']['std']}")
+
+    # 3. Save the updated data back to the pickle file
+    print(f"\nSaving updated data back to {filepath}...")
+    save_pickle(data, filepath)
+    print("Processing complete.")
+
 
 def evaluate(
     checkpoint_folder_path,

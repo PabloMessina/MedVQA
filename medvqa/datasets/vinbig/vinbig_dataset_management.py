@@ -457,7 +457,9 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
                                              shuffle=False,
                                              num_workers=num_workers,
                                              collate_fn=lambda batch: collate_batch_fn(batch, training_mode=False),
-                                             pin_memory=True)
+                                             pin_memory=True,
+                                             persistent_workers=True)
+
             print(f'len(test_indices) = {len(test_indices)}')
     
     def _create_visual_dataset(self, indices, infinite, transform, data_augmentation_enabled):
@@ -1441,6 +1443,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 collate_fn=VinBig_PhraseClassificationDataset.collate_fn, # Use dataset's collate_fn
                 shuffle=False, # Shuffling is handled by the CompositeInfiniteDataset sampler
                 pin_memory=True, # Optimization for GPU data transfer
+                persistent_workers=self.num_train_workers > 0, # Keep workers alive for efficiency
             )
             logger.info(f"  Training classification DataLoader ready (Batch size: {self.max_images_per_batch}, Workers: {self.num_train_workers}).")
 
@@ -1465,6 +1468,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 collate_fn=VinBig_PhraseClassificationDataset.collate_fn, # Use dataset's collate_fn
                 shuffle=False, # No shuffling for validation
                 pin_memory=True,
+                persistent_workers=self.num_val_workers > 0, # Keep workers alive for efficiency
             )
             logger.info(f"  Validation classification DataLoader ready (Batch size: {val_batch_size}, Workers: {self.num_val_workers}).")
 
@@ -1577,6 +1581,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 collate_fn=self.train_dataset.collate_fn, # Use dataset's collate_fn
                 shuffle=True, # Shuffle batches each epoch (if dataset isn't infinite/doesn't shuffle internally)
                 pin_memory=True,
+                persistent_workers=self.num_train_workers > 0, # Keep workers alive for efficiency
             )
             logger.info(f"  Training grounding DataLoader ready (Batch size: {self.max_images_per_batch}, Workers: {self.num_train_workers}).")
         elif self.actual_train_indices:
@@ -1612,6 +1617,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 collate_fn=self.val_dataset.collate_fn, # Use dataset's collate_fn
                 shuffle=False, # No shuffling for validation
                 pin_memory=True,
+                persistent_workers=self.num_val_workers > 0, # Keep workers alive for efficiency
             )
             logger.info(f"  Validation grounding DataLoader ready (Batch size: {val_batch_size}, Workers: {self.num_val_workers}).")
         elif self.actual_val_indices:
