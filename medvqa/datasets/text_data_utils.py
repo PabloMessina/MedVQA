@@ -1,7 +1,12 @@
 import re
 import json
+import multiprocessing as mp
+from tqdm import tqdm
+from typing import Any, Callable, List, Optional, Tuple
 from torch.utils.data import Dataset, DataLoader
 from nltk.tokenize import sent_tokenize, wordpunct_tokenize, word_tokenize
+from Levenshtein import distance as levenshtein_distance
+
 
 class TextDataset(Dataset):
     def __init__(self, texts):
@@ -65,48 +70,197 @@ def split_text_into_chunks(text, max_length):
         chunks.append(chunk)
     return chunks
 
-def sentence_tokenize_texts_in_parallel(texts, num_workers=None):
-    import multiprocessing as mp
+
+def _parallel_map(
+    func: Callable[[Any], Any],
+    data: List[Any],
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False,
+    desc: str = ""
+) -> List[Any]:
+    """
+    Helper function to parallelize a function over a list of data with optional tqdm progress bar.
+
+    Args:
+        func: Function to apply to each element.
+        data: List of data to process.
+        num_workers: Number of worker processes to use.
+        use_tqdm: Whether to display a tqdm progress bar.
+        desc: Description for tqdm progress bar.
+
+    Returns:
+        List of results after applying func to each element in data.
+    """
     if num_workers is None:
         num_workers = mp.cpu_count()
     else:
         num_workers = min(num_workers, mp.cpu_count())
-    with mp.Pool(num_workers) as pool:
-        sentences = pool.map(sent_tokenize, texts)
-    return sentences
 
-def wordpunct_tokenize_texts_in_parallel(texts, num_workers=None):
-    import multiprocessing as mp
-    if num_workers is None:
-        num_workers = mp.cpu_count()
-    else:
-        num_workers = min(num_workers, mp.cpu_count())
     with mp.Pool(num_workers) as pool:
-        tokens = pool.map(wordpunct_tokenize, texts)
-    return tokens
+        imap = pool.imap(func, data)
+        if use_tqdm:
+            results = list(tqdm(imap, total=len(data), desc=desc))
+        else:
+            results = list(imap)
+    return results
 
-def word_tokenize_texts_in_parallel(texts, num_workers=None):
-    import multiprocessing as mp
-    if num_workers is None:
-        num_workers = mp.cpu_count()
-    else:
-        num_workers = min(num_workers, mp.cpu_count())
-    with mp.Pool(num_workers) as pool:
-        tokens = pool.map(word_tokenize, texts)
-    return tokens
 
-def _lower_tokenized_text(tokenized_text):
+def sentence_tokenize_texts_in_parallel(
+    texts: List[str],
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False
+) -> List[List[str]]:
+    """
+    Tokenize a list of texts into sentences in parallel.
+
+    Args:
+        texts: List of input strings to tokenize.
+        num_workers: Number of worker processes to use (default: all CPUs).
+        use_tqdm: Whether to display a tqdm progress bar.
+
+    Returns:
+        List of lists, where each sublist contains the sentences of a text.
+    """
+    return _parallel_map(
+        sent_tokenize, texts, num_workers, use_tqdm, desc="Sentence tokenizing"
+    )
+
+
+def wordpunct_tokenize_texts_in_parallel(
+    texts: List[str],
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False
+) -> List[List[str]]:
+    """
+    Tokenize a list of texts into word-punctuation tokens in parallel.
+
+    Args:
+        texts: List of input strings to tokenize.
+        num_workers: Number of worker processes to use (default: all CPUs).
+        use_tqdm: Whether to display a tqdm progress bar.
+
+    Returns:
+        List of lists, where each sublist contains the tokens of a text.
+    """
+    return _parallel_map(
+        wordpunct_tokenize, texts, num_workers, use_tqdm, desc="Wordpunct tokenizing"
+    )
+
+
+def word_tokenize_texts_in_parallel(
+    texts: List[str],
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False
+) -> List[List[str]]:
+    """
+    Tokenize a list of texts into words in parallel.
+
+    Args:
+        texts: List of input strings to tokenize.
+        num_workers: Number of worker processes to use (default: all CPUs).
+        use_tqdm: Whether to display a tqdm progress bar.
+
+    Returns:
+        List of lists, where each sublist contains the tokens of a text.
+    """
+    return _parallel_map(
+        word_tokenize, texts, num_workers, use_tqdm, desc="Word tokenizing"
+    )
+
+
+def _lower_tokenized_text(tokenized_text: List[str]) -> List[str]:
+    """
+    Convert all tokens in a tokenized text to lowercase.
+
+    Args:
+        tokenized_text: List of tokens.
+
+    Returns:
+        List of lowercase tokens.
+    """
     return [t.lower() for t in tokenized_text]
 
-def tokenized_texts_to_lower_in_parallel(tokenized_texts, num_workers=None):
-    import multiprocessing as mp
+
+def tokenized_texts_to_lower_in_parallel(
+    tokenized_texts: List[List[str]],
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False
+) -> List[List[str]]:
+    """
+    Convert all tokens in a list of tokenized texts to lowercase in parallel.
+
+    Args:
+        tokenized_texts: List of lists of tokens.
+        num_workers: Number of worker processes to use (default: all CPUs).
+        use_tqdm: Whether to display a tqdm progress bar.
+
+    Returns:
+        List of lists of lowercase tokens.
+    """
+    return _parallel_map(
+        _lower_tokenized_text,
+        tokenized_texts,
+        num_workers,
+        use_tqdm,
+        desc="Lowercasing tokens"
+    )
+
+
+def _levenshtein_to_query(
+    reference: str, query: str
+) -> Tuple[str, int]:
+    """
+    Compute Levenshtein distance between reference and query.
+    """
+    return reference, levenshtein_distance(query, reference)
+
+def top_k_most_similar_by_levenshtein(
+    query: str,
+    reference_texts: List[str],
+    k: int = 5,
+    num_workers: Optional[int] = None,
+    use_tqdm: bool = False
+) -> List[Tuple[str, int]]:
+    """
+    Compute Levenshtein distance in parallel between a query and a list of references,
+    and return the top k most similar (lowest distance).
+
+    Args:
+        query: The query string.
+        reference_texts: List of reference strings to compare.
+        k: Number of top similar references to return.
+        num_workers: Number of worker processes to use.
+        use_tqdm: Whether to display a tqdm progress bar.
+
+    Returns:
+        List of tuples: (reference_text, distance), sorted by ascending distance.
+    """
     if num_workers is None:
         num_workers = mp.cpu_count()
     else:
         num_workers = min(num_workers, mp.cpu_count())
+
+    # Prepare arguments for parallel processing
+    args = [(ref, query) for ref in reference_texts]
+
     with mp.Pool(num_workers) as pool:
-        lower_tokens = pool.map(_lower_tokenized_text, tokenized_texts)
-    return lower_tokens
+        if use_tqdm:
+            results = list(
+                tqdm(
+                    pool.starmap(
+                        _levenshtein_to_query, args
+                    ),
+                    total=len(reference_texts),
+                    desc="Levenshtein"
+                )
+            )
+        else:
+            results = pool.starmap(_levenshtein_to_query, args)
+
+    # Sort by distance (ascending) and return top k
+    results.sort(key=lambda x: x[1])
+    return results[:k]
+
 
 _COMMA_SEPARATED_LIST_REGEX = re.compile(r'\[\s*(\".+?\"(\s*,\s*\".+?\")*)?\s*\]?')
 
