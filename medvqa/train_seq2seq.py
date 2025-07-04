@@ -1,53 +1,31 @@
+import logging
 import  os
 import argparse
 import torch
 import json
-
 from ignite.engine import Events
 from ignite.handlers.timing import Timer
-
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import Seq2SeqTaskNames, Seq2SeqTrainer
 from medvqa.losses.optimizers import create_optimizer
 from medvqa.losses.schedulers import create_lr_scheduler
-from medvqa.models.checkpoint import load_model_state_dict
 from medvqa.models.nlp.seq2seq import Seq2SeqModel, Seq2SeqModels
-
-from medvqa.training.utils import append_metric_name
+from medvqa.training.utils import append_metric_name, run_common_boilerplate_code_and_start_training
 from medvqa.utils.common import WORKSPACE_DIR, DictWithDefault
 from medvqa.metrics import (
     attach_condition_aware_loss,
     attach_condition_aware_seq2seq_exactmatch,
-    # attach_condition_aware_seq2seq_output_logger,
     attach_loss,
 )
-from medvqa.models.checkpoint import (
-    get_checkpoint_filepath,
-    load_metadata,
-    save_metadata,
-)
-from medvqa.models.checkpoint.model_wrapper import ModelWrapper
+from medvqa.models.checkpoint import load_metadata
 from medvqa.utils.common import parsed_args_to_dict
-from medvqa.utils.handlers_utils import (
-    get_log_checkpoint_saved_handler,
-    get_log_metrics_handler,
-    get_log_iteration_handler,
-    get_log_epoch_started_handler,
-    get_lr_sch_handler,
-    get_checkpoint_handler,
-)
-from medvqa.utils.files_utils import (
-    get_checkpoint_folder_path,
-)
+from medvqa.utils.files_utils import get_checkpoint_folder_path
 from medvqa.training.seq2seq import get_engine
-from medvqa.datasets.dataloading_utils import (
-    cyclic_dataloader_generator,
-    get_seq2seq_collate_batch_fn,
-)
-from medvqa.metrics.utils import (
-    get_merge_metrics_fn,
-    get_hybrid_score_name,
-)
-from medvqa.utils.logging_utils import CountPrinter, print_blue, print_red
+from medvqa.datasets.dataloading_utils import cyclic_dataloader_generator, get_seq2seq_collate_batch_fn
+from medvqa.metrics.utils import get_merge_metrics_fn
+from medvqa.utils.logging_utils import log_title, setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -160,7 +138,6 @@ def train_model(
         save=True,
         override_lr=False,
         ):
-    count_print = CountPrinter()
     
     # Pull out some args from kwargs
     batch_size = dataloading_kwargs['batch_size']
@@ -172,33 +149,33 @@ def train_model(
 
     # device
     device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
-    count_print('device =', device)
+    logger.info(f'device = {device}')
 
     # Create model
-    count_print('Creating instance of Seq2SeqModel ...')
+    log_title(logger, 'Creating instance of Seq2SeqModel')
     model = Seq2SeqModel(**model_kwargs)
     model = model.to(device)
 
     # Optimizer
-    count_print('Defining optimizer ...')
+    log_title(logger, 'Defining optimizer')
     optimizer = create_optimizer(params=model.parameters(), **optimizer_kwargs)
 
     # Learning rate scheduler
-    count_print('Defining scheduler ...')
+    log_title(logger, 'Defining scheduler')
     lr_scheduler, update_lr_batchwise = create_lr_scheduler(optimizer=optimizer, **lr_scheduler_kwargs)
 
     # Create trainer and validator engines
-    count_print('Creating trainer and validator engines ...')
+    log_title(logger, 'Creating trainer and validator engines')
     trainer_engine = get_engine(model=model, optimizer=optimizer, device=device, 
                                 update_lr_batchwise=update_lr_batchwise, lr_scheduler=lr_scheduler, **trainer_engine_kwargs)
     validator_engine = get_engine(model=model, device=device, **validator_engine_kwargs)
     
     # Define collate_batch_fn
-    count_print('Defining collate_batch_fn ...')
+    log_title(logger, 'Defining collate_batch_fn')
     collate_batch_fn = get_seq2seq_collate_batch_fn(**collate_batch_fn_kwargs)
 
     # Create Seq2Seq trainer
-    count_print('Creating Seq2SeqTrainer ...')
+    log_title(logger, 'Creating Seq2SeqTrainer')
     seq2seq_trainer = Seq2SeqTrainer(
         batch_size=batch_size,
         collate_batch_fn=collate_batch_fn,
@@ -213,7 +190,7 @@ def train_model(
     print('seq2seq_trainer.name = ', seq2seq_trainer_name)
     
     # Attach metrics, losses, timer and events to engines    
-    count_print('Attaching metrics, losses, timer and events to engines ...')
+    log_title(logger, 'Attaching metrics, losses, timer and events to engines')
 
     train_metrics_to_merge = []
     val_metrics_to_merge = []
@@ -260,77 +237,43 @@ def train_model(
         merge_metrics_fn = get_merge_metrics_fn(train_metrics_to_merge, val_metrics_to_merge, _METRIC_WEIGHTS, 0, 1, _metric_getter)
         score_fn = lambda _ : merge_metrics_fn(validator_engine.state.metrics)
 
-    # Learning rate scheduler
-    if not update_lr_batchwise:
-        count_print('Defining learning rate scheduler handler ...')
-        lr_sch_handler = get_lr_sch_handler(lr_scheduler, lr_scheduler_kwargs['name'], score_fn=score_fn)    
-
-    # Checkpoint saving
-    model_wrapper = ModelWrapper(model, optimizer, lr_scheduler)
-    pretrained_checkpoint_folder_path = model_kwargs.get('pretrained_checkpoint_folder_path', None)    
-    if checkpoint_folder_path is None: # first time
-        if save: # only if we want to save checkpoints to disk
-            count_print('Defining checkpoint folder path ...')
-            checkpoint_folder_path = get_checkpoint_folder_path('seq2seq', seq2seq_trainer_name, model.get_name())
-            print_red('checkpoint_folder_path =', checkpoint_folder_path, bold=True)
-            save_metadata(checkpoint_folder_path,
-                        model_kwargs=model_kwargs,
-                        optimizer_kwargs=optimizer_kwargs,
-                        lr_scheduler_kwargs=lr_scheduler_kwargs,
-                        seq2seq_trainer_kwargs=seq2seq_trainer_kwargs,
-                        dataloading_kwargs=dataloading_kwargs,
-                        collate_batch_fn_kwargs=collate_batch_fn_kwargs,
-                        training_kwargs=training_kwargs,
-                        trainer_engine_kwargs=trainer_engine_kwargs,
-                        validator_engine_kwargs=validator_engine_kwargs)
-        if pretrained_checkpoint_folder_path is not None:
-            count_print(f'Loading pretrained weights ...')
-            pretrained_checkpoint_path = get_checkpoint_filepath(pretrained_checkpoint_folder_path)
-            print(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
-            checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
-            load_model_state_dict(model_wrapper.model, checkpoint['model'])
-            print('Checkpoint successfully loaded!')    
-    else: # resuming
-        checkpoint_path = get_checkpoint_filepath(checkpoint_folder_path)
-        count_print('Loading model from checkpoint ...')
-        print('checkpoint_path =', checkpoint_path)
-        model_wrapper.load_checkpoint(checkpoint_path, device, model_only=override_lr)
-    
-    if save: # only if we want to save checkpoints to disk
-        checkpoint_handler = get_checkpoint_handler(model_wrapper, checkpoint_folder_path, trainer_engine,
-                                                    epoch_offset=model_wrapper.get_epoch(),
-                                                    score_name=get_hybrid_score_name(train_metrics_to_merge, val_metrics_to_merge),
-                                                    score_fn=score_fn)
-
-    # Logging
-    count_print('Defining log_metrics_handler ...')
-
-    log_metrics_handler = get_log_metrics_handler(timer,
-                                                   metrics_to_print=metrics_to_print,
-                                                   log_to_disk=save,
-                                                   checkpoint_folder=checkpoint_folder_path)
-    log_iteration_handler = get_log_iteration_handler()
-    log_checkpoint_saved_handler = get_log_checkpoint_saved_handler(checkpoint_folder_path)
-    
-    # Attach handlers
-    trainer_engine.add_event_handler(Events.EPOCH_STARTED, get_log_epoch_started_handler(model_wrapper))
-    trainer_engine.add_event_handler(Events.EPOCH_STARTED, lambda : print(f'(1) Training stage (lr = {optimizer.param_groups[0]["lr"]:.6f}) ...'))
-    trainer_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
-    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, lambda : validator_engine.run(val_dataloader,
-                                     max_epochs=1, epoch_length=val_dataloader_size))
-    validator_engine.add_event_handler(Events.EPOCH_STARTED, lambda : print('(2) Validation stage ...'))
-    validator_engine.add_event_handler(Events.ITERATION_STARTED, log_iteration_handler)
-    validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
-    if not update_lr_batchwise:
-        validator_engine.add_event_handler(Events.EPOCH_COMPLETED, lr_sch_handler)
-    if save: # only if we want to save checkpoints to disk
-        validator_engine.add_event_handler(Events.EPOCH_COMPLETED, checkpoint_handler)
-        validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_checkpoint_saved_handler)
-
-    # Start training
-    count_print('Running trainer engine ...')
-    trainer_engine.run(train_dataloader, max_epochs=epochs, epoch_length=batches_per_epoch)
+    # Run common boilerplate code and start training
+    run_common_boilerplate_code_and_start_training(
+        update_lr_batchwise=update_lr_batchwise,
+        lr_scheduler=lr_scheduler,
+        lr_scheduler_kwargs=lr_scheduler_kwargs,
+        score_fn=score_fn,
+        model=model,
+        optimizer=optimizer,
+        save=save,
+        checkpoint_folder_path=checkpoint_folder_path,
+        build_custom_checkpoint_folder_path=lambda: get_checkpoint_folder_path('seq2seq', seq2seq_trainer_name, model.get_name()),
+        metadata_kwargs=dict(
+            model_kwargs=model_kwargs,
+            optimizer_kwargs=optimizer_kwargs,
+            lr_scheduler_kwargs=lr_scheduler_kwargs,
+            seq2seq_trainer_kwargs=seq2seq_trainer_kwargs,
+            dataloading_kwargs=dataloading_kwargs,
+            collate_batch_fn_kwargs=collate_batch_fn_kwargs,
+            training_kwargs=training_kwargs,
+            trainer_engine_kwargs=trainer_engine_kwargs,
+            validator_engine_kwargs=validator_engine_kwargs
+        ),
+        device=device,
+        trainer_engine=trainer_engine,
+        validator_engine=validator_engine,
+        train_metrics_to_merge=train_metrics_to_merge,
+        val_metrics_to_merge=val_metrics_to_merge,
+        metrics_to_print=metrics_to_print,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
+        epochs=epochs,
+        batches_per_epoch=batches_per_epoch,
+        val_dataloader_size=val_dataloader_size,
+        model_kwargs=model_kwargs,
+        override_lr=override_lr,
+        use_determinism_during_validation=False,  # We don't use determinism during validation to speed it up
+    )
 
 
 def train_from_scratch(
@@ -403,7 +346,7 @@ def train_from_scratch(
     # Other args
     save,
 ):
-    print_blue('----- Training model from scratch ------', bold=True)
+    log_title(logger, 'Training model from scratch')
 
     use_t5 = seq2seq_model_name == Seq2SeqModels.T5
     use_flan_t5 = seq2seq_model_name == Seq2SeqModels.FLAN_T5
@@ -549,7 +492,7 @@ def resume_training(
         override_lr = False,
         **unused_kwargs,
         ):
-    print_blue('----- Resuming training ------', bold=True)
+    log_title(logger, 'Resuming training')
 
     checkpoint_folder = os.path.join(WORKSPACE_DIR, checkpoint_folder)
     metadata = load_metadata(checkpoint_folder)

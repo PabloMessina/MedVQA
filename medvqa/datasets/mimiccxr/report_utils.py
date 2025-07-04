@@ -2,7 +2,7 @@ import os
 import random
 from pprint import pprint
 import re
-from medvqa.datasets.text_data_utils import (
+from medvqa.utils.text_data_utils import (
     is_s1_subsequence_of_s2,
     remove_consecutive_repeated_words_from_text,
 )
@@ -361,12 +361,12 @@ def concatenate_report_parts(background, findings, impression):
         report += part
     return report
 
-def concatenate_facts(facts):
+def concatenate_sentences(sentences):
     report = ""
-    for fact in facts:
+    for s in sentences:
         if report:
             if report[-1] != '.':
                 report += '.'
             report += ' '
-        report += fact
+        report += s
     return report

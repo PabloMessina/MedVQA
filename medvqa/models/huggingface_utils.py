@@ -5,7 +5,7 @@ import logging
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 from sklearn.cluster import KMeans
-from medvqa.datasets.text_data_utils import (
+from medvqa.utils.text_data_utils import (
     create_text_dataset_and_dataloader,
     remove_consecutive_repeated_words_from_text,
     sentence_tokenize_texts_in_parallel,
@@ -538,7 +538,7 @@ class CachedT5FactExtractor:
             tokenizer_func=lambda x: tokenizer(x, padding='longest', return_tensors='pt'),
         )
 
-        from medvqa.datasets.text_data_utils import parse_facts
+        from medvqa.utils.text_data_utils import parse_facts
 
         # Run inference
         output = [None] * len(sentences)

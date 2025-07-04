@@ -12,7 +12,7 @@ from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     load_radnli_test_data,
     load_report_nli_examples_filepaths,
 )
-from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.metrics.medical.chexbert import CheXbertLabeler
 from medvqa.utils.common import FAST_CACHE_DIR, parsed_args_to_dict

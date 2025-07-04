@@ -7,13 +7,8 @@ from medvqa.utils.files_utils import (
     get_file_path_with_hashing_if_too_long,
     save_pickle,
 )
-from medvqa.datasets.chexpert import (
-    CHEXPERT_LARGE_FAST_CACHE_DIR,
-)
-from medvqa.utils.constants import (
-    CHEXPERT_LABELS,
-    CHEXPERT_LABEL2PHRASE,
-)
+from medvqa.datasets.chexpert import CHEXPERT_LARGE_FAST_CACHE_DIR
+from medvqa.utils.constants import CHEXPERT_LABELS, CHEXPERT_LABEL2PHRASE
 from medvqa.utils.logging_utils import print_blue, print_bold
 
 def main():

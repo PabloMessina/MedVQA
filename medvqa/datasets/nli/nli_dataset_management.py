@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.dataloading_utils import INFINITE_DATASET_LENGTH, CompositeInfiniteDataset
 from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
 from medvqa.datasets.seq2seq.seq2seq_dataset_management import _compute_input2paraphrases, _prepare_nli_data, _prepare_sentence_to_facts_data
-from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.files_utils import load_jsonl
 from medvqa.utils.logging_utils import print_bold

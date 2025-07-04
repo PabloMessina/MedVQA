@@ -1,9 +1,8 @@
-# import time
 from ignite.metrics import Metric
+from pycocoevalcap.cider import cider_scorer
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
-from medvqa.utils.nlp import indexes_to_string
-from pycocoevalcap.cider import cider_scorer
+from medvqa.utils.text_data_utils import indexes_to_string
 
 class CiderD(Metric):
 

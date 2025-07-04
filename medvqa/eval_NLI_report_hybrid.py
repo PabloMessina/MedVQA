@@ -15,7 +15,7 @@ from medvqa.datasets.seq2seq.seq2seq_dataset_management import (
     load_radnli_test_data,
     load_report_nli_examples_filepaths,
 )
-from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.evaluation.plots import plot_metrics
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
 from medvqa.models.nlp.nli import EmbeddingBasedNLI

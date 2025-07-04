@@ -127,7 +127,7 @@ def parse_args(args=None):
     # Dataset and dataloading arguments
     parser.add_argument('--num_train_workers', type=int, default=0, help='Number of workers for train dataloader')
     parser.add_argument('--num_val_workers', type=int, default=0, help='Number of workers for test dataloader')
-    parser.add_argument('--device', type=str, default='GPU', help='Device to use (GPU or CPU)')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (cuda or cpu)')
     parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--use_train_data_augmentations', action='store_true',
                         help='Whether to use image augmentations for training')
@@ -252,11 +252,11 @@ def train_model(
     val_batch_size_factor,
     num_train_workers,
     num_val_workers,
-    device = 'GPU',
-    checkpoint_folder_path = None,
-    save = True,
-    override_lr = False,
-    debug = False,
+    device='cuda',
+    checkpoint_folder_path=None,
+    save=True,
+    override_lr=False,
+    debug=False,
 ):  
     # Pull out some args from kwargs
     use_mimiccxr_facts_for_train = mimiccxr_trainer_kwargs is not None and mimiccxr_trainer_kwargs.get('use_facts_for_train', False)
@@ -361,7 +361,7 @@ def train_model(
                 use_chexpert_for_train, use_iuxray_for_train, use_cxrlt2024_challenge_split]) > 0
 
     # device
-    device = torch.device('cuda' if torch.cuda.is_available() and device == 'GPU' else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() and device == 'cuda' else 'cpu')
     logger.info(f'device = {device}')
 
     # Create model
@@ -1591,7 +1591,7 @@ def resume_training(
     num_train_workers,
     num_val_workers,
     val_batch_size_factor,
-    device='GPU',
+    device='cuda',
     save=True,
     override_lr=False,
     debug=False,

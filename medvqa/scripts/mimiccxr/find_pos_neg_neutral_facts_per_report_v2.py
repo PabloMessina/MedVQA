@@ -11,7 +11,7 @@ from sklearn_extra.cluster import KMedoids
 from medvqa.datasets.dataloading_utils import embedding_based_nli_collate_batch_fn
 from medvqa.datasets.mimiccxr import load_mimiccxr_reports_detailed_metadata
 from medvqa.datasets.mimiccxr.report_utils import concatenate_report_parts
-from medvqa.datasets.text_data_utils import word_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import word_tokenize_texts_in_parallel
 from medvqa.models.checkpoint import get_checkpoint_filepath, load_metadata
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.models.nlp.nli import EmbeddingBasedNLI

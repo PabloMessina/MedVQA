@@ -6,7 +6,7 @@ import json
 import numpy as np
 from tqdm import tqdm
 
-from medvqa.datasets.text_data_utils import remove_consecutive_repeated_words_from_text
+from medvqa.utils.text_data_utils import remove_consecutive_repeated_words_from_text
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
 from medvqa.utils.logging_utils import get_console_logger, print_red
 from medvqa.datasets.mimiccxr import MIMICCXR_FAST_CACHE_DIR

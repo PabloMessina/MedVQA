@@ -1,6 +1,7 @@
 from ignite.metrics import Metric
-from medvqa.utils.nlp import indexes_to_string
 from pycocoevalcap.rouge import rouge
+
+from medvqa.utils.text_data_utils import indexes_to_string
 
 class RougeL(Metric):
 

@@ -1,7 +1,7 @@
 # from time import time
 import os
 # import subprocess
-from medvqa.datasets.text_data_utils import split_text_into_chunks
+from medvqa.utils.text_data_utils import split_text_into_chunks
 from medvqa.utils.common import CACHE_DIR
 from medvqa.utils.files_utils import get_cached_pickle_file, save_pickle
 from medvqa.utils.hashing_utils import hash_string

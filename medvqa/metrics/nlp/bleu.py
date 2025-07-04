@@ -1,9 +1,9 @@
-from ignite.metrics import Metric
-from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
-from medvqa.utils.nlp import indexes_to_string
-from pycocoevalcap.bleu import bleu_scorer
-
 import warnings
+from ignite.metrics import Metric
+from pycocoevalcap.bleu import bleu_scorer
+from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
+from medvqa.utils.text_data_utils import indexes_to_string
+
 warnings.simplefilter('ignore', UserWarning)
 
 class Bleu(Metric):

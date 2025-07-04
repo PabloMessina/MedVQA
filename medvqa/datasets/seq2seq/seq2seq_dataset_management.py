@@ -16,7 +16,7 @@ from medvqa.datasets.dataloading_utils import (
 )
 from medvqa.datasets.iuxray import get_iuxray_image_path
 from medvqa.datasets.mimiccxr import get_imageId2PartPatientStudy, get_imageId2reportId, get_mimiccxr_medium_image_path
-from medvqa.datasets.mimiccxr.report_utils import concatenate_facts, concatenate_report_parts
+from medvqa.datasets.mimiccxr.report_utils import concatenate_sentences, concatenate_report_parts
 from medvqa.datasets.nli import (
     ANLI_V1_DATASET_DIR,
     MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH,
@@ -29,7 +29,7 @@ from medvqa.datasets.interpret_cxr_challenge import (
     INTERPRET_CXR_TEST_PUBLIC_CSV_PATH,
     INTERPRET_CXR_TEST_PUBLIC_IMAGES_FOLDER_PATH,
 )
-from medvqa.datasets.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import tokenized_texts_to_lower_in_parallel, word_tokenize_texts_in_parallel
 from medvqa.utils.files_utils import get_cached_jsonl_file, load_json, load_jsonl, load_pickle
 from medvqa.utils.logging_utils import print_bold, print_magenta, print_orange
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES_WITH_TEXTUAL_GROUNDING
@@ -413,14 +413,14 @@ class _RandomizedReportToNegativeFactsDataset(Dataset):
         if mode == 1: # fully abnormal
             num_sentences = random.randint(1, self.max_num_sentences)
             sentences = random.sample(self.abnormal_sentences, num_sentences)
-            input_text = concatenate_facts(sentences)
+            input_text = concatenate_sentences(sentences)
             output_text = "{}" # empty object
         elif mode == 2: # fully normal
             num_sentences = random.randint(1, self.max_num_sentences)
             idxs = random.sample(self.normal_idxs, num_sentences)
             sentences = [self.normal_sentences[i] for i in idxs]
             negative_facts = [self.negative_facts[i] if len(self.negative_facts[i]) <= 2 else random.sample(self.negative_facts[i], 2) for i in idxs]
-            input_text = concatenate_facts(sentences)
+            input_text = concatenate_sentences(sentences)
             output_object = {s: nf for s, nf in zip(sentences, negative_facts)}
             output_text = json.dumps(output_object)
         elif mode == 3: # mixed
@@ -439,7 +439,7 @@ class _RandomizedReportToNegativeFactsDataset(Dataset):
             sentences_ = [None] * len(sentences)
             for i, r in enumerate(rank):
                 sentences_[r] = sentences[i]
-            input_text = concatenate_facts(sentences_)
+            input_text = concatenate_sentences(sentences_)
             output_object = {normal_sentences[i]: normal_negative_facts[i] for i in normal_idxs}
             output_text = json.dumps(output_object)
         else:
@@ -474,7 +474,7 @@ class _ShuffledReportToNegativeFactsDataset(Dataset):
         if random.random() < 0.7: # 70% chance of randomizing the order of sentences
             sentences = self.input_sentences[idx][:] # copy
             random.shuffle(sentences)
-            input_text = concatenate_facts(sentences)
+            input_text = concatenate_sentences(sentences)
         else:
             input_text = self.input_texts[idx]
         output_text = self.output_texts[idx]
@@ -612,7 +612,8 @@ def _prepare_reports_to_negative_facts_data(input_output_jsonl_filepaths, apply_
     return merged_train_dataset, merged_val_dataset
 
 def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_prefix=False, verbose=True,
-                                    collect_input_output_for_nli=False, medical_sentences=None):
+                                    collect_input_output_for_nli=False, medical_sentences=None,
+                                    concatenate_pairs=False):
     assert input_output_jsonl_filepaths is not None, 'input_output_jsonl_filepaths must be provided'
     sentence2facts = dict()
     if collect_input_output_for_nli:
@@ -626,9 +627,16 @@ def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_pre
                 sentence = input_output['metadata']['query']
             except KeyError:
                 sentence = input_output['metadata']['sentence'] # backward compatibility
+            output = input_output['parsed_response']
+            if isinstance(output, dict):
+                assert 'reason' in output
+                assert 'facts' in output
+                facts = output['facts']
+            else:
+                assert isinstance(output, list), f'Expected list or dict but got {type(output)}'
+                facts = output
             if collect_input_output_for_nli:
-                input_output_for_nli.append((sentence, input_output['parsed_response']))
-            facts = input_output['parsed_response']
+                input_output_for_nli.append((sentence, facts))
             sentence2facts[sentence] = facts
             if medical_sentences is not None:
                 medical_sentences.add(sentence)
@@ -636,9 +644,26 @@ def _prepare_sentence_to_facts_data(input_output_jsonl_filepaths, apply_task_pre
                     medical_sentences.add(f)
     input_texts = []
     output_texts = []
-    for sentence, facts in sentence2facts.items():
+    sentences, facts_list = zip(*sentence2facts.items())
+    for sentence, facts in zip(sentences, facts_list):
         input_texts.append(sentence)
         output_texts.append(json.dumps(facts))
+    if concatenate_pairs:
+        print_orange('Concatenating pairs of sentences for data augmentation...', bold=True)
+        # Concatenate pairs of sentences and facts as a data augmentation technique:
+        # e.g. "sentence1. sentence2" -> facts1 + facts2
+        for i in range(len(sentences)):
+            while True:
+                j = random.randint(0, len(sentences) - 1)
+                if i != j:
+                    break
+            if sentences[i][-1] == '.':
+                input_text = f'{sentences[i]} {sentences[j]}'
+            else:
+                input_text = f'{sentences[i]}. {sentences[j]}'
+            input_texts.append(input_text)
+            output_texts.append(json.dumps(facts_list[i] + facts_list[j]))
+
     if apply_task_prefix:
         input_texts = [f'S2F: {x}' for x in input_texts]
     print(f'Number of sentence2facts pairs: {len(input_texts)}')
@@ -2537,7 +2562,8 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                                                                              filter_for_t5=filter_for_t5)
 
     elif task_name == Seq2SeqTaskNames.SENTENCE_TO_FACTS:
-        input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths)
+        input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths,
+                                                                    concatenate_pairs=True)
         train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
                                                                      apply_uppercase_data_augmentation=True)
 
@@ -2660,11 +2686,12 @@ def get_seq2seq_datasets_and_dataloaders(task_name, batch_size, collate_batch_fn
                 if use_sentence2facts_for_nli:
                     input_texts, output_texts, s2f_input_output_for_nli = _prepare_sentence_to_facts_data(
                         sentence_to_facts_input_output_jsonl_filepaths, apply_task_prefix=True, collect_input_output_for_nli=True,
-                        medical_sentences=medical_sentences)
+                        medical_sentences=medical_sentences, concatenate_pairs=True)
                 else:
                     input_texts, output_texts = _prepare_sentence_to_facts_data(sentence_to_facts_input_output_jsonl_filepaths,
                                                                                 apply_task_prefix=True,
-                                                                                medical_sentences=medical_sentences)
+                                                                                medical_sentences=medical_sentences,
+                                                                                concatenate_pairs=True)
                     
                 train_dataset, val_dataset = _get_general_train_val_datasets(input_texts, output_texts, val_size, verbose=verbose,
                                                                              include_val=include_val, apply_uppercase_data_augmentation=True)

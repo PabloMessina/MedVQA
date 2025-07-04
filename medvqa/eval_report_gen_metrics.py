@@ -9,7 +9,7 @@ import time
 import pandas as pd
 from medvqa.datasets.nli import MS_CXR_T_TEMPORAL_SENTENCE_SIMILARITY_V1_CSV_PATH, RADNLI_DEV_JSONL_PATH, RADNLI_TEST_JSONL_PATH
 
-from medvqa.datasets.text_data_utils import word_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import word_tokenize_texts_in_parallel
 from medvqa.evaluation.plots import plot_correlation_matrix, plot_metric_lists
 from medvqa.evaluation.ranking_evaluation_utils import load_mimiccxr_custom_radiologist_annotations
 from medvqa.metrics.medical.chexbert import CheXbertLabeler

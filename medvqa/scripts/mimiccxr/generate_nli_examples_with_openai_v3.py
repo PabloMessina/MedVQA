@@ -6,7 +6,7 @@ import random
 import numpy as np
 from tqdm import tqdm
 from Levenshtein import distance as levenshtein_distance
-from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.utils.logging_utils import get_console_logger
 from medvqa.datasets.mimiccxr import (

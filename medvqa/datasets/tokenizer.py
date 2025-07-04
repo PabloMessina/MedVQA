@@ -1,7 +1,7 @@
 from nltk.tokenize import wordpunct_tokenize
 from tqdm import tqdm
 from medvqa.datasets.medical_tags_extractor import MedicalTagsExtractor
-from medvqa.datasets.text_data_utils import wordpunct_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import wordpunct_tokenize_texts_in_parallel
 from medvqa.utils.files_utils import (
     get_cached_json_file,
     load_pickle,

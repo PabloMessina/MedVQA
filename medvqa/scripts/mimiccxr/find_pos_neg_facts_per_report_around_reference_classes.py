@@ -7,7 +7,7 @@ import time
 from multiprocessing import Pool
 from tqdm import tqdm
 from medvqa.datasets.mimiccxr import get_path_to_report_text_dict, load_mimiccxr_reports_detailed_metadata
-from medvqa.datasets.text_data_utils import sentence_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import sentence_tokenize_texts_in_parallel
 from medvqa.models.huggingface_utils import CachedTextEmbeddingExtractor
 from medvqa.scripts.mimiccxr.find_pos_neg_neutral_facts_per_report_v2 import _compute_mlp_fact_based_nli_softmaxes_per_report
 from medvqa.utils.constants import VINBIG_LABELS

@@ -17,11 +17,13 @@ def batch_to_device(batch, device):
             batch[key] = batch[key].to(device)
     return batch
 
-def run_validation_engine(validator_engine, val_dataloader, val_dataloader_size):
+def run_validation_engine(validator_engine, val_dataloader, val_dataloader_size, use_determinism):
     logger.info('(2) Validation stage ...')
-    activate_determinism(verbose=False) # deterministic validation
+    if use_determinism:
+        activate_determinism(verbose=False) # deterministic validation
     validator_engine.run(val_dataloader, max_epochs=1, epoch_length=val_dataloader_size)
-    deactivate_determinism() # back to non-deterministic training
+    if use_determinism:
+        deactivate_determinism() # back to non-deterministic training
 
 def run_common_boilerplate_code_and_start_training(
     update_lr_batchwise,
@@ -47,6 +49,7 @@ def run_common_boilerplate_code_and_start_training(
     val_dataloader_size,
     model_kwargs,
     override_lr,
+    use_determinism_during_validation=True,
 ):
     from ignite.engine import Events
     from ignite.handlers.timing import Timer
@@ -150,7 +153,8 @@ def run_common_boilerplate_code_and_start_training(
     trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
     trainer_engine.add_event_handler(
         Events.EPOCH_COMPLETED,
-        lambda : run_validation_engine(validator_engine, val_dataloader, val_dataloader_size),
+        lambda : run_validation_engine(validator_engine, val_dataloader,
+                                       val_dataloader_size, use_determinism_during_validation),
     )
     validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
 

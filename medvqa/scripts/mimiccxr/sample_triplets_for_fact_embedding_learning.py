@@ -14,7 +14,7 @@ import nltk
 from nltk.translate.bleu_score import sentence_bleu
 
 from medvqa.datasets.mimiccxr import MIMICCXR_LARGE_FAST_CACHE_DIR
-from medvqa.datasets.text_data_utils import wordpunct_tokenize_texts_in_parallel
+from medvqa.utils.text_data_utils import wordpunct_tokenize_texts_in_parallel
 from medvqa.scripts.chest_imagenome.generate_phrase_groundings_from_scene_graphs import collect_phrase_groundings_from_padchest_gr_and_mscxr
 from medvqa.utils.logging_utils import ANSI_BLUE_BOLD, ANSI_BOLD, ANSI_RESET, setup_logging
 from medvqa.utils.files_utils import get_file_path_with_hashing_if_too_long, load_jsonl, load_pickle, save_pickle

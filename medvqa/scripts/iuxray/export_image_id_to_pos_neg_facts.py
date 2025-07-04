@@ -7,7 +7,7 @@ from medvqa.utils.files_utils import load_json, load_jsonl
 from medvqa.utils.logging_utils import print_blue
 
 def compute_positive_negative_facts_per_image(
-    manual_tags_with_slashes_to_sentences_jsol_filepath,
+    manual_tags_with_slashes_to_sentences_jsonl_filepath,
     fact_embedding_model_name,
     fact_embedding_model_checkpoint_folder_path,
     fact_embedding_batch_size,
@@ -16,8 +16,8 @@ def compute_positive_negative_facts_per_image(
     print(f'Loading IUXray reports from {IUXRAY_REPORTS_MIN_JSON_PATH}...')
     reports = load_json(IUXRAY_REPORTS_MIN_JSON_PATH)
 
-    print(f'Loading manual tags with slashes to sentences from {manual_tags_with_slashes_to_sentences_jsol_filepath}...')
-    manual_tags_with_slashes_to_sentences = load_jsonl(manual_tags_with_slashes_to_sentences_jsol_filepath)
+    print(f'Loading manual tags with slashes to sentences from {manual_tags_with_slashes_to_sentences_jsonl_filepath}...')
+    manual_tags_with_slashes_to_sentences = load_jsonl(manual_tags_with_slashes_to_sentences_jsonl_filepath)
     tag2fact = { x['metadata']['query']: x['parsed_response'] for x in manual_tags_with_slashes_to_sentences }
     print(f'Loaded {len(tag2fact)} tags.')
 
@@ -79,7 +79,7 @@ def compute_positive_negative_facts_per_image(
 
     # Save output
     filepath_strings = [
-        manual_tags_with_slashes_to_sentences_jsol_filepath,
+        manual_tags_with_slashes_to_sentences_jsonl_filepath,
         fact_embedding_model_name,
         fact_embedding_model_checkpoint_folder_path,
     ]
@@ -99,7 +99,7 @@ def compute_positive_negative_facts_per_image(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--manual_tags_with_slashes_to_sentences_jsol_filepath', type=str, required=True)
+    parser.add_argument('--manual_tags_with_slashes_to_sentences_jsonl_filepath', type=str, required=True)
     parser.add_argument('--fact_embedding_model_name', type=str, required=True)
     parser.add_argument('--fact_embedding_model_checkpoint_folder_path', type=str, required=True)
     parser.add_argument('--fact_embedding_batch_size', type=int, default=32)
@@ -108,7 +108,7 @@ def main():
 
     print_blue(f'Computing positive and negative facts per image...')
     compute_positive_negative_facts_per_image(
-        manual_tags_with_slashes_to_sentences_jsol_filepath=args.manual_tags_with_slashes_to_sentences_jsol_filepath,
+        manual_tags_with_slashes_to_sentences_jsonl_filepath=args.manual_tags_with_slashes_to_sentences_jsonl_filepath,
         fact_embedding_model_name=args.fact_embedding_model_name,
         fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
         fact_embedding_batch_size=args.fact_embedding_batch_size,
