@@ -1,0 +1,16 @@
+# Required arguments (previously CLI flags)
+dataset_name: "chest-x-det"
+max_images_per_batch: 150
+max_phrases_per_batch: 100
+max_phrases_per_image: 1
+num_workers: 3
+override_bbox_format: "cxcywh"
+use_amp: true
+# checkpoint_folder_path: # This argument must be provided via CLI
+
+# Path arguments
+chestxdet_train_json_path: /mnt/researchers/denis-parra/datasets/ChestX-Det-Dataset/ChestX_Det_train.json
+chestxdet_train_image_dir: /mnt/researchers/denis-parra/datasets/ChestX-Det-Dataset/train/
+chestxdet_test_json_path: /mnt/researchers/denis-parra/datasets/ChestX-Det-Dataset/ChestX_Det_test.json
+chestxdet_test_image_dir: /mnt/researchers/denis-parra/datasets/ChestX-Det-Dataset/test/
+chestxdet_label2embedding_path: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chestxdet/chestxdet_label2embedding(hash=498,3630461608310564345).pkl

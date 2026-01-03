@@ -1,0 +1,12 @@
+# Required arguments (previously CLI flags)
+dataset_name: "vindrcxr"
+max_images_per_batch: 100
+max_phrases_per_batch: 100
+max_phrases_per_image: 1
+num_workers: 3
+override_bbox_format: "cxcywh"
+use_amp: true
+# checkpoint_folder_path: # This argument must be provided via CLI
+
+# Path arguments
+vindrcxr_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/vinbig/label_phrase_embeddings(hash=553,547344555309613415).pkl

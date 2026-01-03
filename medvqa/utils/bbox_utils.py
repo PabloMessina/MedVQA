@@ -1,4 +1,3 @@
-import random
 from shapely.geometry import box as shapely_box
 import itertools
 import math

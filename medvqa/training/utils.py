@@ -1,3 +1,4 @@
+import os
 import torch
 import logging
 from medvqa.models.checkpoint import load_model_state_dict
@@ -6,16 +7,19 @@ from medvqa.utils.logging_utils import ANSI_RED_BOLD, ANSI_RESET, log_title
 
 logger = logging.getLogger(__name__)
 
+
 def append_metric_name(train_list, val_list, log_list, metric_name, train=True, val=True, log=True):
     if train: train_list.append(metric_name)
     if val: val_list.append(metric_name)
     if log: log_list.append(metric_name)
+
 
 def batch_to_device(batch, device):
     for key in batch:
         if isinstance(batch[key], torch.Tensor):
             batch[key] = batch[key].to(device)
     return batch
+
 
 def run_validation_engine(validator_engine, val_dataloader, val_dataloader_size, use_determinism):
     logger.info('(2) Validation stage ...')
@@ -24,6 +28,7 @@ def run_validation_engine(validator_engine, val_dataloader, val_dataloader_size,
     validator_engine.run(val_dataloader, max_epochs=1, epoch_length=val_dataloader_size)
     if use_determinism:
         deactivate_determinism() # back to non-deterministic training
+
 
 def run_common_boilerplate_code_and_start_training(
     update_lr_batchwise,
@@ -44,10 +49,11 @@ def run_common_boilerplate_code_and_start_training(
     metrics_to_print,
     train_dataloader,
     val_dataloader,
-    epochs,
+    max_epochs,
     batches_per_epoch,
     val_dataloader_size,
     model_kwargs,
+    wandb_config,
     override_lr,
     use_determinism_during_validation=True,
 ):
@@ -56,14 +62,16 @@ def run_common_boilerplate_code_and_start_training(
     from ignite.contrib.handlers.tqdm_logger import ProgressBar
     from medvqa.utils.handlers_utils import (
         get_checkpoint_handler,
-        get_log_metrics_handler,
         get_log_checkpoint_saved_handler,
         get_log_epoch_started_handler,
+        get_log_learning_rate_to_wandb_handler,
+        get_log_metrics_handler,
         get_lr_sch_handler,
     )
     from medvqa.models.checkpoint import get_checkpoint_filepath, save_metadata
     from medvqa.metrics.utils import get_hybrid_score_name
     from medvqa.models.checkpoint.model_wrapper import ModelWrapper
+    from medvqa.utils.logging_utils import initialize_wandb, finalize_wandb
     import torch
 
     # Timer
@@ -91,7 +99,7 @@ def run_common_boilerplate_code_and_start_training(
         if (pretrained_checkpoint_path or pretrained_checkpoint_folder_path or pretrained_checkpoint_folder_paths):
             if pretrained_checkpoint_folder_path:
                 pretrained_checkpoint_folder_paths = [pretrained_checkpoint_folder_path]
-            log_title(logger, f'Loading pretrained weights')
+            log_title(logger, 'Loading pretrained weights')
             if pretrained_checkpoint_path:
                 logger.info(f'pretrained_checkpoint_path = {pretrained_checkpoint_path}')
                 checkpoint = torch.load(pretrained_checkpoint_path, map_location=device)
@@ -119,25 +127,58 @@ def run_common_boilerplate_code_and_start_training(
     # Logging & Progress bar
     log_title(logger, 'Defining log_metrics_handler')
 
-    log_metrics_handler = get_log_metrics_handler(
+    # Initialize Wandb
+    wandb_run = initialize_wandb(
+        wandb_config=wandb_config,
+        full_experiment_config=metadata_kwargs,
+        experiment_dir=checkpoint_folder_path,
+        resume_if_possible=True
+    )
+
+    # 1. Create Handler for TRAINING
+    # It reads epoch from itself (engine passed to handler)
+    log_metrics_handler_train = get_log_metrics_handler(
         timer,
+        epoch_offset=model_wrapper.get_epoch(),
         metrics_to_print=metrics_to_print,
         log_to_disk=save,
         checkpoint_folder=checkpoint_folder_path,
+        split='train',
+        wandb_run=wandb_run
+    )
+
+    # 2. Create Handler for VALIDATION
+    # It reads epoch from trainer_engine (collator_engine)
+    log_metrics_handler_val = get_log_metrics_handler(
+        timer,
+        epoch_offset=model_wrapper.get_epoch(),
+        metrics_to_print=metrics_to_print,
+        log_to_disk=save,
+        checkpoint_folder=checkpoint_folder_path,
+        split='val',
+        collator_engine=trainer_engine, # <--- Key Fix: Validation reads Trainer's epoch
+        wandb_run=wandb_run
     )
 
     log_checkpoint_saved_handler = get_log_checkpoint_saved_handler(checkpoint_folder_path)
 
     # --- Progress Bar Setup ---
-    # Create progress bars
-    pbar_train = ProgressBar(persist=True, desc='Training', mininterval=2, miniters=5, ncols=70)
-    pbar_val = ProgressBar(persist=True, desc='Validation', mininterval=2, miniters=10, ncols=50)
+    # Auto-detection: Disable progress bars if running in SLURM to avoid log file spam
+    # but keep them enabled for manual runs or Jupyter notebooks.
+    show_pbar = 'SLURM_JOB_ID' not in os.environ
+    if show_pbar:
+        logger.info("Showing progress bars")
+        # Create progress bars
+        pbar_train = ProgressBar(persist=True, desc='Training', mininterval=2, miniters=5, ncols=70)
+        pbar_val = ProgressBar(persist=True, desc='Validation', mininterval=2, miniters=10, ncols=50)
 
-    # Attach progress bars to engines
-    pbar_train.attach(
-        trainer_engine, output_transform=lambda x: {'loss': x.get('loss', 0.0)}
-    )
-    pbar_val.attach(validator_engine)
+        # Attach progress bars to engines
+        pbar_train.attach(
+            trainer_engine, output_transform=lambda x: {'loss': x.get('loss', 0.0)}
+        )
+        pbar_val.attach(validator_engine)
+    else:
+        logger.info("Not showing progress bars")
     # --- End Progress Bar Setup ---
     
     # --- Attach other handlers ---
@@ -150,13 +191,15 @@ def run_common_boilerplate_code_and_start_training(
             f'(1) Training stage (lr = {optimizer.param_groups[0]["lr"]:.6f}) ...'
         ),
     )
-    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
+    if wandb_run:
+        trainer_engine.add_event_handler(Events.EPOCH_STARTED, get_log_learning_rate_to_wandb_handler(wandb_run, optimizer))
+    trainer_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler_train)
     trainer_engine.add_event_handler(
         Events.EPOCH_COMPLETED,
         lambda : run_validation_engine(validator_engine, val_dataloader,
                                        val_dataloader_size, use_determinism_during_validation),
     )
-    validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler)
+    validator_engine.add_event_handler(Events.EPOCH_COMPLETED, log_metrics_handler_val)
 
     if not update_lr_batchwise:
         validator_engine.add_event_handler(Events.EPOCH_COMPLETED, lr_sch_handler)
@@ -171,4 +214,13 @@ def run_common_boilerplate_code_and_start_training(
 
     # Start training
     log_title(logger, 'Running trainer engine')
-    trainer_engine.run(train_dataloader, max_epochs=epochs, epoch_length=batches_per_epoch)
+    last_epoch = model_wrapper.get_epoch()
+    remaining_epochs = max_epochs - last_epoch
+    if remaining_epochs > 0:
+        trainer_engine.run(train_dataloader, max_epochs=remaining_epochs, epoch_length=batches_per_epoch)
+    else:
+        logger.warning(f'{ANSI_RED_BOLD}No remaining epochs to train. Exiting...{ANSI_RESET}')
+        
+    # Finalize Wandb
+    finalize_wandb(wandb_run)
+    return

@@ -1,10 +1,8 @@
-# from dotenv import load_dotenv
-# load_dotenv()
 from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from sklearn.metrics import f1_score
 from medvqa.utils.files_utils import get_cached_pickle_file, save_pickle
-from medvqa.utils.common import CACHE_DIR, TMP_DIR
+from medvqa.settings import CACHE_DIR, TMP_DIR
 from medvqa.utils.constants import CHEXPERT_LABELS
 from medvqa.utils.hashing_utils import hash_string
 import os

@@ -1,20 +1,12 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, FAST_TMP_DIR, LARGE_FAST_CACHE_DIR
-from medvqa.utils.files_utils import get_cached_json_file
-
 import os
+from medvqa.utils.files_utils import get_cached_json_file
+from medvqa.settings import (
+    IUXRAY_DATASET_DIR,
+    IUXRAY_IMAGE_INFO_JSON_PATH,
+    IUXRAY_REPORTS_MIN_JSON_PATH,
+)
 
-IUXRAY_DATASET_DIR = os.environ['IUXRAY_DATASET_DIR']
-IUXRAY_DATASET_AUX_DIR = os.environ['IUXRAY_DATASET_AUX_DIR']
-IUXRAY_IMAGE_INFO_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'info.json')
-IUXRAY_REPORTS_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'reports/reports.json')
-IUXRAY_REPORTS_MIN_JSON_PATH = os.path.join(IUXRAY_DATASET_DIR, 'reports/reports.min.json')
-IUXRAY_CACHE_DIR = os.path.join(CACHE_DIR, 'iuxray')
-IUXRAY_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'iuxray')
-IUXRAY_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'iuxray')
-IUXRAY_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'iuxray')
+
 IUXRAY_IMAGE_ORIENTATIONS = ['lateral-left', 'lateral-right', 'frontal']
 
 _IUXRAY_IMAGE_PATH_TEMPLATE = os.path.join(IUXRAY_DATASET_DIR, 'images', '{}')

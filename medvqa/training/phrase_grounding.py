@@ -1,8 +1,7 @@
 import torch
-from torch.cuda.amp.grad_scaler import GradScaler
-from torch.cuda.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
+from torch.amp import autocast
 from ignite.engine import Engine
-from medvqa.datasets.vinbig.vinbig_dataset_management import VinBigPhraseTaskMode
 from medvqa.losses import BinaryMultiLabelClassificationLossNames, get_binary_multilabel_loss
 from medvqa.losses.custom_bbox_loss import compute_bbox_loss
 from medvqa.losses.nt_xent_loss import NTXentLoss
@@ -50,11 +49,9 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 use_global_image_phrase_contrastive_loss=False,
                 # other args
                 skip_nms=False,
-                vinbig_task_mode=None,
                 mscxr_do_grounding_only=False,
                 ):
 
-    scaler = GradScaler(enabled=use_amp)
 
     # using_yolo = using_yolov8 or using_yolov11
 
@@ -74,8 +71,15 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         # else:
         #     mimiccxr_yolov8_criterion = vinbig_yolov8_criterion = yolov8_criterion
 
+    scaler = GradScaler(enabled=use_amp)
+
     if training:
-        gradient_accumulator = GradientAccumulator(optimizer, scaler, gradient_accumulation_steps, max_grad_norm)
+        gradient_accumulator = GradientAccumulator(
+            optimizer=optimizer,
+            scaler=scaler,
+            num_accumulation_steps=gradient_accumulation_steps,
+            max_grad_norm=max_grad_norm,
+        )
 
     # if use_vinbig_with_modified_labels:
     #     vinbig_num_bbox_classes = len(VINBIG_BBOX_NAMES__MODIFIED) # 23
@@ -108,7 +112,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 
                 if training or skip_nms:
@@ -206,7 +210,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
                 if use_contrastive_phrase_grounding_loss:
@@ -312,10 +316,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
                 'phrase_embeddings': phrase_embeddings,
                 'only_compute_features': True,
                 'compute_global_alignment': use_global_image_phrase_contrastive_loss,
+                'apply_nms': not training and not skip_nms, # apply NMS during validation/testing
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention'] # (batch_size, num_facts, HxW)
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
@@ -395,7 +400,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             output['loss'] = batch_loss.detach()
         
         output['phrase_classifier_loss'] = phrase_classifier_loss.detach()
-        output['classifier_sigmoids'] = phrase_classifier_logits.detach().sigmoid()
+        output['pred_probs'] = phrase_classifier_logits.detach().sigmoid()
         output['gt_labels'] = phrase_classification_labels.detach()
         if use_contrastive_phrase_grounding_loss:
             output['contrastive_phrase_grounding_loss'] = contrastive_phrase_grounding_loss.detach()
@@ -436,7 +441,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 
@@ -496,7 +501,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 
                 visual_grounding_confidence_logits = model_output['visual_grounding_confidence_logits'] # (B, 1, num_regions, 1)
@@ -557,7 +562,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 
                 if training or skip_nms:
@@ -634,15 +639,11 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         return output
     
 
-    def step_fn__vinbig(batch):
-        if vinbig_task_mode == VinBigPhraseTaskMode.CLASSIFICATION.value:
-            raise NotImplementedError('Classification only mode is not implemented')
-        elif vinbig_task_mode == VinBigPhraseTaskMode.GROUNDING.value:
-            return _step_fn__grounding_only__one_phrase_per_image(batch)
-        elif vinbig_task_mode == VinBigPhraseTaskMode.CLASSIFICATION_AND_GROUNDING.value:
-            raise NotImplementedError('Classification and grounding mode is not implemented')
-        else:
-            raise ValueError(f'Unknown vinbig_task_mode: {vinbig_task_mode}')
+    def step_fn__vinbig_pg(batch):
+        return _step_fn__grounding_only__one_phrase_per_image(batch)
+        
+    def step_fn__vinbig_cl(batch):
+        return _step_fn__standard_multilabel_classification(batch)
         
     def step_fn__padchest_grounding(batch):
         return _step_fn__grounding_only__one_phrase_per_image(batch)
@@ -685,7 +686,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
     #             model_kwargs['use_first_n_facts_for_detection'] = vinbig_num_bbox_classes # only 22 out of 28 classes have bounding boxes
 
     #         # Forward pass
-    #         with autocast(enabled=use_amp): # automatic mixed precision
+    #         with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
     #             model_output = model(**model_kwargs)
     #             if using_yolo:
     #                 phrase_classifier_logits = model_output['classification_logits']
@@ -876,7 +877,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
                 
@@ -972,7 +973,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits']
@@ -1062,7 +1063,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
@@ -1176,7 +1177,7 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
             }
 
             # Forward pass
-            with autocast(enabled=use_amp): # automatic mixed precision
+            with autocast(device_type=device.type, enabled=use_amp): # automatic mixed precision
                 model_output = model(**model_kwargs)
                 sigmoid_attention = model_output['sigmoid_attention']
                 phrase_classifier_logits = model_output['phrase_classifier_logits'] # (batch_size, num_facts)
@@ -1256,7 +1257,8 @@ def get_step_fn(model, optimizer, training, validating, testing, device,
         'mscxr': step_fn__mscxr_grounding, # MS-CXR phrase grounding
         'chest-imagenome-pg': step_fn__chest_imagenome_phrase_grounding, # Chest Imagenome phrase grounding
         'chest-imagenome-alg': step_fn__chest_imagenome_anatomical_location_grounding, # Chest Imagenome anatomical location grounding
-        'vinbig': step_fn__vinbig, # vinbig bbox grounding
+        'vinbig-pg': step_fn__vinbig_pg, # vinbig phrase grounding
+        'vinbig-cl': step_fn__vinbig_cl, # vinbig classification
         'padchest_gr': step_fn__padchest_grounding, # padchest grounding
         'cl': step_fn__chexlocalize, # chexlocalize
         'chxp': step_fn__chexpert_phrase_grounding, # chexpert phrase grounding
@@ -1297,7 +1299,6 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                use_global_image_phrase_contrastive_loss=False,
                nt_xent_temperature=0.1,
                skip_nms=False,
-               vinbig_task_mode=None,
                mscxr_do_grounding_only=False,
                **unused_kwargs,
             ):
@@ -1410,7 +1411,6 @@ def get_engine(model, device, gradient_accumulation_steps=1,
                             use_contrastive_phrase_grounding_loss=use_contrastive_phrase_grounding_loss,
                             use_global_image_phrase_contrastive_loss=use_global_image_phrase_contrastive_loss,
                             skip_nms=skip_nms,
-                            vinbig_task_mode=vinbig_task_mode,
                             mscxr_do_grounding_only=mscxr_do_grounding_only,
                         )
     engine = Engine(step_fn)

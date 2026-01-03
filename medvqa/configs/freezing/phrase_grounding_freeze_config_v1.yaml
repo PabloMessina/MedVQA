@@ -1,0 +1,5 @@
+freeze_all: true
+unfreeze_modules:
+  - "classifier_attention_hidden_layer"
+  - "classifier_attention_final_layer"
+  - "classifier_mlp"

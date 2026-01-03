@@ -6,7 +6,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 
 from medvqa.datasets.chexlocalize import CHEXLOCALIZE_IMAGE_DIR_512X512
-from medvqa.datasets.chexpert import (
+from medvqa.settings import (
     CHEXPERT_DATASET_DIR,
     CHEXPERT_TRAIN_VAL_CSV_PATH,
     CHEXPERT_TEST_LABELS_CSV_PATH,

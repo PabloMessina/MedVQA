@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from nltk.tokenize import sent_tokenize, wordpunct_tokenize, word_tokenize
 from Levenshtein import distance as levenshtein_distance
 
-from medvqa.utils.common import LARGE_FAST_CACHE_DIR
+from medvqa.settings import CACHE_DIR
 from medvqa.utils.files_utils import load_pickle, save_pickle
 
 
@@ -422,7 +422,7 @@ def sort_sentences(
         len_sum = sum(len(x) for x in sentences)
         suffix = "_increasing" if increasing else ""
         save_path = os.path.join(
-            LARGE_FAST_CACHE_DIR,
+            CACHE_DIR,
             f"sorted_sentences({len(sentences)},{len_sum},{sort_indices}){suffix}.pkl",
         )
         if os.path.exists(save_path):

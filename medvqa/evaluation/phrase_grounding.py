@@ -5,8 +5,8 @@ from medvqa.utils.files_utils import get_cached_pickle_file
 _empty_dict = {}
 
 def get_phrase_grounding_classification_metrics_dataframe(metrics_paths, metric_prefix, class_names, class_name2short):
-    assert type(metrics_paths) == list or type(metrics_paths) == str
-    if type(metrics_paths) is str:
+    assert isinstance(metrics_paths, list) or isinstance(metrics_paths, str)
+    if isinstance(metrics_paths, str):
         metrics_paths  = [metrics_paths]
 
     metric_names = [

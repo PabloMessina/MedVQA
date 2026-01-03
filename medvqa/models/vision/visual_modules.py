@@ -3,7 +3,6 @@ import copy
 import torch
 import torch.nn as nn
 import torchvision.models as models
-import torchxrayvision as xrv
 from medvqa.datasets.chest_imagenome import (
     CHEST_IMAGENOME_ANAXNET_NUM_BBOX_CLASSES,
     CHEST_IMAGENOME_BBOX_NAMES,
@@ -14,7 +13,6 @@ from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_ORIENTATIONS
 from medvqa.datasets.iuxray import IUXRAY_IMAGE_ORIENTATIONS
 from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES__MODIFIED, VINBIG_LABELS__MODIFIED
 from medvqa.models.checkpoint import load_model_state_dict
-from medvqa.models.common import freeze_parameters
 from medvqa.models.mlp import MLP
 from medvqa.models.vision.bbox_regression import (
     BBoxRegressorVersion,
@@ -42,9 +40,8 @@ from medvqa.utils.constants import (
     VINBIG_BBOX_NAMES,
     VINBIG_LABELS,
 )
-from ultralytics.utils.ops import non_max_suppression
+from ultralytics.utils.nms import non_max_suppression
 from ultralytics.nn.tasks import DetectionModel
-import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -66,6 +63,7 @@ class RawImageEncoding:
     CXRMATE_RRG24_UNIFORMER__HUGGINGFACE = 'cxrmate-rrg24-uniformer-huggingface'
     UNIFORMER_BASE_TL_384__HUGGINGFACE = 'uniformer-base-tl-384-huggingface'
     SIGLIP_HUGGINGFACE = 'siglip-huggingface'
+    MEDSIGLIP_448_HUGGINGFACE = 'medsiglip-448-huggingface'
     DETECTRON2 = 'detectron2'
     YOLOV8 = 'yolov8'
     YOLOV11_FOR_DET_MLC = 'yolov11-for-det-mlc'
@@ -95,6 +93,7 @@ def comes_with_positional_encoding(raw_image_encoding):
         RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
         RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
         RawImageEncoding.SIGLIP_HUGGINGFACE,
+        RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE,
         RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
     ]
 
@@ -121,6 +120,9 @@ def inject_mean_std_for_image_normalization(kwargs, raw_image_encoding):
     ]:
         kwargs['image_mean'] = [0.0, 0.0, 0.0]
         kwargs['image_std'] = [1.0, 1.0, 1.0]
+    elif raw_image_encoding == RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE:
+        kwargs['image_mean'] = [0.5, 0.5, 0.5]
+        kwargs['image_std'] = [0.5, 0.5, 0.5]
     else:
         raise ValueError(f'Unknown raw_image_encoding: {raw_image_encoding}')
 
@@ -132,7 +134,6 @@ class MultiPurposeVisualModule(nn.Module):
                 visual_input_mode=VisualInputMode.RAW_IMAGE,
                 raw_image_encoding=RawImageEncoding.DENSENET_121,
                 image_local_feat_size=None,
-                freeze_image_encoder=False,
                 only_compute_features=False,
                 image_encoder_pretrained_weights_path=None,
                 imagenet_pretrained=False,
@@ -228,7 +229,6 @@ class MultiPurposeVisualModule(nn.Module):
         self.n_chest_imagenome_bboxes = n_chest_imagenome_bboxes
         self.image_encoder_pretrained_weights_path = image_encoder_pretrained_weights_path
         self.imagenet_pretrained = imagenet_pretrained
-        self.freeze_image_encoder = freeze_image_encoder
         self.only_compute_features = only_compute_features
         self.image_local_feat_size = image_local_feat_size
         self.visual_features_mlp_in_dim = visual_features_mlp_in_dim
@@ -282,6 +282,7 @@ class MultiPurposeVisualModule(nn.Module):
             RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE,
             RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE,
             RawImageEncoding.SIGLIP_HUGGINGFACE,
+            RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE,
             RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE,
         ]:
             assert huggingface_model_name is not None
@@ -339,7 +340,7 @@ class MultiPurposeVisualModule(nn.Module):
             else:
                 model_name = None
             self._init_raw_image_encoder(self.image_encoder_pretrained_weights_path,
-                                         self.imagenet_pretrained, model_name, self.freeze_image_encoder,
+                                         self.imagenet_pretrained, model_name,
                                          self.image_encoder_dropout_p)
             if not skip_local_global:
                 global_feat_size += self._get_raw_image_encoder_global_feat_size(self.image_local_feat_size)
@@ -347,7 +348,7 @@ class MultiPurposeVisualModule(nn.Module):
         if does_include_visual_features(self.visual_input_mode):
             self._init_mlp_visual_feat_encoder(
                 self.visual_features_mlp_in_dim, self.visual_features_mlp_out_dim,
-                 self.visual_features_mlp_hidden_dims, self.freeze_image_encoder)
+                 self.visual_features_mlp_hidden_dims)
             global_feat_size += self.visual_features_mlp_out_dim
         
         if not skip_local_global:
@@ -390,9 +391,11 @@ class MultiPurposeVisualModule(nn.Module):
             return HUGGINGFACE_RAD_DINO_GLOBAL_FEAT_SIZE
         if self.raw_image_encoding == RawImageEncoding.SIGLIP_HUGGINGFACE:
             return HUGGINGFACE_SIGLIP_GLOBAL_FEAT_SIZE[self.huggingface_model_name]
+        if self.raw_image_encoding == RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE:
+            return HUGGINGFACE_MEDSIGLIP_448_GLOBAL_FEAT_SIZE
         raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
     
-    def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name, freeze_image_encoder,
+    def _init_raw_image_encoder(self, pretrained_weights_path, imagenet_pretrained, model_name,
                                 dropout_p=0):
         logger.info(f'  Initializing raw_image_encoder: {self.raw_image_encoding}')
         ignore_name_regex = None
@@ -429,7 +432,6 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_vitmodel_feature_extractor(model_name, pretrained_weights_path)
-            ignore_name_regex = HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX
         elif self.raw_image_encoding == RawImageEncoding.DETECTRON2:
             if dropout_p:
                 logger.warning('dropout_p is not implemented yet for this model')
@@ -543,7 +545,8 @@ class MultiPurposeVisualModule(nn.Module):
         elif self.raw_image_encoding == RawImageEncoding.CXRMATE_RRG24_UNIFORMER__HUGGINGFACE:
             if dropout_p:
                 logger.warning('dropout_p is not implemented yet for this model')
-            self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(model_name, pretrained_weights_path)
+            self.raw_image_encoder = create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(
+                model_name, pretrained_weights_path, new_image_size=self.image_size)
         elif self.raw_image_encoding == RawImageEncoding.UNIFORMER_BASE_TL_384__HUGGINGFACE:
             if dropout_p:
                 logger.warning('dropout_p is not implemented yet for this model')
@@ -556,13 +559,15 @@ class MultiPurposeVisualModule(nn.Module):
             if dropout_p:
                 logger.warning('dropout_p is not implemented yet for this model')
             self.raw_image_encoder = create_huggingface_medsam_feature_extractor(model_name, pretrained_weights_path)
+        elif self.raw_image_encoding == RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE:
+            if dropout_p:
+                logger.warning('dropout_p is not implemented yet for this model')
+            self.raw_image_encoder = create_huggingface_medsiglip_448_feature_extractor(model_name, pretrained_weights_path)
         else: raise ValueError(f'Unknown raw_image_encoding: {self.raw_image_encoding}')
-        if freeze_image_encoder: freeze_parameters(self.raw_image_encoder, ignore_name_regex)
 
-    def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims, freeze_image_encoder):
+    def _init_mlp_visual_feat_encoder(self, mlp_in_dim, mlp_out_dim, mlp_hidden_dims):
         logger.info(f'  Initializing mlp_visual_feat_encoder: {mlp_in_dim} -> {mlp_out_dim}, hidden_dims={mlp_hidden_dims}')
         self.mlp_vf_encoder = MLP(in_dim=mlp_in_dim, out_dim=mlp_out_dim, hidden_dims=mlp_hidden_dims)
-        if freeze_image_encoder: freeze_parameters(self.mlp_vf_encoder)
 
     def _init_auxiliary_tasks(self):
         
@@ -831,6 +836,8 @@ class MultiPurposeVisualModule(nn.Module):
             img_str = HUGGINGFACE_SIGLIP_NAMES_2_SHORT[self.huggingface_model_name]
         elif self.raw_image_encoding == RawImageEncoding.MEDSAM_FEATURE_EXTRACTOR__HUGGINGFACE:
             img_str = HUGGINGFACE_MEDSAM_NAMES_2_SHORT[self.huggingface_model_name]
+        elif self.raw_image_encoding == RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE:
+            img_str = HUGGINGFACE_MEDSIGLIP_448_NAMES_2_SHORT[self.huggingface_model_name]
         else: assert False, f'Unknown raw image encoding {self.raw_image_encoding}'
         vf_str = 'mlp(vf)'
         if self.visual_input_mode == VisualInputMode.HYBRID:
@@ -1032,6 +1039,12 @@ class MultiPurposeVisualModule(nn.Module):
                     global_max_pool = local_feat_NxRxC.max(1)[0]
                     global_list.append(global_avg_pool)
                     global_list.append(global_max_pool)
+
+            elif self.raw_image_encoding == RawImageEncoding.MEDSIGLIP_448_HUGGINGFACE:
+                tmp = self.raw_image_encoder(pixel_values=raw_images)
+                global_feat, local_feat_NxRxC = tmp.pooler_output, tmp.last_hidden_state
+                if compute_global_features:
+                    global_list.append(global_feat)
 
             elif self.raw_image_encoding == RawImageEncoding.YOLOV8:
                 batch_size = raw_images.size(0)
@@ -1283,13 +1296,11 @@ class DensenetVisualModule(nn.Module):
                 merge_findings=False,
                 n_findings=False,
                 chexpert_indices=None,
-                freeze_cnn=False,
                 **unused_kwargs,
         ):
         super().__init__()
         self.name = 'densenet121'
         self.raw_image_encoder = create_densenet121_feature_extractor(densenet_pretrained_weights_path, pretrained)
-        if freeze_cnn: freeze_parameters(self.raw_image_encoder)
 
         self.global_feat_size = 2 * image_local_feat_size        
         self.merge_findings = merge_findings
@@ -1410,17 +1421,20 @@ def create_densenet121_feature_extractor(
     return densenet.features
 
 def create_torchxrayvision_densenet121_feature_extractor(weights_name):
+    import torchxrayvision as xrv
     logger.info('create_torchxrayvision_densenet121_feature_extractor()')
     model = xrv.models.DenseNet(weights=weights_name)
     return model
 
 def create_torchxrayvision_resnet_feature_extractor(weights_name):
+    import torchxrayvision as xrv
     logger.info('create_torchxrayvision_resnet_feature_extractor()')
     model = xrv.models.ResNet(weights=weights_name)
     model.forward = _torchxrayvision_resnet_modified_forward.__get__(model) # HACK: monkey patching
     return model
 
 def create_torchxrayvision_resnet_autoencoder_feature_extractor(weights_name):
+    import torchxrayvision as xrv
     logger.info('create_torchxrayvision_resnet_autoencoder_feature_extractor()')
     model = xrv.autoencoders.ResNetAE(weights=weights_name)
     return model
@@ -1534,6 +1548,10 @@ HUGGINGFACE_MEDSAM_NAMES_2_SHORT = {
     'wanglab/medsam-vit-base': 'wanglab/medsam-vit-base',
 }
 
+HUGGINGFACE_MEDSIGLIP_448_NAMES_2_SHORT = {
+    'google/medsiglip-448': 'google/medsiglip-448',
+}
+
 DETECTRON2_YAML_2_SHORT = {
     'COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml': 'D2-CocoDet-faster-rcnn-R-50-FPN-3x',
     'COCO-Detection/retinanet_R_50_FPN_1x.yaml': 'D2-CocoDet-retinanet-R-50-FPN-1x',
@@ -1599,9 +1617,7 @@ HUGGINGFACE_SIGLIP_GLOBAL_FEAT_SIZE = {
     'google/siglip-base-patch16-224': 768,
     'google/siglip-so400m-patch14-384': 1152,
 }
-
-
-HUGGINGFACE_VITMODEL_UNFROZEN_PARAM_NAMES_REGEX = re.compile(r'\bpooler\b')
+HUGGINGFACE_MEDSIGLIP_448_GLOBAL_FEAT_SIZE = 1152
 
 def _load_pretrained_model_state_dict(model, pretrained_weights_path, key_adaptation_fn=None):
     data = torch.load(pretrained_weights_path)
@@ -1658,13 +1674,65 @@ def create_huggingface_rad_dino_feature_extractor(rad_dino_version, pretrained_w
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 
-def create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(version, pretrained_weights_path):
+def create_huggingface_cxrmate_rrg24_uniformer_feature_extractor(
+    version, pretrained_weights_path, new_image_size: int = None
+):
+    """
+    Creates the UniFormer feature extractor from the Hugging Face model hub.
+
+    This function can optionally adapt the model to accept a different input
+    image resolution than the one it was trained on (384x384).
+
+    Args:
+        version (str): The Hugging Face model identifier (e.g., 'aehrc/cxrmate-rrg24').
+        pretrained_weights_path (str): Path to a local state dict file to load.
+        new_image_size (int, optional): The new square image resolution (e.g., 448).
+            If None, the model remains configured for its original 384x384 input.
+            Defaults to None.
+
+    Returns:
+        torch.nn.Module: The UniFormer model, ready for use.
+    """
     from transformers import AutoModel
-    assert version in _HUGGINGFACE_CXRMATE_RRG24_UNIFORMER_VERSIONS, f'Unknown Huggingface CxRMate RRG24 Uniformer version {version}'
+    from timm.models.layers import to_2tuple
+
+    # Load the full model from Hugging Face, allowing custom code
     model = AutoModel.from_pretrained(version, trust_remote_code=True)
-    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
-    model = model.encoder.uniformer # HACK to get the uniformer from the model
-    return model
+
+    # Optionally load a local checkpoint
+    if pretrained_weights_path:
+        _load_pretrained_model_state_dict(model, pretrained_weights_path)
+
+    # Extract the core UniFormer module
+    uniformer_model = model.encoder.uniformer
+
+    # If a new image size is specified, adapt the model
+    if new_image_size is not None:
+        print(f"Adapting UniFormer model to accept input size: {new_image_size}x{new_image_size}")
+        new_image_size_tuple = to_2tuple(new_image_size)
+
+        # Stage 1
+        uniformer_model.patch_embed1.image_size = new_image_size_tuple
+        ps1 = uniformer_model.patch_embed1.patch_size
+        h, w = (
+            new_image_size_tuple[0] // ps1[0],
+            new_image_size_tuple[1] // ps1[1],
+        )
+
+        # Stage 2
+        uniformer_model.patch_embed2.image_size = (h, w)
+        ps2 = uniformer_model.patch_embed2.patch_size
+        h, w = h // ps2[0], w // ps2[1]
+
+        # Stage 3
+        uniformer_model.patch_embed3.image_size = (h, w)
+        ps3 = uniformer_model.patch_embed3.patch_size
+        h, w = h // ps3[0], w // ps3[1]
+
+        # Stage 4
+        uniformer_model.patch_embed4.image_size = (h, w)
+
+    return uniformer_model
 
 def create_uniformer_base_tl_384_feature_extractor(version, pretrained_weights_path):
     from transformers import AutoModel
@@ -1685,6 +1753,14 @@ def create_huggingface_medsam_feature_extractor(version, pretrained_weights_path
     from transformers import SamModel
     model = SamModel.from_pretrained(version)
     model = model.vision_encoder # HACK to get the vision encoder from the model
+    if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
+    return model
+
+def create_huggingface_medsiglip_448_feature_extractor(version, pretrained_weights_path):
+    from medvqa.settings import HF_TOKEN
+    from transformers import AutoModel
+    model = AutoModel.from_pretrained(version, token=HF_TOKEN)
+    model = model.vision_model # HACK to get the vision model from the model
     if pretrained_weights_path: _load_pretrained_model_state_dict(model, pretrained_weights_path)
     return model
 

@@ -1,21 +1,15 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-from medvqa.utils.common import LARGE_FAST_CACHE_DIR
 from medvqa.utils.files_utils import load_json
 import os
 import pandas as pd
 import numpy as np
 from PIL import Image, ImageDraw
-
-CHEXLOCALIZE_DATA_DIR = os.environ['CHEXLOCALIZE_DATA_DIR']
-CHEXLOCALIZE_WORKSPACE_DIR = os.environ['CHEXLOCALIZE_WORKSPACE_DIR']
-CHEXLOCALIZE_CHEXPERT_TEST_LABELS_CSV_PATH = os.environ['CHEXLOCALIZE_CHEXPERT_TEST_LABELS_CSV_PATH']
-CHEXLOCALIZE_CHEXPERT_VAL_LABELS_CSV_PATH = os.environ['CHEXLOCALIZE_CHEXPERT_VAL_LABELS_CSV_PATH']
-CHEXLOCALIZE_TEST_GT_ANNOTATIONS_JSON_PATH = os.environ['CHEXLOCALIZE_TEST_GT_ANNOTATIONS_JSON_PATH']
-CHEXLOCALIZE_VAL_GT_ANNOTATIONS_JSON_PATH = os.environ['CHEXLOCALIZE_VAL_GT_ANNOTATIONS_JSON_PATH']
-CHEXLOCALIZE_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'chexlocalize')
-CHEXLOCALIZE_IMAGE_DIR_512X512 = os.path.join(CHEXLOCALIZE_WORKSPACE_DIR, 'CheXpert_512x512')
+from medvqa.settings import (
+    CHEXLOCALIZE_IMAGE_DIR_512X512,
+    CHEXLOCALIZE_CHEXPERT_TEST_LABELS_CSV_PATH,
+    CHEXLOCALIZE_CHEXPERT_VAL_LABELS_CSV_PATH,
+    CHEXLOCALIZE_TEST_GT_ANNOTATIONS_JSON_PATH,
+    CHEXLOCALIZE_VAL_GT_ANNOTATIONS_JSON_PATH,
+)
 
 CHEXLOCALIZE_CLASS_NAMES = ["Enlarged Cardiomediastinum", "Cardiomegaly", "Lung Lesion", "Airspace Opacity",
                             "Edema", "Consolidation", "Atelectasis", "Pneumothorax", "Pleural Effusion", "Support Devices"]

@@ -68,6 +68,7 @@ def _get_balancedly_distributed_class_indices(class_weights):
         indices = [i2i[i] for i in indices]
     return np.array(indices, dtype=int)
 
+
 class CompositeDataset(Dataset):
     def __init__(self, datasets):
         self.datasets = datasets

@@ -1,0 +1,70 @@
+# Experiment configuration
+experiment_name: fgvlm_medsiglip_pg_chestimagenome_cnr
+epochs: 200
+batches_per_epoch: 400
+max_images_per_batch: 15
+max_phrases_per_batch: 1000
+max_phrases_per_image: 45
+val_batch_size_factor: 4
+use_train_data_augmentations: true
+num_train_workers: 3
+num_val_workers: 2
+gradient_accumulation_steps: 4
+optimizer_name: adamw
+scheduler: exp-warmup+decay+cyclicdecay
+lr: 1e-6
+warmup_decay_and_cyclic_decay_args: 1e-6,3,8e-5,5,1e-6,8e-5,5,1e-6
+use_amp: true
+use_cnr_metric: true
+
+# Phrase Grounding Model configuration
+raw_image_encoding: medsiglip-448-huggingface
+huggingface_model_name: google/medsiglip-448
+image_size:
+- 448
+- 448
+image_local_feat_size: 1152
+num_regions: 1024
+regions_width: 32
+regions_height: 32
+phrase_embedding_size: 128
+phrase_grounding_mode: adaptive_film_based_pooling_mlp_with_bbox_regression
+phrase_mlp_hidden_dims:
+- 256
+- 128
+visual_grounding_hidden_size: 256
+bbox_format: cxcywh
+predict_relative_bbox_coords: true
+skip_nms: true
+
+# Losses configuration
+binary_multilabel_classif_loss_name: focal+bce+npbbce
+do_visual_grounding_with_bbox_regression: true
+
+# Chest Imagenome dataset configuration
+mimiccxr_exclude_noisy_images: true
+use_chest_imagenome_for_train: true
+use_chest_imagenome_for_val: true
+chest_imagenome_augmented_phrase_groundings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/augmented_groundings_(hash=328,857478564560124280).pkl
+chest_imagenome_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/chest_imagenome_phrase_embeddings_(hash=531,1962336077955156067).pkl
+chest_imagenome_bbox_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/bbox_phrase_embeddings_hybrid(hash=493,1727013299556214953).pkl
+chest_imagenome_pg_weight: 1.0
+chest_imagenome_alg_weight: 1.0
+chest_imagenome_val_max_size: 300 # for faster validation
+
+# MS-CXR dataset configuration
+use_mscxr_for_val: true
+mscxr_do_grounding_only: true
+mscxr_phrase2embedding_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/mimiccxr/mscxr_phrase2embedding(hash=36540,735014075025888377).pkl
+
+# Checkpoint saving configuration
+save: true 
+
+# Wandb configuration
+wandb_config:
+  enabled: true
+  project: fgvlm-phrase-grounding
+  run_name: fgvlm_medsiglip_pg_chestimagenome_cnr
+  notes: "FG-VLM with MedSigLIP-448; datasets: Chest ImaGenome; metrics: CNR; tasks: phrase grounding"
+  tags: ["fgvlm", "medsiglip", "pg", "chestimagenome", "cnr"]
+  epochwise_metrics: ["loss", "cipg_vgconf_loss", "cialg_vgconf_loss", "cialg_vgbbox_loss", "cialg_cnr", "mscxr_cnr", "learning_rate"]

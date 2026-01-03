@@ -212,7 +212,8 @@ def get_gt_labels_for_dicom_id(dicom_id, use_chexpert=True, use_chest_imagenome=
         return chexpert_labels
     elif use_chest_imagenome:
         return chest_imagenome_labels
-    else: assert False
+    else:
+        assert False
 
 def load_and_run_labels2report_gen_model_in_inference_mode(
         input_binary_labels, model_folder_path, is_second_label_source=False, max_report_length=100,
@@ -258,7 +259,7 @@ def load_and_run_labels2report_gen_model_in_inference_mode(
     if use_t5:
         from transformers import T5Tokenizer
         t5_tokenizer = T5Tokenizer.from_pretrained(model_kwargs['t5_model_name'])
-        assert type(input_binary_labels) == str
+        assert isinstance(input_binary_labels, str)
         input_binary_labels = [input_binary_labels] # To make it a list
         input_encoding = t5_tokenizer(
             input_binary_labels,
@@ -358,8 +359,8 @@ def load_and_run_seq2seq_model_in_inference_mode(
         else:
             from transformers import BartTokenizerFast
             tokenizer = BartTokenizerFast.from_pretrained(model_kwargs['model_name'])
-        assert type(input_text) == str or (type(input_text) == list and type(input_text[0]) == str)
-        if type(input_text) == str:
+        assert isinstance(input_text, str) or (isinstance(input_text, list) and isinstance(input_text[0], str))
+        if isinstance(input_text, str):
             input_text = [input_text] # To make it a list
         input_encoding = tokenizer(
             input_text,
@@ -450,9 +451,9 @@ def load_and_run_fact_encoder_in_inference_mode(
     # Prepare input
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_kwargs['huggingface_model_name'], trust_remote_code=True)
-    assert type(facts) == list
+    assert isinstance(facts, list)
     assert len(facts) >= 2
-    assert all(type(x) == str for x in facts)
+    assert all(isinstance(x, str) for x in facts)
     input_encoding = tokenizer(
         facts,
         padding="longest",
@@ -843,7 +844,8 @@ class PhraseGroundingVisualizer:
             image_transform = self.mimiccxr_val_image_transform
         elif vinbig_forward:
             image_transform = self.vinbig_val_image_transform
-        else: assert False
+        else:
+            assert False
         image, image_size_before, image_size_after = image_transform(image_path, return_image_size=True)
         print(f'image.shape = {image.shape}')
         print(f'image_size_before = {image_size_before}')
@@ -890,7 +892,8 @@ class PhraseGroundingVisualizer:
         elif vinbig_forward:
             from medvqa.datasets.vinbig import VINBIG_BBOX_NAMES
             bbox_class_names = VINBIG_BBOX_NAMES
-        else: assert False
+        else:
+            assert False
         from medvqa.evaluation.plots import visualize_predicted_bounding_boxes__yolo
         print_bold('Visualize bbox predictions')
         visualize_predicted_bounding_boxes__yolo(
@@ -969,7 +972,8 @@ class PhraseGroundingVisualizer:
         elif vinbig_forward:
             image_transform = (self.vinbig_train_image_transform
                                if apply_data_augmentation else self.vinbig_val_image_transform)
-        else: assert False
+        else:
+            assert False
         if apply_data_augmentation:
             # Break determinism by using OS-level entropy or system time
             import random
@@ -1139,7 +1143,8 @@ class YOLOv11Visualizer:
                 assert len(phrases) > len(class_names) # only 22 out of 28 phrases have bounding boxes
                 phrases = phrases[:len(class_names)] # keep only phrases with bounding boxes
                 phrase_embeddings = phrase_embeddings[:len(class_names)]
-        else: assert False
+        else:
+            assert False
         
         import torch
 
@@ -1229,7 +1234,8 @@ class YOLOv11Visualizer:
                 gt_bbox_coords = [[] for _ in class_names]
                 for coords, class_id in zip(coords_list, class_list):
                     gt_bbox_coords[class_id].append(coords)
-            else: assert False
+            else:
+                assert False
         else:
             gt_bbox_coords = None
 

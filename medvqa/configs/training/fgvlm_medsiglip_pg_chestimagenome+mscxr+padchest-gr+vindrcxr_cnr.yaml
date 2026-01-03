@@ -1,0 +1,98 @@
+# Experiment configuration
+experiment_name: fgvlm_medsiglip_pg_chestimagenome+mscxr+padchest-gr+vindrcxr_cnr
+epochs: 200
+batches_per_epoch: 450
+max_images_per_batch: 14
+max_phrases_per_batch: 1000
+max_phrases_per_image: 45
+val_batch_size_factor: 3
+use_train_data_augmentations: true
+num_train_workers: 3
+num_val_workers: 3
+gradient_accumulation_steps: 4
+optimizer_name: adamw
+scheduler: exp-warmup+decay+cyclicdecay
+lr: 1e-6
+warmup_decay_and_cyclic_decay_args: 1e-6,3,8e-5,5,1e-6,8e-5,5,1e-6
+use_amp: true
+use_cnr_metric: true
+
+# Phrase Grounding Model configuration
+raw_image_encoding: medsiglip-448-huggingface
+huggingface_model_name: google/medsiglip-448
+image_size:
+- 448
+- 448
+image_local_feat_size: 1152
+num_regions: 1024
+regions_width: 32
+regions_height: 32
+phrase_embedding_size: 128
+phrase_grounding_mode: adaptive_film_based_pooling_mlp_with_bbox_regression
+phrase_mlp_hidden_dims:
+- 256
+- 128
+visual_grounding_hidden_size: 256
+bbox_format: cxcywh
+predict_relative_bbox_coords: true
+skip_nms: true
+pretrained_checkpoint_folder_path: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/experiments/fgvlm_medsiglip_pg_chestimagenome_cnr__20251223_164800/
+
+# Losses configuration
+binary_multilabel_classif_loss_name: focal+bce+npbbce
+do_visual_grounding_with_bbox_regression: true
+
+# MIMIC-CXR general dataset configuration
+mimiccxr_exclude_noisy_images: true
+
+# Chest Imagenome dataset configuration
+use_chest_imagenome_for_train: true
+use_chest_imagenome_for_val: true
+chest_imagenome_augmented_phrase_groundings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/augmented_groundings_(hash=328,857478564560124280).pkl
+chest_imagenome_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/chest_imagenome_phrase_embeddings_(hash=531,1962336077955156067).pkl
+chest_imagenome_bbox_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/bbox_phrase_embeddings_hybrid(hash=493,1727013299556214953).pkl
+chest_imagenome_val_max_size: 200 # for faster validation
+chest_imagenome_pg_weight: 1.0
+chest_imagenome_alg_weight: 1.0
+
+# MSCXR dataset configuration
+use_mscxr_for_train: true
+use_mscxr_for_val: true
+mscxr_training_data_mode: train
+mscxr_do_grounding_only: true
+mscxr_phrase2embedding_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/mimiccxr/mscxr_phrase2embedding(hash=36540,735014075025888377).pkl
+mscxr_weight: 1.0
+
+# PadChest-GR dataset configuration
+use_padchest_gr_for_train: true
+use_padchest_gr_for_val: true
+padchest_gr_training_split: train
+padchest_gr_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/padchest/padchest_gr_phrase2embedding(hash=197637,3883807560112046018).pkl
+padchest_gr_val_max_size: 200 # for faster validation
+padchest_gr_weight: 1.0
+
+# VinBigData dataset configuration
+use_vinbig_for_train: true
+use_vinbig_for_test: true
+vinbig_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/vinbig/label_phrase_embeddings(hash=553,547344555309613415).pkl
+vinbig_training_data_mode: train
+vinbig_task_mode: grounding
+vinbig_val_max_size: 200 # for faster validation
+vinbig_weight: 1.0
+
+# Checkpoint saving configuration
+save: true 
+
+# Wandb configuration
+wandb_config:
+  enabled: true
+  project: fgvlm-phrase-grounding
+  run_name: fgvlm_medsiglip_pg_chestimagenome+mscxr+padchest-gr+vindrcxr_cnr
+  notes: "FG-VLM with MedSigLIP-448; datasets: Chest ImaGenome, MSCXR, PadChest-GR, VinDr-CXR; metrics: CNR; tasks: phrase grounding"
+  tags: ["fgvlm", "medsiglip", "pg", "chestimagenome", "mscxr", "padchest-gr", "vindrcxr", "cnr"]
+  epochwise_metrics: ["loss",
+    "cipg_vgconf_loss", "cialg_vgconf_loss", "cialg_vgbbox_loss", "cialg_cnr",
+    "mscxr_vgconf_loss", "mscxr_vgbbox_loss", "mscxr_cnr",
+    "pchstgr_vgconf_loss", "pchstgr_vgbbox_loss", "pchstgr_cnr",
+    "vbg_vgconf_loss", "vbg_vgbbox_loss", "vbg_cnr",
+    "learning_rate"]

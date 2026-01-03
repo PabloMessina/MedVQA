@@ -3,7 +3,7 @@ import random
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from typing import List, Optional, Callable, Tuple
+from typing import Any, Dict, List, Optional, Callable, Tuple
 from PIL.Image import Image as PILImage
 from medvqa.datasets.chest_imagenome import (
     ANAXNET_BBOX_NAMES,
@@ -643,8 +643,8 @@ def plot_multiple_experiment_curves(
 
 def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliases, metric_name, metric_alias,
                                                   dataset_name, thresholds=[0.5, 0.6, 0.7, 0.8, 0.9], figsize=(8, 6)):
-    assert type(metrics_paths) == list
-    assert type(method_aliases) == list
+    assert isinstance(metrics_paths, list)
+    assert isinstance(method_aliases, list)
     assert len(metrics_paths) == len(method_aliases)
     assert len(metrics_paths) > 0    
     metrics_list = [get_cached_pickle_file(path) for path in metrics_paths]
@@ -680,8 +680,8 @@ def plot_chest_imagenome_bbox_metrics_at_thresholds(metrics_paths, method_aliase
 
 def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_aliases, metric_name, metric_alias,
         dataset_name, figsize=(8,6), horizontal=True, bbox_class_names=None, make_anaxnet_ticks_red=False):
-    assert type(metrics_paths) == list
-    assert type(method_aliases) == list
+    assert isinstance(metrics_paths, list)
+    assert isinstance(method_aliases, list)
     assert len(metrics_paths) == len(method_aliases)
     assert len(metrics_paths) > 0
     metrics_list = [get_cached_pickle_file(path) for path in metrics_paths]
@@ -696,14 +696,15 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
                 all_bbox_names.update(metrics_dict['bbox_names'])
             else:
                 metrics_per_class = metrics_dict[metric_name]
-                assert type(metrics_per_class) == list or type(metrics_per_class) == np.ndarray
+                assert isinstance(metrics_per_class, list) or isinstance(metrics_per_class, np.ndarray)
                 assert len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES or\
                         len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
                 if len(metrics_per_class) == CHEST_IMAGENOME_NUM_BBOX_CLASSES:
                     all_bbox_names.update(CHEST_IMAGENOME_BBOX_NAMES)
                 elif len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
                     all_bbox_names.update(CHEST_IMAGENOME_GOLD_BBOX_NAMES)
-                else: assert False
+                else:
+                    assert False
         all_bbox_names = list(all_bbox_names)
         n_bboxes = len(all_bbox_names)
     else:
@@ -722,7 +723,8 @@ def plot_chest_imagenome_bbox_metrics_per_bbox_class(metrics_paths, method_alias
             bbox_names = CHEST_IMAGENOME_BBOX_NAMES
         elif len(metrics_per_class) == CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES:
             bbox_names = CHEST_IMAGENOME_GOLD_BBOX_NAMES
-        else: assert False
+        else:
+            assert False
         scores_per_method.append([None] * n_bboxes)
         for j in range(len(bbox_names)):
             try:
@@ -827,22 +829,241 @@ def generate_color_variants(color: str, n: int):
         for i in range(n)
     ]
 
-def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metric_aliases, title,
-                                figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
-                                sort_metrics=True, method_idx_to_sort_by=None, sort_methods=True, vertical=False,
-                                bbox_to_anchor=None, show_std=False, xtick_rotation=90, xtick_ha='right',
-                                xlabel=None, ylabel=None, prepend_mean_score_to_legend=True, xlim=None, ylim=None,
-                                save_as_pdf=False, save_path=None, vertical_score_text_rotation=90, colors=_COLORS,
-                                hide_xticks=False, hide_yticks=False, max_score=None):
+# def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metric_aliases, title,
+#                                 figsize=(10, 8), scores_fontsize=7, metrics_tick_fontsize=10, metrics_axis_size=1.0,
+#                                 sort_metrics=True, method_idx_to_sort_by=None, sort_methods=True, vertical=False,
+#                                 bbox_to_anchor=None, show_std=False, xtick_rotation=90, xtick_ha='right',
+#                                 xlabel=None, ylabel=None, prepend_mean_score_to_legend=True, xlim=None, ylim=None,
+#                                 save_as_pdf=False, save_path=None, vertical_score_text_rotation=90, colors=_COLORS,
+#                                 hide_xticks=False, hide_yticks=False, max_score=None, legend_fontsize=10):
+#     n = len(method_dicts)
+#     assert n == len(method_aliases)
+#     assert n > 0
+#     m = len(metric_names)
+#     assert m == len(metric_aliases)
+#     assert m > 0
+    
+#     scores_per_method = [[method_dicts[i].get(k, 0) for k in metric_names] for i in range(n)]
+#     std_per_method = [[method_dicts[i].get(f'{k}_std', 0) for k in metric_names] for i in range(n)]
+#     upper_err_per_method = []
+#     lower_err_per_method = []
+#     for i in range(n):
+#         upper_err_list = []
+#         lower_err_list = []
+#         for j in range(m):
+#             upper_bound = scores_per_method[i][j] + std_per_method[i][j]
+#             lower_bound = scores_per_method[i][j] - std_per_method[i][j]
+#             if lower_bound < 0.0:
+#                 delta = -lower_bound
+#                 upper_bound += delta
+#                 lower_bound += delta
+#             elif max_score is not None and upper_bound > max_score:
+#                 delta = upper_bound - max_score
+#                 upper_bound -= delta
+#                 lower_bound -= delta
+#             upper_err_list.append(upper_bound - scores_per_method[i][j])
+#             lower_err_list.append(scores_per_method[i][j] - lower_bound)
+#         upper_err_per_method.append(upper_err_list)
+#         lower_err_per_method.append(lower_err_list)
+#     metric_idxs = list(range(m))
+#     if sort_metrics:
+#         scores_minus_lower_err_per_method = [[scores_per_method[i][j] - lower_err_per_method[i][j] for j in range(m)] for i in range(n)]
+#         if method_idx_to_sort_by is not None: # sort by a specific row
+#             metric_idxs.sort(key=lambda i: scores_minus_lower_err_per_method[method_idx_to_sort_by][i], reverse=vertical)
+#         else: # sort by the mean score
+#             mean_score_per_metric = [np.mean([scores_minus_lower_err_per_method[i][j] for i in range(n)]) for j in range(m)]
+#             metric_idxs.sort(key=lambda i: mean_score_per_metric[i], reverse=vertical)
+#     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
+#     method_idxs = list(range(n))
+#     if sort_methods:
+#         method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=vertical)
+#     min_score = min(min(scores_per_method[i]) for i in range(n))
+#     max_score = max(max(scores_per_method[i]) for i in range(n))
+
+#     plt.figure(figsize=figsize)
+#     if vertical:
+#         bar_width = 0.9 * metrics_axis_size / (n * m)
+#         for i in range(n):
+#             label = method_aliases[method_idxs[i]]
+#             if prepend_mean_score_to_legend:
+#                 label = f'({mean_score_per_method[method_idxs[i]]:.3f}) {label}'
+#             positions = [j * (metrics_axis_size / m) + i * bar_width for j in range(1, m+1)]
+#             scores = [scores_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+#             # stds = [std_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)] if show_std else None
+#             if show_std:
+#                 upper_err = [upper_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+#                 lower_err = [lower_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+#                 yerr = [lower_err, upper_err]
+#             else:
+#                 yerr = None
+#             plt.bar(positions, scores, width=bar_width, label=label, color=colors[method_idxs[i] % len(colors)], yerr=yerr, capsize=3)
+#             for j in range(m):
+#                 plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01, f'{scores[j]:.3f}', ha='center',
+#                          va='bottom', fontsize=scores_fontsize, rotation=vertical_score_text_rotation)
+#         if not hide_xticks:
+#             plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
+#                     fontsize=metrics_tick_fontsize, rotation=xtick_rotation, ha=xtick_ha)
+#         else:
+#             plt.xticks([])
+#         if xlabel is None: xlabel = 'Metric'
+#         if ylabel is None: ylabel = 'Score'
+#         plt.xlabel(xlabel)
+#         plt.ylabel(ylabel)
+#         plt.grid(axis='y')
+#         if bbox_to_anchor is None:
+#             plt.legend(loc='upper left')
+#         else:
+#             plt.legend(bbox_to_anchor=bbox_to_anchor, loc='lower center', borderaxespad=0.)
+#     else:
+#         bar_height = 0.9 * metrics_axis_size / (n * m)
+#         for i in range(n):
+#             label = method_aliases[method_idxs[n-1-i]]
+#             if prepend_mean_score_to_legend:
+#                 label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
+#             positions = [j * (metrics_axis_size / m) + (n-1-i) * bar_height for j in range(1, m+1)]
+#             scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+#             # stds = [std_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)] if show_std else None
+#             if show_std:
+#                 upper_err = [upper_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+#                 lower_err = [lower_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+#                 xerr = [lower_err, upper_err]
+#             else:
+#                 xerr = None
+#             plt.barh(positions, scores, height=bar_height, label=label, color=colors[method_idxs[n-1-i] % len(colors)], xerr=xerr, capsize=3)
+#             for j in range(m):
+#                 plt.text(scores[j] + (max_score - min_score) * 0.01, positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+#         if not hide_yticks:
+#             plt.yticks([j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
+#                     fontsize=metrics_tick_fontsize)
+#         else:
+#             plt.yticks([])
+#         if xlabel is None: xlabel = 'Score'
+#         if ylabel is None: ylabel = 'Metric'
+#         plt.xlabel(xlabel)
+#         plt.ylabel(ylabel)
+#         plt.grid(axis='x')
+#         if bbox_to_anchor is None:
+#             plt.legend(loc='upper left', fontsize=legend_fontsize)
+#         else:
+#             plt.legend(bbox_to_anchor=bbox_to_anchor, loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
+#     if xlim is not None:
+#         plt.xlim(xlim)
+#     if ylim is not None:
+#         plt.ylim(ylim)
+#     plt.title(title)
+
+#     # Save the plot as a PDF file
+#     if save_as_pdf:
+#         assert save_path is not None
+#         assert save_path.endswith('.pdf')
+#         import os
+#         os.makedirs(os.path.dirname(save_path), exist_ok=True) # create the directory if it doesn't exist
+#         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1, format='pdf')
+#         print_blue(f'Saved the plot as a PDF file: {save_path}')
+
+#     # Show the plot
+#     plt.show()
+
+def plot_metric_bars_per_method(
+    method_dicts: List[Dict[str, float]],
+    method_aliases: List[str],
+    metric_names: List[str],
+    metric_aliases: List[str],
+    title: str,
+    figsize: Tuple[float, float] = (10, 8),
+    scores_fontsize: int = 7,
+    metrics_tick_fontsize: int = 10,
+    metrics_axis_size: float = 1.0,
+    sort_metrics: bool = True,
+    method_idx_to_sort_by: Optional[int] = None,
+    sort_methods: bool = True,
+    vertical: bool = False,
+    bbox_to_anchor: Optional[Tuple[float, float]] = None,
+    show_std: bool = False,
+    xtick_rotation: int = 90,
+    xtick_ha: str = 'right',
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    prepend_mean_score_to_legend: bool = True,
+    xlim: Optional[Tuple[float, float]] = None,
+    ylim: Optional[Tuple[float, float]] = None,
+    save_as_pdf: bool = False,
+    save_path: Optional[str] = None,
+    vertical_score_text_rotation: int = 90,
+    colors: List[Any] = _COLORS,
+    hide_xticks: bool = False,
+    hide_yticks: bool = False,
+    min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
+    legend_fontsize: int = 10
+) -> None:
+    """Generates and displays a grouped bar plot comparing methods across metrics.
+
+    This function creates either a vertical or horizontal bar chart to visualize
+    the performance (scores) of different methods on a set of metrics. It
+    supports sorting of both methods and metrics, displaying standard deviations
+    as error bars, and extensive customization of the plot's appearance.
+
+    Args:
+        method_dicts: A list of dictionaries, where each dictionary
+            represents a method and contains metric names as keys and scores as
+            values. May also contain standard deviations with keys like
+            '{metric_name}_std'.
+        method_aliases: A list of display names for the methods.
+        metric_names: A list of internal key names for the metrics.
+        metric_aliases: A list of display names for the metrics.
+        title: The title of the plot.
+        figsize: The size of the figure as a (width, height) tuple.
+        scores_fontsize: Font size for the score values displayed on the bars.
+        metrics_tick_fontsize: Font size for the metric labels on the axes.
+        metrics_axis_size: A scaling factor for the axis where metrics are
+            displayed.
+        sort_metrics: If True, metrics will be sorted based on scores.
+        method_idx_to_sort_by: If provided, metrics are sorted based on the
+            scores of this specific method index. Otherwise, they are sorted
+            by the mean score across all methods.
+        sort_methods: If True, methods will be sorted based on their mean
+            score across all metrics.
+        vertical: If True, creates a vertical bar chart. Otherwise, creates a
+            horizontal bar chart.
+        bbox_to_anchor: A tuple (x, y) to manually position the legend.
+        show_std: If True, displays standard deviation as error bars.
+        xtick_rotation: Rotation angle for the x-axis tick labels.
+        xtick_ha: Horizontal alignment for the x-axis tick labels.
+        xlabel: Custom label for the x-axis.
+        ylabel: Custom label for the y-axis.
+        prepend_mean_score_to_legend: If True, prefixes the method's mean
+            score to its legend entry.
+        xlim: A tuple (min, max) to set the x-axis limits.
+        ylim: A tuple (min, max) to set the y-axis limits.
+        save_as_pdf: If True, saves the plot to a PDF file.
+        save_path: The file path to save the PDF. Required if save_as_pdf is
+            True.
+        vertical_score_text_rotation: Rotation angle for score text on
+            vertical bars.
+        colors: A list of colors to use for the bars for each method.
+        hide_xticks: If True, hides the x-axis tick labels.
+        hide_yticks: If True, hides the y-axis tick labels.
+        min_score: An optional minimum score value used to adjust error bars
+            so they do not go below this value.
+        max_score: An optional maximum score value used to adjust error bars
+            so they do not exceed this value.
+        legend_fontsize: Font size for the plot's legend.
+    """
+    # --- Data Preparation and Validation ---
     n = len(method_dicts)
     assert n == len(method_aliases)
     assert n > 0
     m = len(metric_names)
     assert m == len(metric_aliases)
     assert m > 0
-    
+
+    # Extract scores and standard deviations from the input dictionaries
     scores_per_method = [[method_dicts[i].get(k, 0) for k in metric_names] for i in range(n)]
     std_per_method = [[method_dicts[i].get(f'{k}_std', 0) for k in metric_names] for i in range(n)]
+
+    # --- Asymmetric Error Bar Calculation ---
+    # Calculate error bars that do not go below 0 or above a max_score
     upper_err_per_method = []
     lower_err_per_method = []
     for i in range(n):
@@ -851,116 +1072,174 @@ def plot_metric_bars_per_method(method_dicts, method_aliases, metric_names, metr
         for j in range(m):
             upper_bound = scores_per_method[i][j] + std_per_method[i][j]
             lower_bound = scores_per_method[i][j] - std_per_method[i][j]
-            if lower_bound < 0.0:
-                delta = -lower_bound
+
+            # Adjust error bars if the lower bound is negative
+            if min_score is not None and lower_bound < min_score:
+                delta = min_score - lower_bound
                 upper_bound += delta
                 lower_bound += delta
+            # Adjust error bars if the upper bound exceeds max_score
             elif max_score is not None and upper_bound > max_score:
                 delta = upper_bound - max_score
                 upper_bound -= delta
                 lower_bound -= delta
+
+            # Store the calculated error magnitudes
             upper_err_list.append(upper_bound - scores_per_method[i][j])
             lower_err_list.append(scores_per_method[i][j] - lower_bound)
         upper_err_per_method.append(upper_err_list)
         lower_err_per_method.append(lower_err_list)
+
+    # --- Sorting Logic ---
     metric_idxs = list(range(m))
     if sort_metrics:
+        # Use a conservative score (score - lower_error) for sorting
         scores_minus_lower_err_per_method = [[scores_per_method[i][j] - lower_err_per_method[i][j] for j in range(m)] for i in range(n)]
-        if method_idx_to_sort_by is not None: # sort by a specific row
+        if method_idx_to_sort_by is not None: # Sort by a specific method's scores
             metric_idxs.sort(key=lambda i: scores_minus_lower_err_per_method[method_idx_to_sort_by][i], reverse=vertical)
-        else: # sort by the mean score
+        else: # Sort by the mean score across all methods
             mean_score_per_metric = [np.mean([scores_minus_lower_err_per_method[i][j] for i in range(n)]) for j in range(m)]
             metric_idxs.sort(key=lambda i: mean_score_per_metric[i], reverse=vertical)
+
+    # Calculate mean scores for sorting methods and for the legend
     mean_score_per_method = [np.mean(scores_per_method[i]) for i in range(n)]
     method_idxs = list(range(n))
     if sort_methods:
+        # Sort methods by their mean score
         method_idxs.sort(key=lambda i: mean_score_per_method[i], reverse=vertical)
-    min_score = min(min(scores_per_method[i]) for i in range(n))
-    max_score = max(max(scores_per_method[i]) for i in range(n))
 
+    # Determine score range for positioning text labels
+    min_score_val = min(min(scores_per_method[i]) for i in range(n))
+    max_score_val = max(max(scores_per_method[i]) for i in range(n))
+
+    # --- Plotting ---
     plt.figure(figsize=figsize)
+
+    # --- Vertical Bar Plot ---
     if vertical:
+        # Calculate the width for each individual bar
         bar_width = 0.9 * metrics_axis_size / (n * m)
+        # Iterate through methods to plot their bars
         for i in range(n):
-            label = method_aliases[method_idxs[i]]
+            # Get the sorted method index and create its label
+            current_method_idx = method_idxs[i]
+            label = method_aliases[current_method_idx]
             if prepend_mean_score_to_legend:
-                label = f'({mean_score_per_method[method_idxs[i]]:.3f}) {label}'
+                label = f'({mean_score_per_method[current_method_idx]:.3f}) {label}'
+
+            # Calculate the x-positions for the bars of the current method
             positions = [j * (metrics_axis_size / m) + i * bar_width for j in range(1, m+1)]
-            scores = [scores_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
-            # stds = [std_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)] if show_std else None
+            # Get scores in the sorted metric order
+            scores = [scores_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
+
+            # Prepare error bars if requested
+            yerr = None
             if show_std:
-                upper_err = [upper_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
-                lower_err = [lower_err_per_method[method_idxs[i]][metric_idxs[j]] for j in range(m)]
+                upper_err = [upper_err_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
+                lower_err = [lower_err_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
                 yerr = [lower_err, upper_err]
-            else:
-                yerr = None
-            plt.bar(positions, scores, width=bar_width, label=label, color=colors[method_idxs[i] % len(colors)], yerr=yerr, capsize=3)
+
+            # Plot the bars for the current method
+            plt.bar(positions, scores, width=bar_width, label=label, color=colors[current_method_idx % len(colors)], yerr=yerr, capsize=3)
+
+            # Add text labels for each score value
             for j in range(m):
-                plt.text(positions[j], scores[j] + (max_score - min_score) * 0.01, f'{scores[j]:.3f}', ha='center',
+                plt.text(positions[j], scores[j] + (max_score_val - min_score_val) * 0.01, f'{scores[j]:.3f}', ha='center',
                          va='bottom', fontsize=scores_fontsize, rotation=vertical_score_text_rotation)
+
+        # Configure x-axis ticks to be centered under each group of bars
         if not hide_xticks:
-            plt.xticks([j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
-                    fontsize=metrics_tick_fontsize, rotation=xtick_rotation, ha=xtick_ha)
+            tick_positions = [j * (metrics_axis_size / m) + bar_width * 0.5 * (n - 1) for j in range(1, m+1)]
+            tick_labels = [metric_aliases[i] for i in metric_idxs]
+            plt.xticks(tick_positions, tick_labels, fontsize=metrics_tick_fontsize, rotation=xtick_rotation, ha=xtick_ha)
         else:
             plt.xticks([])
-        if xlabel is None: xlabel = 'Metric'
-        if ylabel is None: ylabel = 'Score'
+
+        # Set labels, grid, and legend
+        if xlabel is None:
+            xlabel = 'Metric'
+        if ylabel is None:
+            ylabel = 'Score'
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         plt.grid(axis='y')
         if bbox_to_anchor is None:
-            plt.legend(loc='upper left')
+            plt.legend(loc='upper left', fontsize=legend_fontsize)
         else:
-            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='lower center', borderaxespad=0.)
+            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='lower center', borderaxespad=0., fontsize=legend_fontsize)
+
+    # --- Horizontal Bar Plot ---
     else:
+        # Calculate the height for each individual bar
         bar_height = 0.9 * metrics_axis_size / (n * m)
+        # Iterate through methods to plot their bars (in reverse for ascending order)
         for i in range(n):
-            label = method_aliases[method_idxs[n-1-i]]
+            # Get the sorted method index and create its label
+            current_method_idx = method_idxs[n-1-i]
+            label = method_aliases[current_method_idx]
             if prepend_mean_score_to_legend:
-                label = f'({mean_score_per_method[method_idxs[n-1-i]]:.3f}) {label}'
+                label = f'({mean_score_per_method[current_method_idx]:.3f}) {label}'
+
+            # Calculate the y-positions for the bars of the current method
             positions = [j * (metrics_axis_size / m) + (n-1-i) * bar_height for j in range(1, m+1)]
-            scores = [scores_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-            # stds = [std_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)] if show_std else None
+            # Get scores in the sorted metric order
+            scores = [scores_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
+
+            # Prepare error bars if requested
+            xerr = None
             if show_std:
-                upper_err = [upper_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
-                lower_err = [lower_err_per_method[method_idxs[n-1-i]][metric_idxs[j]] for j in range(m)]
+                upper_err = [upper_err_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
+                lower_err = [lower_err_per_method[current_method_idx][metric_idxs[j]] for j in range(m)]
                 xerr = [lower_err, upper_err]
-            else:
-                xerr = None
-            plt.barh(positions, scores, height=bar_height, label=label, color=colors[method_idxs[n-1-i] % len(colors)], xerr=xerr, capsize=3)
+
+            # Plot the bars for the current method
+            plt.barh(positions, scores, height=bar_height, label=label, color=colors[current_method_idx % len(colors)], xerr=xerr, capsize=3)
+
+            # Add text labels for each score value
             for j in range(m):
-                plt.text(scores[j] + (max_score - min_score) * 0.01, positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+                plt.text(scores[j] + (max_score_val - min_score_val) * 0.01, positions[j], f'{scores[j]:.3f}', ha='left', va='center', fontsize=scores_fontsize)
+
+        # Configure y-axis ticks to be centered next to each group of bars
         if not hide_yticks:
-            plt.yticks([j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)], [metric_aliases[i] for i in metric_idxs],
-                    fontsize=metrics_tick_fontsize)
+            tick_positions = [j * (metrics_axis_size / m) + bar_height * 0.5 * (n - 1) for j in range(1, m+1)]
+            tick_labels = [metric_aliases[i] for i in metric_idxs]
+            plt.yticks(tick_positions, tick_labels, fontsize=metrics_tick_fontsize)
         else:
             plt.yticks([])
-        if xlabel is None: xlabel = 'Score'
-        if ylabel is None: ylabel = 'Metric'
+
+        # Set labels, grid, and legend
+        if xlabel is None:
+            xlabel = 'Score'
+        if ylabel is None:
+            ylabel = 'Metric'
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         plt.grid(axis='x')
         if bbox_to_anchor is None:
-            plt.legend(loc='upper left')
+            plt.legend(loc='upper left', fontsize=legend_fontsize)
         else:
-            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='upper left', borderaxespad=0.)
+            plt.legend(bbox_to_anchor=bbox_to_anchor, loc='upper left', borderaxespad=0., fontsize=legend_fontsize)
+
+    # --- Final Plot Adjustments ---
     if xlim is not None:
         plt.xlim(xlim)
     if ylim is not None:
         plt.ylim(ylim)
     plt.title(title)
 
-    # Save the plot as a PDF file
+    # Save the plot as a PDF file if requested
     if save_as_pdf:
-        assert save_path is not None
-        assert save_path.endswith('.pdf')
+        assert save_path is not None, "A 'save_path' must be provided when 'save_as_pdf' is True."
+        assert save_path.endswith('.pdf'), "The 'save_path' must end with '.pdf'."
         import os
-        os.makedirs(os.path.dirname(save_path), exist_ok=True) # create the directory if it doesn't exist
+        # Create the directory if it doesn't exist
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1, format='pdf')
         print_blue(f'Saved the plot as a PDF file: {save_path}')
 
-    # Show the plot
+    # Display the plot
     plt.show()
+
 
 def plot_class_frequency_vs_metric_scores_per_method(dataframe_rows, method_aliases, metric_names, label_frequencies,
                                                      title, ylabel, figsize=(10, 8)):
@@ -1225,110 +1504,8 @@ def visualize_attention_maps(image_path, attention_maps, figsize, titles=None, m
 
     plt.show()
 
-
-# def visualize_visual_grounding_as_bboxes(phrases, phrase_classifier_probs, bbox_coords, bbox_probs, phrase_ids,
-#                                          figsize, max_cols=3, gt_phrases_to_highlight=None, image=None, image_path=None,
-#                                          show_heatmaps=False, heatmaps=None, bbox_format='xyxy'):
-#     """
-#     Visualizes visual grounding by displaying bounding boxes over an image with associated phrases.
     
-#     Args:
-#         image (PIL.Image.Image, optional): Image object. Default is None.
-#         image_path (str, optional): Path to the image file. Default is None.
-#         phrases (list of str): List of phrases corresponding to detected objects.
-#         phrase_classifier_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each phrase.
-#         bbox_coords (numpy.ndarray): Array of shape (n, 4) containing bounding box coordinates in normalized format.
-#         bbox_probs (numpy.ndarray): Array of shape (n,) containing confidence scores for each bounding box.
-#         phrase_ids (numpy.ndarray): Array of shape (n,) containing indices mapping bounding boxes to phrases.
-#         figsize (tuple): Figure size for visualization.
-#         max_cols (int, optional): Maximum number of columns in the grid. Default is 3.
-#         gt_phrases_to_highlight (list of str, optional): List of phrases to highlight in the visualization. Default is None.
-#         show_heatmaps (bool, optional): Whether to display heatmaps. Default is False.
-#         heatmaps (numpy.ndarray, optional): Array of shape (num_phrases, num_regions), where num_regions = H * W.
-#         bbox_format (str, optional): Format of bounding box coordinates. Default is 'xyxy'.
-#     """
-#     assert image is not None or image_path is not None, "Either image or image_path must be provided."
-#     assert len(phrases) == len(phrase_classifier_probs), "Mismatched dimensions between phrases and phrase classifier probabilities."
-#     assert bbox_coords.shape[0] == bbox_probs.shape[0] == phrase_ids.shape[0], "Mismatched dimensions between bounding box arrays."
-#     assert bbox_coords.shape[1] == 4, "Bounding box coordinates must have shape (n, 4)."
-#     if show_heatmaps:
-#         assert heatmaps is not None, "Heatmaps must be provided when show_heatmaps is True."
-#         assert heatmaps.shape[0] == len(phrases), "Heatmaps should have the same first dimension as phrases."
-    
-#     from PIL import Image
-#     import matplotlib.patches as patches
-#     import textwrap
-
-#     # Determine grid size
-#     n_phrases = len(phrases)
-#     n_cols = min(n_phrases, max_cols)
-#     n_rows = math.ceil(n_phrases / n_cols)
-#     fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
-
-#     # Define wrap length for titles
-#     wrap_length = (figsize[0] / n_cols) * (60 / 7.5)
-
-#     # Load and process image if path is provided
-#     if image is None:
-#         assert image_path is not None, "Image path must be provided."
-#         image = Image.open(image_path).convert('RGB')
-#     width, height = image.size
-
-#     # Infer heatmap dimensions
-#     if show_heatmaps:
-#         H = W = math.isqrt(heatmaps.shape[1])  # Assuming square heatmap regions
-#         assert H * W == heatmaps.shape[1], "Heatmap size mismatch: Expected H * W regions."
-#         # Compute grid lines positions based on the image size and feature map size.
-#         cell_width = width / W
-#         cell_height = height / H
-#         # Grid lines (excluding image borders):
-#         vlines = [cell_width * i for i in range(1, W)]
-#         hlines = [cell_height * i for i in range(1, H)]
-
-#     # Iterate through unique phrases
-#     for phrase_id in range(n_phrases):
-#         row, col = divmod(phrase_id, n_cols)
-#         ax[row, col].imshow(image)
-
-#         phrase_prob = phrase_classifier_probs[phrase_id]
-
-#         # Overlay heatmap if enabled
-#         if show_heatmaps:
-#             heatmap = heatmaps[phrase_id].reshape(H, W)
-#             heatmap_resized = np.array(Image.fromarray(heatmap).resize((width, height), Image.BILINEAR))
-#             ax[row, col].imshow(heatmap_resized, cmap='jet', alpha=0.5)
-#             for x in vlines:
-#                 ax[row, col].axvline(x, color="white", linestyle="--", linewidth=1)
-#             for y in hlines:
-#                 ax[row, col].axhline(y, color="white", linestyle="--", linewidth=1)
-
-#         # Filter bounding boxes for the current phrase
-#         mask = phrase_ids == phrase_id
-#         for bbox, prob in zip(bbox_coords[mask], bbox_probs[mask]):
-#             if bbox_format == 'xyxy':
-#                 x1, y1, x2, y2 = bbox * np.array([width, height, width, height])
-#             elif bbox_format == 'cxcywh':
-#                 cx, cy, w, h = bbox
-#                 x1 = (cx - w / 2) * width
-#                 y1 = (cy - h / 2) * height
-#                 x2 = (cx + w / 2) * width
-#                 y2 = (cy + h / 2) * height
-#             else: raise ValueError(f"Unknown bbox_format: {bbox_format}")
-#             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
-#             ax[row, col].add_patch(rect)
-#             ax[row, col].text(x1, y1, f'{prob:.2f}', color='red', fontsize=8, bbox=dict(facecolor='black', alpha=0.5))
-
-#         # Set subplot title with wrapped text
-#         title = f'{phrases[phrase_id]}\n({phrase_prob:.2f})'
-#         wrapped_title = "\n".join(textwrap.wrap(title, wrap_length))
-#         if gt_phrases_to_highlight is not None and phrases[phrase_id] in gt_phrases_to_highlight:
-#             ax[row, col].set_title(wrapped_title, color='red')
-#         else:
-#             ax[row, col].set_title(wrapped_title)
-
-#     plt.show()
-    
-def visualize_visual_grounding_as_bboxes(
+def visualize_visual_grounding_as_bboxes(   
     phrases: List[str],
     phrase_classifier_probs: np.ndarray,
     bbox_coords: np.ndarray,
@@ -1400,7 +1577,8 @@ def visualize_visual_grounding_as_bboxes(
     assert n_phrases > 0, "No phrases provided for visualization."
 
     num_subplots = len(phrases)
-    if display_raw_image: num_subplots += 1 # Add an extra subplot for the raw image
+    if display_raw_image:
+        num_subplots += 1 # Add an extra subplot for the raw image
     n_cols_fig = min(num_subplots, max_cols)
     n_rows_fig = math.ceil(num_subplots / n_cols_fig)
     
@@ -1683,7 +1861,7 @@ def plot_wordclouds_per_bin(sentences, scores, num_bins, figsize=(10, 5), num_wo
     from wordcloud import WordCloud
     for i in range(1, num_bins+1):
         bin_sentences = [sentences[j] for j in range(len(sentences)) if bin_indices[j] == i]
-        bin_scores = [scores[j] for j in range(len(scores)) if bin_indices[j] == i]
+        # bin_scores = [scores[j] for j in range(len(scores)) if bin_indices[j] == i]
         if len(bin_sentences) > 0:
             print_bold(f'==================== Bin {i} ({bins[i-1]:.3f}-{bins[i]:.3f})')
             # plot_wordcloud(bin_sentences, bin_scores, title=f'{title} (bin {i})', score_name=score_name, figsize=figsize, num_words=num_words)
@@ -1837,9 +2015,9 @@ def plot_embeddings_sentences_and_scores(embeddings, sentences, scores, title, s
         print(f"{sentence} ({score:.3f}, idx={idx})")
 
 def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Epoch', ylabel=None, figsize=(10, 10), first_k=None):
-    assert type(metric_lists) == list
+    assert isinstance(metric_lists, list)
     assert len(metric_lists) > 0
-    assert all(type(metric_list) == list or type(metric_list) == np.ndarray for metric_list in metric_lists)
+    assert all(isinstance(metric_list, list) or isinstance(metric_list, np.ndarray) for metric_list in metric_lists)
     assert all(len(metric_list) > 0 for metric_list in metric_lists)
     assert all(len(metric_list) == len(metric_lists[0]) for metric_list in metric_lists)
     assert len(method_names) == len(metric_lists)
@@ -1866,7 +2044,7 @@ def plot_metric_lists(metric_lists, method_names, title, metric_name, xlabel='Ep
     plt.show()
 
 def plot_correlation_matrix(correlation_matrix, method_names, title, figsize=(10, 10)):
-    assert type(correlation_matrix) == np.ndarray
+    assert isinstance(correlation_matrix, np.ndarray)
     assert correlation_matrix.shape[0] == correlation_matrix.shape[1]
     assert correlation_matrix.shape[0] == len(method_names)
 

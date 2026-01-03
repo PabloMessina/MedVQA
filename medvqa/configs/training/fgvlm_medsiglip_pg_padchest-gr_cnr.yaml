@@ -1,0 +1,60 @@
+# Experiment configuration
+experiment_name: fgvlm_medsiglip_pg_padchest-gr_cnr
+epochs: 120
+batches_per_epoch: 300
+max_images_per_batch: 15
+max_phrases_per_batch: 2000
+max_phrases_per_image: 45
+val_batch_size_factor: 4
+use_train_data_augmentations: true
+num_train_workers: 3
+num_val_workers: 2
+gradient_accumulation_steps: 4
+optimizer_name: adamw
+scheduler: exp-warmup+decay+cyclicdecay
+lr: 1e-6
+warmup_decay_and_cyclic_decay_args: 1e-6,3,8e-5,5,1e-6,8e-5,5,1e-6
+use_amp: true
+use_cnr_metric: true
+
+# Phrase Grounding Model configuration
+raw_image_encoding: medsiglip-448-huggingface
+huggingface_model_name: google/medsiglip-448
+image_size:
+- 448
+- 448
+image_local_feat_size: 1152
+num_regions: 1024
+regions_width: 32
+regions_height: 32
+phrase_embedding_size: 128
+phrase_grounding_mode: adaptive_film_based_pooling_mlp_with_bbox_regression
+phrase_mlp_hidden_dims:
+- 256
+- 128
+visual_grounding_hidden_size: 256
+bbox_format: cxcywh
+predict_relative_bbox_coords: true
+skip_nms: true
+
+# Losses configuration
+binary_multilabel_classif_loss_name: focal+bce+npbbce
+do_visual_grounding_with_bbox_regression: true
+
+# PadChest-GR dataset configuration
+use_padchest_gr_for_train: true
+use_padchest_gr_for_val: true
+padchest_gr_training_split: train
+padchest_gr_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/padchest/padchest_gr_phrase2embedding(hash=197637,3883807560112046018).pkl
+
+# Checkpoint saving configuration
+save: true 
+
+# Wandb configuration
+wandb_config:
+  enabled: true
+  project: fgvlm-phrase-grounding
+  run_name: fgvlm_medsiglip_pg_padchest-gr_cnr
+  notes: "FG-VLM with MedSigLIP-448; datasets: PadChest-GR; metrics: CNR; tasks: phrase grounding"
+  tags: ["fgvlm", "medsiglip", "pg", "padchest-gr", "cnr"]
+  epochwise_metrics: ["loss", "pchstgr_vgconf_loss", "pchstgr_vgbbox_loss", "pchstgr_cnr", "learning_rate"]

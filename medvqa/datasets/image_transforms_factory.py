@@ -237,54 +237,53 @@ class ConfigurableAlbumentations:
     Compatible with recent Albumentations versions (addressing API changes).
     """
 
-    def __init__(
-        self,
-        image_size: Union[int, Tuple[int, int]],
-        # --- Global Flags ---
-        apply_clahe: bool = True,
-        apply_spatial_train: bool = True,
-        apply_color_train: bool = True,
-        p_test_in_train: float = 0.5,  # i.e. 50% of train images will use test pipeline
-        # --- CLAHE Params ---
-        clahe_clip_limit: float = 4.0,
-        clahe_tile_grid_size: Tuple[int, int] = (8, 8),
-        clahe_p_train: float = 0.5,
-        # --- Spatial Params (for training) ---
-        crop_scale: Tuple[float, float] = (0.8, 1.0),
-        crop_p: float = 1.0,
-        ssr_shift_limit: float = 0.1,
-        ssr_scale_limit: float = 0.1,
-        ssr_rotate_limit: int = 20,
-        ssr_p: float = 0.5,
-        hflip_p: float = 0.5,
-        # --- Color Params (for training) ---
-        # Coarse Dropout - Use ranges directly now
-        dropout_num_holes_range: Tuple[int, int] = (4, 8),
-        dropout_hole_height_range_frac: Tuple[float, float] = (0.01, 0.05),
-        dropout_hole_width_range_frac: Tuple[float, float] = (0.01, 0.05),
-        dropout_fill_value: Union[int, float, str] = 0,
-        dropout_p: float = 0.5,
-        # Color Jitter
-        jitter_brightness: float = 0.15,
-        jitter_contrast: float = 0.15,
-        jitter_saturation: float = 0.0,  # RECOMMENDATION: Set to 0 for grayscale
-        jitter_hue: float = 0.0,  # RECOMMENDATION: Set to 0 for grayscale
-        jitter_p: float = 0.35,
-        # Gauss Noise
-        noise_std_limit_abs: Tuple[int, int] = (3, 8),
-        noise_mean_abs: float = 0.0,
-        noise_p: float = 0.15,
-        # Gaussian Blur
-        blur_limit: Tuple[int, int] = (3, 7),
-        blur_p: float = 0.15,
-    ):
+    def __init__(self,
+                 image_size: Union[int, Tuple[int, int]],
+                 # --- Global Flags ---
+                 apply_clahe: bool = True,
+                 apply_spatial_train: bool = True,
+                 apply_color_train: bool = True,
+                 p_test_in_train: float = 0.4, # i.e. 40% of train images use test pipeline
+                 # --- CLAHE Params ---
+                 clahe_clip_limit: float = 4.0,
+                 clahe_tile_grid_size: Tuple[int, int] = (8, 8),
+                 clahe_p_train: float = 0.5,
+                 # --- Spatial Params (for training) ---
+                 crop_scale: Tuple[float, float] = (0.9, 1.0),
+                 crop_p: float = 0.3,
+                 ssr_shift_limit: float = 0.1,
+                 ssr_scale_limit: float = 0.1,
+                 ssr_rotate_limit: int = 15,
+                 ssr_p: float = 0.5,
+                 hflip_p: float = 0.4,
+                 # --- Color Params (for training) ---
+                 # Coarse Dropout - Use ranges directly now
+                 dropout_num_holes_range: Tuple[int, int] = (4, 8),
+                 dropout_hole_height_range_frac: Tuple[float, float] = (0.01, 0.05),
+                 dropout_hole_width_range_frac: Tuple[float, float] = (0.01, 0.05),
+                 dropout_fill_value: Union[int, float, str] = 0,
+                 dropout_p: float = 0.3,
+                 # Color Jitter
+                 jitter_brightness: float = 0.15,
+                 jitter_contrast: float = 0.15,
+                 jitter_saturation: float = 0.0,  # RECOMMENDATION: Set to 0 for grayscale
+                 jitter_hue: float = 0.0,  # RECOMMENDATION: Set to 0 for grayscale
+                 jitter_p: float = 0.1,
+                 # Gauss Noise - Store absolute std limit, convert later
+                 noise_std_limit_abs: Tuple[int, int] = (3, 8),
+                 noise_mean_abs: float = 0.0, # Keep mean at 0
+                 noise_p: float = 0.1,
+                 # Gaussian Blur
+                 blur_limit: Tuple[int, int] = (3, 7),
+                 blur_p: float = 0.1):
+
         if isinstance(image_size, int):
             self.height, self.width = image_size, image_size
         else:
             self.height, self.width = image_size
 
         if not 0.0 <= p_test_in_train <= 1.0:
-            raise ValueError("p_test_in_train must be between 0.0 and 1.0")
+             raise ValueError("p_test_in_train must be between 0.0 and 1.0")
 
         # Store config
         self.apply_clahe = apply_clahe
@@ -304,167 +303,140 @@ class ConfigurableAlbumentations:
 
         # CoarseDropout params
         self.dropout_num_holes_range = dropout_num_holes_range
-        self.dropout_hole_height_range = dropout_hole_height_range_frac
+        self.dropout_hole_height_range = dropout_hole_height_range_frac 
         self.dropout_hole_width_range = dropout_hole_width_range_frac
-        self.dropout_fill = dropout_fill_value  # Renamed param
+        self.dropout_fill = dropout_fill_value # Renamed param
         self.dropout_p = dropout_p
 
-        # Color Jitter params
         self.jitter_brightness = jitter_brightness
         self.jitter_contrast = jitter_contrast
         self.jitter_saturation = jitter_saturation
         self.jitter_hue = jitter_hue
         self.jitter_p = jitter_p
 
-        # Gauss Noise - Store absolute noise limits, will convert to variance later
+        # Store absolute noise limits, will convert to fractional std_range later
         self.noise_std_limit_abs = noise_std_limit_abs
         self.noise_mean_abs = noise_mean_abs
         self.noise_p = noise_p
 
-        # Gaussian Blur params
-        self.blur_limit = (
-            max(3, blur_limit[0] // 2 * 2 + 1),
-            max(3, blur_limit[1] // 2 * 2 + 1),
-        )
+        self.blur_limit = (max(3, blur_limit[0] // 2 * 2 + 1),
+                           max(3, blur_limit[1] // 2 * 2 + 1))
         self.blur_p = blur_p
 
-    def _build_single_pipeline(
-        self, is_train: bool, bbox_format: Optional[str] = None
-    ) -> A.Compose:
+
+    def _build_single_pipeline(self, is_train: bool, bbox_format: Optional[str] = None) -> A.Compose:
         """Internal helper to build either the train or test A.Compose object."""
         pipeline_steps: List[A.BasicTransform] = []
 
-        # 1. CLAHE (Conditional)
+        # 1. CLAHE (Conditional) - Uses p=1.0 for always_apply
         if self.apply_clahe:
             clahe_p = self.clahe_p_train if is_train else 1.0
-            pipeline_steps.append(
-                A.CLAHE(
-                    clip_limit=self.clahe_clip_limit,
-                    tile_grid_size=self.clahe_tile_grid_size,
-                    p=clahe_p,
-                )
-            )
+            if is_train:
+                clahe_clip_limit = self.clahe_clip_limit
+            else:
+                if isinstance(self.clahe_clip_limit, tuple):
+                    assert len(self.clahe_clip_limit) == 2, "clahe_clip_limit must be a tuple of length 2"
+                    mean_limit = np.mean(self.clahe_clip_limit)
+                    clahe_clip_limit = (mean_limit, mean_limit) # Force a deterministic value for test
+                else:
+                    assert isinstance(self.clahe_clip_limit, float), "clahe_clip_limit must be a float"
+                    clahe_clip_limit = (self.clahe_clip_limit, self.clahe_clip_limit) # Force a deterministic value for test
+            
+            pipeline_steps.append(A.CLAHE(clip_limit=clahe_clip_limit,
+                                          tile_grid_size=self.clahe_tile_grid_size,
+                                          p=clahe_p))
 
         # --- Training Specific Augmentations ---
         if is_train:
             if self.apply_spatial_train:
                 # Uses size=(h, w)
-                pipeline_steps.append(
-                    A.RandomResizedCrop(
-                        height=self.height,
-                        width=self.width,
-                        scale=self.crop_scale,
-                        interpolation=cv2.INTER_CUBIC,
-                        p=self.crop_p,
-                    )
-                )
+                pipeline_steps.append(A.RandomResizedCrop(size=(self.height, self.width),
+                                                          scale=self.crop_scale,
+                                                          interpolation=cv2.INTER_CUBIC,
+                                                          p=self.crop_p))
+                # ShiftScaleRotate -> replace with A.Affine
+                # pipeline_steps.append(A.ShiftScaleRotate(shift_limit=self.ssr_shift_limit,
+                #                                          scale_limit=self.ssr_scale_limit,
+                #                                          rotate_limit=self.ssr_rotate_limit,
+                #                                          border_mode=cv2.BORDER_CONSTANT,
+                #                                          interpolation=cv2.INTER_CUBIC,
+                #                                          p=self.ssr_p))
+                # Replacement using A.Affine
                 affine_transform = A.Affine(
-                    scale=(
-                        1.0 - self.ssr_scale_limit,
-                        1.0 + self.ssr_scale_limit,
-                    ),
-                    translate_percent=(
-                        -self.ssr_shift_limit,
-                        self.ssr_shift_limit,
-                    ),
+                    scale=(1.0 - self.ssr_scale_limit, 1.0 + self.ssr_scale_limit),
+                    translate_percent=(-self.ssr_shift_limit, self.ssr_shift_limit),
                     rotate=(-self.ssr_rotate_limit, self.ssr_rotate_limit),
                     shear=0,
                     interpolation=cv2.INTER_CUBIC,
-                    mode=cv2.BORDER_CONSTANT,
-                    p=self.ssr_p,
+                    border_mode=cv2.BORDER_CONSTANT,
+                    fill=0, # (default is 0, but explicit is fine)
+                    p=self.ssr_p
                 )
                 pipeline_steps.append(affine_transform)
+
                 pipeline_steps.append(A.HorizontalFlip(p=self.hflip_p))
 
             if self.apply_color_train:
-                pipeline_steps.append(
-                    CoarseDropoutWithoutBbox(
-                        min_holes=self.dropout_num_holes_range[0],
-                        max_holes=self.dropout_num_holes_range[1],
-                        min_height=self.dropout_hole_height_range[0],
-                        max_height=self.dropout_hole_height_range[1],
-                        min_width=self.dropout_hole_width_range[0],
-                        max_width=self.dropout_hole_width_range[1],
-                        fill_value=self.dropout_fill,
-                        p=self.dropout_p,
-                    )
-                )
-                pipeline_steps.append(
-                    A.ColorJitter(
-                        brightness=self.jitter_brightness,
-                        contrast=self.jitter_contrast,
-                        saturation=self.jitter_saturation,
-                        hue=self.jitter_hue,
-                        p=self.jitter_p,
-                    )
-                )
+                pipeline_steps.append(CoarseDropoutWithoutBbox(
+                    num_holes_range=self.dropout_num_holes_range,
+                    hole_height_range=self.dropout_hole_height_range,
+                    hole_width_range=self.dropout_hole_width_range,
+                    fill=self.dropout_fill,
+                    p=self.dropout_p
+                ))
+                pipeline_steps.append(A.ColorJitter(brightness=(1 - self.jitter_brightness, 1 + self.jitter_brightness),
+                                                    contrast=(1 - self.jitter_contrast, 1 + self.jitter_contrast),
+                                                    saturation=(1 - self.jitter_saturation, 1 + self.jitter_saturation),
+                                                    hue=(-self.jitter_hue, self.jitter_hue),
+                                                    p=self.jitter_p))
 
-                # Convert std dev limits (absolute) to variance limits (absolute) by squaring.
-                var_limit_abs = (
-                    self.noise_std_limit_abs[0] ** 2,
-                    self.noise_std_limit_abs[1] ** 2,
-                )
-                # The mean for the API is a single value.
-                mean_abs = self.noise_mean_abs
-                pipeline_steps.append(
-                    A.GaussNoise(
-                        var_limit=var_limit_abs,
-                        mean=mean_abs,
-                        p=self.noise_p,
-                    )
-                )
-                pipeline_steps.append(
-                    A.GaussianBlur(blur_limit=self.blur_limit, p=self.blur_p)
-                )
+                # Use new GaussNoise parameters (std_range, mean_range)
+                # Convert absolute std limits to fractional based on uint8 max value (255)
+                std_range_frac = (self.noise_std_limit_abs[0] / 255.0, self.noise_std_limit_abs[1] / 255.0)
+                # Convert absolute mean to fractional
+                mean_range_frac = (self.noise_mean_abs / 255.0, self.noise_mean_abs / 255.0) # Assuming single mean value maps to range
 
-        # 4. Resize (Always apply at the end for consistency)
-        pipeline_steps.append(
-            A.Resize(
-                height=self.height,
-                width=self.width,
-                interpolation=cv2.INTER_CUBIC,
-                p=1.0,
-            )
-        )
+                pipeline_steps.append(A.GaussNoise(
+                    std_range=std_range_frac,
+                    mean_range=mean_range_frac, # Use new mean_range
+                    # per_channel=True, # Default is True, keep it?
+                    p=self.noise_p
+                ))
+                pipeline_steps.append(A.GaussianBlur(blur_limit=self.blur_limit, p=self.blur_p))
+
+        # 4. Resize (Always apply at the end for consistency) - Uses p=1.0
+        pipeline_steps.append(A.Resize(height=self.height, width=self.width,
+                                        interpolation=cv2.INTER_CUBIC,
+                                        p=1.0))
 
         # --- BBox Params ---
         bbox_params = None
         if bbox_format:
-            bbox_params = A.BboxParams(
-                format=bbox_format, label_fields=["bbox_labels"]
-            )
+            bbox_params = A.BboxParams(format=bbox_format,
+                                       label_fields=['bbox_labels'])
 
         return A.Compose(pipeline_steps, bbox_params=bbox_params)
 
-    def build_pipeline(
-        self, is_train: bool, bbox_format: Optional[str] = None
-    ) -> Callable[..., Dict[str, Any]]:
+
+    def build_pipeline(self, is_train: bool, bbox_format: Optional[str] = None) -> Callable[..., Dict[str, Any]]:
         """
         Builds the augmentation pipeline. Handles stochastic train/test switching.
         """
         # --- Build the Test Pipeline ---
-        test_pipeline = self._build_single_pipeline(
-            is_train=False, bbox_format=bbox_format
-        )
+        test_pipeline = self._build_single_pipeline(is_train=False, bbox_format=bbox_format)
 
         if not is_train:
             return test_pipeline
         else:
             if self.p_test_in_train <= 0.0:
                 # --- Build the Full Train Pipeline ---
-                return self._build_single_pipeline(
-                    is_train=True, bbox_format=bbox_format
-                )
+                return self._build_single_pipeline(is_train=True, bbox_format=bbox_format)
             else:
                 # --- Build Full Train Pipeline for Stochastic Wrapper ---
-                full_train_pipeline = self._build_single_pipeline(
-                    is_train=True, bbox_format=bbox_format
-                )
+                full_train_pipeline = self._build_single_pipeline(is_train=True, bbox_format=bbox_format)
 
                 # --- Define Stochastic Wrapper ---
-                def stochastic_pipeline_wrapper(
-                    **kwargs: Any,
-                ) -> Dict[str, Any]:
+                def stochastic_pipeline_wrapper(**kwargs: Any) -> Dict[str, Any]:
                     if random.random() < self.p_test_in_train:
                         return test_pipeline(**kwargs)
                     else:

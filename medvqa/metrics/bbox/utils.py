@@ -1,12 +1,15 @@
 import itertools
-from sklearn.metrics import average_precision_score
+import multiprocessing
 import time
-import torch
-import numpy as np
-from torchvision.ops.boxes import nms
 from multiprocessing import Pool
+from typing import Optional, Union
+
+import numpy as np
+import torch
 from shapely.geometry import box as shapely_box
 from shapely.ops import unary_union
+from sklearn.metrics import average_precision_score
+from torchvision.ops.boxes import nms
 from tqdm import tqdm
 
 from medvqa.utils.logging_utils import print_bold
@@ -93,7 +96,8 @@ def compute_iou(pred, gt):
     # areas - the interesection area
     iou = interArea / (boxAArea + boxBArea - interArea)
     # return the intersection over union value
-    if torch.is_tensor(iou): iou = iou.item()
+    if torch.is_tensor(iou):
+        iou = iou.item()
     return iou
 
 # HACK to make multiprocessing work. Based on https://stackoverflow.com/a/37746961/2801404
@@ -363,7 +367,7 @@ def compute_mae_per_class__yolov5(pred_boxes, pred_classes, gt_coords, gt_presen
 def _compute_score(task, metric_fn):
     iou_thrs, c, n = task
     tp, fp, fn = 0, 0, 0
-    if type(_shared_pred_presences) == list:
+    if isinstance(_shared_pred_presences, list):
         for i in range(n):
             if _shared_pred_presences[i][c] > 0:
                 if _shared_gt_presences[i][c] == 1:
@@ -430,7 +434,7 @@ def _compute_multiple_scores(pred_coords, pred_presences, gt_coords, gt_presence
             task_args.append((iou_thr, c, num_samples))
     with Pool(num_workers) as p:
         scores = p.map(metric_fn, task_args)
-    if type(scores[0]) == tuple:
+    if isinstance(scores[0], tuple):
         scores = np.array(scores).reshape((len(iou_thresholds), num_classes, len(scores[0])))
     else:
         scores = np.array(scores).reshape((len(iou_thresholds), num_classes))
@@ -516,7 +520,7 @@ def _compute_multiple_scores__detectron2(pred_boxes, pred_classes, scores, gt_co
         actual_num_classes = np.sum(valid_classes)
     else:
         actual_num_classes = num_classes
-    if type(scores[0]) == tuple:
+    if isinstance(scores[0], tuple):
         scores = np.array(scores).reshape((len(iou_thresholds), actual_num_classes, len(scores[0])))
     else:
         scores = np.array(scores).reshape((len(iou_thresholds), actual_num_classes))
@@ -577,7 +581,7 @@ def _compute_multiple_scores__v2(pred_boxes, pred_classes, gt_coords, gt_classes
             task_args.append((iou_thr, c, num_samples))
     with Pool(num_workers) as p:
         scores = p.map(metric_fn, task_args)
-    if type(scores[0]) == tuple:
+    if isinstance(scores[0], tuple):
         scores = np.array(scores).reshape((len(iou_thresholds), num_classes, len(scores[0])))
     else:
         scores = np.array(scores).reshape((len(iou_thresholds), num_classes))
@@ -988,7 +992,7 @@ def find_optimal_conf_iou_max_det_thresholds__single_class(
         'pred_confs_list': best_pred_confs_list
     }
 
-def compute_probability_map_iou(prob_map, gt_bboxes, conf_th, bbox_format='xyxy'):
+def compute_probability_map_iou(prob_map, gt_bboxes, conf_th=0.5, bbox_format='xyxy'):
     """
     Compute the Intersection over Union (IoU) between the predicted probability map and ground truth bounding boxes.
 
@@ -1038,8 +1042,40 @@ def compute_probability_map_iou(prob_map, gt_bboxes, conf_th, bbox_format='xyxy'
     return intersection / union if union > 0 else 0.0
 
 
-def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, bbox_format='xyxy',
-                                                 conf_thresholds=np.arange(0.1, 0.9, 0.1)):
+
+# A single global dictionary to hold all shared data for the workers
+_worker_data = None
+
+def init_worker(data_dict):
+    """
+    Initializer for each worker process.
+    It sets a single global dictionary containing all necessary data.
+    """
+    global _worker_data
+    _worker_data = data_dict
+
+def evaluate_probability_map_threshold(conf_th):
+    """
+    The function executed by each worker. It computes the average IoU
+    for a single confidence threshold using data from the global dictionary.
+    """
+    total_iou = 0.0
+    # Access the data from the global dictionary
+    prob_maps = _worker_data["prob_maps"]
+    gt_bboxes_list = _worker_data["gt_bboxes_list"]
+    bbox_format = _worker_data["bbox_format"]
+
+    for prob_map, gt_bboxes in zip(prob_maps, gt_bboxes_list):
+        total_iou += compute_probability_map_iou(
+            prob_map, gt_bboxes, float(conf_th), bbox_format=bbox_format
+        )
+
+    avg_iou = total_iou / len(prob_maps)
+    return avg_iou, conf_th
+
+def find_optimal_probability_map_conf_threshold(prob_maps: np.ndarray, gt_bboxes_list: list, bbox_format: str = 'xyxy',
+                                                 conf_thresholds: np.ndarray = np.arange(0.1, 0.9, 0.1),
+                                                 num_processes=None):
     """
     Find the optimal confidence threshold for binarizing probability maps that maximizes the average IoU with ground truth.
 
@@ -1054,6 +1090,7 @@ def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, bbox_
         - 'best_iou' (float): The highest average IoU achieved across samples.
         - 'best_conf_th' (float): The confidence threshold that achieved this IoU.
     """
+    # --- Assertions ---
     assert prob_maps.ndim == 3, "prob_maps must have shape (num_samples, height, width)"
     assert len(gt_bboxes_list) == prob_maps.shape[0], "Mismatch between number of samples in prob_maps and gt_bboxes_list"
     assert isinstance(gt_bboxes_list, list), "gt_bboxes_list must be a list"
@@ -1061,32 +1098,42 @@ def find_optimal_probability_map_conf_threshold(prob_maps, gt_bboxes_list, bbox_
     assert all(len(bbox) == 4 for bboxes in gt_bboxes_list for bbox in bboxes), "Each bounding box must be in (x_min, y_min, x_max, y_max) format"
     assert all(0 <= x <= 1 for bboxes in gt_bboxes_list for bbox in bboxes for x in bbox), "Bounding box coordinates must be normalized"
 
-    best_iou = -1.0
-    best_conf_th = None
+     # --- Multiprocessing Pool ---
+    if num_processes is None:
+        num_processes = multiprocessing.cpu_count()
 
-    # Iterate over confidence thresholds to find the best one
-    for conf_th in tqdm(conf_thresholds, desc="Optimizing threshold", mininterval=2.0):
-        total_iou = 0.0
-        
-        # Compute IoU for each probability map and its corresponding ground truth
-        for prob_map, gt_bboxes in zip(prob_maps, gt_bboxes_list):
-            total_iou += compute_probability_map_iou(prob_map, gt_bboxes, float(conf_th),
-                                                     bbox_format=bbox_format)  # Ensure conf_th is a float
-        
-        avg_iou = total_iou / len(prob_maps)  # Compute mean IoU over all samples
-        
-        # Track the best threshold
-        if avg_iou > best_iou:
-            best_iou = avg_iou
-            best_conf_th = conf_th
-
-    return {
-        'best_iou': best_iou,
-        'best_conf_th': best_conf_th
+    # Bundle all data needed by workers into a single dictionary
+    worker_init_data = {
+        "prob_maps": prob_maps,
+        "gt_bboxes_list": gt_bboxes_list,
+        "bbox_format": bbox_format,
     }
 
-def compute_iou_with_nms(gt_bboxes, pred_bbox_coords, pred_bbox_probs, iou_th, conf_th, pre_nms_max_det,
-                         post_nms_max_det=None, bbox_format='xyxy'):
+    with multiprocessing.Pool(
+        processes=num_processes,
+        initializer=init_worker,
+        # Pass the dictionary as the single initialization argument.
+        # The trailing comma is important to ensure it's a tuple.
+        initargs=(worker_init_data,),
+    ) as pool:
+        results = list(
+            tqdm(
+                pool.imap(evaluate_probability_map_threshold, conf_thresholds),
+                total=len(conf_thresholds),
+                desc="Optimizing threshold (MP)",
+            )
+        )
+
+    if not results:
+        return {"best_iou": -1.0, "best_conf_th": None}
+
+    best_iou, best_conf_th = max(results, key=lambda item: item[0])
+
+    return {"best_iou": best_iou, "best_conf_th": best_conf_th}
+
+def compute_iou_with_nms(gt_bboxes: Union[list, np.ndarray], pred_bbox_coords: np.ndarray, pred_bbox_probs: np.ndarray,
+                         iou_th: float, conf_th: float, pre_nms_max_det: int, post_nms_max_det: Optional[int] = None,
+                         bbox_format: str = 'xyxy') -> float:
     """
     Computes the Intersection over Union (IoU) between ground truth bounding boxes and predicted bounding boxes 
     after applying confidence thresholding and Non-Maximum Suppression (NMS).

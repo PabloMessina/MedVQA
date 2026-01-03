@@ -160,12 +160,12 @@ class VinBigTrainerBase:
         logger.info("Determining image paths...")
         if use_original_image_size:
             self.image_paths: List[str] = [
-                get_original_image_path(img_id) for img_id in self.image_ids
+                get_original_image_path("train" if i < N_IMAGES_TRAIN else "test", img_id) for i, img_id in enumerate(self.image_ids)
             ]
             logger.info("Using original image paths.")
         else:
             self.image_paths: List[str] = [
-                get_medium_size_image_path(img_id) for img_id in self.image_ids
+                get_medium_size_image_path("train" if i < N_IMAGES_TRAIN else "test", img_id) for i, img_id in enumerate(self.image_ids)
             ]
             logger.info("Using medium-size image paths.")
 
@@ -262,7 +262,7 @@ class VinBigTrainerBase:
                 for j, class_id in enumerate(class_id_list):
                     assert 0 <= class_id < num_bbox_classes, \
                         f"Image {img_id}, Bbox {j}: Class ID {class_id} out of range [0, {num_bbox_classes - 1}]"
-            logger.info(f"Sanity checks complete.")
+            logger.info("Sanity checks complete.")
 
             logger.info(
                 f"Loaded bounding box data for {len(self.image_id_2_bboxes)} images."
@@ -336,7 +336,8 @@ class VinBig_VQA_Trainer(VinBigTrainerBase):
             train_indices = self.test_indices
         elif training_data_mode == VinBigTrainingMode.ALL:
             train_indices = self.train_indices + self.test_indices
-        else: assert False, f'Unknown training_data_mode = {training_data_mode}'         
+        else:
+            assert False, f'Unknown training_data_mode = {training_data_mode}'         
         
         self.train_dataset, self.train_dataloader = self._generate_dataset_and_dataloader(
             train_indices, batch_size, collate_batch_fn, num_workers, infinite=True, min_pos_to_include=10,
@@ -420,7 +421,8 @@ class VinBig_VisualModuleTrainer(VinBigTrainerBase):
             train_indices = self.test_indices
         elif training_data_mode == VinBigTrainingMode.ALL:
             train_indices = self.train_indices + self.test_indices
-        else: assert False, f'Unknown training_data_mode = {training_data_mode}'
+        else:
+            assert False, f'Unknown training_data_mode = {training_data_mode}'
         
         if use_training_set:
             print('Generating train dataset and dataloader')
@@ -496,7 +498,8 @@ class VinBigVQADataset(Dataset):
         self.indices = indices
         self.include_image = include_image
         
-        if suffle_indices: np.random.shuffle(self.indices)
+        if suffle_indices:
+            np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
 
         if include_image:
@@ -551,7 +554,8 @@ class VinBigVisualDataset(Dataset):
             if data_augmentation_enabled:
                 self.albumentation_adapter = VinBigAlbumentationAdapter()
         
-        if suffle_indices: np.random.shuffle(self.indices)
+        if suffle_indices:
+            np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
     
     def __len__(self):
@@ -641,7 +645,8 @@ class VinBig_MAE_Trainer(MAETrainerBase):
         labels[N_IMAGES_TRAIN:] = df_labels_test[VINBIG_LABELS].values
 
         train_indices = list(range(len(labels)))
-        labels_getter = lambda i: labels[i]
+        def labels_getter(i):
+            return labels[i]
         super().__init__(train_indices, None, None, list(range(len(VINBIG_LABELS))),
                          labels_getter, batch_size, collate_batch_fn, num_workers, use_validation_set=False)
     
@@ -721,7 +726,7 @@ class VinBig_PhraseClassificationDataset(Dataset):
             'i': images,
             'pe': phrase_embeddings,
             'pcl': labels,
-            'dataset_name': 'vinbig', # Used downstream in multi-dataset training
+            'dataset_name': 'vinbig-cl', # Used downstream in multi-dataset training
         }
 
 # --- Dataset 2: Phrase Grounding Only ---
@@ -849,282 +854,7 @@ class VinBig_PhraseGroundingDataset(Dataset):
                 'pe': phrase_embeddings,
                 'bboxes': bboxes,
             }
-        collated_batch['dataset_name'] = 'vinbig' # Used downstream in multi-dataset training
-        return collated_batch
-
-
-# --- Dataset 3: Phrase Grounding and Classification Combined ---
-
-class VinBig_PhraseGroundingAndClassificationDataset(Dataset):
-    """
-    Dataset for combined VinBig phrase classification and grounding.
-    - Training: Returns image, all phrase embeddings, classification labels,
-      and grounding targets (tbc, tbp, tpm) ONLY for phrases with supervision,
-      plus indices mapping these targets back to the full output tensor.
-    - Inference: Returns image, all phrase embeddings, classification labels,
-      and the actual bounding boxes with their corresponding phrase indices
-      for phrases with supervision.
-    """
-    # TODO: review and test this dataset class
-    def __init__(self,
-                 indices: List[int],
-                 image_paths: List[str],
-                 image_transform: Callable, # Should handle augmentation of img, bboxes, masks
-                 phrase_embeddings: np.ndarray,
-                 phrase_classification_labels: np.ndarray,
-                 # Lookup: image_idx -> phrase_idx -> {bboxes, prob_mask}
-                 image_idx_to_grounding_info: Dict[int, Dict[int, Dict]],
-                 feature_map_size: Tuple[int, int], # Needed for target generation (training)
-                 bbox_format: str = 'xyxy',         # Needed for target generation (training)
-                 infinite: bool = False,
-                 shuffle_indices: bool = False,
-                 data_augmentation_enabled: bool = False, # Control augmentation
-                 for_training: bool = True, # <<< ADDED
-                 ):
-        self.indices = list(indices)
-        self.image_paths = image_paths
-        self.image_transform = image_transform # This callable handles augmentation logic internally
-        self.phrase_embeddings = torch.tensor(phrase_embeddings, dtype=torch.float32)
-        self.phrase_classification_labels = phrase_classification_labels
-        self.image_idx_to_grounding_info = image_idx_to_grounding_info
-        self.feature_map_size = feature_map_size
-        self.bbox_format = bbox_format
-        self.infinite = infinite
-        self.data_augmentation_enabled = data_augmentation_enabled
-        self.for_training = for_training # <<< STORED
-
-        if for_training:
-             assert self.feature_map_size is not None, "feature_map_size needed for training"
-             assert self.bbox_format is not None, "bbox_format needed for training"
-
-        if shuffle_indices:
-            random.shuffle(self.indices)
-
-        if infinite:
-            self._len = INFINITE_DATASET_LENGTH
-        else:
-            self._len = len(self.indices)
-
-    def __len__(self) -> int:
-        return self._len
-
-    def __getitem__(self, i: int) -> Dict:
-        if self.infinite:
-            actual_idx = self.indices[i % len(self.indices)]
-        else:
-            actual_idx = self.indices[i]
-
-        image_path = self.image_paths[actual_idx]
-        labels = torch.tensor(self.phrase_classification_labels[actual_idx], dtype=torch.float32)
-
-        # Get grounding info for this image
-        grounding_info = self.image_idx_to_grounding_info.get(actual_idx, {})
-        grounding_phrase_indices = sorted(list(grounding_info.keys())) # Original phrase indices (0-27)
-
-        # --- Prepare FLAT lists for augmentation ---
-        flat_bboxes_to_augment = []
-        flat_bbox_labels_to_augment = [] # Will store the original phrase index (0-27)
-        masks_to_augment = []
-        bboxes_per_phrase_idx = {} # Track counts for reconstructing later if needed
-
-        for pidx in grounding_phrase_indices:
-            phrase_data = grounding_info[pidx]
-            bboxes = phrase_data["bboxes"]
-            mask = phrase_data["prob_mask"]
-            count = 0
-            for bbox in bboxes:
-                flat_bboxes_to_augment.append(bbox)
-                flat_bbox_labels_to_augment.append(pidx)
-                count += 1
-            masks_to_augment.append(mask) # Keep masks per phrase for now
-            bboxes_per_phrase_idx[pidx] = count
-
-        # --- Apply transform/augmentation ---
-        augmented_image = None
-        augmented_flat_bboxes = flat_bboxes_to_augment
-        augmented_flat_labels = flat_bbox_labels_to_augment
-        augmented_masks = masks_to_augment # List of masks, one per phrase index
-
-        if self.data_augmentation_enabled and len(grounding_phrase_indices) > 0:
-            # Pass FLAT lists to the transform. Assumes transform handles this format.
-            # The transform should ideally also augment the masks if needed for training.
-            transform_output = self.image_transform(
-                image_path=image_path,
-                bboxes=flat_bboxes_to_augment,   # Flat list of bboxes
-                bbox_labels=flat_bbox_labels_to_augment, # Flat list of phrase indices
-                masks=masks_to_augment,          # List of masks (one per phrase)
-                # Add other args your transform might need, e.g., adapter
-            )
-            augmented_image = transform_output['pixel_values']
-            augmented_flat_bboxes = transform_output['bboxes'] # Should return flat list
-            augmented_flat_labels = transform_output['bbox_labels'] # Should return flat list
-            augmented_masks = transform_output['masks'] # Should return list of masks
-            # Sanity check (optional): Ensure label list length matches bbox list length
-            assert len(augmented_flat_bboxes) == len(augmented_flat_labels)
-        else:
-            # No augmentation or no grounding phrases
-            # Still need to apply basic image transform
-            transform_output = self.image_transform(image_path=image_path)
-            augmented_image = transform_output['pixel_values']
-            # Use original flat lists if no augmentation applied
-            augmented_flat_bboxes = flat_bboxes_to_augment
-            augmented_flat_labels = flat_bbox_labels_to_augment
-            augmented_masks = masks_to_augment
-
-
-        # --- Prepare output based on mode ---
-        output_dict = {
-            'i': augmented_image,
-            'pe': self.phrase_embeddings,
-            'pcl': labels,
-            'gpi': grounding_phrase_indices, # Still useful to know which phrases *could* have grounding
-        }
-
-        if self.for_training:
-            # --- Generate target tensors for training ---
-            tbc_list = []
-            tbp_list = []
-            tpm_list = []
-
-            # We need to reconstruct per-phrase bboxes/masks from the flat augmented lists
-            current_bbox_idx = 0
-            current_mask_idx = 0
-            for pidx in grounding_phrase_indices: # Iterate through the *original* sorted phrase indices
-                num_bboxes_for_this_phrase = bboxes_per_phrase_idx[pidx]
-                # Slice the flat augmented bboxes belonging to this phrase index
-                # This assumes the transform preserves the *order* relative to the input flat list
-                phrase_bboxes = augmented_flat_bboxes[current_bbox_idx : current_bbox_idx + num_bboxes_for_this_phrase]
-                # Get the corresponding augmented mask
-                # This assumes masks are returned one per original phrase index
-                phrase_mask = augmented_masks[current_mask_idx]
-
-                if len(phrase_bboxes) > 0: # Only generate targets if bboxes survived augmentation
-                    tbc, tbp, tpm = convert_bboxes_into_target_tensors(
-                        bboxes=phrase_bboxes,
-                        probabilistic_mask=phrase_mask,
-                        feature_map_size=self.feature_map_size,
-                        bbox_format=self.bbox_format,
-                    )
-                    tbc_list.append(tbc)
-                    tbp_list.append(tbp)
-                    tpm_list.append(tpm)
-                # else:
-                    # Handle case where augmentation removed all bboxes for a phrase?
-                    # Option 1: Skip target generation (lists will be shorter than gpi) - Requires careful collate
-                    # Option 2: Generate empty/zero targets (might be simpler) - Let's assume this for now if needed
-                    # Current convert_bboxes_into_target_tensors likely handles empty input gracefully.
-
-                current_bbox_idx += num_bboxes_for_this_phrase
-                current_mask_idx += 1
-
-            # Add target lists to output
-            output_dict['gt_tbc_list'] = tbc_list
-            output_dict['gt_tbp_list'] = tbp_list
-            output_dict['gt_tpm_list'] = tpm_list
-
-        else:
-            # --- Prepare output for inference ---
-            # Return the flat lists of augmented bboxes and their corresponding phrase indices
-            output_dict['bboxes'] = augmented_flat_bboxes # Flat list for this image
-            output_dict['bbox_labels'] = augmented_flat_labels # Flat list of phrase indices (0-27)
-
-        return output_dict
-
-
-    @staticmethod
-    def collate_fn(batch: List[Dict]) -> Dict:
-        """
-        Collate function for combined classification and grounding.
-        Handles both training and inference modes.
-        """
-        # Check mode based on keys in the first item
-        is_training = 'gt_tbc_list' in batch[0]
-
-        # Common batching
-        images = torch.stack([item['i'] for item in batch])
-        phrase_embeddings = batch[0]['pe'] # Shared
-        labels = torch.stack([item['pcl'] for item in batch])
-        num_phrases = phrase_embeddings.shape[0]
-
-        collated_batch = {
-            'i': images,
-            'pe': phrase_embeddings,
-            'pcl': labels,
-            'dataset_name': 'vinbig', # Added dataset name
-        }
-
-        if is_training:
-            # --- Collate for Training ---
-            batched_grounding_indices = []
-            batch_indices_for_grounding = []
-            tbc_to_cat = []
-            tbp_to_cat = []
-            tpm_to_cat = []
-
-            for batch_idx, item in enumerate(batch):
-                # Use the *actual* generated target lists, their length might be
-                # less than len(item['gpi']) if augmentation removed all bboxes for a phrase.
-                num_targets_generated = len(item['gt_tbc_list'])
-                original_phrase_indices_with_targets = item['gpi'][:num_targets_generated] # Assuming order is preserved
-
-                if num_targets_generated > 0:
-                    tbc_to_cat.extend(item['gt_tbc_list']) # Extend with list of tensors
-                    tbp_to_cat.extend(item['gt_tbp_list'])
-                    tpm_to_cat.extend(item['gt_tpm_list'])
-
-                    for phrase_idx in original_phrase_indices_with_targets:
-                        batched_grounding_indices.append(batch_idx * num_phrases + phrase_idx)
-                        batch_indices_for_grounding.append(batch_idx)
-
-            # Convert index lists to tensors
-            gpi_flat_tensor = torch.tensor(batched_grounding_indices, dtype=torch.long)
-            gpi_batch_idx_tensor = torch.tensor(batch_indices_for_grounding, dtype=torch.long)
-
-            # Concatenate target tensors across the batch (stack the list of tensors)
-            if tbc_to_cat:
-                collated_gt_tbc = torch.stack(tbc_to_cat, dim=0)
-                collated_gt_tbp = torch.stack(tbp_to_cat, dim=0)
-                collated_gt_tpm = torch.stack(tpm_to_cat, dim=0)
-            else:
-                # Create empty tensors with correct trailing dimensions
-                # Need feature_map_size info here - maybe infer from a non-empty item if possible
-                # Or pass feature_map_size to collate_fn? Let's try inferring.
-                fm_h, fm_w = batch[0]['gt_tbc_list'][0].shape[-2:] if batch and batch[0]['gt_tbc_list'] else (0, 4)
-                fm_hw = batch[0]['gt_tbp_list'][0].shape[-1] if batch and batch[0]['gt_tbp_list'] else 0
-                collated_gt_tbc = torch.empty((0, fm_h, fm_w), dtype=torch.float32)
-                collated_gt_tbp = torch.empty((0, fm_hw), dtype=torch.bool) # Check dtype
-                collated_gt_tpm = torch.empty((0, fm_hw), dtype=torch.float32)
-
-
-            assert len(gpi_flat_tensor) == collated_gt_tbc.shape[0], \
-                f"Training Collate Mismatch: {len(gpi_flat_tensor)} indices vs {collated_gt_tbc.shape[0]} target tensors"
-
-            collated_batch.update({
-                'gpi_flat': gpi_flat_tensor,
-                'gpi_batch_idx': gpi_batch_idx_tensor,
-                'gt_tbc': collated_gt_tbc,
-                'gt_tbp': collated_gt_tbp,
-                'gt_tpm': collated_gt_tpm,
-                'task_mode': 'classification_and_grounding_train', # More specific mode
-            })
-
-        else:
-            # --- Collate for Inference ---
-            batched_bboxes = []
-            batched_bbox_labels = []
-
-            for item in batch:
-                # Append the flat list of bboxes for the image
-                batched_bboxes.append(item['bboxes'])
-                # Append the flat list of corresponding phrase indices
-                batched_bbox_labels.append(item['bbox_labels'])
-
-            collated_batch.update({
-                'bboxes': batched_bboxes,           # List[List[bbox]] - Outer list is batch
-                'bbox_labels': batched_bbox_labels, # List[List[int]] - Outer list is batch
-                'task_mode': 'classification_and_grounding_eval', # More specific mode
-            })
-
+        collated_batch['dataset_name'] = 'vinbig-pg' # Used downstream in multi-dataset training
         return collated_batch
 
 
@@ -1143,7 +873,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
     - Loads phrase embeddings and corresponding phrases.
     - Reorders labels, phrases, and embeddings for consistency (bbox classes first).
     - Determines training and validation image indices based on configuration.
-    - Sets up task-specific datasets and dataloaders (`train_dataloader`, `val_dataloader`).
+    - Sets up task-specific datasets and dataloaders.
     """
 
     def __init__(
@@ -1166,6 +896,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         replace_phrase_embeddings_with_random_vectors: bool = False, # Debug: use random embeddings
         use_modified_labels: bool = False, # Use modified label set?
         bbox_format: Literal["xyxy", "cxcywh"] = "xyxy", # Bbox format used/expected
+        val_max_size: Optional[int] = None, # Max size for validation set
     ):
         """
         Initializes the VinBigPhraseTrainer.
@@ -1209,6 +940,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
             bbox_format: Specifies the format ('xyxy' or 'cxcywh') of the bounding
                 boxes loaded by the base class and used for generating grounding targets.
                 Defaults to 'xyxy'.
+            val_max_size: Max size for validation set. Defaults to None.
         """
         logger.info(f"Initializing VinBigPhraseTrainer (Task: {task_mode})")
         # --- Initialize Base Class ---
@@ -1250,6 +982,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         self.bbox_format = bbox_format # Store for potential use in target generation
         self.max_images_per_batch = max_images_per_batch
         self.val_batch_size_factor = val_batch_size_factor
+        self.val_max_size = val_max_size
         self.num_train_workers = num_train_workers
         self.num_val_workers = num_val_workers
 
@@ -1331,7 +1064,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         logger.info(f'  Reordered number of phrases: {len(self.phrases)}')
         logger.info(f'  Reordered phrase_embeddings shape: {self.phrase_embeddings.shape}')
         
-        message_to_log = f'\nFinal phrases mapped to labels (in order):'
+        message_to_log = '\nFinal phrases mapped to labels (in order):'
         for i, (phrase, label) in enumerate(zip(self.phrases, self.label_names)):
             message_to_log += f'\n\t{i}: "{phrase}" ({label})'
         logger.info(message_to_log)
@@ -1381,7 +1114,8 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
             self._setup_grounding_dataloaders()
         elif task_mode == VinBigPhraseTaskMode.CLASSIFICATION_AND_GROUNDING.value:
             assert self.bboxes is not None, "Bounding boxes must be loaded for combined task"
-            self._setup_classification_and_grounding_dataloaders()
+            self._setup_classification_dataloaders()
+            self._setup_grounding_dataloaders()
         else:
             # This case should ideally be caught by the initial assertion, but included for safety.
             raise ValueError(f"Unknown task_mode: {task_mode}")
@@ -1392,15 +1126,15 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         """
         Sets up datasets and dataloaders for the phrase classification task.
 
-        Creates `self.train_dataset`, `self.train_dataloader` (if `use_training_set` is True)
-        and `self.val_dataset`, `self.val_dataloader` (if `use_validation_set` is True).
+        Creates `self.train_classification_dataset`, `self.train_classification_dataloader` (if `use_training_set` is True)
+        and `self.val_classification_dataset`, `self.val_classification_dataloader` (if `use_validation_set` is True).
         Training uses balanced sampling via `CompositeInfiniteDataset`.
         Validation uses a standard sequential dataset.
         """
-        self.train_dataset = None
-        self.train_dataloader = None
-        self.val_dataset = None
-        self.val_dataloader = None
+        self.train_classification_dataset = None
+        self.train_classification_dataloader = None
+        self.val_classification_dataset = None
+        self.val_classification_dataloader = None
 
         # --- Training Dataloader Setup ---
         if self.actual_train_indices: # Check if list is not empty
@@ -1435,9 +1169,9 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 logger.info(f'    Group size: {len(indices):<6}, weight: {weight:.2f}')
 
             # Combine group datasets into a single dataset that samples based on weights
-            self.train_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
-            self.train_dataloader = DataLoader(
-                dataset=self.train_dataset,
+            self.train_classification_dataset = CompositeInfiniteDataset(train_datasets, train_weights)
+            self.train_classification_dataloader = DataLoader(
+                dataset=self.train_classification_dataset,
                 batch_size=self.max_images_per_batch,
                 num_workers=self.num_train_workers,
                 collate_fn=VinBig_PhraseClassificationDataset.collate_fn, # Use dataset's collate_fn
@@ -1450,8 +1184,16 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         # --- Validation Dataloader Setup ---
         if self.actual_val_indices: # Check if list is not empty
             logger.info(f'{ANSI_BOLD}Setting up VALIDATION classification dataloader...{ANSI_RESET}')
+
+            if self.val_max_size:
+                random_old_state = random.getstate()
+                random.seed(42) # Use a fixed seed so validation is consistent across runs/restarts
+                self.actual_val_indices = random.sample(self.actual_val_indices, self.val_max_size)
+                logger.info(f"  Subsampled validation data to: {len(self.actual_val_indices)}")
+                random.setstate(random_old_state) # Restore the original random state
+
             # Validation dataset uses the selected validation indices directly
-            self.val_dataset = VinBig_PhraseClassificationDataset(
+            self.val_classification_dataset = VinBig_PhraseClassificationDataset(
                 indices=self.actual_val_indices,
                 image_paths=self.image_paths,
                 image_transform=self.val_image_transform, # Use validation transform
@@ -1461,8 +1203,8 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 shuffle_indices=False, # No shuffling for validation
             )
             val_batch_size = int(self.max_images_per_batch * self.val_batch_size_factor)
-            self.val_dataloader = DataLoader(
-                dataset=self.val_dataset,
+            self.val_classification_dataloader = DataLoader(
+                dataset=self.val_classification_dataset,
                 batch_size=val_batch_size,
                 num_workers=self.num_val_workers,
                 collate_fn=VinBig_PhraseClassificationDataset.collate_fn, # Use dataset's collate_fn
@@ -1478,14 +1220,14 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
 
         This involves preprocessing the bounding boxes loaded by the base class
         into probabilistic masks for each phrase associated with an image.
-        It then creates `self.train_dataset`, `self.train_dataloader` (if applicable)
-        and `self.val_dataset`, `self.val_dataloader` (if applicable) using
+        It then creates `self.train_grounding_dataset`, `self.train_grounding_dataloader` (if applicable)
+        and `self.val_grounding_dataset`, `self.val_grounding_dataloader` (if applicable) using
         `VinBig_PhraseGroundingDataset`.
         """
-        self.train_dataset = None
-        self.train_dataloader = None
-        self.val_dataset = None
-        self.val_dataloader = None
+        self.train_grounding_dataset = None
+        self.train_grounding_dataloader = None
+        self.val_grounding_dataset = None
+        self.val_grounding_dataloader = None
 
         logger.info(f'{ANSI_BOLD}Preprocessing data for grounding...{ANSI_RESET}')
         # --- Prepare Data Structures for Grounding Dataset ---
@@ -1553,11 +1295,18 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
             if img_idx in actual_val_image_indices_set
         ]
 
+        if self.val_max_size:
+            random_old_state = random.getstate()
+            random.seed(42) # Use a fixed seed so validation is consistent across runs/restarts
+            val_grounding_sample_indices = random.sample(val_grounding_sample_indices, self.val_max_size)
+            logger.info(f"  Subsampled grounding samples for validation to: {len(val_grounding_sample_indices)}")
+            random.setstate(random_old_state) # Restore the original random state
+
         # --- Training Dataloader Setup ---
         if train_grounding_sample_indices: # Check if list is not empty
             logger.info(f'{ANSI_BOLD}Setting up TRAINING grounding dataloader...{ANSI_RESET}')
             logger.info(f'  Using {len(train_grounding_sample_indices)} grounding samples for training.')
-            self.train_dataset = VinBig_PhraseGroundingDataset(
+            self.train_grounding_dataset = VinBig_PhraseGroundingDataset(
                 # Provide the pre-processed parallel lists
                 image_paths=image_paths_for_grounding,
                 image_transform=self.train_image_transform,
@@ -1574,11 +1323,11 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 bbox_format=self.bbox_format,
                 infinite=False,
             )
-            self.train_dataloader = DataLoader(
-                dataset=self.train_dataset,
+            self.train_grounding_dataloader = DataLoader(
+                dataset=self.train_grounding_dataset,
                 batch_size=self.max_images_per_batch,
                 num_workers=self.num_train_workers,
-                collate_fn=self.train_dataset.collate_fn, # Use dataset's collate_fn
+                collate_fn=self.train_grounding_dataset.collate_fn, # Use dataset's collate_fn
                 shuffle=True, # Shuffle batches each epoch (if dataset isn't infinite/doesn't shuffle internally)
                 pin_memory=True,
                 persistent_workers=self.num_train_workers > 0, # Keep workers alive for efficiency
@@ -1592,7 +1341,7 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
         if val_grounding_sample_indices: # Check if list is not empty
             logger.info(f'{ANSI_BOLD}Setting up VALIDATION grounding dataloader...{ANSI_RESET}')
             logger.info(f'  Using {len(val_grounding_sample_indices)} grounding samples for validation.')
-            self.val_dataset = VinBig_PhraseGroundingDataset(
+            self.val_grounding_dataset = VinBig_PhraseGroundingDataset(
                 # Provide the pre-processed parallel lists
                 image_paths=image_paths_for_grounding,
                 image_transform=self.val_image_transform, # Use validation transform
@@ -1610,11 +1359,11 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
                 infinite=False,
             )
             val_batch_size = int(self.max_images_per_batch * self.val_batch_size_factor)
-            self.val_dataloader = DataLoader(
-                dataset=self.val_dataset,
+            self.val_grounding_dataloader = DataLoader(
+                dataset=self.val_grounding_dataset,
                 batch_size=val_batch_size,
                 num_workers=self.num_val_workers,
-                collate_fn=self.val_dataset.collate_fn, # Use dataset's collate_fn
+                collate_fn=self.val_grounding_dataset.collate_fn, # Use dataset's collate_fn
                 shuffle=False, # No shuffling for validation
                 pin_memory=True,
                 persistent_workers=self.num_val_workers > 0, # Keep workers alive for efficiency
@@ -1622,19 +1371,3 @@ class VinBigPhraseTrainer(VinBigTrainerBase):
             logger.info(f"  Validation grounding DataLoader ready (Batch size: {val_batch_size}, Workers: {self.num_val_workers}).")
         elif self.actual_val_indices:
             logger.warning("  Validation indices specified, but no corresponding grounding samples found.")
-
-
-    def _setup_classification_and_grounding_dataloaders(self):
-        """
-        Sets up datasets and dataloaders for the combined classification and
-        grounding task.
-
-        (This method is currently not implemented).
-        """
-        # Implementation Note: This would likely involve creating a dataset that returns
-        # both classification targets (for all phrases) and grounding targets (masks)
-        # for the phrases that have bounding boxes in the image. The collation function
-        # would need to handle combining these potentially different structures.
-        # It might reuse logic from the other two setup methods.
-        logger.error("Combined classification and grounding dataloader setup is not yet implemented.")
-        raise NotImplementedError("Classification and grounding combined dataloader setup not implemented yet.")

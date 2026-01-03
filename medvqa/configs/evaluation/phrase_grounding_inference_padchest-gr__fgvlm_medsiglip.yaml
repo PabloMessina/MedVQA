@@ -1,0 +1,12 @@
+# Required arguments (previously CLI flags)
+dataset_name: "padchest-gr"
+max_images_per_batch: 100
+max_phrases_per_batch: 100
+max_phrases_per_image: 1
+num_workers: 2
+override_bbox_format: "cxcywh"
+use_amp: true
+# checkpoint_folder_path: # This argument must be provided via CLI
+
+# Path arguments
+padchest_gr_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/padchest/padchest_gr_phrase2embedding(hash=197637,3883807560112046018).pkl

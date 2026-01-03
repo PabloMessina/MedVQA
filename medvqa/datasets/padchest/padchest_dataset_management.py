@@ -19,7 +19,7 @@ from medvqa.utils.bbox_utils import (
     xyxy_to_cxcywh,
 )
 from medvqa.utils.files_utils import load_json, load_pickle, read_lines_from_txt
-from medvqa.datasets.padchest import (
+from medvqa.settings import (
     PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH,
     PADCHEST_GR_JPG_DIR,
     PADCHEST_GR_MASTER_TABLE_CSV_PATH,
@@ -116,14 +116,16 @@ class PadChestVQADataset(Dataset):
         if include_image:
             assert image_paths is not None, 'Must provide image paths if include_image is True'
 
-        if shuffle_indices: np.random.shuffle(self.indices)
+        if shuffle_indices:
+            np.random.shuffle(self.indices)
         self._len = INFINITE_DATASET_LENGTH if infinite else len(self.indices)
 
     def __len__(self):
         return self._len
 
     def __getitem__(self, idx):
-        if self.infinite: idx %= len(self.indices)
+        if self.infinite:
+            idx %= len(self.indices)
         idx = self.indices[idx]
         output = dict(
             idx=idx,
@@ -590,7 +592,8 @@ class PadChest_MAE_Trainer(MAETrainerBase):
                             train_study_ids_path, val_study_ids_path, test_study_ids_path,
                             training_data_mode, use_validation_set, keep_one_projection_per_study=False)
 
-        labels_getter = lambda i: self.labels[i]
+        def labels_getter(i):
+            return self.labels[i]
         super().__init__(self.train_indices, self.val_indices, self.test_indices,
                          list(range(len(self.labels_list))),
                          labels_getter, batch_size, collate_batch_fn, num_workers,
@@ -641,6 +644,10 @@ class PadChestGRPhraseGroundingDataset(Dataset):
         for_training: If True, returns target tensors suitable for training.
             If False, returns the image, phrase embedding, and original
             bounding boxes for inference.
+        include_labels_as_phrases: If True, includes labels from findings as
+            additional phrases for grounding. Labels are expected to be
+            present in the `phrase2embedding` dictionary.
+        sample_max_size: Maximum number of samples to include in the dataset.
     """
     def __init__(
         self,
@@ -656,6 +663,8 @@ class PadChestGRPhraseGroundingDataset(Dataset):
         image_format: Literal["jpg", "png"] = "jpg",
         data_augmentation_enabled: bool = False,
         for_training: bool = True,
+        include_labels_as_phrases: bool = True,
+        sample_max_size: Optional[int] = None,
     ):
         super().__init__()
 
@@ -743,7 +752,8 @@ class PadChestGRPhraseGroundingDataset(Dataset):
                     sentence_text = sentence_text[:-1]
                 finding_phrases.append(sentence_text)
                 # Collect labels
-                finding_phrases.extend(finding.get('labels', []))
+                if include_labels_as_phrases:
+                    finding_phrases.extend(finding.get('labels', []))
 
                 # Check for bounding boxes
                 original_boxes_xyxy = finding.get('boxes')
@@ -785,7 +795,19 @@ class PadChestGRPhraseGroundingDataset(Dataset):
                 f"'{language}' and available embeddings. Check data and "
                 f"phrase2embedding keys."
             )
-
+        if sample_max_size is not None and len(self.image_paths) > sample_max_size:
+            # Use a fixed seed so subsampling is consistent across runs/restarts
+            random_old_state = random.getstate()
+            random.seed(42)
+            self.image_paths = self.image_paths[:sample_max_size]
+            self.phrase_embeddings = self.phrase_embeddings[:sample_max_size]
+            self.phrase_bboxes = self.phrase_bboxes[:sample_max_size]
+            self.study_ids = self.study_ids[:sample_max_size]
+            self.image_ids = self.image_ids[:sample_max_size]
+            self.phrase_texts = self.phrase_texts[:sample_max_size]
+            random.setstate(random_old_state) # Restore the original random state
+            logger.info(f"Subsampled dataset to: {len(self.image_paths)}")
+        
         logger.info(f"Created {len(self.image_paths)} image-phrase grounding pairs.")
 
         # Store embedding size
@@ -928,10 +950,6 @@ class PadChestGRPhraseTrainer:
     def __init__(
         self,
 
-        # --- Task & Target Configuration ---
-        mask_height: int,
-        mask_width: int,
-
         # --- Data Source Configuration ---
         phrase_embeddings_filepath: str,
         json_path: str = PADCHEST_GR_GROUNDED_REPORTS_JSON_PATH,
@@ -940,6 +958,7 @@ class PadChestGRPhraseTrainer:
         language: Literal["en", "es"] = "en",
         image_format: Literal["jpg", "png"] = "jpg",
         bbox_format: Literal["xyxy", "cxcywh"] = "cxcywh",
+        include_labels_as_phrases: bool = True,
 
         # --- Split & DataLoader Configuration ---
         use_training_set: bool = False,
@@ -952,6 +971,8 @@ class PadChestGRPhraseTrainer:
         num_train_workers: Optional[int] = 2,
         num_val_workers: Optional[int] = 2,
         num_test_workers: Optional[int] = 2,
+        val_max_size: Optional[int] = None,
+
 
         # --- Transforms & Augmentation ---
         # Pass the *full kwargs dict* for create_image_transforms
@@ -959,13 +980,15 @@ class PadChestGRPhraseTrainer:
         val_image_transforms_kwargs: Optional[Dict[str, Any]] = None,
         test_image_transforms_kwargs: Optional[Dict[str, Any]] = None,
         data_augmentation_enabled: bool = True, # Only affects training set
+
+        # --- Task & Target Configuration ---
+        mask_height: Optional[int] = None,
+        mask_width: Optional[int] = None,  # Only required if for_training=True
     ):
         """
         Initializes the PadChestGRPhraseTrainer.
 
         Args:
-            mask_height: Target height for grounding masks/feature maps.
-            mask_width: Target width for grounding masks/feature maps.
             phrase_embeddings_filepath: Path to the .pkl file containing the
                 phrase-to-embedding dictionary. Expected key: 'phrase2embedding'.
             json_path: Path to the PadChest-GR JSON file.
@@ -974,6 +997,9 @@ class PadChestGRPhraseTrainer:
             language: Language for report sentences ('en' or 'es').
             image_format: Image file extension ('jpg' or 'png').
             bbox_format: Bounding box format ('xyxy' or 'cxcywh').
+            include_labels_as_phrases: If True, include labels from findings
+                as additional phrases for grounding. Labels are expected to be
+                present in the `phrase2embedding` dictionary.
             use_training_set: If True, create training dataset and dataloader.
             use_validation_set: If True, create validation dataset and dataloader.
             use_test_set: If True, create test dataset and dataloader.
@@ -994,6 +1020,9 @@ class PadChestGRPhraseTrainer:
                 `create_image_transforms` for the test set. Required if `use_test_set`.
             data_augmentation_enabled: If True, enable data augmentation in the
                 training dataset.
+            mask_height: Target height for grounding masks/feature maps.
+            mask_width: Target width for grounding masks/feature maps.
+            val_max_size: Maximum number of images to include in the validation set.
         """
         logger.info("Initializing PadChestGRPhraseTrainer...")
 
@@ -1050,6 +1079,7 @@ class PadChestGRPhraseTrainer:
             "language": language,
             "bbox_format": bbox_format,
             "image_format": image_format,
+            "include_labels_as_phrases": include_labels_as_phrases,
         }
 
         # --- Training Set ---
@@ -1080,10 +1110,10 @@ class PadChestGRPhraseTrainer:
             logger.info("Setting up VALIDATION dataset (split: 'validation')...")
             self.val_dataset = PadChestGRPhraseGroundingDataset(
                 image_transforms_kwargs=val_image_transforms_kwargs,
-                feature_map_size=self.feature_map_size, # Needed even if for_training=False if mask calc happens
                 split="validation",
                 data_augmentation_enabled=False, # No augmentation for validation
                 for_training=False, # Return format for inference/evaluation
+                sample_max_size=val_max_size, # Maximum number of images to include in the validation set
                 **common_dataset_args
             )
             val_batch_size = int(max_images_per_batch * val_batch_size_factor)
@@ -1105,7 +1135,6 @@ class PadChestGRPhraseTrainer:
             logger.info("Setting up TEST dataset (split: 'test')...")
             self.test_dataset = PadChestGRPhraseGroundingDataset(
                 image_transforms_kwargs=test_image_transforms_kwargs,
-                feature_map_size=self.feature_map_size, # Needed even if for_training=False
                 split="test",
                 data_augmentation_enabled=False, # No augmentation for test
                 for_training=False, # Return format for inference/evaluation

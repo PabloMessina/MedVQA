@@ -2,13 +2,13 @@ from ignite.metrics import Metric
 from ignite.exceptions import NotComputableError
 from medvqa.metrics.condition_aware_metric import ConditionAwareMetric
 from medvqa.metrics.dataset_aware_metric import DatasetAwareMetric
-from medvqa.utils.common import SOURCE_DIR, CACHE_DIR
+from medvqa.settings import PROJECT_ROOT, CACHE_DIR
 from medvqa.utils.files_utils import load_pickle
 import os
 
-MEDICAL_TERMS_PATH = os.path.join(SOURCE_DIR, 'medvqa', 'metrics', 'medical',
+MEDICAL_TERMS_PATH = os.path.join(PROJECT_ROOT, 'medvqa', 'metrics', 'medical',
                                  'med_completeness', 'medical_terms.txt')
-MEDICAL_SYNONYMS_PATH = os.path.join(SOURCE_DIR, 'medvqa', 'metrics', 'medical',
+MEDICAL_SYNONYMS_PATH = os.path.join(PROJECT_ROOT, 'medvqa', 'metrics', 'medical',
                                  'med_completeness', 'medical_synonyms.txt')
 MEDICAL_TERMS_WEIGHTS_PATH = os.path.join(CACHE_DIR, 'medical_terms_weights.pkl')
 

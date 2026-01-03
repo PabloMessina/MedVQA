@@ -1,0 +1,14 @@
+# Required arguments (previously CLI flags)
+dataset_name: "chest-imagenome"
+max_images_per_batch: 100
+max_phrases_per_batch: 100
+max_phrases_per_image: 1
+num_workers: 3
+override_bbox_format: "cxcywh"
+use_amp: true
+# checkpoint_folder_path: # This argument must be provided via CLI
+
+# Path arguments
+chest_imagenome_augmented_phrase_groundings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/augmented_groundings_(hash=328,857478564560124280).pkl
+chest_imagenome_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/chest_imagenome_phrase_embeddings_(hash=531,1962336077955156067).pkl
+chest_imagenome_bbox_phrase_embeddings_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/chest_imagenome/bbox_phrase_embeddings_hybrid(hash=493,1727013299556214953).pkl

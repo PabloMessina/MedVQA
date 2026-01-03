@@ -14,7 +14,7 @@ from medvqa.datasets.vinbig import VINBIG_LABELS__MODIFIED, VINBIG_LARGE_FAST_CA
 from medvqa.utils.constants import VINBIG_LABELS, VINBIG_LABEL2PHRASE
 from medvqa.utils.logging_utils import print_blue, print_bold
 from medvqa.utils.math_utils import rank_vectors_by_dot_product
-
+    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, required=True, choices=SupportedHuggingfaceMedicalBERTModels.get_all())

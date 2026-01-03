@@ -4,15 +4,19 @@ import numpy as np
 import pandas as pd
 import logging
 from typing import Dict, List, Tuple, Union, Literal
-from dotenv import load_dotenv
 from imagesize import get as get_image_size
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_box
 from medvqa.utils.bbox_utils import xyxy_to_cxcywh
-from medvqa.utils.common import CACHE_DIR, FAST_CACHE_DIR, LARGE_FAST_CACHE_DIR
 from medvqa.utils.constants import VINBIG_BBOX_NAMES, VINBIG_LABELS
 from medvqa.utils.logging_utils import ANSI_ORANGE_BOLD, ANSI_RESET
-
-load_dotenv()
+from medvqa.settings import (
+    VINBIG_ORIGINAL_IMAGES_FOLDER,
+    VINBIG_512x512_IMAGES_FOLDER,
+    VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH,
+    VINBIG_IMAGE_LABELS_TEST_CSV_PATH,
+    VINBIG_ANNOTATIONS_TRAIN_CSV_PATH,
+    VINBIG_ANNOTATIONS_TEST_CSV_PATH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +25,6 @@ BboxDictType = Union[
     Dict[str, Tuple[List[List[float]], List[int]]],
 ]
 
-# VINBIG_ORIGINAL_IMAGES_FOLDER = os.environ['VINBIG_ORIGINAL_IMAGES_FOLDER']
-# VINBIG_512x512_IMAGES_FOLDER = os.environ['VINBIG_512x512_IMAGES_FOLDER']
-VINBIG_ORIGINAL_IMAGES_FOLDER = os.environ['VINBIG_ORIGINAL_HQ_IMAGES_FOLDER']
-VINBIG_512x512_IMAGES_FOLDER = os.environ['VINBIG_512x512_HQ_IMAGES_FOLDER']
-VINBIG_ALL_IMAGES_TXT_PATH  = os.environ['VINBIG_ALL_IMAGES_TXT_PATH']
-VINBIG_TRAIN_VAL_IMAGES_TXT_PATH = os.environ['VINBIG_TRAIN_VAL_IMAGES_TXT_PATH']
-VINBIG_TEST_IMAGES_TXT_PATH = os.environ['VINBIG_TEST_IMAGES_TXT_PATH']
-VINBIG_LABELS_CSV_PATH = os.environ['VINBIG_LABELS_CSV_PATH']
-VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH = os.environ['VINBIG_IMAGE_LABELS_TRAIN_CSV_PATH']
-VINBIG_IMAGE_LABELS_TEST_CSV_PATH = os.environ['VINBIG_IMAGE_LABELS_TEST_CSV_PATH']
-VINBIG_ANNOTATIONS_TRAIN_CSV_PATH = os.environ['VINBIG_ANNOTATIONS_TRAIN_CSV_PATH']
-VINBIG_ANNOTATIONS_TEST_CSV_PATH = os.environ['VINBIG_ANNOTATIONS_TEST_CSV_PATH']
-VINBIG_YOLOV5_LABELS_DIR = os.environ['VINBIG_YOLOV5_LABELS_DIR']
-VINBIG_CACHE_DIR = os.path.join(CACHE_DIR, 'vinbig')
-VINBIG_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'vinbig')
-VINBIG_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'vinbig')
 
 N_IMAGES_TRAIN = 15000
 N_IMAGES_TEST = 3000
@@ -177,6 +165,7 @@ def get_unique_bbox_names():
 
 def _load_image_id_2_bboxes(
     csv_path: str,
+    split: Literal["train", "test"],
     for_training: bool = False,
     normalize: bool = False,
     class_id_offset: int = 0,
@@ -194,6 +183,7 @@ def _load_image_id_2_bboxes(
 
     Args:
         csv_path: Path to the input CSV file.
+        split: The split of the dataset to load ('train' or 'test').
         for_training: If True, the output dictionary maps image IDs to a
             tuple containing a list of all bounding boxes for that image and
             a corresponding list of class IDs. If False (default), it maps
@@ -259,7 +249,7 @@ def _load_image_id_2_bboxes(
         # --- BBox Processing and Normalization ---
         if normalize:
             # Get image dimensions for normalization
-            image_path = get_original_image_path(image_id)
+            image_path = get_original_image_path(split, image_id)
             w, h = get_image_size(image_path)
 
             # Prevent division by zero if image dimensions are invalid
@@ -428,6 +418,7 @@ def load_train_image_id_2_bboxes(
     """
     return _load_image_id_2_bboxes(
         csv_path=VINBIG_ANNOTATIONS_TRAIN_CSV_PATH,
+        split="train",
         for_training=for_training,
         normalize=normalize,
         class_id_offset=class_id_offset,
@@ -471,6 +462,7 @@ def load_test_image_id_2_bboxes(
     """
     return _load_image_id_2_bboxes(
         csv_path=VINBIG_ANNOTATIONS_TEST_CSV_PATH,
+        split="test",
         for_training=for_training,
         normalize=normalize,
         class_id_offset=class_id_offset,
@@ -590,7 +582,7 @@ def load_labels(improve_labels=False):
 
     if improve_labels:
         # We will apply some modifications to improve the labels
-        logger.warning(f'NOTE: Improving VinDr-CXR classification labels ...')
+        logger.warning('NOTE: Improving VinDr-CXR classification labels ...')
         
         # 1. The class "Lung Opacity" should subsume the following classes as they are subcategories of it:
         #    - "Lung Opacity" (already included)
@@ -627,11 +619,11 @@ def print_labels(labels):
         if labels[i] == 1:
             print(f'{i}: {label} ({labels[i]})')
 
-def get_original_image_path(image_id):
-    return os.path.join(VINBIG_ORIGINAL_IMAGES_FOLDER, f'{image_id}.jpg')
+def get_original_image_path(split, image_id):
+    return os.path.join(VINBIG_ORIGINAL_IMAGES_FOLDER, split, f'{image_id}.jpg')
 
-def get_medium_size_image_path(image_id):
-    return os.path.join(VINBIG_512x512_IMAGES_FOLDER, f'{image_id}.jpg')
+def get_medium_size_image_path(split, image_id):
+    return os.path.join(VINBIG_512x512_IMAGES_FOLDER, split, f'{image_id}.jpg')
 
 def visualize_image_with_bounding_boxes(image_id, bbox_dict, figsize=(10, 10), denormalize=False, verbose=False,
                                         allowed_classes=None, class_to_draw_last=None, bbox_class_names=VINBIG_BBOX_NAMES):

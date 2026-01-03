@@ -1,3 +1,6 @@
+from typing import Callable, List, Tuple
+from ignite.engine import Engine
+
 from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_NUM_BBOX_CLASSES
 from medvqa.metrics.bbox import DatasetAwareBboxIOU, DatasetAwareBboxMAE, DatasetAwareBboxMeanF1
 from medvqa.metrics.bbox.bbox_cnr import ConditionAwareBboxCNR
@@ -7,6 +10,7 @@ from medvqa.metrics.bbox.bbox_iou import (
     ConditionAwareBboxIOUOpenClass,
     ConditionAwareBboxIOUperClass,
 )
+from medvqa.metrics.bbox.bbox_soft_dice import ConditionAwareBboxSoftDice
 from medvqa.metrics.classification.auc import auc_fn
 from medvqa.metrics.classification.multilabel_accuracy import DatasetAwareMultiLabelAccuracy
 from medvqa.metrics.classification.multilabel_prf1 import (
@@ -665,6 +669,43 @@ def attach_condition_aware_bbox_cnr(engine, field_names, metric_name, feature_ma
         condition_function=condition_function,
     )
     met.attach(engine, metric_name)
+
+# General purpose Condition Aware Bbox Soft Dice metric
+def attach_condition_aware_bbox_soft_dice(
+    engine: Engine,
+    field_names: List[str],
+    metric_name: str,
+    feature_map_dimensions: Tuple[int, int],
+    bbox_format: str,
+    mask_resolution: Tuple[int, int] = (100, 100),
+    condition_function: Callable = lambda _: True,
+):
+    """
+    Factory function to create and attach the ConditionAwareBboxSoftDice metric
+    to an Ignite engine.
+
+    Args:
+        engine: The Ignite engine to attach the metric to.
+        field_names: A list of field names to extract from the engine's output.
+                     Expected to be 2 or 3 fields.
+        metric_name: The name to assign to the metric in the engine's state.
+        feature_map_dimensions: A tuple (H, W) of the model's output feature map.
+        bbox_format: The format of the ground truth bounding boxes ('xyxy' or 'cxcywh').
+        mask_resolution: The resolution (H, W) for the binary mask created from bboxes.
+        condition_function: A function that takes the engine's state and returns
+                            True if the metric should be computed.
+    """
+    H, W = feature_map_dimensions
+    metric = ConditionAwareBboxSoftDice(
+        output_transform=_get_output_transform(*field_names),
+        output_len=len(field_names),
+        H=H,
+        W=W,
+        bbox_format=bbox_format,
+        mask_resolution=mask_resolution,
+        condition_function=condition_function,
+    )
+    metric.attach(engine, metric_name)
 
 # ---------------------------------------------
 # Losses

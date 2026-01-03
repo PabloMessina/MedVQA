@@ -1,11 +1,13 @@
 import math
+import uuid
 import multiprocessing
 import os
-from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import random
 import torch
 import logging
+from multiprocessing import shared_memory
+from typing import Callable, Dict, List, Optional, Tuple
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from medvqa.datasets.augmentation import VinBigAlbumentationAdapter
@@ -650,44 +652,61 @@ class ChestImaGenome_PhraseGroundingDataset(Dataset):
             "dataset_name": "chest-imagenome-pg",
         }
 
+# --- New Worker Initializer and Function for Shared Memory ---
 
-# Global variable for worker processes to avoid passing large data repeatedly
+# Global variable for worker processes
 _ALG_WORKER_DATA = {}
 
-def _init_alg_worker(shared_data: Dict):
+
+def _init_alg_worker_shared(shared_data: Dict):
     """
-    Initializer for the multiprocessing pool.
-    Sets a global variable in each worker process with shared read-only data.
+    Initializer for the multiprocessing pool using shared memory.
+    Connects the worker to the shared numpy array for masks.
     """
     global _ALG_WORKER_DATA
     _ALG_WORKER_DATA = shared_data
 
-def _process_chunk_worker(
-    data_chunk: List[Dict],
+    # Connect to the existing shared memory block
+    shm_name = shared_data["shm_name"]
+    shm_shape = shared_data["shm_shape"]
+    shm_dtype = shared_data["shm_dtype"]
+
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    shared_masks = np.ndarray(shm_shape, dtype=shm_dtype, buffer=existing_shm.buf)
+    _ALG_WORKER_DATA["shared_masks"] = shared_masks
+    _ALG_WORKER_DATA["shm"] = existing_shm  # Keep ref to avoid early closure
+
+
+def _process_chunk_worker_shared(
+    args: Tuple[int, List[Dict]]
 ) -> Tuple[List, List, List, int]:
     """
-    Worker function that processes a chunk of the augmented_data.
-    It validates bboxes, creates probabilistic masks, and returns the results.
+    Worker function that processes a chunk and writes masks to shared memory.
+    It returns lightweight results, avoiding large data transfer.
     """
+    chunk_start_index, data_chunk = args
+
     # Unpack shared data from the global variable
     dicom_id_to_image_path = _ALG_WORKER_DATA["dicom_id_to_image_path"]
     location_to_idx = _ALG_WORKER_DATA["location_to_idx"]
     bbox_format = _ALG_WORKER_DATA["bbox_format"]
     feature_map_size = _ALG_WORKER_DATA["feature_map_size"]
+    shared_masks = _ALG_WORKER_DATA["shared_masks"]
 
     # Local lists to store results for this chunk
     chunk_image_paths = []
     chunk_grounded_locs = []
-    chunk_prob_masks = []
+    chunk_original_indices = []  # Map valid samples back to shared memory index
     skipped_bboxes_count = 0
 
-    for item in data_chunk:
+    for i, item in enumerate(data_chunk):
+        original_data_index = chunk_start_index + i
         image_path = dicom_id_to_image_path(item["dicom_id"])
         grounded_locs = {}
 
         for loc_name, loc_idx in location_to_idx.items():
             if loc_name in item["location2bbox"]:
-                bbox = item["location2bbox"][loc_name]  # Original format: xyxy
+                bbox = item["location2bbox"][loc_name]
                 x_min, y_min, x_max, y_max = bbox
                 x_min, y_min = max(0, min(1, x_min)), max(0, min(1, y_min))
                 x_max, y_max = max(0, min(1, x_max)), max(0, min(1, y_max))
@@ -702,20 +721,23 @@ def _process_chunk_worker(
         if grounded_locs:
             chunk_image_paths.append(image_path)
             chunk_grounded_locs.append(grounded_locs)
-            prob_masks_dict = {}
+            chunk_original_indices.append(original_data_index)
+
+            # Calculate masks and write DIRECTLY to shared memory
             for loc_idx, bbox in grounded_locs.items():
                 mask = calculate_probabilistic_mask_from_bboxes(
                     bboxes=[bbox],
                     mask_resolution=feature_map_size,
                     bbox_format=bbox_format,
                 )
-                prob_masks_dict[loc_idx] = mask
-            chunk_prob_masks.append(prob_masks_dict)
+                # Write to the pre-allocated slot in the shared array
+                shared_masks[original_data_index, loc_idx] = mask
 
+    # Return only lightweight data. The masks are already in shared memory.
     return (
         chunk_image_paths,
         chunk_grounded_locs,
-        chunk_prob_masks,
+        chunk_original_indices,
         skipped_bboxes_count,
     )
 
@@ -770,78 +792,179 @@ class ChestImaGenome_AnatomicalLocationGroundingDataset(Dataset):
         self.anatomical_locations = self.bbox_phrase_embeddings_data[
             "bbox_phrases"
         ]
-        assert self.anatomical_locations == CHEST_IMAGENOME_BBOX_NAMES
+        # assert self.anatomical_locations == CHEST_IMAGENOME_BBOX_NAMES
         self.location_to_idx = {
             name: i for i, name in enumerate(self.anatomical_locations)
         }
         self.num_locations = len(self.anatomical_locations)
 
+        # Initialize attributes for parsed data
         self.image_paths = []
         self.grounded_locations_per_image = []
-        self.prob_masks_per_image = []
+        self.original_indices = []  # To map item index to shared memory index
 
-        self._parse_augmented_data(augmented_data)
+        # --- MODIFIED PART ---
+        # Attributes for shared memory management
+        self.shm_block = None
+        self.shared_masks_array = None
+        self.shm_name = None  # To store the name for workers
+        self.shm_shape = None # To store the shape for workers
+        self.shm_dtype = None # To store the dtype for workers
+        # --- END MODIFIED PART ---
 
-    def _parse_augmented_data(self, augmented_data: List[Dict]):
+        # This now uses the shared memory approach
+        self._parse_augmented_data_shared_mem(augmented_data)
+
+    def _parse_augmented_data_shared_mem(self, augmented_data: List[Dict]):
         """
-        Parses raw data in parallel, pre-computing a probabilistic mask for each
-        grounded location's bounding box.
+        Parses raw data in parallel using shared memory to avoid data
+        duplication and reduce RAM usage.
         """
         logger.info(
-            f"Parsing ChestImaGenome data with {self.num_processes} processes (augmented_data size: {len(augmented_data)})"
+            f"Parsing ChestImaGenome data with {self.num_processes} processes "
+            f"(augmented_data size: {len(augmented_data)}) using shared memory."
         )
 
-        # if len(augmented_data) > 10000:
-        #     augmented_data = augmented_data[:10000]  # Limit to first 10k samples for faster debugging
-        #     logger.warning(
-        #         "Limiting augmented_data to first 10,000 samples for faster debugging. TODO: Remove this limit in production."
-        #     )
+        # --- 1. Create the Shared Memory Block ---
+        mask_h, mask_w = self.feature_map_size
+        shm_shape = (len(augmented_data), self.num_locations, mask_h, mask_w)
+        shm_dtype = np.float32
+        shm_name = f"chest_imagenome_shared_{uuid.uuid4().hex}" # Use a unique ID for every instance so train and val don't collide
+        nbytes = np.prod(shm_shape) * np.dtype(shm_dtype).itemsize
 
+        # --- FIX: STORE SHAPE AND DTYPE ON THE INSTANCE ---
+        self.shm_shape = shm_shape
+        self.shm_dtype = shm_dtype
+        # --- END OF FIX ---
+
+        # --- DEBUGGING LOGS (MAIN PROCESS) ---
+        logger.info("==== MAIN PROCESS SHARED MEMORY CREATION ====")
+        logger.info(f"Target Name: {shm_name}")
+        logger.info(f"Target Shape: {shm_shape}")
+        logger.info(f"Target Dtype: {shm_dtype}")
+        logger.info(f"Calculated Size: {nbytes} bytes ({nbytes/1e9:.4f} GB)")
+        logger.info("===========================================")
+        # -------------------------------------
+
+        try:
+            # Create the shared memory block
+            try:
+                # 1. Attempt to create the memory
+                self.shm_block = shared_memory.SharedMemory(
+                    name=shm_name, 
+                    create=True, 
+                    size=nbytes
+                )
+            except FileExistsError:
+                # 2. If it exists, it's likely a "zombie" from a previous crash
+                logger.warning(f"Shared memory {shm_name} already exists. Cleaning up old block.")
+                
+                # Connect to the existing block without 'create=True'
+                temp_shm = shared_memory.SharedMemory(name=shm_name)
+                
+                # Close and Unlink it to free the RAM and remove the file from /dev/shm
+                temp_shm.close()
+                temp_shm.unlink()
+                
+                # 3. Now try creating it again
+                self.shm_block = shared_memory.SharedMemory(
+                    name=shm_name, 
+                    create=True, 
+                    size=nbytes
+                )
+
+            
+            self.shm_name = self.shm_block.name # <-- ADD THIS LINE
+            # Create a numpy array view on the shared memory
+            self.shared_masks_array = np.ndarray(
+                shm_shape, dtype=shm_dtype, buffer=self.shm_block.buf
+            )
+            # Initialize with a known value (optional but good practice)
+            self.shared_masks_array.fill(0)
+        except Exception as e:
+            logger.error(f"Failed to allocate shared memory: {e}")
+            if self.shm_block:
+                self.shm_block.close()
+                self.shm_block.unlink()
+            raise
+
+        # Log actual memory used
+        logger.info(f"Actual memory used: {self.shm_block.size / 1e9:.2f} GB")
+        logger.info(f"Expected memory used: {nbytes / 1e9:.2f} GB")
+        logger.info(f"Difference: {self.shm_block.size - nbytes} bytes")
+
+        assert self.shm_name == shm_name, f"Shared memory name mismatch: {self.shm_name} != {shm_name}"
+
+        # --- 2. Prepare Data for Workers ---
         shared_data_payload = {
             "dicom_id_to_image_path": self.dicom_id_to_image_path,
             "location_to_idx": self.location_to_idx,
             "bbox_format": self.bbox_format,
             "feature_map_size": self.feature_map_size,
+            "shm_name": self.shm_block.name,
+            "shm_shape": shm_shape,
+            "shm_dtype": shm_dtype,
         }
 
         total_skipped_bboxes = 0
 
-        if self.num_processes == 1:
-            # Run in a single process (useful for debugging)
-            _init_alg_worker(shared_data_payload)
-            (
-                self.image_paths,
-                self.grounded_locations_per_image,
-                self.prob_masks_per_image,
-                total_skipped_bboxes,
-            ) = _process_chunk_worker(augmented_data)
-        else:
-            # Split data into chunks for parallel processing
-            chunk_size = math.ceil(len(augmented_data) / self.num_processes)
-            chunks = [
-                augmented_data[i : i + chunk_size]
-                for i in range(0, len(augmented_data), chunk_size)
-            ]
+        # --- 3. Run Multiprocessing Pool ---
+        try:
+            if self.num_processes == 1:
+                # Single-process path for debugging (doesn't truly share memory)
+                _init_alg_worker_shared(shared_data_payload)
+                (
+                    self.image_paths,
+                    self.grounded_locations_per_image,
+                    self.original_indices,
+                    total_skipped_bboxes,
+                ) = _process_chunk_worker_shared((0, augmented_data))
+            else:
+                chunk_size = math.ceil(len(augmented_data) / self.num_processes)
+                # Pass chunks with their starting index
+                chunks = [
+                    augmented_data[i : i + chunk_size]
+                    for i in range(0, len(augmented_data), chunk_size)
+                ]
+                chunk_start_indices = [
+                    i for i in range(0, len(augmented_data), chunk_size)
+                ]
 
-            with multiprocessing.Pool(
-                processes=self.num_processes,
-                initializer=_init_alg_worker,
-                initargs=(shared_data_payload,),
-            ) as pool:
-                with tqdm(
-                    total=len(chunks), desc="Parsing data chunks"
-                ) as pbar:
-                    for (
-                        img_paths,
-                        grounded_locs,
-                        prob_masks,
-                        skipped_count,
-                    ) in pool.imap_unordered(_process_chunk_worker, chunks):
-                        self.image_paths.extend(img_paths)
-                        self.grounded_locations_per_image.extend(grounded_locs)
-                        self.prob_masks_per_image.extend(prob_masks)
-                        total_skipped_bboxes += skipped_count
-                        pbar.update(1)
+                with multiprocessing.Pool(
+                    processes=self.num_processes,
+                    initializer=_init_alg_worker_shared,
+                    initargs=(shared_data_payload,),
+                ) as pool:
+                    with tqdm(
+                        total=len(chunks), desc="Parsing data chunks"
+                    ) as pbar:
+                        for (
+                            img_paths,
+                            grounded_locs,
+                            orig_indices,
+                            skipped_count,
+                        ) in pool.imap_unordered(
+                            _process_chunk_worker_shared,
+                            zip(chunk_start_indices, chunks),
+                        ):
+                            self.image_paths.extend(img_paths)
+                            self.grounded_locations_per_image.extend(
+                                grounded_locs
+                            )
+                            self.original_indices.extend(orig_indices)
+                            total_skipped_bboxes += skipped_count
+                            pbar.update(1)
+        finally:
+            # In the main process, we can close the link to the shared memory.
+            # The block itself will persist until shm.unlink() is called.
+            # Workers will close their own references upon exit.
+            # We will call unlink() in the __del__ method.
+            if self.shm_block:
+                self.shm_block.close()
+
+        # Detach the numpy array from the main process instance.
+        # This is key to preventing pickling errors with DataLoader.
+        self.shared_masks_array = None
 
         if total_skipped_bboxes > 0:
             logger.warning(
@@ -855,9 +978,55 @@ class ChestImaGenome_AnatomicalLocationGroundingDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, i: int) -> dict:
-        image_path = self.image_paths[i]
+        # Lazy connection: runs once per worker process.
+        if self.shared_masks_array is None:
+            try:
+                shm = shared_memory.SharedMemory(name=self.shm_name)
+            except FileNotFoundError:
+                # This helps debug if the block completely vanished
+                raise RuntimeError(f"Worker could not find shared memory block: {self.shm_name}")
+
+            # --- DEBUGGING LOGIC START ---
+            # Calculate expected bytes
+            expected_nbytes = int(np.prod(self.shm_shape)) * np.dtype(self.shm_dtype).itemsize
+            actual_nbytes = shm.size  # or shm.buf.nbytes
+
+            if actual_nbytes < expected_nbytes:
+                import os
+                pid = os.getpid()
+                logger.error(f"---------------- SHARED MEMORY ERROR (PID {pid}) ----------------")
+                logger.error(f"Shared Memory Name: {self.shm_name}")
+                logger.error(f"Attempting to create array with shape: {self.shm_shape}")
+                logger.error(f"Data type: {self.shm_dtype}")
+                logger.error(f"Expected Size: {expected_nbytes} bytes ({expected_nbytes/1e9:.4f} GB)")
+                logger.error(f"Actual Buffer Size: {actual_nbytes} bytes ({actual_nbytes/1e9:.4f} GB)")
+                logger.error(f"Difference: {expected_nbytes - actual_nbytes} bytes")
+                logger.error("Suggestion: The worker likely attached to a stale/zombie shared memory block from a previous run.")
+                logger.error("-----------------------------------------------------------------")
+                
+                # Close handle to prevent hanging during the crash
+                shm.close()
+                raise TypeError(f"Shared memory buffer too small! Expected {expected_nbytes}, got {actual_nbytes}")
+            # --- DEBUGGING LOGIC END ---
+
+            self.shared_masks_array = np.ndarray(
+                self.shm_shape, dtype=self.shm_dtype, buffer=shm.buf
+            )
+            self.shm_block = shm # Keep handle alive in worker
+
+        # Get the index in the original `augmented_data` list, which corresponds
+        # to the first dimension of our shared memory array.
+        original_idx = self.original_indices[i]
         grounded_locs = self.grounded_locations_per_image[i]
-        prob_masks_dict = self.prob_masks_per_image[i]
+
+        # Dynamically build the dictionary of probability masks for this item
+        # by reading from the shared numpy array.
+        prob_masks_dict = {
+            loc_idx: self.shared_masks_array[original_idx, loc_idx]
+            for loc_idx in grounded_locs.keys()
+        }
+
+        image_path = self.image_paths[i]
 
         # 1. Prepare phrase embeddings for all 36 locations
         embeddings = []
@@ -949,6 +1118,24 @@ class ChestImaGenome_AnatomicalLocationGroundingDataset(Dataset):
                 "bboxes": gt_bboxes,
                 "classes": gt_indices,
             }
+        
+    def __del__(self):
+        # This method is important to clean up the shared memory block
+        # when the training script finishes.
+        logger.info("Cleaning up shared memory block...")
+        if self.shm_name:
+            try:
+                # Reconnect to unlink. Use a temporary variable.
+                shm_to_unlink = shared_memory.SharedMemory(name=self.shm_name)
+                shm_to_unlink.close()
+                shm_to_unlink.unlink()
+                logger.info(f"Successfully unlinked shm block: {self.shm_name}")
+            except FileNotFoundError:
+                # This is fine, means it was already cleaned up or this is a worker process
+                logger.warning(f"Shared memory block not found: {self.shm_name}")
+                pass
+            except Exception as e:
+                logger.error(f"Error during shared memory cleanup: {e}")
 
     def collate_fn(self, batch: List[dict]) -> dict:
         """Custom collate function to handle batching."""
@@ -1089,6 +1276,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                 chest_imagenome_augmented_phrase_groundings_filepath=None,
                 chest_imagenome_phrase_embeddings_filepath=None,
                 chest_imagenome_bbox_phrase_embeddings_filepath=None,
+                chest_imagenome_train_max_size=None,
+                chest_imagenome_val_max_size=None,
                 source_image_size_mode=MIMICCXR_ImageSizeModes.SMALL_256x256,
                 exclude_noisy_images=False,
                 balance_long_middle_short_tail=False,
@@ -1134,7 +1323,9 @@ class MIMICCXR_PhraseGroundingTrainer:
         self.use_cxrlt2024_official_labels = use_cxrlt2024_official_labels
         self.use_all_cxrlt2024_official_labels_for_training = use_all_cxrlt2024_official_labels_for_training
         self.replace_phrase_embeddings_with_random_vectors = replace_phrase_embeddings_with_random_vectors
-
+        self.chest_imagenome_train_max_size = chest_imagenome_train_max_size
+        self.chest_imagenome_val_max_size = chest_imagenome_val_max_size
+        
         forbidden_train_dicom_ids = set()
 
         if exclude_noisy_images:
@@ -1703,9 +1894,12 @@ class MIMICCXR_PhraseGroundingTrainer:
             if mscxr_do_grounding_only:
                 assert mscxr_phrase2embedding_filepath is not None
                 options = []
-                if use_mscxr_for_train: options.append('train')
-                if use_mscxr_for_val: options.append('val')
-                if use_mscxr_for_test: options.append('test')
+                if use_mscxr_for_train:
+                    options.append('train')
+                if use_mscxr_for_val:
+                    options.append('val')
+                if use_mscxr_for_test:
+                    options.append('test')
                 logger.info(f'{ANSI_MAGENTA_BOLD}Preparing MS-CXR dataset and dataloaders for {", ".join(options)} (grounding only) ...{ANSI_RESET}')
                 if use_mscxr_for_train:
                     assert num_train_workers is not None
@@ -1805,7 +1999,8 @@ class MIMICCXR_PhraseGroundingTrainer:
                         actual_train_indices = test_indices
                     elif mscxr_training_data_mode == MS_CXR_TrainingMode.ALL.value:
                         actual_train_indices = train_indices + val_indices + test_indices
-                    else: raise ValueError(f'Invalid training data mode: {mscxr_training_data_mode}')
+                    else:
+                        raise ValueError(f'Invalid training data mode: {mscxr_training_data_mode}')
                     mscxr_train_dataset = MSCXR_PhraseGroundingDataset(
                         image_paths=image_paths,
                         image_transform=train_image_transform,
@@ -1895,9 +2090,12 @@ class MIMICCXR_PhraseGroundingTrainer:
                 assert mscxr_phrase2embedding_filepath is not None
                 assert dicom_id_to_pos_neg_facts_filepath is not None
                 options = []
-                if use_mscxr_for_train: options.append('train')
-                if use_mscxr_for_val: options.append('val')
-                if use_mscxr_for_test: options.append('test')
+                if use_mscxr_for_train:
+                    options.append('train')
+                if use_mscxr_for_val:
+                    options.append('val')
+                if use_mscxr_for_test:
+                    options.append('test')
                 logger.info(f'{ANSI_MAGENTA_BOLD}Preparing MS-CXR dataset and dataloaders for {", ".join(options)} ...{ANSI_RESET}')
                 if use_mscxr_for_train:
                     assert num_train_workers is not None
@@ -2153,7 +2351,12 @@ class MIMICCXR_PhraseGroundingTrainer:
             assert chest_imagenome_bbox_phrase_embeddings_filepath is not None
             assert mask_width is not None
             assert mask_height is not None
-            assert num_train_workers is not None
+            if use_chest_imagenome_for_train:
+                assert num_train_workers is not None
+                assert train_image_transform is not None
+            if use_chest_imagenome_for_val or use_chest_imagenome_for_test:
+                assert num_test_workers is not None
+                assert test_image_transform is not None
             
             logger.info(f'Loading Chest Imagenome augmented phrase groundings from {chest_imagenome_augmented_phrase_groundings_filepath}...')
             augmented_data = load_pickle(chest_imagenome_augmented_phrase_groundings_filepath)
@@ -2178,6 +2381,14 @@ class MIMICCXR_PhraseGroundingTrainer:
                 logger.info(f'len(train_dicom_ids) after removing forbidden ids = {len(train_dicom_ids)}')
                 train_augmented_data = [item for item in augmented_data if item['dicom_id'] in train_dicom_ids]
                 logger.info(f'len(train_augmented_data) = {len(train_augmented_data)}')
+
+                # --- NEW SUBSAMPLING LOGIC ---
+                if self.chest_imagenome_train_max_size is not None and len(train_augmented_data) > self.chest_imagenome_train_max_size:
+                    # Use a fixed seed so training is consistent across runs/restarts
+                    random.seed(42)
+                    train_augmented_data = random.sample(train_augmented_data, self.chest_imagenome_train_max_size)
+                    logger.info(f'Subsampled training data to: {len(train_augmented_data)}')
+                # -----------------------------
 
                 self.chest_imagenome_pg_train_dataset = ChestImaGenome_PhraseGroundingDataset(
                     augmented_data=train_augmented_data,
@@ -2204,7 +2415,15 @@ class MIMICCXR_PhraseGroundingTrainer:
             if use_chest_imagenome_for_val:
                 val_dicom_ids = set(split_to_image_ids['validate'])
                 val_augmented_data = [item for item in augmented_data if item['dicom_id'] in val_dicom_ids]
-                logger.info(f'len(val_augmented_data) = {len(val_augmented_data)}')
+                logger.info(f'len(val_augmented_data) (original) = {len(val_augmented_data)}')
+
+                # --- NEW SUBSAMPLING LOGIC ---
+                if self.chest_imagenome_val_max_size is not None and len(val_augmented_data) > self.chest_imagenome_val_max_size:
+                    # Use a fixed seed so validation is consistent across runs/restarts
+                    random.seed(42)
+                    val_augmented_data = random.sample(val_augmented_data, self.chest_imagenome_val_max_size)
+                    logger.info(f'Subsampled validation data to: {len(val_augmented_data)}')
+                # -----------------------------
                 
                 self.chest_imagenome_pg_val_dataset = ChestImaGenome_PhraseGroundingDataset(
                     augmented_data=val_augmented_data,
@@ -2272,6 +2491,14 @@ class MIMICCXR_PhraseGroundingTrainer:
                 train_augmented_data = [item for item in augmented_data if item['dicom_id'] in train_dicom_ids]
                 logger.info(f'len(train_augmented_data) = {len(train_augmented_data)}')
 
+                # --- NEW SUBSAMPLING LOGIC ---
+                if self.chest_imagenome_train_max_size is not None and len(train_augmented_data) > self.chest_imagenome_train_max_size:
+                    # Use a fixed seed so training is consistent across runs/restarts
+                    random.seed(42)
+                    train_augmented_data = random.sample(train_augmented_data, self.chest_imagenome_train_max_size)
+                    logger.info(f'Subsampled training data to: {len(train_augmented_data)}')
+                # -----------------------------
+
                 self.chest_imagenome_alg_train_dataset = ChestImaGenome_AnatomicalLocationGroundingDataset(
                     augmented_data=train_augmented_data,
                     image_transform=train_image_transform,
@@ -2298,7 +2525,15 @@ class MIMICCXR_PhraseGroundingTrainer:
             if use_chest_imagenome_for_val:
                 val_dicom_ids = set(split_to_image_ids['validate'])
                 val_augmented_data = [item for item in augmented_data if item['dicom_id'] in val_dicom_ids]
-                logger.info(f'len(val_augmented_data) = {len(val_augmented_data)}')
+                logger.info(f'len(val_augmented_data) (original) = {len(val_augmented_data)}')
+
+                # --- NEW SUBSAMPLING LOGIC ---
+                if self.chest_imagenome_val_max_size is not None and len(val_augmented_data) > self.chest_imagenome_val_max_size:
+                    # Use a fixed seed so validation is consistent across runs/restarts
+                    random.seed(42)
+                    val_augmented_data = random.sample(val_augmented_data, self.chest_imagenome_val_max_size)
+                    logger.info(f'Subsampled validation data to: {len(val_augmented_data)}')
+                # -----------------------------
 
                 self.chest_imagenome_alg_val_dataset = ChestImaGenome_AnatomicalLocationGroundingDataset(
                     augmented_data=val_augmented_data,

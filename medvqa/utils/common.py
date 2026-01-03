@@ -11,25 +11,6 @@ from typing import List, Any
 
 logger = logging.getLogger(__name__)
 
-SOURCE_DIR = os.environ['MEDVQA_SOURCE_DIR']
-WORKSPACE_DIR = os.environ['MEDVQA_WORKSPACE_DIR']
-FAST_WORKSPACE_DIR = os.environ['MEDVQA_FAST_WORKSPACE_DIR']
-LARGE_FAST_WORKSPACE_DIR = os.environ['MEDVQA_LARGE_FAST_WORKSPACE_DIR']
-CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
-FAST_CACHE_DIR = os.path.join(FAST_WORKSPACE_DIR, 'cache')
-LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_WORKSPACE_DIR, 'cache')
-TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
-FAST_TMP_DIR = os.path.join(FAST_WORKSPACE_DIR, 'tmp')
-RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
-REGULAR_EXPRESSIONS_FOLDER = os.path.join(SOURCE_DIR, 'medvqa', 'datasets', 'regular_expressions')
-
-# NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem
-# and have set the YOLOv5_PYTHON_PATH environment variable to an appropriate python executable.
-# yolov5 is available at https://github.com/ultralytics/yolov5
-YOLOv5_PYTHON_PATH = os.environ['YOLOv5_PYTHON_PATH']
-YOLOv5_TRAIN_SCRIPT_PATH = os.environ['YOLOv5_TRAIN_SCRIPT_PATH']
-YOLOv5_DETECT_SCRIPT_PATH = os.environ['YOLOv5_DETECT_SCRIPT_PATH']
-YOLOv5_RUNS_DETECT_DIR = os.environ['YOLOv5_RUNS_DETECT_DIR']
 
 def get_timestamp():
     return datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
@@ -114,3 +95,18 @@ def print_nested_dict(d, indent=0):
             print(" " * indent + f"{key}: list of {type(value[0]).__name__} (len={len(value)})")
         else:
             print(" " * indent + f"{key}: {type(value).__name__}")
+
+
+def inspect_available_ram(throw_warning_if_low=True):
+    import psutil
+    ram = psutil.virtual_memory()
+    total_ram = ram.total / (1024 ** 3)  # Convert bytes to GB
+    available_ram = ram.available / (1024 ** 3)  # Convert bytes to GB
+    used_ram = ram.used / (1024 ** 3)  # Convert bytes to GB
+    percent_used = ram.percent
+    logger.info(f"Total RAM: {total_ram:.2f} GB")
+    logger.info(f"Available RAM: {available_ram:.2f} GB")
+    logger.info(f"Used RAM: {used_ram:.2f} GB ({percent_used}%)")
+    if throw_warning_if_low and percent_used > 60:
+        logger.warning("Warning: More than 60% of RAM is used. Consider closing some applications or increasing system memory.")
+    return total_ram, available_ram, used_ram, percent_used

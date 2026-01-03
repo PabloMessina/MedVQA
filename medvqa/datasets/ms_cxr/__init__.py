@@ -1,15 +1,11 @@
 import random
 import os
 import pandas as pd
-from dotenv import load_dotenv
 from zipfile import ZipFile
 from medvqa.datasets.segmentation_utils import compute_mask_from_bounding_boxes
 from medvqa.datasets.mimiccxr import MIMICCXR_JPG_IMAGES_LARGE_DIR
 from medvqa.utils.common import ChoiceEnum
-
-load_dotenv()
-
-MS_CXR_LOCAL_ALIGNMENT_CSV_PATH = os.environ['MS_CXR_LOCAL_ALIGNMENT_V1.1.0_CSV_PATH']
+from medvqa.settings import MS_CXR_LOCAL_ALIGNMENT_CSV_PATH
 
 class MS_CXR_TrainingMode(ChoiceEnum):
     TRAIN = 'train'

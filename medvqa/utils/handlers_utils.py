@@ -1,15 +1,21 @@
 import os
 import operator
 import logging
+from typing import List, Optional, Any
 from ignite.handlers import Checkpoint, DiskSaver
-from ignite.engine import Events
+from ignite.engine import Events, Engine
+from ignite.handlers.timing import Timer
 from torch import Tensor
+from torch.optim.optimizer import Optimizer
 from medvqa.losses.schedulers import LRSchedulerNames
 from medvqa.utils.constants import METRIC2SHORT, MetricNames
 from medvqa.utils.metrics_utils import average_ignoring_nones_and_nans
-from medvqa.utils.logging_utils import ANSI_BLUE, ANSI_MAGENTA_BOLD, ANSI_RED_BOLD, ANSI_RESET, MetricsLogger
+from medvqa.utils.logging_utils import (
+    ANSI_BLUE, ANSI_MAGENTA_BOLD, ANSI_RED_BOLD, ANSI_RESET, MetricsLogger, log_metrics_to_wandb
+)
 
 logger = logging.getLogger(__name__)
+
 
 def get_log_epoch_started_handler(model_wrapper):
     epoch_offset = model_wrapper.get_epoch()
@@ -20,6 +26,7 @@ def get_log_epoch_started_handler(model_wrapper):
         model_wrapper.set_epoch(epoch)
     return handler
 
+
 def get_log_iteration_handler(log_every=25):
 
     def handler(engine):
@@ -29,7 +36,23 @@ def get_log_iteration_handler(log_every=25):
 
     return handler
 
-def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoint_folder=None):
+
+def get_log_metrics_handler(timer: Timer, metrics_to_print: List[str], epoch_offset: int,
+                            log_to_disk: bool = False,  checkpoint_folder: Optional[str] = None,
+                            split: str = 'train', collator_engine: Optional[Engine] = None,
+                            wandb_run: Optional[Any] = None):
+    """
+    Args:
+        timer (Timer): The timer to use for the duration.
+        metrics_to_print (List[str]): The metrics to print.
+        epoch_offset (int): The epoch offset to use for the epoch number.
+        log_to_disk (bool): Whether to log to disk.
+        checkpoint_folder (Optional[str]): The folder to save the metrics to.
+        split (str): 'train' or 'val'.
+        collator_engine (Optional[Engine]): The engine to use for the epoch number. 
+                                            If None, uses the engine that triggered the handler.
+        wandb_run (Optional[Any]): The wandb run to use for logging to wandb.
+    """
 
     if log_to_disk:
         assert checkpoint_folder is not None
@@ -39,6 +62,8 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
         metrics = engine.state.metrics        
         scores = []
         metric_names = []
+        
+        # --- Metric Extraction Logic ---
         for m in metrics_to_print:
             score = metrics.get(m, None)
             if m == MetricNames.BLEU:
@@ -181,23 +206,56 @@ def get_log_metrics_handler(timer, metrics_to_print, log_to_disk=False, checkpoi
                     scores.append(score)
                 else:
                     scores.append(None)
-        
-        # print(metric_names, scores)
+        # ---------------------------------------------------------
 
-        assert len(metric_names) == len(scores)
+        # Print to Console
         nonnull_scores = [s for s in scores if s is not None]
         nonnull_metric_names = [m for m, s in zip(metric_names, scores) if s is not None]
         metrics_str = ', '.join(f'{METRIC2SHORT.get(m, m)} {s:.5f}' for m, s in zip(nonnull_metric_names, nonnull_scores))
         duration = timer._elapsed()
-        if len(metrics_str) > 0:
-            logger.info(f'{ANSI_BLUE}{metrics_str}, {duration:.2f} secs{ANSI_RESET}')
-        else:
-            logger.info(f'{ANSI_BLUE}{duration:.2f} secs{ANSI_RESET}')
+        
+        msg = f'{metrics_str}, {duration:.2f} secs' if metrics_str else f'{duration:.2f} secs'
+        logger.info(f'{ANSI_BLUE}[{split.upper()}] {msg}{ANSI_RESET}') # Added split to log for clarity
 
+        # Determine the correct epoch
+        if collator_engine:
+            # If this is validation, read epoch from the trainer
+            current_epoch = collator_engine.state.epoch + epoch_offset
+        else:
+            # If this is training, read epoch from self
+            current_epoch = engine.state.epoch + epoch_offset
+        
+        # Log to Disk (JSONL)
         if log_to_disk:
-            metrics_logger.log_metrics(metric_names, scores)
-    
+            metrics_logger.log_metrics(
+                metric_names=nonnull_metric_names,
+                scores=nonnull_scores,
+                split=split,  # Uses the explicit split passed at creation
+                epoch=current_epoch,
+            )
+
+        # Log to Wandb
+        if wandb_run:
+            log_metrics_to_wandb(
+                metrics_dict={f"{split}/{m}": s for m, s in zip(nonnull_metric_names, nonnull_scores)},
+                wandb_run=wandb_run,
+                step=current_epoch,
+                step_metric="epoch",
+            )
     return handler
+
+
+def get_log_learning_rate_to_wandb_handler(wandb_run: Any, optimizer: Optimizer):
+    def handler(engine: Engine):
+        lr = optimizer.param_groups[0]["lr"]
+        log_metrics_to_wandb(
+            metrics_dict={"learning_rate": lr},
+            wandb_run=wandb_run,
+            step=engine.state.epoch,
+            step_metric="epoch",
+        )
+    return handler
+
 
 def get_lr_sch_handler(lr_scheduler, lr_scheduler_name, score_fn=None):
 
@@ -211,6 +269,7 @@ def get_lr_sch_handler(lr_scheduler, lr_scheduler_name, score_fn=None):
 
     return handler
 
+
 def get_checkpoint_handler(model_wrapper, folder_path, trainer, epoch_offset, score_name, score_fn):    
     checkpoint = Checkpoint(
         to_save=model_wrapper.to_save(),
@@ -221,6 +280,7 @@ def get_checkpoint_handler(model_wrapper, folder_path, trainer, epoch_offset, sc
         greater_or_equal=True,
     )
     return checkpoint
+
 
 def get_log_checkpoint_saved_handler(folder_path):
     last_checkpoint_names = set(f for f in os.listdir(folder_path) if f.endswith('.pt'))

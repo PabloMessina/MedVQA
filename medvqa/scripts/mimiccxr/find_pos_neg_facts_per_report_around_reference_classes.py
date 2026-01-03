@@ -600,6 +600,7 @@ def _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
+
 def _combine_pos_neg_facts_with_GPT4_mined_labels(
     mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath: str,
     GPT4_mined_labels_jsonl_filepath: str,
@@ -750,36 +751,199 @@ def _combine_pos_neg_facts_with_GPT4_mined_labels(
     print(f'Saving {output_filepath}...')
     save_pickle(output, output_filepath)
 
+
+def _update_embeddings_for_pos_neg_facts(
+    mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath: str,
+    fact_embedding_model_name: str,
+    fact_embedding_model_checkpoint_folder_path: str,
+    fact_embedding_batch_size: int,
+    fact_embedding_num_workers: int,
+    device: str,
+):
+    """
+    Update embeddings for positive and negative facts.
+
+    Args:
+        mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath (str): Path to the DICOM ID to positive/negative facts with GPT-4 mined labels pickle file.
+        fact_embedding_model_name (str): Name of the fact embedding model.
+        fact_embedding_model_checkpoint_folder_path (str): Path to the fact embedding model checkpoint folder.
+        fact_embedding_batch_size (int): Batch size for computing text embeddings.
+        fact_embedding_num_workers (int): Number of workers for computing text embeddings.
+        device (str): Device to use for computing text embeddings.
+    """
+
+    print_blue(f'Running _update_embeddings_for_pos_neg_facts()...', bold=True)
+
+    # Load DICOM ID to positive/negative facts with GPT-4 mined labels
+    print(f'Loading {mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath}...')
+    dicom_id_to_pos_neg_facts = load_pickle(mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath)
+    facts = dicom_id_to_pos_neg_facts['facts']
+    dicom_id_to_pos_facts = dicom_id_to_pos_neg_facts['dicom_id_to_pos_facts']
+    dicom_id_to_strong_neg_facts = dicom_id_to_pos_neg_facts['dicom_id_to_strong_neg_facts']
+    dicom_id_to_weak_neg_facts = dicom_id_to_pos_neg_facts['dicom_id_to_weak_neg_facts']
+    print(f'len(dicom_id_to_pos_facts): {len(dicom_id_to_pos_facts)}')
+    print(f'len(dicom_id_to_strong_neg_facts): {len(dicom_id_to_strong_neg_facts)}')
+    print(f'len(dicom_id_to_weak_neg_facts): {len(dicom_id_to_weak_neg_facts)}')
+    print(f'len(facts): {len(facts)}')
+
+    # Remove " (GPT-4)" suffix from facts
+    facts_ = [f[:-8] if f.endswith(' (GPT-4)') else f for f in facts]
+    num_modified_facts = sum(1 for f, f_ in zip(facts, facts_) if f != f_)
+    if num_modified_facts > 0:
+        print(f'Removed " (GPT-4)" suffix from {num_modified_facts} facts.')
+
+    # Extract embeddings
+    embedding_extractor = CachedTextEmbeddingExtractor(
+        model_name=fact_embedding_model_name,
+        model_checkpoint_folder_path=fact_embedding_model_checkpoint_folder_path,
+        batch_size=fact_embedding_batch_size,
+        num_workers=fact_embedding_num_workers,
+        device=device,
+    )
+    fact_embeddings = embedding_extractor.compute_text_embeddings(facts_)
+    print(f'fact_embeddings.shape: {fact_embeddings.shape}')
+
+    # Save output
+    output = {
+        'facts': facts,
+        'embeddings': fact_embeddings,
+        'dicom_id_to_pos_facts': dicom_id_to_pos_facts,
+        'dicom_id_to_strong_neg_facts': dicom_id_to_strong_neg_facts,
+        'dicom_id_to_weak_neg_facts': dicom_id_to_weak_neg_facts,
+    }
+    output_filepath = get_file_path_with_hashing_if_too_long(
+        prefix=f'mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_and_updated_embeddings(nf={len(facts)})',
+        folder_path=LARGE_FAST_CACHE_DIR,
+        strings=[
+            mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath,
+            fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path,
+            f'len(facts)={len(facts)}',
+        ],
+        force_hashing=True,
+    )
+    print(f'Saving {output_filepath}...')
+    save_pickle(output, output_filepath)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, required=True, choices=_Task.choices())
-    parser.add_argument('--integrated_fact_metadata_jsonl_filepath', type=str)
-    parser.add_argument('--integrated_report_facts_jsonl_filepath', type=str)
-    parser.add_argument('--integrated_sentence_to_negative_facts_jsonl_filepath', type=str)
-    parser.add_argument('--background_findings_and_impression_json_filepath', type=str)
-    parser.add_argument('--fact_embedding_model_name', type=str)
-    parser.add_argument('--fact_embedding_model_checkpoint_folder_path', type=str)
-    parser.add_argument('--fact_embedding_batch_size', type=int, default=32)
-    parser.add_argument('--fact_embedding_num_workers', type=int, default=4)
-    parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--facts_relevant_to_anchor_facts_pickle_filepath', type=str)
-    parser.add_argument('--skip_nli', action='store_true')
-    parser.add_argument('--mlp_batch_size', type=int, default=32)
-    parser.add_argument('--mlp_num_workers', type=int, default=4)
-    parser.add_argument('--mlp_nli_checkpoint_folder_path', type=str)
-    parser.add_argument('--mlp_nli_entailment_threshold', type=float, default=0.5)
-    parser.add_argument('--num_clusters', type=int)
-    parser.add_argument('--max_negative_facts_per_report', type=int)
-    parser.add_argument('--GPT4_mined_labels_jsonl_filepath', type=str)
-    parser.add_argument('--precomputed_phrase_embeddings_for_labels_pickle_filepath', type=str)
-    parser.add_argument('--mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath', type=str)
+    subparsers = parser.add_subparsers(dest='command', required=True)
+
+    # Subcommand: combine
+    combine_parser = subparsers.add_parser(
+        'combine_pos_neg_facts_with_GPT4_mined_labels', help='Combine pos/neg facts with GPT4-mined labels'
+    )
+    combine_parser.add_argument(
+        '--mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath', type=str, required=True
+    )
+    combine_parser.add_argument(
+        '--GPT4_mined_labels_jsonl_filepath', type=str, required=True
+    )
+    combine_parser.add_argument(
+        '--precomputed_phrase_embeddings_for_labels_pickle_filepath', type=str, required=True
+    )
+
+    # Subcommand: update embeddings
+    update_embeddings_parser = subparsers.add_parser(
+        'update_embeddings_for_pos_neg_facts', help='Update embeddings for positive/negative facts'
+    )
+    update_embeddings_parser.add_argument(
+        '--mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath', type=str, required=True,
+        help='Path to the pickle file containing DICOM ID to positive/negative facts with GPT-4 mined labels'
+    )
+    update_embeddings_parser.add_argument(
+        '--fact_embedding_model_name', type=str, required=True,
+        help='Name of the fact embedding model to use'
+    )
+    update_embeddings_parser.add_argument(
+        '--fact_embedding_model_checkpoint_folder_path', type=str, required=True,
+        help='Path to the fact embedding model checkpoint folder'
+    )
+    update_embeddings_parser.add_argument(
+        '--fact_embedding_batch_size', type=int, default=32,
+        help='Batch size for computing text embeddings'
+    )
+    update_embeddings_parser.add_argument(
+        '--fact_embedding_num_workers', type=int, default=4,
+        help='Number of workers for computing text embeddings'
+    )
+    update_embeddings_parser.add_argument(
+        '--device', type=str, default='cuda',
+        help='Device to use for computing text embeddings'
+    )
+
+    # Subcommand: find-relevant
+    find_relevant_parser = subparsers.add_parser(
+        'find_facts_relevant_to_anchor_facts', help='Find facts relevant to anchor facts'
+    )
+    find_relevant_parser.add_argument(
+        '--integrated_fact_metadata_jsonl_filepath', type=str, required=True
+    )
+    find_relevant_parser.add_argument(
+        '--integrated_sentence_to_negative_facts_jsonl_filepath', type=str, required=True
+    )
+
+    # Subcommand: find-pos-neg
+    find_pos_neg_parser = subparsers.add_parser(
+        'find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli',
+        help='Find positive/negative facts per report'
+    )
+    find_pos_neg_parser.add_argument(
+        '--integrated_report_facts_jsonl_filepath', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--integrated_fact_metadata_jsonl_filepath', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--background_findings_and_impression_json_filepath', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--facts_relevant_to_anchor_facts_pickle_filepath', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--integrated_sentence_to_negative_facts_jsonl_filepath', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--fact_embedding_model_name', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--fact_embedding_model_checkpoint_folder_path', type=str, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--fact_embedding_batch_size', type=int, default=32
+    )
+    find_pos_neg_parser.add_argument(
+        '--fact_embedding_num_workers', type=int, default=4
+    )
+    find_pos_neg_parser.add_argument(
+        '--device', type=str, default='cuda'
+    )
+    find_pos_neg_parser.add_argument(
+        '--skip_nli', action='store_true'
+    )
+    find_pos_neg_parser.add_argument(
+        '--mlp_batch_size', type=int, default=32
+    )
+    find_pos_neg_parser.add_argument(
+        '--mlp_num_workers', type=int, default=4
+    )
+    find_pos_neg_parser.add_argument(
+        '--mlp_nli_checkpoint_folder_path', type=str
+    )
+    find_pos_neg_parser.add_argument(
+        '--mlp_nli_entailment_threshold', type=float, default=0.5
+    )
+    find_pos_neg_parser.add_argument(
+        '--num_clusters', type=int, required=True
+    )
+    find_pos_neg_parser.add_argument(
+        '--max_negative_facts_per_report', type=int, required=True
+    )
+
     args = parser.parse_args()
 
-    if args.task == _Task.COMBINE_POS_NEG_FACTS_WITH_GPT4_MINED_LABELS:
-        assert args.mimiccxr_dicom_id_to_pos_neg_facts_pickle_filepath is not None
-        assert args.GPT4_mined_labels_jsonl_filepath is not None
-        assert args.precomputed_phrase_embeddings_for_labels_pickle_filepath is not None
-        # TODO: make this more generic (below is specific to VinDr-CXR)
+    if args.command == 'combine_pos_neg_facts_with_GPT4_mined_labels':
         from medvqa.scripts.mimiccxr.generate_classification_labels_with_openai import VINBIG_LABEL_TO_HYPOTHESIS
         from medvqa.utils.constants import VINBIG_LABEL2PHRASE
         h2p = {h: VINBIG_LABEL2PHRASE[l] for l, h in VINBIG_LABEL_TO_HYPOTHESIS.items()}
@@ -790,10 +954,18 @@ def main():
             hypothesis_to_class_phrase=h2p,
         )
 
-    elif args.task == _Task.FIND_FACTS_RELEVANT_TO_ANCHOR_FACTS:
-        assert args.integrated_fact_metadata_jsonl_filepath is not None
-        assert args.integrated_sentence_to_negative_facts_jsonl_filepath is not None
-        dataset_name = 'VinDr-CXR' # TODO: support other datasets
+    elif args.command == 'update_embeddings_for_pos_neg_facts':
+        _update_embeddings_for_pos_neg_facts(
+            mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath=args.mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_filepath,
+            fact_embedding_model_name=args.fact_embedding_model_name,
+            fact_embedding_model_checkpoint_folder_path=args.fact_embedding_model_checkpoint_folder_path,
+            fact_embedding_batch_size=args.fact_embedding_batch_size,
+            fact_embedding_num_workers=args.fact_embedding_num_workers,
+            device=args.device,
+        )
+
+    elif args.command == 'find_facts_relevant_to_anchor_facts':
+        dataset_name = 'VinDr-CXR'  # TODO: support other datasets
         class_name_to_regex = load_class_specific_regex(dataset_name)
         anchor_facts = list(class_name_to_regex.keys())
         anchor_facts.sort()
@@ -804,23 +976,10 @@ def main():
             anchor_facts=anchor_facts,
             anchor_fact_to_regex=class_name_to_regex,
         )
-    elif args.task == _Task.FIND_POSITIVE_NEGATIVE_FACTS_PER_REPORT_WITH_FACT_EMBEDDINGS_AND_MLP_NLI:
-        assert args.integrated_report_facts_jsonl_filepath is not None
-        assert args.integrated_fact_metadata_jsonl_filepath is not None
-        assert args.background_findings_and_impression_json_filepath is not None
-        assert args.facts_relevant_to_anchor_facts_pickle_filepath is not None
-        assert args.integrated_sentence_to_negative_facts_jsonl_filepath is not None
-        assert args.fact_embedding_model_name is not None
-        assert args.fact_embedding_model_checkpoint_folder_path is not None
-        assert args.fact_embedding_batch_size is not None
-        assert args.fact_embedding_num_workers is not None
-        assert args.num_clusters is not None
-        assert args.max_negative_facts_per_report is not None
+
+    elif args.command == 'find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli':
         if not args.skip_nli:
             assert args.mlp_nli_checkpoint_folder_path is not None
-            assert args.mlp_batch_size is not None
-            assert args.mlp_num_workers is not None
-            assert args.mlp_nli_entailment_threshold is not None
         _find_positive_negative_facts_per_report_with_fact_embeddings_and_mlp_nli(
             integrated_report_facts_jsonl_filepath=args.integrated_report_facts_jsonl_filepath,
             integrated_fact_metadata_jsonl_filepath=args.integrated_fact_metadata_jsonl_filepath,
@@ -841,9 +1000,9 @@ def main():
             max_negative_facts_per_report=args.max_negative_facts_per_report,
         )
     else:
-        raise ValueError(f'Invalid task: {args.task}')
-    
-    print_blue(f'Done!', bold=True)
+        raise ValueError(f'Invalid command: {args.command}')
+
+    print_blue('Done!', bold=True)
 
 if __name__ == '__main__':
     main()

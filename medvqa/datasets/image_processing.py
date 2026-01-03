@@ -1,9 +1,7 @@
-import math
 import pydicom
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 import torch
 import torchvision.transforms as T
-import torchxrayvision as xrv
 import cv2
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
@@ -24,7 +22,7 @@ from medvqa.models.vision.visual_modules import (
     CLIP_DEFAULT_IMAGE_MEAN_STD,
     CLIP_VERSION_2_IMAGE_MEAN_STD,
 )
-from medvqa.utils.common import CACHE_DIR
+from medvqa.settings import CACHE_DIR
 from medvqa.utils.files_utils import MAX_FILENAME_LENGTH, load_pickle, save_pickle
 from medvqa.utils.hashing_utils import hash_string
 from medvqa.datasets.augmentation import (
@@ -110,6 +108,7 @@ def get_image_transform(
         tf_normalize = T.Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
 
     elif use_torchxrayvision_transform:
+        import torchxrayvision as xrv
         assert image_size[0] == image_size[1]
         assert augmentation_mode is None # augmentation not supported. TODO: add support
         print(f'Using torchxrayvision transform (image_size = {image_size})')

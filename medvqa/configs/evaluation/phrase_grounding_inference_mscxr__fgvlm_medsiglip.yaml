@@ -1,0 +1,13 @@
+# Required arguments (previously CLI flags)
+dataset_name: "mscxr"
+max_images_per_batch: 60
+max_phrases_per_batch: 2000
+max_phrases_per_image: 30
+num_workers: 3
+override_bbox_format: "cxcywh"
+use_amp: true
+# checkpoint_folder_path: # This argument must be provided via CLI
+
+# Path arguments
+mscxr_phrase2embedding_filepath: /mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/mimiccxr/mscxr_phrase2embedding(hash=36540,735014075025888377).pkl
+mimicxr_dicom_id_to_pos_neg_facts_filepath: "/mnt/researchers/denis-parra/workspace_pamessina/medvqa/cache/mimiccxr/mimiccxr_dicom_id_to_pos_neg_facts_with_GPT4_mined_labels_and_updated_embeddings(nf=403416)(hash=620,3260673045818510147).pkl"

@@ -1,3 +1,4 @@
+from typing import Dict, List, Optional
 import numpy as np
 import time
 import multiprocessing as mp
@@ -374,27 +375,38 @@ def _bootstrap_metric_avg(seed):
     # Compute average metric
     return _shared_metric_values[boot_indices].mean()
 
-def apply_stratified_bootstrapping(metric_values, class_to_indices, class_names, metric_name,
-                                   num_bootstraps=500, num_processes=None, seed_base=0,
-                                   use_tqdm=True):
+def apply_bootstrapping(metric_values: np.ndarray, metric_name: str,
+                        num_bootstraps: int = 500, num_processes: Optional[int] = None,
+                        seed_base: int = 0, class_to_indices: Optional[List[List[int]]] = None,
+                        class_names: Optional[List[str]] = None,
+                        use_tqdm: bool = False) -> Dict[str, Dict[str, float]]:
     """
     Apply bootstrapping to estimate the mean and standard deviation of metrics computed by a given function.
 
     Args:
         metric_values (numpy.ndarray): Array of metric values.
-        class_to_indices (list): List of indices per class.
-        class_names (list): List of class names.
         metric_name (str): Name of the metric.
         num_bootstraps (int, optional): Number of bootstrap iterations (default: 500).
         num_processes (int, optional): Number of processes to use for parallel computation (default: None, don't use multiprocessing).
         seed_base (int, optional): Base seed for random number generator (default: 0).
-        use_tqdm (bool, optional): Whether to use tqdm for progress bar (default: True).
+        class_to_indices (list of list of int, optional): List of lists where each sublist contains indices for a specific class.
+        class_names (list of str, optional): List of class names corresponding to the indices in `class_to_indices`.
+        use_tqdm (bool, optional): Whether to use tqdm for progress bar (default: False).
 
     Returns:
         dict: A dictionary where each metric name maps to another dictionary containing:
               - "mean": The mean of the metric across bootstrap samples.
               - "std": The standard deviation of the metric across bootstrap samples.
     """
+
+    assert (class_to_indices is None) == (class_names is None), (
+        "Either both class_to_indices and class_names should be provided or neither."
+    )
+    if class_to_indices is None:
+        class_to_indices = []
+    if class_names is None:
+        class_names = []
+
     metric_values = np.array(metric_values)
     
     # Perform bootstrapping

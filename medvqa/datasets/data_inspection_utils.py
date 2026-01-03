@@ -1,16 +1,20 @@
 import math
 import os
-from PIL import Image
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import imagesize
+import torch
 from time import time
 from multiprocessing import Pool
-
-import torch
-from medvqa.datasets.chest_imagenome import CHEST_IMAGENOME_BBOX_NAMES, CHEST_IMAGENOME_GOLD_BBOX_NAMES, CHEST_IMAGENOME_NUM_BBOX_CLASSES, CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES
+from PIL import Image
+from medvqa.datasets.chest_imagenome import (
+    CHEST_IMAGENOME_BBOX_NAMES,
+    CHEST_IMAGENOME_GOLD_BBOX_NAMES,
+    CHEST_IMAGENOME_NUM_BBOX_CLASSES,
+    CHEST_IMAGENOME_NUM_GOLD_BBOX_CLASSES,
+)
 from medvqa.datasets.chest_imagenome.chest_imagenome_dataset_management import (
     load_chest_imagenome_gold_bboxes,
     load_chest_imagenome_silver_bboxes,
@@ -20,9 +24,13 @@ from medvqa.metrics.bbox.utils import compute_iou
 from medvqa.datasets.image_processing import inv_normalize
 from medvqa.utils.constants import CHEXPERT_GENDERS, CHEXPERT_ORIENTATIONS
 from medvqa.utils.files_utils import get_cached_json_file
-from medvqa.datasets.iuxray import IUXRAY_CACHE_DIR
-from medvqa.datasets.mimiccxr import MIMICCXR_CACHE_DIR, MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
+from medvqa.datasets.mimiccxr import MIMICCXR_IMAGE_REGEX, get_mimiccxr_large_image_path
 from medvqa.utils.logging_utils import chest_imagenome_label_array_to_string, chexpert_label_array_to_string, print_bold
+from medvqa.settings import (
+    IUXRAY_CACHE_DIR,
+    MIMICCXR_CACHE_DIR,
+)
+
 
 def inspect_chexpert_vision_trainer(chexpert_vision_trainer, i):
     instance = chexpert_vision_trainer.dataset[i]

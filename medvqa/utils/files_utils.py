@@ -3,14 +3,12 @@ import pickle
 import os
 import datetime
 import logging
+import yaml
 from tqdm import tqdm
 from typing import Union, List, Optional
 from pathlib import Path
-
-from medvqa.utils.common import (
-    WORKSPACE_DIR,
-    get_timestamp,
-)
+from medvqa.utils.common import get_timestamp
+from medvqa.settings import CONFIGS_FOLDER, EXPERIMENTS_DIR
 from medvqa.utils.hashing_utils import hash_string
 
 logger = logging.getLogger(__name__)
@@ -22,6 +20,7 @@ _jsonl_cache = dict()
 _pickle_cache = dict()
 _csv_dataframe_cache = dict()
 
+
 def get_cached_json_file(path, force_reload=False):
     if force_reload:
         file = _json_cache[path] = load_json(path)
@@ -32,6 +31,7 @@ def get_cached_json_file(path, force_reload=False):
             file = _json_cache[path] = load_json(path)
     return file
 
+
 def get_cached_jsonl_file(path, force_reload=False):
     if force_reload:
         file = _jsonl_cache[path] = load_jsonl(path)
@@ -41,6 +41,7 @@ def get_cached_jsonl_file(path, force_reload=False):
         except KeyError:
             file = _jsonl_cache[path] = load_jsonl(path)
     return file
+
 
 def get_cached_pickle_file(path, force_reload=False):
     if force_reload:
@@ -53,6 +54,7 @@ def get_cached_pickle_file(path, force_reload=False):
         if file is None:
             file = _pickle_cache[path] = load_pickle(path)
     return file
+
 
 def get_cached_dataframe_from_csv(path, force_reload=False):
     import pandas as pd
@@ -67,9 +69,11 @@ def get_cached_dataframe_from_csv(path, force_reload=False):
             file = _csv_dataframe_cache[path] = pd.read_csv(path)
     return file
 
+
 def load_json(path):
     with open(path, 'r') as f:
         return json.load(f)
+
 
 def load_jsonl(path):
     assert os.path.exists(path)
@@ -78,10 +82,30 @@ def load_jsonl(path):
     with open(path, 'r') as f:
         return [json.loads(line) for line in f]
 
+
 def load_pickle(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
     
+
+def load_yaml(path):
+    # open() accepts Path objects since Python 3.6
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def load_config_yaml(path):
+    # Check if the path is relative
+    if not os.path.isabs(path):
+        # Avoid repeating 'configs/' in the path
+        if path.startswith('configs/'):
+            path = path[len('configs/'):]
+        # Convert to absolute path using CONFIGS_FOLDER
+        path = os.path.join(CONFIGS_FOLDER, path)
+    # Now load the YAML file
+    return load_yaml(path)
+    
+
 def read_lines_from_txt(path):
     with open(path, 'r') as f:
         lines = f.readlines()
@@ -95,14 +119,17 @@ def read_lines_from_txt(path):
     clean_lines = clean_lines[:i]
     return clean_lines
 
+
 def read_txt(path):
     with open(path, 'r') as f:
         return f.read()
+
 
 def make_dirs_in_filepath(filepath):
     dirpath = os.path.dirname(filepath)
     if dirpath:  # Only make directories if dirpath is not empty
         os.makedirs(dirpath, exist_ok=True)
+
 
 def save_pickle(obj, path, add_to_cache=False):
     make_dirs_in_filepath(path)
@@ -111,10 +138,12 @@ def save_pickle(obj, path, add_to_cache=False):
     if add_to_cache:
         _pickle_cache[path] = obj
 
+
 def save_json(obj, path):
     make_dirs_in_filepath(path)
     with open(path, 'w') as f:
         json.dump(obj, f)
+
 
 def save_jsonl(obj_list, path, append=False):
     assert isinstance(obj_list, list)
@@ -131,17 +160,31 @@ def save_txt(strings_list, path):
         for s in strings_list:
             f.write(f'{s}\n')
 
-def get_checkpoint_folder_path(task, dataset_name, model_name, *args):
+
+def get_checkpoint_folder_path(experiment_name, *args):
     timestamp = get_timestamp()
-    folder_name = f'{timestamp}_{dataset_name}_{model_name}'
+    folder_name = f'{experiment_name}__{timestamp}'
     if args: 
         args = [arg for arg in args if arg is not None]
         if len(args) > 0:
             folder_name = f'{folder_name}_{"_".join(args)}'
     folder_name = folder_name.replace(os.path.sep, '-') # prevent path-related bugs
-    full_path = os.path.join(WORKSPACE_DIR, 'models', task, folder_name)
+    full_path = os.path.join(EXPERIMENTS_DIR, folder_name)
     os.makedirs(full_path, exist_ok=True)
     return full_path
+
+
+def find_existing_checkpoint_folder_paths(experiment_name: str):
+    """Find all checkpoint folder paths for a given experiment name.
+    Returns a list of checkpoint folder paths sorted by creation time (newest first)."""
+    checkpoint_folder_paths = []
+    for root, dirs, _ in os.walk(EXPERIMENTS_DIR):
+        for dir in dirs:
+            if dir.startswith(experiment_name):
+                checkpoint_folder_paths.append(os.path.join(root, dir))
+    checkpoint_folder_paths.sort(key=lambda x: os.path.getctime(x), reverse=True)
+    return checkpoint_folder_paths
+
 
 def get_results_folder_path(checkpoint_folder_path, create_if_not_exists=True):
     results_folder_path = checkpoint_folder_path.replace(f'{os.path.sep}models{os.path.sep}',
@@ -149,6 +192,7 @@ def get_results_folder_path(checkpoint_folder_path, create_if_not_exists=True):
     if create_if_not_exists:
         os.makedirs(results_folder_path, exist_ok=True)
     return results_folder_path
+
 
 def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings=[], ext='pkl', force_hashing=False):
     assert os.path.sep not in prefix # prevent path-related bugs
@@ -168,6 +212,7 @@ def get_file_path_with_hashing_if_too_long(folder_path, prefix, strings=[], ext=
         h = hash_string(file_path)
         file_path = os.path.join(folder_path, f'{prefix}(hash={h[0]},{h[1]}).{ext}')
     return file_path
+
 
 def find_inconsistencies_between_directories(dir_path_1, dir_path_2):
     # 1) Check that all files and subdirectories in dir_path_1 are also in dir_path_2
@@ -223,8 +268,9 @@ def zip_files_and_folders_in_dir(dir_path, file_or_folder_names, output_path):
                         arcname = os.path.join(name, file_path.replace(path, ''))
                         zipf.write(file_path, arcname=arcname)
 
+
 def list_filepaths_with_prefix_and_timestamps(path_prefix, must_contain=None):
-    if type(must_contain) == str:
+    if isinstance(must_contain, str):
         must_contain = [must_contain]
     matching_files = []
     directory = os.path.dirname(path_prefix)
@@ -241,6 +287,7 @@ def list_filepaths_with_prefix_and_timestamps(path_prefix, must_contain=None):
     matching_files.sort(key=lambda x:x[1], reverse=True)
     return matching_files
 
+
 def print_file_size(filepath):
     size = os.path.getsize(filepath)
     size_kb = size / 1024
@@ -248,8 +295,9 @@ def print_file_size(filepath):
     size_gb = size_mb / 1024
     logger.info(f'File size: {size} bytes ({size_kb:.2f} KB, {size_mb:.2f} MB, {size_gb:.2f} GB)')
 
+
 def load_regex_from_files(txt_filepaths):
-    if type(txt_filepaths) == str:
+    if isinstance(txt_filepaths, str):
         txt_filepaths = [txt_filepaths]
     import re
     pattern = ''
@@ -261,9 +309,10 @@ def load_regex_from_files(txt_filepaths):
                 pattern += f'({line.strip()})'
     return re.compile(pattern, re.IGNORECASE)
 
+
 def load_class_specific_regex(dataset_name, class_name=None):
     from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
-    class_name_to_regex_files = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, "unified_classes", f'class_name_to_regex_files.json'))
+    class_name_to_regex_files = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, "unified_classes", 'class_name_to_regex_files.json'))
     if class_name is None:
         # Load all regexes for the dataset
         class_name_to_regex = dict()
@@ -290,6 +339,7 @@ DEFAULT_IGNORE_LIST = [
     'env',
     'node_modules',
     '__tmp',
+    'tmp',
 ]
 
 def print_directory_tree(
@@ -344,7 +394,7 @@ def print_directory_tree(
             and (include_files or item.is_dir())
             and (
                 item.is_dir() or
-                item.suffix not in ignore_extensions
+                ((ignore_extensions is None) or (item.suffix not in ignore_extensions))
             )
         ]
         # Sort alphabetically, directories might naturally come first depending on OS/locale
