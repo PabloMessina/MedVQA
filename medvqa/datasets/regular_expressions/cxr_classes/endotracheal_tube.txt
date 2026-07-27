@@ -1,0 +1,5 @@
+
+    # Matches: "ETT", "Endotracheal tube"
+    \bett\b
+    |
+    \bendotracheal\s+tube

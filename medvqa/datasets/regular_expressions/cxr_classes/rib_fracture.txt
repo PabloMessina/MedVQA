@@ -1,0 +1,27 @@
+
+    # 1. Anatomy ... Pathology
+    # Matches: "Ribs: Fractured", "Rib (fracture)", "rib-fracture", "rib irregularity"
+    \b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
+    (?:
+        [\s,/\-():]+
+        # Stop if we hit negation, normalcy, or boundary terms
+        (?!(?:no|not|without|absent|absence|negative|normal|clear|unremarkable|intact)\b)
+        [^\s,\.;:]+
+    ){0,12}
+    [\s,/\-():]+\b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|
+                  deformit(?:y|ies)|step-off|irregularit(?:y|ies))\b
+    |
+    # 2. Pathology ... Anatomy
+    # Matches: "Cortical step-off of the lateral 6th rib"
+    \b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|
+       deformit(?:y|ies)|step-off|irregularit(?:y|ies))\b
+    (?:
+        [\s,/\-():]+
+        (?!(?:no|not|without|absent|absence|negative|normal|clear|unremarkable|intact)\b)
+        [^\s,\.;:]+
+    ){0,12}
+    [\s,/\-():]+\b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
+    |
+    # 3. Direct Clinical Diagnosis (Implicit Rib Involvement)
+    # Matches: "Flail chest" (which clinically defines >=3 consecutive rib fractures)
+    \bflail\s+chest\b

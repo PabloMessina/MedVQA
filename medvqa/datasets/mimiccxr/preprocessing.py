@@ -257,7 +257,7 @@ def _split_report_into_sections(report_path, debug=False):
 
 def _load_invalid_patterns_regex():
     pattern = ''
-    with open(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'invalid_sentence_patterns.txt')) as f:
+    with open(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'qa', 'invalid_sentence_patterns.txt')) as f:
         for line in f.readlines():
             if len(pattern) > 0:
                 pattern += '|'

@@ -1,0 +1,22 @@
+
+    # 1. Direct terms & common misspellings
+    \b(?:consolidat|consolodat|consildat)\w*
+    |
+    # 2. Classic supportive sign
+    \bair[\s\-]?bronchogram\w*
+    |
+    # 3. Explicit airspace/alveolar morphology
+    \b(?:air[\s\-]?space|alveolar)
+    [\s\.,;:\-\(\)]+
+    (?:
+        disease
+        | process
+        | consolid\w*
+        | opacit\w*
+        | opacif\w*
+        | infiltrat\w*
+        | fill(?:ing)?(?:[\s\.,;:\-\(\)]+pattern)?
+        | pattern
+        | shadow\w*
+    )
+    

@@ -1,0 +1,57 @@
+
+    # ==============================================================================
+    # 1. SPECIFIC DIAGNOSES (High Confidence)
+    #    Matches: "Mesothelioma", "Solitary fibrous tumor of pleura", "Pseudotumor"
+    # ==============================================================================
+    \b(?:
+        mesothelioma|
+        fibrous\s+tumor\s+of\s+(?:the\s+)?pleura|
+        (?:pleural\s+)?pseudotumor           # Added pseudotumor (mass-like fluid)
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 2. ANATOMY ... followed by ... PATHOLOGY
+    # ==============================================================================
+    \b
+    (?:extra)?pleur\w* # Matches: Pleural, Extrapleural
+    (?:
+        \s+
+        [^\s.]+ 
+    ){0,15}
+    \s+
+    (?:
+        mass\w*|
+        mass-like|
+        nodul\w*|
+        tumor\w*|
+        lesion\w*|
+        metastas\w*|
+        implants?|
+        mammillations?
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 3. PATHOLOGY ... followed by ... ANATOMY
+    # ==============================================================================
+    \b
+    (?:
+        mass\w*|
+        mass-like|
+        nodul\w*|
+        tumor\w*|
+        lesion\w*|
+        metastas\w*|
+        implants?|
+        mammillations?
+    )\b
+    (?:
+        \s+
+        [^\s.]+ 
+    ){0,15}
+    \s+
+    (?:extra)?pleur\w* # Matches: Pleural, Extrapleural
+    \b

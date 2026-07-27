@@ -1,0 +1,39 @@
+
+    \b(?:
+        # 1. Adjective/Descriptor First
+        aneurysm\w*
+        (?:
+            \W+\w+
+        ){0,4}
+        \s+
+        (?:
+            aort\w*|ascend\w*|descend\w*|arch|root
+        )
+
+        |
+
+        # 2. Anatomy First
+        (?:
+            aort\w*|ascend\w*|descend\w*|arch|root
+        )
+        (?:
+            \W+\w+
+        ){0,4}
+        \s+
+        aneurysm\w*
+
+        |
+
+        # 3. Noun-form (e.g., "aneurysm of the thoracic aorta")
+        (?:
+            aneurysm|aneurysmal\s+dilatation
+        )
+        \s+of\s+(?:the\s+)?
+        (?:
+            thoracic\s+|ascending\s+|descending\s+
+        )?
+        (?:
+            aort\w*|arch|root
+        )
+    )\b
+    

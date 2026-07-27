@@ -1,0 +1,41 @@
+
+    # ==============================================================================
+    # 1. Action ... followed by ... Anatomy
+    #    Matches: "Blunting of the right posterior lateral costophrenic angle"
+    #             "Hazy right pleural sinus"
+    # ==============================================================================
+    \b(?:blunt\w*|obscur\w*|efface\w*|occlu\w*|hazy|haziness)\b
+    # FLEXIBLE WINDOW: Allows up to 7 words.
+    # Needs to be generous to catch long strings like:
+    # "of the right posterior and lateral"
+    (?:
+        \W+\w+
+    ){0,7}
+    \s+
+    \b(?:
+        (?:costo-?phrenic|c-?p|costo-?diaphragmatic)\s+(?:angles?|sulcus|recess|sinus)
+        |
+        pleural\s+(?:sinus|sinuses|recess)
+        |
+        phrenic\s+(?:angle|sinus)
+    )\b
+    
+    |
+    
+    # ==============================================================================
+    # 2. Anatomy ... followed by ... Action
+    #    Matches: "The left CP angle is completely obscured"
+    #             "Right costodiaphragmatic recess appears blunted"
+    # ==============================================================================
+    \b(?:
+        (?:costo-?phrenic|c-?p|costo-?diaphragmatic)\s+(?:angles?|sulcus|recess|sinus)
+        |
+        pleural\s+(?:sinus|sinuses|recess)
+    )\b
+    # FLEXIBLE WINDOW: Allows up to 5 words.
+    # Matches: "is appearing to be mildy", "remains partially"
+    (?:
+        \W+\w+
+    ){0,5}
+    \s+
+    \b(?:blunt\w*|obscur\w*|efface\w*|occlu\w*|hazy|haziness)

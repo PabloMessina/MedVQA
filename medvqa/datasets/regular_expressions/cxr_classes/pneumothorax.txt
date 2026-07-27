@@ -1,0 +1,23 @@
+
+    # 1. Direct Diagnosis & Typos (Robust matching)
+    # Matches: Pneumothorax, Pnuemothorax, Pnemothorax, Pneumothoraces
+    # Does NOT match: "No pneumothorax", "no ptx", etc.
+    (?<!\bno\s)
+    \bp(?:neu|nue|ne|nu)mothora(?:x|ces)\w*
+    |
+    # 2. Abbreviation (Extremely common in MIMIC notes)
+    # Does NOT match: "No PTX", etc.
+    (?<!\bno\s)
+    \bptx\b
+    |
+    # 3. The "Deep Sulcus Sign"
+    # 
+    # In supine patients (ICU), air collects at the bottom front, making the
+    # costophrenic angle look "deep" and dark.
+    \bdeep\s+sulcus\s+(?:sign|appearance)
+    |
+    # 4. The "Visceral Pleural Line"
+    # 
+    # This is the visible edge of the lung pulling away from the chest wall.
+    # Radiologists often write: "A fine visceral pleural line is visualized."
+    \bvisceral\s+pleural\s+(?:line|edge|surface)

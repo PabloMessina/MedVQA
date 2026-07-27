@@ -1,0 +1,14 @@
+
+    # 1. Standard Names
+    # Matches: "Hiatal hernia", "Hiatus hernia", "Paraesophageal hernia"
+    \b(?:hiatal|hiatus|para-?esophageal)\s+hernia
+    |
+    # 2. "Gastric" Herniation synonyms
+    # Matches: "Gastric hernia", "Herniation of the stomach"
+    \bgastric\s+herni\w*
+    |
+    \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:stomach|gastr\w*)
+    |
+    # 3. Visual Definition (Strong Synonym)
+    # Matches: "Intrathoracic stomach" (Radiologists often use this phrase instead of "hernia")
+    \bintra-?thoracic\s+stomach

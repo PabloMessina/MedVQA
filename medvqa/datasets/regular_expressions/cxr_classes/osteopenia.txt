@@ -1,0 +1,58 @@
+
+    # ==============================================================================
+    # 1. Explicit Medical Terms
+    #    Matches: "Osteopenia", "Osteopenic", "Demineralization"
+    #    Note: "Osteoporosis" is technically a separate label, but in CXR reports
+    #    they are often used interchangeably to describe low bone mass. 
+    # ==============================================================================
+    \b(?:
+        osteopeni\w*|       # Osteopenia, osteopenic
+        osteoporo\w*|       # Osteoporosis, osteoporotic
+        deminerali\w* # Demineralization, demineralized
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 2. Descriptive: Low/Decreased Bone Density
+    #    CRITICAL: Must include "bone/osseous" to avoid matching "decreased lung density"
+    #    Matches: "Decreased bone density", "Low osseous mineralization"
+    # ==============================================================================
+    \b(?:
+        decreas\w*|low|diminished|reduced|poor|loss\s+of
+    )\b
+    (?:
+        # Allow intervening words like "diffuse", "generalized", "overall"
+        \s+(?:diffuse|generalized|overall|gross|severe|mild)?
+    ){0,2}
+    \s+
+    \b(?:
+        bone|osseous|skeletal|vertebral|spinal
+    )\b
+    (?:
+        # Allow "bone" ... "density"
+        \s+(?:mineral|matrix)?
+    ){0,2}
+    \s+
+    \b(?:
+        density|mineralization|content
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 3. Anatomy ... Descriptor
+    #    Matches: "Osseous structures appear osteopenic", "Bones appear washed out"
+    # ==============================================================================
+    \b(?:
+        bones?|osseous|skeletal|structures?|
+        spine|vertebra\w*|ribs?|clavicles?
+    )\b
+    (?:
+        \s+(?:are|appear|show|demonstrate|look|diffusely|grossly)?
+    ){0,3}
+    \s+
+    \b(?:
+        osteopeni\w*|osteoporo\w*|deminerali\w*|
+        washed\s+out   # Colloquial radiological term for low density
+    )\b

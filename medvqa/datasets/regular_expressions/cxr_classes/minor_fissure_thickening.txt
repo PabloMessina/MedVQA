@@ -1,0 +1,11 @@
+
+    # Anatomy -> Adverbs/Verbs -> Pathology
+    \b(?:minor|horizontal|lesser|transverse)\s+fissur\w*
+    (?:\s+\w+){0,4}\s+
+    (?:thick\w*|prominen\w*|accentuat\w*|visib\w*|scar\w*|sclero\w*|plaque\w*|effusion|fluid|loculat\w*|pseudotumor)
+    |
+    # Pathology -> Compound Anatomy
+    (?:thick\w*|prominen\w*|accentuat\w*|scar\w*|sclero\w*|plaque\w*|effusion|fluid|loculat\w*|pseudotumor)
+    \s+
+    (?:\w+\s+){0,6}
+    \b(?:minor|horizontal|lesser|transverse)\s+fissur\w*

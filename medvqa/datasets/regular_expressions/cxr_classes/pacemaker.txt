@@ -1,0 +1,13 @@
+
+    # 1. Direct Terms
+    \bpacemaker
+    |
+    \bpacer\b
+    |
+    # 2. Descriptive
+    # Matches: "Pulse generator", "Cardiac rhythmic device"
+    \b(?:pulse\s+)?generator\b
+    |
+    # 3. Lead-based descriptions
+    # Matches: "Pacing leads", "Right atrial lead"
+    \b(?:pacing\s+|atrial\s+|ventricular\s+)?leads?

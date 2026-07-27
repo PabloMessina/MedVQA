@@ -1,0 +1,6 @@
+
+    # 1. Direct "Alveolar" Terms
+    \balveolar\w*
+    |
+    # 2. The English Synonym: "Airspace"
+    \bair\s*space\s+(?:disease|process|opac\w*|infiltrat\w*|consolid\w*|chang\w*)

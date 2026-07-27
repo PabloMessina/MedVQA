@@ -1,0 +1,17 @@
+
+    # 1. Acronyms & Names
+    \bcvc\b
+    |
+    \bpicc\b # Peripherally Inserted Central Catheter (Very common)
+    |
+    \bcentral\s+(?:venous\s+)?(?:line|catheter)
+    |
+    \bhickman
+    |
+    \bpermacath
+    |
+    \bswan[-]?ganz
+    |
+    \bpa\s+catheter # Pulmonary Artery catheter
+    |
+    \bintroducer\s+sheath

@@ -1,0 +1,48 @@
+
+    # 1. Direct nodal disease/enlargement terms
+    \b(?:
+        (?:lymph[\s\-]?)?adeno(?:path\w*|megal\w*)
+        | enlarged\s+lymph[\s\-]?nodes?
+        | lymph[\s\-]?node\s+enlargement
+        | nodal\s+enlargement
+    )\b
+
+    |
+
+    # 2. Location-specific adenopathy
+    \b(?:
+        hilar
+        | mediastinal
+        | paratracheal
+        | subcarinal
+        | suprahilar
+        | infrahilar
+        | aortopulmonary
+        | AP\ window
+    )\s+(?:adenopathy|lymphadenopathy)\b
+
+    |
+
+    # 3. Enlarged/prominent nodes with explicit nodal wording
+    \b(?:enlarged|prominent|bulky)\s+
+    (?:
+        hilar
+        | mediastinal
+        | paratracheal
+        | subcarinal
+    )\s+(?:lymph[\s\-]?nodes?|nodes?)\b
+
+    |
+
+    # 4. Calcified nodes (Caught explicitly so the LLM can dismiss them)
+    \bcalcified\s+(?:hilar|mediastinal|paratracheal|subcarinal|AP\ window|aortopulmonary)?\s*lymph[\s\-]?nodes?\b
+    |
+    \bcalcified\s+nodes?\b
+
+    |
+
+    # 5. Weak CXR proxies (Low specificity, requires LLM verification)
+    \b(?:bilateral\s+)?hilar\s+(?:enlargement|prominence|fullness)\b
+    |
+    \bmediastinal\s+widening\b
+    

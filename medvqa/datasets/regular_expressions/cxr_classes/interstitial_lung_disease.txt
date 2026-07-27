@@ -1,0 +1,17 @@
+
+    # 1. Direct "Interstitial" Mentions
+    # Matches: "Interstitial opacities", "Interstitial markings", "Interstitial disease"
+    \binterstit\w*
+    |
+    # 2. "Infiltrates" (Strictly constrained)
+    # In English, "Infiltrate" alone usually means Pneumonia (Alveolar). 
+    # We only count it as ILD if it explicitly says "Interstitial infiltrate" 
+    # or "Chronic infiltrate".
+    \binterstit\w*\s+(?:infiltrat\w*|opac\w*|process|disease|abnormal\w*)
+    |
+    # 3. Clinical Acronyms
+    \bild\b             # Interstitial Lung Disease
+    |
+    \buip\b             # Usual Interstitial Pneumonia (Fibrosis pattern)
+    |
+    \bnsip\b            # Nonspecific Interstitial Pneumonia

@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 CHEXPERT_LABELS = [ # Note: I'm annotating roughly equivalent labels in the Chest ImaGenome dataset
     'No Finding', # NOT abnormal
@@ -261,7 +262,7 @@ VINBIG_BBOX_NAMES = [
     'Pulmonary fibrosis',
     'Rib fracture',
 ]
-assert all([l in VINBIG_LABELS for l in VINBIG_BBOX_NAMES])
+assert all(l in VINBIG_LABELS for l in VINBIG_BBOX_NAMES)
 
 VINBIG_NUM_BBOX_CLASSES = len(VINBIG_BBOX_NAMES)
 
@@ -296,8 +297,8 @@ VINBIG_LABEL2PHRASE = {
     'No finding': 'no abnormalities seen',
     'Abnormal finding': 'abnormal findings seen', # this class was added (it doesn't exist in the original dataset)
 }
-assert all([l in VINBIG_LABEL2PHRASE for l in VINBIG_LABELS])
-assert all([l in VINBIG_LABELS for l in VINBIG_LABEL2PHRASE if l != 'Abnormal finding'])
+assert all(l in VINBIG_LABEL2PHRASE for l in VINBIG_LABELS)
+assert all(l in VINBIG_LABELS for l in VINBIG_LABEL2PHRASE if l != 'Abnormal finding')
 
 CHEXPERT_CXR14_SYNONYMS = [
     ('No Finding', 'No Finding'),
@@ -1465,3 +1466,282 @@ MULTIDATASET_UNIFIED_CLASSES__VINDRCXR_SUBSET = [
     'pneumonia',
     'tuberculosis',
 ]
+
+
+UNIFIED_CXRLT2024_VINDRCXR_CLASSES = [
+    'Adenopathy', # CXR-LT 2024
+    'Atelectasis', # CXR-LT 2024, VinDr-CXR
+    'Aortic Calcification', # In CXR-LT 2024 as 'Calcification of the Aorta'
+    'Aortic Enlargement', # VinDr-CXR
+    'Aortic Tortuosity', # In CXR-LT 2024 as 'Tortuous Aorta'
+    'Azygos Lobe', # CXR-LT 2024.
+    'Bone Fracture', # In CXR-LT 2024 as 'Fracture'. VinDr-CXR has 'Clavicle fracture' and 'Rib fracture'.
+    'Bulla', # CXR-LT 2024. VinDr-CXR has 'Lung cyst', which is related.
+    'Calcification', # VinDr-CXR. In CXR-LT 2024 as 'Calcification of the Aorta'
+    'Cardiomegaly', # CXR-LT 2024, VinDr-CXR
+    # 'Cardiomyopathy', # CXR-LT 2024 -> Removed because it's too hard to detect based on chest X-rays only.
+    'Clavicle Fracture', # CXR-LT 2024, VinDr-CXR
+    'Consolidation', # CXR-LT 2024, VinDr-CXR
+    'Edema', # CXR-LT 2024, VinDr-CXR
+    'COPD/Emphysema', # In CXR-LT 2024 as 'Emphysema'. In VinDr-CXR as 'COPD' and 'Emphysema' (two separate classes)
+    'Enlarged Cardiomediastinum', # CXR-LT 2024
+    'Enlarged Pulmonary Artery', # In VinDr-CXR as 'Enlarged PA'
+    'Fissural Effusion', # In CXR-LT 2024 as 'Fissure'. NOTE: "fissure" is just anatomy, so we focus on the "effusion" abnormality.
+    'Fissural Thickening', # In CXR-LT 2024 as 'Fissure'. NOTE: "fissure" is just anatomy, so we focus on the "thickening" abnormality.
+    'Granuloma', # CXR-LT 2024
+    'Hernia', # CXR-LT 2024
+    'Hilar Congestion', # In CXR-LT 2024 as 'Hilum'. NOTE: "hilum" is just anatomy, so we focus on the "congestion" abnormality.
+    'Hilar Enlargement', # In CXR-LT 2024 as 'Hilum'. NOTE: "hilum" is just anatomy, so we focus on the "enlargement" abnormality.
+    'Hydropneumothorax', # CXR-LT 2024. NOTE: Technically 'Hydropneumothorax' can fall under 'Pleural Other' as well.
+    'Infiltration', # CXR-LT 2024, VinDr-CXR
+    'Interstitial Lung Disease', # In VinDr-CXR as 'ILD'
+    'Kyphosis', # CXR-LT 2024
+    'Lobar Atelectasis', # CXR-LT 2024
+    'Lung Cavity', # VinDr-CXR
+    'Lung Cyst', # VinDr-CXR. Related to 'Bulla' in CXR-LT 2024.
+    'Lung Lesion', # CXR-LT 2024. VinDr-CXR has 'Other lesion', but it's unclear what they had in mind.
+    'Lung Opacity', # CXR-LT 2024, VinDr-CXR
+    'Lung Tumor', # VinDr-CXR. Related to 'Mass' in CXR-LT 2024.
+    'Mass', # CXR-LT 2024. VinDr-CXR has 'Nodule/Mass'
+    'Mediastinal Shift', # VinDr-CXR
+    'Nodule', # CXR-LT 2024. VinDr-CXR has 'Nodule/Mass'
+    'Normal', # CXR-LT 2024. VinDr-CXR has 'No finding'
+    'Pleural Effusion', # CXR-LT 2024, VinDr-CXR
+    'Pleural Calcification', # In CXR-LT 2024 as 'Pleural Other'. NOTE: 'Pleural Other' is a vague class. Here we focus on the "calcification" part.
+    'Pleural Nodule/Mass', # In CXR-LT 2024 as 'Pleural Other'. NOTE: 'Pleural Other' is a vague class. Here we focus on the "nodule/mass" part.
+    'Pleural Thickening', # CXR-LT 2024, VinDr-CXR
+    'Pneumomediastinum', # CXR-LT 2024
+    'Pneumonia', # CXR-LT 2024, VinDr-CXR
+    'Pneumoperitoneum', # CXR-LT 2024
+    'Pneumothorax', # CXR-LT 2024, VinDr-CXR
+    'Pulmonary Embolism', # CXR-LT 2024
+    'Pulmonary Fibrosis', # In CXR-LT 2024 as 'Fibrosis'. In VinDr-CXR as 'Pulmonary fibrosis'
+    'Pulmonary Hypertension', # CXR-LT 2024
+    'Pulmonary Infarction', # In CXR-LT 2024 as 'Infarction'.
+    'Osteopenia', # CXR-LT 2024
+    'Rib Fracture', # CXR-LT 2024, VinDr-CXR
+    'Rounded Atelectasis', # In CXR-LT 2024 as 'Round(ed) Atelectasis', VinDr-CXR only has 'Atelectasis'
+    'Scoliosis', # CXR-LT 2024
+    'Subcutaneous Emphysema', # CXR-LT 2024. VinDr-CXR has 'Emphysema', but that's presumably COPD/Emphysema.
+    'Support Devices', # CXR-LT 2024
+    'Tuberculosis', # CXR-LT 2024, VinDr-CXR
+    # NOTE on Pleural Other: CXR-LT considers 3 pleura-related classes: 'Pleural Effusion', 'Pleural Thickening', 'Pleural Other'.
+    # It's unclear what 'Pleural Other' was intended to capture, but an educated guess is any pleura-related abnormality that doesn't fit
+    # into the other two classes. Therefore, one could classify 'Pleural Other' as present if any of the following is present:
+    # - Pleural Mass
+    # - Pleural Calcification
+    # Arguably, one could also include 'Hydropneumothorax' as part of 'Pleural Other', but CXR-LT 2024 defines it as a separate class,
+    # and it's not clear if they also consider it as part of 'Pleural Other' or not. The paper does not provide information on this.
+]
+
+
+UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES = {
+    'Adenopathy': ['Adenopathy'],
+    'Atelectasis': ['Atelectasis'],
+    'Aortic Calcification': ['Aortic Calcification'],
+    'Aortic Enlargement': ['Aortic Enlargement'],
+    'Aortic Tortuosity': ['Aortic Tortuosity'],
+    'Azygos Lobe': ['Azygos Lobe'],
+    'Bone Fracture': ['Fracture'],
+    'Bulla': ['Bulla'],
+    'Calcification': ['Calcification'],
+    'Cardiomegaly': ['Cardiomegaly'],
+    # 'Cardiomyopathy': ['Cardiomyopathy'], -> Removed because it's too hard to detect based on chest X-rays only.
+    'Clavicle Fracture': ['Clavicle Fracture'],
+    'Consolidation': ['Consolidation'],
+    'Edema': ['Edema'],
+    'COPD/Emphysema': ['COPD/Emphysema'],
+    'Enlarged Cardiomediastinum': ['Enlarged Cardiomediastinum'],
+    'Enlarged Pulmonary Artery': ['Enlarged PA'],
+    'Fissural Effusion': ['Fissural Effusion'],
+    'Fissural Thickening': ['Fissural Thickening'],
+    'Granuloma': ['Granuloma'],
+    'Hernia': ['Hernia'],
+    'Hilar Congestion': ['Hilar Congestion'],
+    'Hilar Enlargement': ['Hilar Enlargement'],
+    'Hydropneumothorax': ['Hydropneumothorax'],
+    'Infiltration': ['Infiltration'],
+    'Interstitial Lung Disease': ['Interstitial Lung Disease'],
+    'Kyphosis': ['Kyphosis'],
+    'Lobar Atelectasis': ['Lobar Atelectasis'],
+    'Lung Cavity': ['Lung Cavity'],
+    'Lung Cyst': ['Lung Cyst'],
+    'Lung Lesion': ['Lung Lesion'],
+    'Lung Opacity': ['Lung Opacity'],
+    'Lung Tumor': ['Lung Tumor'],
+    'Mass': ['Mass'],
+    'Mediastinal Shift': ['Mediastinal Shift'],
+    'Nodule': ['Nodule'],
+    'Normal': None, # No corresponding regex class
+    'Pleural Effusion': ['Pleural Effusion'],
+    'Pleural Calcification': ['Pleural Calcification'],
+    'Pleural Nodule/Mass': ['Pleural Nodule/Mass'],
+    'Pleural Thickening': ['Pleural Thickening'],
+    'Pneumomediastinum': ['Pneumomediastinum'],
+    'Pneumonia': ['Pneumonia'],
+    'Pneumoperitoneum': ['Pneumoperitoneum'],
+    'Pneumothorax': ['Pneumothorax'],
+    'Pulmonary Embolism': ['Pulmonary Embolism'],
+    'Pulmonary Fibrosis': ['Pulmonary Fibrosis'],
+    'Pulmonary Hypertension': ['Pulmonary Hypertension'],
+    'Pulmonary Infarction': ['Pulmonary Infarction'],
+    'Osteopenia': ['Osteopenia'],
+    'Rib Fracture': ['Rib Fracture'],
+    'Rounded Atelectasis': ['Rounded Atelectasis'],
+    'Scoliosis': ['Scoliosis'],
+    'Subcutaneous Emphysema': ['Subcutaneous Emphysema'],
+    'Support Devices': ['Support Devices'],
+    'Tuberculosis': ['Tuberculosis'],
+}
+
+assert len(UNIFIED_CXRLT2024_VINDRCXR_CLASSES) == len(UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES)
+assert all(x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES for x in UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES)
+
+CXRLT2024_CLASS_TO_UNIFIED_CXRLT2024_VINDRCXR_CLASSES = {
+    'Adenopathy': 'Adenopathy',
+    'Atelectasis': 'Atelectasis',
+    'Azygos Lobe': 'Azygos Lobe',
+    'Bulla': 'Bulla',
+    'Calcification of the Aorta': 'Aortic Calcification',
+    'Cardiomegaly': 'Cardiomegaly',
+    'Cardiomyopathy': [], # Removed because it's too hard to detect based on chest X-rays only.
+    'Clavicle Fracture': 'Clavicle Fracture',
+    'Consolidation': 'Consolidation',
+    'Edema': 'Edema',
+    'Emphysema': 'COPD/Emphysema',
+    'Enlarged Cardiomediastinum': 'Enlarged Cardiomediastinum',
+    'Fibrosis': 'Pulmonary Fibrosis',
+    'Fissure': ['Fissural Effusion', 'Fissural Thickening'], # NOTE: "fissure" is just anatomy, so we focus on the "effusion" and "thickening" abnormalities.
+    'Fracture': 'Bone Fracture',
+    'Granuloma': 'Granuloma',
+    'Hernia': 'Hernia',
+    'Hilum': ['Hilar Congestion', 'Hilar Enlargement'], # NOTE: "hilum" is just anatomy, so we focus on the "congestion" and "enlargement" abnormalities.
+    'Hydropneumothorax': 'Hydropneumothorax',
+    'Infarction': 'Pulmonary Infarction',
+    'Infiltration': 'Infiltration',
+    'Kyphosis': 'Kyphosis',
+    'Lobar Atelectasis': 'Lobar Atelectasis',
+    'Lung Lesion': 'Lung Lesion',
+    'Lung Opacity': 'Lung Opacity',
+    'Mass': 'Mass',
+    'Normal': 'Normal',
+    'Nodule': 'Nodule',
+    'Osteopenia': 'Osteopenia',
+    'Pleural Effusion': 'Pleural Effusion',
+    'Pleural Other': ['Pleural Nodule/Mass', 'Pleural Calcification', 'Pleural Thickening', 'Hydropneumothorax'], # NOTE: "Pleural Other" is a vague class.
+    'Pleural Thickening': 'Pleural Thickening',
+    'Pneumomediastinum': 'Pneumomediastinum',
+    'Pneumonia': 'Pneumonia',
+    'Pneumoperitoneum': 'Pneumoperitoneum',
+    'Pneumothorax': 'Pneumothorax',
+    'Pulmonary Embolism': 'Pulmonary Embolism',
+    'Pulmonary Hypertension': 'Pulmonary Hypertension',
+    'Rib Fracture': 'Rib Fracture',
+    'Round(ed) Atelectasis': 'Rounded Atelectasis',
+    'Scoliosis': 'Scoliosis',
+    'Subcutaneous Emphysema': 'Subcutaneous Emphysema',
+    'Support Devices': 'Support Devices',
+    'Tortuous Aorta': 'Aortic Tortuosity',
+    'Tuberculosis': 'Tuberculosis',
+}
+
+assert len(CXRLT2024_CLASS_TO_UNIFIED_CXRLT2024_VINDRCXR_CLASSES) == len(CXRLT2024_CLASSES)
+assert all(x in CXRLT2024_CLASSES for x in CXRLT2024_CLASS_TO_UNIFIED_CXRLT2024_VINDRCXR_CLASSES)
+for x in CXRLT2024_CLASSES:
+    assigned_classes = CXRLT2024_CLASS_TO_UNIFIED_CXRLT2024_VINDRCXR_CLASSES[x]
+    assert isinstance(assigned_classes, (list, str))
+    if isinstance(assigned_classes, list):
+        assert all(y in UNIFIED_CXRLT2024_VINDRCXR_CLASSES for y in assigned_classes)
+    else:
+        assert assigned_classes in UNIFIED_CXRLT2024_VINDRCXR_CLASSES
+
+
+_CXR_CLASS_PHRASES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'cxr_classes')
+
+
+def _cxr_class_name_to_phrase_stem(class_name: str) -> str:
+    """Map a unified CXR class name to its phrase filename stem under prompts/cxr_classes/."""
+    return class_name.lower().replace('/', '_').replace(' ', '_').replace('-', '_')
+
+
+def _load_cxr_class_phrase_for_report_nli(class_name: str) -> str:
+    stem = _cxr_class_name_to_phrase_stem(class_name)
+    path = os.path.join(_CXR_CLASS_PHRASES_DIR, f'{stem}.txt')
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read().rstrip('\n')
+
+
+# 'Cardiomyopathy' removed because it's too hard to detect based on chest X-rays only.
+UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI = {
+    'Adenopathy': _load_cxr_class_phrase_for_report_nli('Adenopathy'),
+    'Atelectasis': _load_cxr_class_phrase_for_report_nli('Atelectasis'),
+    'Aortic Calcification': _load_cxr_class_phrase_for_report_nli('Aortic Calcification'),
+    'Aortic Enlargement': _load_cxr_class_phrase_for_report_nli('Aortic Enlargement'),
+    'Aortic Tortuosity': _load_cxr_class_phrase_for_report_nli('Aortic Tortuosity'),
+    'Azygos Lobe': _load_cxr_class_phrase_for_report_nli('Azygos Lobe'),
+    'Bone Fracture': _load_cxr_class_phrase_for_report_nli('Bone Fracture'),
+    'Bulla': _load_cxr_class_phrase_for_report_nli('Bulla'),
+    'Calcification': _load_cxr_class_phrase_for_report_nli('Calcification'),
+    'Cardiomegaly': _load_cxr_class_phrase_for_report_nli('Cardiomegaly'),
+    'Clavicle Fracture': _load_cxr_class_phrase_for_report_nli('Clavicle Fracture'),
+    'Consolidation': _load_cxr_class_phrase_for_report_nli('Consolidation'),
+    'COPD/Emphysema': _load_cxr_class_phrase_for_report_nli('COPD/Emphysema'),
+    'Edema': _load_cxr_class_phrase_for_report_nli('Edema'),
+    'Enlarged Cardiomediastinum': _load_cxr_class_phrase_for_report_nli('Enlarged Cardiomediastinum'),
+    'Enlarged Pulmonary Artery': _load_cxr_class_phrase_for_report_nli('Enlarged Pulmonary Artery'),
+    'Fissural Effusion': _load_cxr_class_phrase_for_report_nli('Fissural Effusion'),
+    'Fissural Thickening': _load_cxr_class_phrase_for_report_nli('Fissural Thickening'),
+    'Granuloma': _load_cxr_class_phrase_for_report_nli('Granuloma'),
+    'Hernia': _load_cxr_class_phrase_for_report_nli('Hernia'),
+    'Hilar Enlargement': _load_cxr_class_phrase_for_report_nli('Hilar Enlargement'),
+    'Hydropneumothorax': _load_cxr_class_phrase_for_report_nli('Hydropneumothorax'),
+    'Infiltration': _load_cxr_class_phrase_for_report_nli('Infiltration'),
+    'Interstitial Lung Disease': _load_cxr_class_phrase_for_report_nli('Interstitial Lung Disease'),
+    'Kyphosis': _load_cxr_class_phrase_for_report_nli('Kyphosis'),
+    'Lobar Atelectasis': _load_cxr_class_phrase_for_report_nli('Lobar Atelectasis'),
+    'Lung Cavity': _load_cxr_class_phrase_for_report_nli('Lung Cavity'),
+    'Lung Cyst': _load_cxr_class_phrase_for_report_nli('Lung Cyst'),
+    'Lung Lesion': _load_cxr_class_phrase_for_report_nli('Lung Lesion'),
+    'Lung Opacity': _load_cxr_class_phrase_for_report_nli('Lung Opacity'),
+    'Lung Tumor': _load_cxr_class_phrase_for_report_nli('Lung Tumor'),
+    'Mass': _load_cxr_class_phrase_for_report_nli('Mass'),
+    'Mediastinal Shift': _load_cxr_class_phrase_for_report_nli('Mediastinal Shift'),
+    'Nodule': _load_cxr_class_phrase_for_report_nli('Nodule'),
+    'Normal': _load_cxr_class_phrase_for_report_nli('Normal'),
+    'Pleural Effusion': _load_cxr_class_phrase_for_report_nli('Pleural Effusion'),
+    'Pleural Calcification': _load_cxr_class_phrase_for_report_nli('Pleural Calcification'),
+    'Pleural Nodule/Mass': _load_cxr_class_phrase_for_report_nli('Pleural Nodule/Mass'),
+    'Pleural Thickening': _load_cxr_class_phrase_for_report_nli('Pleural Thickening'),
+    'Pneumomediastinum': _load_cxr_class_phrase_for_report_nli('Pneumomediastinum'),
+    'Pneumonia': _load_cxr_class_phrase_for_report_nli('Pneumonia'),
+    'Pneumoperitoneum': _load_cxr_class_phrase_for_report_nli('Pneumoperitoneum'),
+    'Pneumothorax': _load_cxr_class_phrase_for_report_nli('Pneumothorax'),
+    'Pulmonary Embolism': _load_cxr_class_phrase_for_report_nli('Pulmonary Embolism'),
+    'Pulmonary Fibrosis': _load_cxr_class_phrase_for_report_nli('Pulmonary Fibrosis'),
+    'Pulmonary Hypertension': _load_cxr_class_phrase_for_report_nli('Pulmonary Hypertension'),
+    'Pulmonary Infarction': _load_cxr_class_phrase_for_report_nli('Pulmonary Infarction'),
+    'Pulmonary Vascular Congestion': _load_cxr_class_phrase_for_report_nli('Pulmonary Vascular Congestion'),
+    'Osteopenia': _load_cxr_class_phrase_for_report_nli('Osteopenia'),
+    'Rib Fracture': _load_cxr_class_phrase_for_report_nli('Rib Fracture'),
+    'Rounded Atelectasis': _load_cxr_class_phrase_for_report_nli('Rounded Atelectasis'),
+    'Scoliosis': _load_cxr_class_phrase_for_report_nli('Scoliosis'),
+    'Subcutaneous Emphysema': _load_cxr_class_phrase_for_report_nli('Subcutaneous Emphysema'),
+    'Support Devices': _load_cxr_class_phrase_for_report_nli('Support Devices'),
+    'Tuberculosis': _load_cxr_class_phrase_for_report_nli('Tuberculosis'),
+}
+
+assert len(UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI) == len(UNIFIED_CXRLT2024_VINDRCXR_CLASSES)
+assert all(x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES for x in UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI)
+for x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES:
+    phrase = UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI[x]
+    assert phrase is not None
+    assert isinstance(phrase, str)
+    assert len(phrase) > 0
+    if x.startswith('Enlarged'):
+        assert 'larger than normal' in phrase
+        assert ' '.join(x.split()[1:]).lower() in phrase.lower()
+    elif "in the pleura" in phrase:
+        assert x.startswith('Pleural')
+        assert x.split()[1].lower() in phrase.lower()
+    else:
+        assert all(y in phrase.lower() for y in x.lower().split()), f"{x} not in {phrase}"

@@ -1,0 +1,9 @@
+
+    # Generic Valve Replacement
+    \b(?:avr|mvr|tavr|tavi)\b
+    |
+    \b(?:prosthetic|mechanical|bioprosthetic)\s+valve
+    |
+    \bvalve\s+replacement
+    |
+    \bannuloplasty\s+ring

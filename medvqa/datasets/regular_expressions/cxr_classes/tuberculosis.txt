@@ -1,0 +1,40 @@
+
+    # ==============================================================================
+    # 1. Direct Terminology & Acronyms
+    # ==============================================================================
+    \btubercul\w*
+    |
+    \btb\b
+    |
+    \bmtb\b                                  # Added: MTB acronym
+    |
+    # ==============================================================================
+    # 2. The Organism & Synonyms
+    # ==============================================================================
+    \bacid[- ]?fast\s+bacill\w*
+    |
+    \bafb\b
+    |
+    \bkoch'?s\s+(?:infection|disease|bacillus)
+    |
+    # ==============================================================================
+    # 3. Pathological Eponyms & States (Highly TB Specific)
+    # ==============================================================================
+    \b(?:ghon|ranke)'?s?\s+(?:complex|focus)\b # Added: Ghon / Ranke complex
+    |
+    \bcaseat\w* # Added: Caseation / Caseating
+    |
+    \bmiliary\b                              # Added: Miliary spread pattern
+    |
+    # ==============================================================================
+    # 4. Radiological Euphemisms & Footprints
+    # ==============================================================================
+    \bgranuloma(?:ta|s)?\b
+    |
+    \bgranulomat\w*
+    |
+    \bcavit(?:y|ies|ary|ating|ation)\b
+    |
+    # Added 'fibronodular' to the apical footprint block
+    \b(?:apical|biapical|apices|upper\s+lobe|upper\s+lobes)\s+(?:.*?)\b(?:fibrocalcific|fibronodular|calcific\w*|scarring|scars?)\b
+    

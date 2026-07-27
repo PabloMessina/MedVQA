@@ -1,29 +1,35 @@
 # Taken and adapted from https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
 
 # imports
-import math
-import sys
-from openai import OpenAI, AsyncOpenAI # for OpenAI API calls
 import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
+import math
 import os  # for reading API key
-import re  # for matching endpoint from request URL
-import tiktoken  # for counting tokens
-import time  # for sleeping after rate limit is hit
 import random  # for sampling error messages
+import re  # for matching endpoint from request URL
+import sys
+import time  # for sleeping after rate limit is hit
 from dataclasses import dataclass, field
+from typing import Callable, List, Optional
 
-from medvqa.utils.common import get_timestamp
-from medvqa.utils.files_utils import load_jsonl, load_pickle, save_jsonl, save_pickle
-from medvqa.utils.logging_utils import ANSI_MAGENTA_BOLD, ANSI_RESET  # for storing API inputs, outputs, and metadata
+import tiktoken  # for counting tokens
+from openai import AsyncOpenAI, OpenAI  # for OpenAI API calls
+from medvqa.utils.files_utils import (
+    get_timestamp,
+    load_jsonl,
+    load_pickle,
+    save_jsonl,
+    save_pickle,
+)
+from medvqa.utils.logging_utils import ANSI_MAGENTA_BOLD, ANSI_RESET
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "process_api_requests_from_file",
     "GPT_IS_ACTING_WEIRD_REGEX",
-    "run_common_boilerplate_for_api_requests",
+    "orchestrate_api_calls",
 ]
 
 ALLOWED_MODELS = {
@@ -46,8 +52,9 @@ ALLOWED_MODELS = {
         "gemini-2.5-pro-preview-03-25",
         "gemini-2.5-flash-preview-04-17",
         "gemini-2.5-flash-preview-04-17-thinking",
-        "gemini-2.5-flash-lite-preview-06-17",
         "gemini-2.5-pro-preview-05-06",
+        "gemini-2.5-flash-lite-preview-06-17",
+        "gemini-2.5-flash-lite-preview-09-2025",
         # ...add more as released
     ]),
 }
@@ -59,6 +66,7 @@ REASONING_MODELS = {
         "gemini-2.5-flash-preview-04-17",
         "gemini-2.5-flash-preview-04-17-thinking",
         "gemini-2.5-pro-preview-05-06",
+        "gemini-2.5-flash-lite-preview-09-2025",
     ]),
     "openai": set([
         "gpt-4o",
@@ -73,13 +81,13 @@ def process_api_requests_from_file(
     requests_filepath: str,
     api_type: str,
     api_key: str,
-    save_filepath: str = None,
+    save_filepath: Optional[str] = None,
     max_requests_per_minute: float = 3_000 * 0.5,
     max_tokens_per_minute: float = 250_000 * 0.5,
-    token_encoding_name: str = None,
+    token_encoding_name: Optional[str] = None,
     max_attempts: int = 3,
     log_info_every_n_requests: int = 100,
-    base_url: str = None, # Add base_ur l as a parameter with a default of None
+    base_url: Optional[str] = None, # Add base_ur l as a parameter with a default of None
 ):
     """Processes API requests in parallel from a file, throttling to stay under rate limits.
     Can target either OpenAI or Gemini compatibility API based on base_url.
@@ -194,30 +202,30 @@ def _generate_batch_request(custom_id, model_name, system_instructions, query, m
         },
     }
 
-def run_common_boilerplate_for_api_requests(
-    api_responses_filepath: str = None,
-    texts: list[str] = None,
-    system_instructions: str = None,
+def orchestrate_api_calls(
+    api_responses_filepath: Optional[str] = None,
+    texts: Optional[List[str]] = None,
+    system_instructions: Optional[str] = None,
     api_key_name: str = "OPENAI_API_KEY", # Name of the environment variable for the API key
-    model_name: str = None, # Use a more general model_name parameter
-    max_tokens_per_request: int = None,
-    max_requests_per_minute: float = None,
-    max_tokens_per_minute: float = None,
+    model_name: Optional[str] = None, # Use a more general model_name parameter
+    max_tokens_per_request: Optional[int] = None,
+    max_requests_per_minute: Optional[float] = None,
+    max_tokens_per_minute: Optional[float] = None,
     temperature: float = 0,
     frequency_penalty: float = 0,
     presence_penalty: float = 0,
-    parse_output: callable = None,
+    parse_output: Optional[Callable] = None,
     tmp_dir: str = "tmp",
-    save_filepath: str = None,
+    save_filepath: Optional[str] = None,
     delete_api_requests_and_responses: bool = True,
     use_batch_api: bool = False, # OpenAI-specific batch API flag
-    batch_description: str = None,
-    batch_input_file_id: str = None,
+    batch_description: Optional[str] = None,
+    batch_input_file_id: Optional[str] = None,
     api_type: str = "openai", # New parameter: 'openai' or 'gemini'
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/", # Default for Gemini compatibility
     log_info_every_n_requests: int = 50, # Add log_info_every_n_requests back
 ):
-    """Runs common boilerplate for API requests.
+    """Runs the common boilerplate for orchestrating API calls.
 
     Handles both direct API calls (throttled) and OpenAI Batch API.
     Supports targeting OpenAI or Gemini compatibility API based on base_url.
@@ -245,7 +253,7 @@ def run_common_boilerplate_for_api_requests(
                 logger.info(f"Batch status: {batch.status}")
 
                 if batch.output_file_id is None:
-                    logger.warning(f"Batch output file ID is None. Exiting.")
+                    logger.warning("Batch output file ID is None. Exiting.")
                     sys.exit(1)
                 
                 if batch.status in ['completed', 'cancelled']:
@@ -454,7 +462,7 @@ def run_common_boilerplate_for_api_requests(
 
     # Delete API requests and responses
     if delete_api_requests_and_responses:
-        logger.info(f"Deleting API requests and responses")
+        logger.info("Deleting API requests and responses")
         os.remove(api_requests_filepath)
         os.remove(api_responses_filepath)
 
@@ -522,13 +530,13 @@ async def _process_api_requests_from_file(
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
-    logger.debug(f"Initialization complete.")
+    logger.debug("Initialization complete.")
 
     # initialize file reading
     with open(requests_filepath) as file:
         # `requests` will provide requests one at a time
         requests = file.__iter__()
-        logger.debug(f"File opened. Entering main loop")
+        logger.debug("File opened. Entering main loop")
 
         while True:
             # get next request (if one is not already waiting for capacity)

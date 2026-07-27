@@ -1,0 +1,57 @@
+
+    # ==============================================================================
+    # 1. Direct Diagnosis (Medical Terms)
+    # ==============================================================================
+    \b(?:cardiomeg\w*|cadriomeg\w*|cardimeg\w*|megacardia)
+    |
+    # ==============================================================================
+    # 2. Anatomy ... followed by ... Pathology (The "Subject -> Verb" flow)
+    #    Matches: "Heart is mildly enlarged", "Cardiac silhouette, however, appears prominent"
+    # ==============================================================================
+    \b(?:heart|cardiac\w*|cardio\w*|ventric\w*|atri\w*|biventric\w*|lv|rv|la|ra) # Anatomy
+    (?:
+        \s+(?:size|silhouette|shadow|contour|chamber|dimensi\w*)
+    )? # Optional Specifier
+    # THE FIX: Allow up to 5 arbitrary words/punctuation marks
+    # This eats commas, "remains", "appears", "grossly", etc.
+    (?:
+        \W+\w+
+    ){0,10}
+    \s+
+    (?:enlarg\w*|increas\w*|prominen\w*|dilat\w*|big|large|massive|globular|hypertroph\w*|expand\w*|wide\w*|thick\w*|accentu\w*|magnif\w*
+    |upper\s+limit|top\s+normal|borderline) # Pathology
+    |
+    # ==============================================================================
+    # 3. Pathology ... followed by ... Anatomy (The "Adjective -> Noun" flow)
+    #    Matches: "Enlargement of the cardiac silhouette", "Massive heart"
+    # ==============================================================================
+    \b(?:enlarg\w*|increas\w*|prominen\w*|dilat\w*|big|large|massive|globular|hypertroph\w*|expand\w*|wide\w*|thick\w*|accentu\w*|magnif\w*
+    |upper\s+limit|top\s+normal|borderline) # Pathology
+    # THE FIX: Allow up to 5 arbitrary words
+    # Matches: "of the", "observed in the", "seen in"
+    (?:
+        \W+\w+
+    ){0,10}
+    \s+
+    \b(?:heart|cardiac\w*|cardio\w*|ventric\w*|atri\w*|biventric\w*|lv|rv|la|ra) # Anatomy
+    |
+    # ==============================================================================
+    # 4. Quantitative Measurements (CTR)
+    #    Matches: "CTR > 0.5", "Cardiothoracic ratio is elevated"
+    # ==============================================================================
+    \b(?:ctr|ratio)\b
+    # THE FIX: Allow symbols like =, :, > or words "is", "of"
+    (?:
+        \s*(?:=|:|>|is|of|shows)?\s*
+    )
+    (?:
+        >|greater|elevated|increas\w*|abnormal|high
+        |
+        # Optional: Catch explicit numbers > 0.5 (Simple check)
+        0\.[5-9]\d* # Matches 0.5, 0.55, 0.6, etc.
+    )
+    |
+    # ==============================================================================
+    # 5. Specific Acronyms
+    # ==============================================================================
+    \b(?:lvh|rvh)\b # Left/Right Ventricular Hypertrophy

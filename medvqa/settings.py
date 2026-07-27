@@ -59,6 +59,9 @@ REGULAR_EXPRESSIONS_FOLDER = os.path.join(PROJECT_ROOT, 'medvqa', 'datasets', 'r
 # -- Configs folder --
 CONFIGS_FOLDER = os.path.join(PROJECT_ROOT, 'medvqa', 'configs')
 
+# -- LLM prompts folder --
+LLM_PROMPTS_DIR = os.path.join(PROJECT_ROOT, 'medvqa', 'prompts')
+
 # -- YOLOv5 paths --
 # NOTE: The following assumes that you have git cloned the YOLOv5 repo somewhere in your filesystem
 # and have set the YOLOv5_PYTHON_PATH environment variable to an appropriate python executable.
@@ -137,6 +140,10 @@ raise_warning_if_none(MIMIC_CXR_LT_2024_TASK2_EVAL_CLASSES_TXT_PATH, "MIMIC_CXR_
 
 MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH = os.getenv('MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH')
 raise_warning_if_none(MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH, "MIMIC_CXR_LT_2024_TASK3_EVAL_CLASSES_TXT_PATH")
+
+MIMIC_CXR_LT_2024_LABELS_CSV_PATH = os.getenv('MIMIC_CXR_LT_2024_LABELS_CSV_PATH')
+raise_warning_if_none(MIMIC_CXR_LT_2024_LABELS_CSV_PATH, "MIMIC_CXR_LT_2024_LABELS_CSV_PATH")
+
 
 # -- PADCHEST --
 

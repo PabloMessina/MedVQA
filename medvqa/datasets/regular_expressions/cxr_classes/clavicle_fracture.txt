@@ -1,0 +1,18 @@
+
+    # 1. Anatomy ... followed by ... Pathology
+    # Matches: "Clavicle fracture", "Clavicular head fracture", "Clavicle shows a deformity"
+    \w*clavic\w* # Anatomy: clavicle, clavicular, acromioclavicular
+    (?:                             # Non-capturing group for the gap
+    \s+(?:of|the|left|right|mid|distal|proximal|third|is|shows|demonstrates|appears) # Common fillers
+    ){0,5}                          # Allow up to 5 filler words to cover "Clavicle shows signs of healing fracture"
+    \s+
+    (?:fractur\w*|fx|break|deform\w*|callus|comminut\w*|displac\w*|angulat\w*|non-?union|malunion) # Pathology
+    |
+    # 2. Pathology ... followed by ... Anatomy
+    # Matches: "Fracture of the distal clavicle", "Deformity of the right clavicle"
+    \b(?:fractur\w*|fx|break|deform\w*|callus|comminut\w*|displac\w*|angulat\w*|non-?union|malunion) # Pathology
+    (?:
+    \s+(?:of|the|left|right|mid|distal|proximal|third|in|at)
+    ){0,5}                          # Allow up to 5 filler words
+    \s+
+    \w*clavic\w* # Anatomy

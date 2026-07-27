@@ -1,0 +1,15 @@
+
+    # Generic "Lesion" terms linked to Lung Anatomy
+    \b(?:lesion|mass(?:es)?|nodules?|tumor\w*|neoplasm\w*)
+    (?:
+        [\s\.,;-]+(?:in|of|within|the|right|left|lung|lobe|apical|basal|hilar|perihilar|zone|field|lingula|base|apex|parenchym\w*|r[lmu]l|l[lu]l)\b
+    ){1,4} # Must have at least one anatomical/connector word nearby to avoid skin lesions
+    |
+    # Explicit Anatomy ... Pathology
+    \b(?:lung|pulmonary|lobe|apex|base|hilar|perihilar|zone|field|lingula|parenchym\w*|r[lmu]l|l[lu]l)[\s\.,;-]+(?:lesion|mass(?:es)?|nodules?|tumor\w*|neoplasm\w*)
+    |
+    # "Space Occupying Lesion" (SOL)
+    \bspace\s+occupying\s+lesion
+    |
+    # "Coin lesion" (Old school term for solitary nodule)
+    \bcoin\s+lesion

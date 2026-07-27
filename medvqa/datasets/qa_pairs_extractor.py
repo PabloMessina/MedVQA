@@ -10,6 +10,8 @@ from medvqa.utils.common import REGULAR_EXPRESSIONS_FOLDER
 from medvqa.utils.files_utils import load_json, load_regex_from_files, read_lines_from_txt
 from medvqa.metrics.medical.med_completeness import MEDICAL_TERMS_PATH
 
+QA_REGULAR_EXPRESSIONS_FOLDER = os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'qa')
+
 _LINKING_WORDS = ['when', 'and', 'but', 'however', 'although', 'should', 'since', 'unless', 'nevertheless']
 _aux = '('+'|'.join(f'\\b{x}\\b' for x in _LINKING_WORDS)+'|[,;.:])'
 _aux = f'{_aux}+(\\s+{_aux}+)*'
@@ -31,7 +33,7 @@ class QuestionAnswerExtractor:
     
     def reload(self, debug=False):
         # load question specifications
-        questions = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
+        questions = load_json(os.path.join(QA_REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
         
         if debug: print(questions)
         
@@ -59,7 +61,7 @@ class QuestionAnswerExtractor:
         self.medterms_regex = self._load_medical_terms_regex()
     
     def _load_regex_from_files(self, files):
-        file_paths = [os.path.join(REGULAR_EXPRESSIONS_FOLDER, file) for file in files]
+        file_paths = [os.path.join(QA_REGULAR_EXPRESSIONS_FOLDER, file) for file in files]
         return load_regex_from_files(file_paths)
 
     def _load_medical_terms_regex(self):
@@ -69,7 +71,7 @@ class QuestionAnswerExtractor:
 
 
     def _load_replacements(self):
-        df = pd.read_csv(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'replacements.csv'), header=None)
+        df = pd.read_csv(os.path.join(QA_REGULAR_EXPRESSIONS_FOLDER, 'replacements.csv'), header=None)
         self.replacements = []
         for source, target in zip(df[0], df[1]):
             self.replacements.append((

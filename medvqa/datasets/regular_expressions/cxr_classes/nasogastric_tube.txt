@@ -1,0 +1,10 @@
+
+    # Matches: "NGT", "Nasogastric tube", "Dobhoff tube" (feeding tube)
+    \b(?:ng|naso-?gastric|dobhoff|feeding)\s+tube
+    |
+    \bngt\b
+    |
+    \bnasogastric\s+tube
+    |
+    # Orogastric (OGT) included here clinically
+    \bogt\b|\boro-?gastric\s+tube

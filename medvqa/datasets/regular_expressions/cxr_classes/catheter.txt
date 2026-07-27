@@ -1,0 +1,14 @@
+
+    # 1. Generic Catheter Terms
+    \b(:?catheter|caheter|cathter|catherter|cathteter|cathether|cathetar|cathere)
+    |
+    # 2. Specific "IV" Context (High Recall for Peripheral Lines)
+    # Matches: "IV line", "IV cannula", "IV catheter"
+    \b(?:iv|intravenous)\s+(?:line|cath\w*|cannula)
+    |
+    # 3. Risky Single Words (Use with caution)
+    \blines?\b
+    |
+    \bcath\b  # Short for catheter
+    |
+    \btubing\b

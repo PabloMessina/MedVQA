@@ -1,0 +1,20 @@
+
+    # 1. Anatomy ... followed by ... Pathology
+    # Matches: "Mediastinum is widened", "Right paratracheal stripe thickening"
+    \b(?:(?:cardio-?)?mediastin\w*|paratracheal)\w* # Anatomy
+    (?:
+        \W+\w+     # Match non-word chars (punctuation/spaces) + a word
+    ){0,6}         # Allow up to 6 intervening words (e.g. "is appearing slightly")
+    \s+
+    (?:widen\w*|wide|enlarg\w*|prominen\w*|full\w*|expand\w*|thick\w*) # Pathology
+
+    |
+
+    # 2. Pathology ... followed by ... Anatomy
+    # Matches: "Widening of the right upper mediastinum"
+    \b(?:widen\w*|wide|enlarg\w*|prominen\w*|full\w*|expand\w*|thick\w*) # Pathology
+    (?:
+        \W+\w+     # Match gap: "of", "the", "right", "upper", "moderately"
+    ){0,6}         # Allow up to 6 intervening words
+    \s+
+    \b(?:(?:cardio-?)?mediastin\w*|paratracheal)\w* # Anatomy

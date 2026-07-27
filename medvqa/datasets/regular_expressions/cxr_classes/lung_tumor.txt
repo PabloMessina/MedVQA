@@ -1,0 +1,103 @@
+
+    \b(?:
+        # --------------------------------------------------------
+        # 1. Explicit Oncologic Terminology (Typo & Boundary Tolerant)
+        # --------------------------------------------------------
+        tumou?rs? | cancers? | neoplas(?:m|ms|tic) |
+        malignan(?:cy|cies|t) | 
+        (?:adeno)?carcin(?:o|io)m\w* |
+        bronchogenic\s+(?:carcinoma|cancer|neoplasm) |
+        sarcomas? | lymphomas? | melanomas? |
+        metasta(?:sis|ses|tic|size\w*) | secondaries |
+        pancoast(?:\s+tumou?r)? | nsclc | sclc |
+        (?:non[-\s]?small|small)(?:\s+cell)?\s+lung\s+cancer |
+
+        # High-Precision Oncologic Context (Passes to LLM for reasoning)
+        chemotherapy | radiation\s+therapy | debulking
+        
+        |
+
+        # --------------------------------------------------------
+        # 2. Strong Radiographic Proxies: "Mass" in Thoracic Context
+        # (Removed mediastinal/paramediastinal for anatomical precision)
+        # --------------------------------------------------------
+        (?:
+            pulmonary | lung | hilar | perihilar | suprahilar | juxtahilar |
+            apical | parenchymal | central | lingula(?:r)? |
+            endobronchial | bronchial | retrocardiac | basilar |
+            residual | underlying | previously\s+noted |
+            (?:left|right|bilateral)\s+(?:upper|middle|lower)\s+(?:lobe|zone) |
+            (?:left|right|bilateral)\s+(?:midzone|base|hilar)
+        )\s+mass(?:es)?
+
+        |
+
+        # --------------------------------------------------------
+        # 3. Mass <--> Anatomy (Bidirectional support)
+        # --------------------------------------------------------
+        (?:residual\s+|underlying\s+|previously\s+noted\s+)?mass(?:es)?
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:
+            lung | pulmonary | hil(?:um|ar) | perihilar | juxtahilar |
+            apex | apical | lobe | zone | midzone | base | basilar |
+            lingula(?:r)? | bronchus | bronchial
+        )
+        
+        |
+        
+        (?:
+            lung | pulmonary | hil(?:um|ar) | perihilar | juxtahilar |
+            apex | apical | lobe | zone | midzone | base | basilar |
+            lingula(?:r)? | bronchus | bronchial
+        )
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:residual\s+|underlying\s+|previously\s+noted\s+)?mass(?:es)?
+
+        |
+
+        # --------------------------------------------------------
+        # 4. Highly Suspicious Proxy Morphology & Context
+        # --------------------------------------------------------
+        spiculated\s+(?:nodule|lesion|mass|opacity) |
+        fiducial\s+(?:seed|marker)s? |
+        endobronchial\s+(?:lesion|nodule|abnormality) |
+        
+        # Explicit suspicion
+        (?:concerning|suspicious|highly\s+suspicious)\s+(?:for|of)\s+(?:a\s+)?
+        (?:malignan\w+|neoplasm|tumou?r|cancer|carcinoma|metastatic\s+disease) |
+        
+        (?:malignant|neoplastic|metastatic|primary|secondary)\s+
+        (?:nodules?|lesions?|opacit(?:y|ies)|densit(?:y|ies)|appearance) |
+        
+        # Dangling suspicion & Possible Mass
+        (?:nodules?|lesions?|mass(?:es)?|opacit(?:y|ies))
+        (?:
+            \W+\w+
+        ){0,6}
+        \s+(?:is|are)\s+(?:concerning|suspicious)\b |
+        
+        (?:underlying\s+)?(?:hilar|lung|pulmonary)?\s*mass\s+(?:is\s+)?possible |
+        possible\s+(?:underlying\s+)?(?:hilar|lung|pulmonary)?\s*mass |
+
+        # High-Burden / Bilateral Nodule Patterns (Passed to LLM for oncologic context)
+        (?:widespread|innumerable|diffuse|multiple|bilateral)\s+
+        (?:pulmonary|lung|parenchymal)?\s*
+        (?:nodules?|nodular\s+(?:opacit(?:y|ies)|densit(?:y|ies)|disease))
+        |
+        (?:nodules?|nodular\s+(?:opacit(?:y|ies)|densit(?:y|ies)|disease))\s+
+        (?:scattered\s+)?(?:throughout\s+(?:both\s+)?lungs|bilaterally|in\s+both\s+lungs)
+
+        |
+
+        # --------------------------------------------------------
+        # 5. Specific Tumor Types 
+        # --------------------------------------------------------
+        hamartoma | teratoma | lipoma | blastoma | adenoma | carcinoid\w*
+    )\b
+    

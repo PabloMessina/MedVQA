@@ -1,0 +1,33 @@
+
+    # ==============================================================================
+    # 1. Generic Catch-All Terms (The "Lines and Tubes" clause)
+    #    Matches: "Support device", "Medical hardware", "All lines and tubes"
+    # ==============================================================================
+    \b(?:device|hardware|apparatus|lines?\b|tubes?\b)
+    |
+    \bforeign\s+body
+    |
+    # ==============================================================================
+    # 2. Specific Hardware (Not covered by other classes)
+    # ==============================================================================
+    \b(?:
+        clips?|                # Surgical clips
+        staples?|              # Sternal/Surgical staples
+        wires?|                # Sternotomy wires
+        coils?|                # Embolization coils
+        sutures?|              # Suture material
+        anchors?               # Bone anchors/suture anchors
+    )\b
+    |
+    # ==============================================================================
+    # 3. Components of Devices (High Recall)
+    #    Matches: "Leads", "Electrodes" (e.g. "Single endovascular electrode")
+    #    Note: These often belong to Pacemakers, but if the main PM regex misses, 
+    #    this ensures the Parent Class still returns True.
+    # ==============================================================================
+    \b(?:
+        leads?|
+        electrodes?|
+        generator|
+        battery\s+pack
+    )\b

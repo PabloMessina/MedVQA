@@ -1,0 +1,3 @@
+
+    # Matches: "Trach tube", "Tracheostomy"
+    \btrach(?:eostomy)?\s+(?:tube|cannula)?

@@ -1,0 +1,16 @@
+
+    # Anatomy ... Pathology
+    \bhumer(?:us|al)
+    (?:
+        \s+(?:head|neck|shaft|proximal|distal|left|right|is)?
+    ){0,4}
+    \s+
+    (?:fractur\w*|fx|break|deform\w*|dislocat\w*) # Added dislocation as it's traumatic
+    |
+    # Pathology ... Anatomy
+    (?:fractur\w*|fx|break|deform\w*|dislocat\w*)
+    (?:
+        \s+(?:of|the|head|neck|shaft|proximal|distal|left|right)?
+    ){0,4}
+    \s+
+    \bhumer(?:us|al)

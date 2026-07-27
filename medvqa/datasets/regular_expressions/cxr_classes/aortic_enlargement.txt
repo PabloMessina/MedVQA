@@ -1,0 +1,65 @@
+
+    \b(?:
+        # --------------------------------------------------------
+        # 1. Adjective / Descriptor First (e.g., "prominent thoracic aorta")
+        # --------------------------------------------------------
+        (?:
+            prominen\w*|
+            enlarg\w*|
+            widen\w*|
+            dilat\w*
+        )
+        # Flexible window for intervening words (e.g., "mildly", "is again")
+        (?:
+            \W+\w+
+        ){0,4}
+        \s+
+        (?:
+            aort\w*|
+            aortic\s+(?:arch|root|knob|shadow|silhouette|contour)
+        )
+
+        |
+
+        # --------------------------------------------------------
+        # 2. Anatomy First (e.g., "aortic root is mildly widened")
+        # --------------------------------------------------------
+        (?:
+            aort\w*|
+            aortic\s+(?:arch|root|knob|shadow|silhouette|contour)
+        )
+        (?:
+            \W+\w+
+        ){0,4}
+        \s+
+        (?:
+            prominen\w*|
+            enlarg\w*|
+            widen\w*|
+            dilat\w*
+        )
+
+        |
+
+        # --------------------------------------------------------
+        # 3. Noun-form (e.g., "widening of the aortic arch")
+        # --------------------------------------------------------
+        (?:
+            prominence|
+            enlargement|
+            widening|
+            dilation|
+            dilatation
+        )
+        \s+(?:of|in)\s+(?:the\s+)?
+        (?:
+            thoracic\s+|
+            ascending\s+|
+            descending\s+
+        )?
+        (?:
+            aort\w*|
+            aortic\s+(?:arch|root|knob|shadow|silhouette|contour)
+        )
+    )\b
+    

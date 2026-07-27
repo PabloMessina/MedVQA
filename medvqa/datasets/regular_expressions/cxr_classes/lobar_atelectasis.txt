@@ -1,0 +1,91 @@
+
+    # ---------------------------------------------------------
+    # 1. Explicit "Lobar" Terminology (Added Multi/Bi-lobar)
+    # ---------------------------------------------------------
+    \b(?:multi-?|bi-?)?lobar\s+(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    # ---------------------------------------------------------
+    # 2. Specific Lobe Acronyms -> Pathology (Upgraded Gap)
+    # ---------------------------------------------------------
+    \b(?:lul|rul|rml|rll|lll)\b
+    (?:\W+\w+){0,7}\W+
+    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    # ---------------------------------------------------------
+    # 3. Pathology -> Specific Lobe Acronyms (Upgraded Gap)
+    # ---------------------------------------------------------
+    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)\b
+    (?:\W+\w+){0,7}\W+
+    \b(?:lul|rul|rml|rll|lll)\b
+    |
+    # ---------------------------------------------------------
+    # 4. Full Anatomy / Compound Lobes / Lingula -> Pathology (Added Bilateral/Both)
+    # ---------------------------------------------------------
+    \b(?:
+        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
+        |
+        lingul\w*
+    )\b
+    (?:\W+\w+){0,7}\W+
+    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    # ---------------------------------------------------------
+    # 5. Pathology -> Full Anatomy / Compound Lobes / Lingula (Added Bilateral/Both)
+    # ---------------------------------------------------------
+    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)\b
+    (?:\W+\w+){0,7}\W+
+    (?:
+        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
+        |
+        lingul\w*
+    )\b
+    |
+    # ---------------------------------------------------------
+    # 6. Eponymous Signs
+    # ---------------------------------------------------------
+    \bgolden\s+s\s+(?:sign|appearance)
+    |
+    \bluftsichel\w*
+    |
+    # ---------------------------------------------------------
+    # 7. Cross-Sentence Coreference
+    # ---------------------------------------------------------
+    \b(?:
+        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
+        |
+        (?:lul|rul|rml|rll|lll|lingul\w*)
+    )\b
+    (?:\s+\S+){0,10}\s+
+    \b(?:this|which|it)\b
+    (?:\W+\w+){0,6}\W+
+    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    # ---------------------------------------------------------
+    # 8. Complete Lung Collapse (Multi-lobar)
+    # ---------------------------------------------------------
+    \b(?:complet\w*|total|entire|whole)\s+(?:right|left)\s+lung\b
+    (?:\W+\w+){0,7}\W+
+    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)
+    |
+    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)\b
+    (?:\W+\w+){0,7}\W+
+    (?:complet\w*|total|entire|whole|the\s+entire)\s+(?:right|left)\s+lung\b
+    |
+    \b(?:right|left)\s+lung\b
+    (?:\W+\w+){0,7}\W+
+    (?:complet\w*|total|entirely?|whole)\W+(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)
+    |
+    # ---------------------------------------------------------
+    # 9. Opacified/Airless Hemithorax with Volume Loss
+    # ---------------------------------------------------------
+    (?:opacifi\w*|opaque|airless)[\s\S]{1,40}hemi\s*-?thorax[\s\S]{1,120}(?:volum\w*\s+loss|loss\s+of\s+volume|atelect\w*|collaps\w*)
+    |
+    hemi\s*-?thorax[\s\S]{1,40}(?:opacifi\w*|opaque|airless)[\s\S]{1,120}(?:volum\w*\s+loss|loss\s+of\s+volume|atelect\w*|collaps\w*)
+    |
+    # ---------------------------------------------------------
+    # 10. Retrocardiac Anatomical Equivalent (Left Lower Lobe)
+    # Catches: "retrocardiac opacity compatible with volume loss", "retrocardiac atelectasis"
+    # ---------------------------------------------------------
+    \bretrocardiac\b[\s\S]{1,80}(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)[\s\S]{1,80}\bretrocardiac\b

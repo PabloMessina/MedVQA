@@ -1,0 +1,25 @@
+
+    \b(?:
+        # 1. Pleural / Diaphragmatic Plaques (with optional intervening modifiers)
+        # Matches: "pleural plaques", "pleural calcified plaques", 
+        # "diaphragmatic plaques", "pleural plaquing"
+        (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*)
+        (?:[\s,;()/-]+[a-z-]+){0,3}
+        [\s,;()/-]+plaque[a-z]*
+        
+        |
+        
+        # 2. Plaques followed by anatomy
+        # Matches: "calcified plaques along the diaphragms", 
+        # "calcific plaques on the chest wall", "plaques of the pleura"
+        (?:calcif[a-z]*[\s,;()/-]+)?plaque[a-z]*
+        (?:[\s,;()/-]+(?:along|on|over|in|of|the|bilateral|calcified)){0,4}
+        [\s,;()/-]+(?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|chest[\s-]+wall)
+        
+        |
+        
+        # 3. Inverted Anatomy (e.g., "calcific chest wall plaques")
+        chest[\s-]+wall
+        (?:[\s,;()/-]+[a-z-]+){0,3}
+        [\s,;()/-]+plaque[a-z]*
+    )\b

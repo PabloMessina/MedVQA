@@ -1,0 +1,24 @@
+
+    # 1. Direct Terminology
+    # Matches "infarct" but explicitly rejects "myocardial", "splenic", or "bone" 
+    # immediately preceding it. (Note: Python requires fixed-width lookbehinds).
+    (?<!myocardial\s)(?<!splenic\s)(?<!bone\s)\binfarct\w*
+    |
+    # 2. Necrosis / Ischemia
+    # Matches "necrosis" but rejects "avascular" (to avoid avascular necrosis of bone)
+    (?<!avascular\s)\bnecro(?:sis|tic|tizing)
+    |
+    # Matches "ischemia" but rejects "myocardial"
+    (?<!myocardial\s)\bischemi\w*
+    |
+    # 3. Specific Visual Eponyms & Signs (Highly specific to lungs)
+    \bhampton\w*\s+hump
+    |
+    \bmelting\s+sign
+    |
+    # 4. Morphological Descriptions (High Recall for Pulmonary Infarcts)
+    # Matches: "wedge-shaped opacity", "wedge consolidation"
+    \bwedge[-\s]?(?:shape\w*)?\s+(?:opacit\w+|consolidation|densit\w+)
+    |
+    # Matches: "juxtapleural opacification", "subpleural density"
+    \b(?:juxta|sub)[-\s]?pleural\s+(?:opacit\w+|consolidation|densit\w+)

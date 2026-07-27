@@ -1,0 +1,7 @@
+
+    # 1. Direct Term
+    # Matches: "Ground glass opacity", "Ground glass density", "Areas of ground glass"
+    \bground\s*glass
+    |
+    # 2. Acronym (Common in modern reports)
+    \bggo\b

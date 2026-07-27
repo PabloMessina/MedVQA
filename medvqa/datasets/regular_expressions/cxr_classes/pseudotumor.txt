@@ -1,0 +1,7 @@
+
+    \bpseudo-?tumor
+    |
+    \bphantom\s+tumor
+    |
+    # Descriptive definition: "Vanishing tumor"
+    \bvanishing\s+tumor

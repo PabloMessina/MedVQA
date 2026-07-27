@@ -1,0 +1,27 @@
+
+    # A. Specific Compression/Height Loss Logic (Most common in CXR)
+    # Matches: "Compression deformity of T12", "L1 height loss"
+    \b(?:compress\w*|collaps\w*|wedg\w*|height\s+loss) # Pathology
+    (?:
+        \s+(?:fractur\w*|deform\w*|of|the|at|body)?
+    ){0,4}
+    \s+
+    (?:
+        \bvertebr\w*|spine|body|dorsal|thoracic|lumbar|sacrum|
+        \b[tlcs][\s-]*\d{1,2}\b # Matches T12, L1, C7
+    )
+    |
+    # B. General Fracture Logic (Anatomy ... Path)
+    # Matches: "Vertebral fracture", "Spine fx"
+    (?:
+        \bvertebr\w*|spine|body|dorsal|thoracic|lumbar|sacrum|
+        \b[tlcs][\s-]*\d{1,2}\b
+    )
+    (?:
+        \s+(?:body|is|shows|demonstrates)?
+    ){0,4}
+    \s+
+    (?:fractur\w*|fx|break|deform\w*|aplasia)
+    |
+    # C. Vertebroplasty (Implies fracture history)
+    \bvertebroplast\w*|\bkyphoplast\w*

@@ -1,0 +1,36 @@
+
+    # 1. Direct Term & Variations 
+    \bgranuloma\w*
+    |
+    # 2. Granulomatous Diseases, Fungi, Pathogens & Their Masses (-omas)
+    \bsarcoid\w*
+    |
+    \bmycobacteri\w*
+    |
+    \btubercul\w+
+    |
+    \bhistoplasm\w+      
+    |
+    \b(?:coccidioid\w+|blastomycos\w+|cryptococc\w+)
+    |
+    # Abbreviations (Requires word boundaries)
+    \b(?:tb|mac|ntm)\b
+    |
+    # 3. The "Calcified" Proxies (Allowing up to 5 intervening words/punctuation)
+    \bcalcifi\w*(?:\s+(?:and|or|,|\w+)){0,5}\s+(?:nodule\w*|foc(?:us|i)|(?:lymph\s+)?node\w*|densit\w+|opacit\w+|lesion\w*)
+    |
+    # Matches reversed syntax (e.g., "lymph node calcification")
+    \b(?:lymph\s+)?node\w*(?:\s+(?:and|or|,|\w+)){0,5}\s+calcifi\w*
+    |
+    # Matches regional & specific thoracic node station shorthand
+    \b(?:hilar|mediastinal|subcarinal|paratracheal|aortopulmonary|ap\s+window)(?:\s+(?:and|or|,|\w+)){0,3}\s+calcifi\w*
+    |
+    # 4. Fibrocalcific Changes & Specific Scars
+    \bfibrocalcific\w*
+    |
+    \bspecific\s+scar\w*
+    |
+    # 5. Specific Eponyms & Patterns
+    \b(?:ghon|ranke)\s+complex
+    |
+    \bmiliary\b

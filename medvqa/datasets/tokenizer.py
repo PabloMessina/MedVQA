@@ -89,7 +89,7 @@ class Tokenizer:
 
             if mode == 'report':
                 # include questions' vocab
-                questions = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'questions.json'))
+                questions = load_json(os.path.join(REGULAR_EXPRESSIONS_FOLDER, 'qa', 'questions.json'))
                 for item in questions:
                     for token in item['question'][:-1].split():
                         filtered_vocab.add(token)

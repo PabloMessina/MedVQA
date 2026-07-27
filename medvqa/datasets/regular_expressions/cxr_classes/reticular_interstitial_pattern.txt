@@ -1,0 +1,12 @@
+
+    # 1. Direct "Reticular" Terms
+    # Matches: "Reticular opacities", "Reticulation", "Fine reticular pattern"
+    \breticul\w*
+    |
+    # 2. "Net-like" (The plain English equivalent)
+    \bnet[\s-]*like
+    |
+    # 3. Interlobular Septal Thickening (The definition of reticular pattern)
+    # Note: We avoid just "septal" to not catch "septal defect" (heart).
+    # Matches: "Septal thickening", "Interlobular septal thickening"
+    (?:inter)?septal\s+thick\w*

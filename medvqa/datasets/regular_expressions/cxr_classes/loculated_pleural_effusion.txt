@@ -1,0 +1,10 @@
+
+    # 1. Direct "Loculated" Term
+    # Matches: "Loculated effusion", "Loculated fluid"
+    \bloculated\s+(?:pleural\s+)?(?:effusion|fluid|collection|pocket)
+    |
+    # 2. "Pocket" of fluid
+    \bpocket\s+(?:of\s+)?(?:pleural\s+)?fluid
+    |
+    # 3. "Encysted" (Older term, sometimes used)
+    \bencysted\s+(?:effusion|fluid)

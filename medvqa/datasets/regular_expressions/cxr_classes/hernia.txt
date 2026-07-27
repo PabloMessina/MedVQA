@@ -1,0 +1,12 @@
+
+    # 1. Direct Term
+    # Matches: "Hernia", "Herniation", "Herniated"
+    \bhernia\w*
+    |
+    # 2. Named Diaphragmatic Hernias (Rare but critical)
+    # Matches: "Morgagni hernia", "Bochdalek hernia"
+    \b(?:morgagni|bochdalek)
+    |
+    # 3. Descriptive (Bowel in chest)
+    # Matches: "Colonic interposition", "Bowel loops in the hemithorax"
+    \b(?:bowel|colon|intestin\w*)\s+(?:loops?|structures?)?\s+(?:in|within|into)\s+(?:the\s+)?(?:chest|thorax|hemithorax)

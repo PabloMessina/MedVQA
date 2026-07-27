@@ -1,0 +1,13 @@
+
+    \bfractur\w* # Fracture, Fractured
+    |
+    \bfx\b             # Standard medical abbreviation
+    |
+    \bbroken           # Plain English
+    |
+    \bbone\s+break
+    |
+    # "Deformity" is a strong proxy for old fractures, but we usually 
+    # link it to a bone in the sub-classes. 
+    # We include it here as a catch-all if they just say "Osseous deformity".
+    \bdeform\w*

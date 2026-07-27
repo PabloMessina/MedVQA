@@ -1,0 +1,8 @@
+
+    # 1. Direct Root
+    \bkypho\w*
+    |
+    \bgibbus
+    |
+    # 2. Visual Proxies (Gatekeeper trigger only - let the LLM decide)
+    \b(?:compression\s+deformit\w*|anterior\s+wedging)

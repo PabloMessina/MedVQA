@@ -1,0 +1,26 @@
+
+    # 1. Direct Terms & Typos
+    \b(?:pulmonary\s+|interstitial\s+|alveolar\s+)?(?:o?edema\w*|o?edma)
+    |
+    # 2. Fluid/Volume Overload
+    \b(?:fluid|volum\w*)\s+(?:status\s+)?overload
+    |
+    # 3. Congestion & Vascular Prominence
+    # NEW: Added "Prominence" of vasculature (often a soft call for congestion)
+    \b(?:pulmonary\s+|vascul\w*\s+|venous\s+|hilar\s+)(?:congest\w*|engorge\w*|prominen\w*)
+    |
+    # 4. Specific Visual Signs (High Precision)
+    # NEW: Added "Redistribution" (The specific fix for your failure case)
+    \b(?:kerley\s*(?:lines?|b)|cephaliz\w*|cuffing|redistribut\w*)
+    |
+    # 5. "Wet" Lung Descriptors (High Recall / Lower Precision)
+    # Captures "Hazy markings", "Indistinct vessels" - classic signs of interstitial edema
+    \b(?:indistinct\w*|hazy|haziness)
+    (?:(?![.!?])\W+\w+){0,5}
+    \s+
+    (?:vascul\w*|vessels?|markings?)
+    |
+    # 6. Clinical Proxies (The "Nuclear Option" for Recall)
+    # WARNING: This captures the diagnosis "CHF" even if the description is vague.
+    # Most "High Recall" systems (like CheXpert) include this.
+    \b(?:chf|congestive\s+heart\s+failure)

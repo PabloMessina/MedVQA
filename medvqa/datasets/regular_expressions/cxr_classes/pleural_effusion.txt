@@ -1,0 +1,17 @@
+
+    # 1. Direct "Effusion" Terms
+    # Matches: "Pleural effusion", "Bilateral effusions"
+    \b(?:pleural\s+)?effusion\w*
+    |
+    # 2. "Fluid" in the Pleural Space
+    # Matches: "Pleural fluid", "Small amount of fluid in the pleural space"
+    \bpleural\s+fluid
+    |
+    \bfluid\s+(?:is\s+)?(?:in|within)\s+(?:the\s+)?pleural\s+(?:space|cavity)
+    |
+    # 3. Hydrothorax (Specific type of effusion)
+    \bhydrothorax
+    |
+    # 4. "Meniscus Sign" (Pathognomonic visual sign) 
+    # This curved line at the lung base indicates fluid.
+    \bmeniscus\s+(?:sign|surrounding|of)

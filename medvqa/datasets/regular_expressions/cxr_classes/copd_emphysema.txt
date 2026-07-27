@@ -1,0 +1,25 @@
+
+    # 1. Clinical Diagnosis Names
+    \bcopd\b                            # The acronym
+    |
+    \bchronic\s+obstructive             # "Chronic Obstructive Pulmonary Disease"
+    |
+    \bchronic\s+bronchitis              # The clinical partner to emphysema
+    |
+    # 2. Emphysema & Structural Changes
+    \bemphysem\w* # "Emphysema", "Emphysematous"
+    |
+    \bbull(?:a|ae|ous)\b                # "Bulla", "Bullae", "Bullous disease"
+    |
+    # 3. Visual Proxies (Hyperinflation)
+    # Radiologists often use these words INSTEAD of saying "Emphysema"
+    \bhyper-?inflat\w* # "Hyperinflation", "Hyperinflated"
+    |
+    \bhyper-?expan\w* # "Hyperexpansion"
+    |
+    # 4. Specific Anatomical Signs
+    # Flattened diaphragms are the mechanical result of air trapping
+    \bflatten\w*\s+(?:of\s+)?(?:the\s+)?(?:hemi)?diaphragm\w*
+    |
+    # "Saber-sheath trachea" is a specific sign of COPD 
+    \bsaber\s*sheath\s+trachea

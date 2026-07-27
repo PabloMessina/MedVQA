@@ -1,0 +1,8 @@
+
+    # 1. The Core Term
+    # Matches: "Mass", "Masses", "Mass-like"
+    \bmass(?:-?like|es)?\b
+    |
+    # 2. Descriptive "Space Occupying"
+    # Matches: "Space occupying lesion" (SOL)
+    \bspace\s+occupying\s+lesion

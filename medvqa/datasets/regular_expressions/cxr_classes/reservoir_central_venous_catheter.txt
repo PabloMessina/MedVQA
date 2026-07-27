@@ -1,0 +1,7 @@
+
+    # Matches: "Port-A-Cath", "Mediport", "Chemotherapy port"
+    \bport(?:-?a-?cath)?\b
+    |
+    \bmediport
+    |
+    \breservoir

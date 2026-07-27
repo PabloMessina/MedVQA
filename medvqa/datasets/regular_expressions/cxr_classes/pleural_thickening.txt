@@ -1,0 +1,24 @@
+
+    \b(?:
+        # 1. Direct pleural thickening
+        pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,4}
+        [\s,;()/-]+thicken[a-z]*
+        |
+        # 2. Inverted phrasing: thickening ... pleura
+        thicken[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,4}
+        [\s,;()/-]+pleur[a-z]*
+        |
+        # 3. Close equivalents
+        pleural[\s,;()/-]+(?:rind|peel)
+        |
+        # 4. Fibrothorax
+        fibrothorax
+        |
+        # 5. Narrow Chronic Pleural Changes
+        (?:chronic|stable|residual|post[-\s]?operative|post[-\s]?surgical)
+        (?:[\s,;()/-]+[a-z-]+){0,2}
+        [\s,;()/-]+pleur[a-z]*
+        [\s,;()/-]+change[a-z]*
+    )\b

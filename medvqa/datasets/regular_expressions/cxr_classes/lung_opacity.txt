@@ -1,0 +1,26 @@
+
+    # 1. Generic Opacity Terms
+    # Matches: "Lung opacity", "Patchy opacities", "Hazy opacification"
+    \bopac(?:ity|ities|ifi\w*)
+    |
+    # 2. Generic Density Terms (Restricted to Lung Context)
+    # Matches: "Pulmonary densities", "Density in the right lung"
+    # We enforce lung context to avoid "Bone density" or "Breast density"
+    \b(?:lung|pulmonary|lobe|lobar|hilar|perihilar|alveolar|interstitial)\w*
+    (?:
+        \s+(?:field|zone|region|base|apex)?
+    ){0,2}
+    \s+
+    \bdensit\w*
+    |
+    # Reverse: Density ... Anatomy
+    \bdensit\w*
+    (?:
+        \s+(?:in|of|at|within|the)?
+    ){0,3}
+    \s+
+    \b(?:lung|pulmonary|lobe|lobar|hilar|perihilar)\w*
+    |
+    # 3. "Shadow" (Old school term, still in MIMIC)
+    # Matches: "Acinar shadow", "Lung shadowing"
+    \bshadow\w*

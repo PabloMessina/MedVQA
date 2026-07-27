@@ -1,0 +1,63 @@
+
+    # 1. ANATOMY ... followed by ... MASS TERMS
+    #    (e.g., "Right upper lobe large spiculated mass")
+    \b(?:
+        lung|pulmonary|lob\w*|zone|field|bas\w*|apic\w*|apex|parenchym\w*|
+        hilar|perihilar|mediastin\w*|lingula|segment\w*|
+        l[lu]l|r[lmu]l|left|right|bi[-]?lateral
+    )\b
+    (?:
+        # Allow intervening words:
+        # - Locations/Zones (field, region, base)
+        # - Verbs (shows, demonstrates, is)
+        # - Adjectives (large, bulky, rounded, cavitated)
+        # - Articles/Prepositions (a, the, with)
+        [\s\.,;-]+(?:
+            field|zone|lower|upper|mid|lung|lobe|region|base|side|
+            is|has|show\w*|demonstrat\w*|represent\w*|
+            large|bulky|round\w*|irregular|spiculated|cavitated|cavitating|
+            a|an|the|with
+        )
+    ){0,5} # Increased lookahead window slightly to catch "lung shows a large mass"
+    [\s\.,;-]+
+    \b(?:
+        mass(?:es)?|tumor\w*|neoplasm\w*|
+        mass[-]?like|
+        space\s+occupying\s+lesion
+    )\b
+    |
+    # 2. MASS TERMS ... followed by ... ANATOMY
+    #    (e.g., "Mass projecting over the left hilum")
+    \b(?:
+        mass(?:es)?|tumor\w*|neoplasm\w*|
+        mass[-]?like|
+        space\s+occupying\s+lesion
+    )\b
+    (?:
+        # Allow intervening words:
+        # - Prepositions (in, at, within, projecting over)
+        # - Verbs (seen in, located at)
+        # - Articles (the)
+        [\s\.,;-]+(?:is|in|of|at|within|the|projecting|over|seen|located|measuring)
+    ){0,5}
+    [\s\.,;-]+
+    \b(?:
+        lung|pulmonary|lob\w*|zone|field|bas\w*|apic\w*|apex|parenchym\w*|
+        hilar|perihilar|mediastin\w*|lingula|segment\w*|
+        l[lu]l|r[lmu]l
+    )\b
+    |
+    # 3. STRONG MORPHOLOGICAL DESCRIPTORS (Implies Mass)
+    #    Combines "spiculated/cannonball", "cavitating", and "cavitary"
+    \b(?:
+        spiculated|cannonball|cavitating|cavitated|cavitary
+    )\s+(?:
+        opac\w*|densit\w*|lesion\w*|nodul\w*|mass\w*|pneumonia|consolidation
+    )
+    |
+    # 4. SPECIFIC TUMOR TYPES & MASS MIMICS (Benign/Infectious/Specific Entities)
+    \b(?:
+        hamartoma|teratoma|lipoma|thymoma|
+        blastoma|mycetoma|aspergilloma|
+        fungal\s+ball|abscess|rounded\s+atelectasis|hydatid\s+cyst
+    )\b

@@ -1,0 +1,22 @@
+
+    \b(?:
+        # 1. Pathology followed by Anatomy
+        (?:tortuo\w*|elongat\w*|unfold\w*|uncoil\w*|serpentine|ectat\w*|ectasi\w*|meander\w*|kink\w*)
+        (?:\W+\w+){0,12}  # Increased to allow up to 12 intervening words
+        \W+
+        (?:aort\w*|arch|knob|knuckle)
+
+        |
+
+        # 2. Anatomy followed by Pathology
+        (?:aort\w*|arch|knob|knuckle)
+        (?:\W+\w+){0,12}  # Increased to allow up to 12 intervening words
+        \W+
+        (?:tortuo\w*|elongat\w*|unfold\w*|uncoil\w*|serpentine|ectat\w*|ectasi\w*|meander\w*|kink\w*)
+
+        |
+
+        # 3. Specific Syndrome / Systemic Catch
+        arterial\W+tortuosity
+    )\b
+    

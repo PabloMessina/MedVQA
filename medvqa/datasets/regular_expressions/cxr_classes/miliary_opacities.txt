@@ -1,0 +1,9 @@
+
+    # 1. Direct Term
+    \bmiliar\w*
+    |
+    # 2. Descriptive Definition (High Recall)
+    # Matches: "Diffuse micronodules", "Diffuse small nodules", "Fine nodular pattern"
+    \bdiffus\w*\s+(?:micro)?nodul\w*
+    |
+    \b(?:innumerable|many|multiple|tiny|fine|small)\s+(?:micro)?nodul\w*\s+(?:throughout|diffuse|bilateral)

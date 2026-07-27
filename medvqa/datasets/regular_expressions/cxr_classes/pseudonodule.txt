@@ -1,0 +1,11 @@
+
+    # 1. Nipple Shadows (Most common pseudonodule)
+    \bnipple\s+(?:shadow|marker)
+    |
+    # 2. Skin/Cutaneous lesions projecting over lung
+    \b(?:skin|cutaneous|chest\s+wall)\s+(?:lesion|nodule|tag)\w*
+    |
+    \bmole\s+(?:marker|on\s+skin)
+    |
+    # 3. Bone Islands (Enostosis) - look like nodules but are bone
+    \bbone\s+island

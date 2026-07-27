@@ -1,0 +1,23 @@
+
+    # 1. Direct Disease Terms
+    # Matches: "Pneumonia", "Pneumonitis", "Bronchopneumonia"
+    \b(?:broncho)?pneumoni\w*
+    |
+    # 2. Abbreviations
+    # Matches: "PNA" (Standard abbreviation: "RLL PNA")
+    \bpna\b
+    |
+    # 3. Clinical "Infection" Context
+    # Radiologists often write: "Findings represent infection", "Infectious process"
+    # (Note: Negation handling is assumed to happen later, e.g., "No infection")
+    \binfect\w*
+    |
+    \bsepsis|\bseptic
+    |
+    # 4. Pathogens (Contextual)
+    # Matches: "Viral opacities", "Bacterial process"
+    \b(?:bacter|viral|fungal|myco)\w*
+    |
+    # 5. Common Typos in MIMIC (High Recall)
+    # Matches: "Pneumomia", "Pnuemonia", "Penumonia"
+    \bp(?:ne?|en)umon\w*|pn(?:eu|ue)mon|penumonia

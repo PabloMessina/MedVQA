@@ -1,0 +1,32 @@
+
+    # 1. Direct Cyst Terms (Preceding modifiers)
+    \b(?:lung|pulmonary|subpleural|pleural|apical|basal|parenchymal|bronchogenic)\s+cyst\w*
+    |
+    # 2. Morphological Descriptors (High Recall)
+    # Handles hyphens and up to 3 intermediate words before the noun.
+    \bcyst(?:ic)?(?:-like|-appearing)?[\s-]+(?:\w+[\s,]+){0,3}(?:lesion|space|change|disease|lucency|airspace|metast\w+)\w*
+    |
+    # 3. Structural Definitions
+    \b(?:thin-walled|thin\s+walled)\s+cyst\w*
+    |
+    # 4. Cysts Located in Specific Pulmonary Anatomy
+    \bcyst\w*(?:[\s,]+\w+){0,5}[\s,]+(?:in|of|within|throughout)\s+(?:the\s+)?(?:lung|lobe|parenchyma|upper|middle|lower|lingula|RUL|RML|RLL|LUL|LLL|apex|apices|base|bases|zone|zones)\w*
+    |
+    # 5. The "Noun-First" Inversion
+    \b(?:lesion|space|lucency)\w*(?:[\s,]+\w+){0,4}[\s,]+(?:cystic|cyst\w*)\b
+    |
+    # 6. Specific Pulmonary Cyst Types, Bullae, & Malformations
+    \bpneumatocele\w*
+    |
+    \bbleb\w*
+    |
+    # Merged the bulla concepts into the main gatekeeper
+    \bbull(?:a|ae|ous|ectomy|osis)\w*
+    |
+    \bhoneycomb\w*
+    |
+    \b(?:cpam|ccam)\b 
+    |
+    # 7. Radiographic Descriptors (High Recall Trigger)
+    # We rely entirely on the LLM to filter these out if they represent bronchiectasis.
+    \bring\s+shadow\w*

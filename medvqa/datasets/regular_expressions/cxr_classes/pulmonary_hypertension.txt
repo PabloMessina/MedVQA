@@ -1,0 +1,29 @@
+
+    # 1. Direct Diagnosis
+    # Matches: "Pulmonary hypertension", "Pulmonary arterial hypertension", "Cor pulmonale"
+    \bpulmonary\s+(?:arterial\s+|venous\s+)?(?:hypertension|htn)
+    |
+    \bcor\s+pulmonale\b
+    |
+    # 2. Safe Acronyms
+    # Matches: "PHTN", "PAH" 
+    \b(?:phtn|pah)\b
+    |
+    # 3. The Structural Sign: Enlarged Pulmonary/Interlobar Arteries
+    \b(?:enlarg\w*|dilat\w*|prominen\w*|engorg\w*|widen\w*|ectasia)\b
+    (?:
+        \s+(?:of|the|is|are|appear|central|right|left|descending)?
+    ){0,4}
+    \s+
+    \b(?:main\s+)?(?:pulmonary|interlobar)\s+(?:artery|arteries|trunk)\b 
+    |
+    # Reverse: Anatomy ... Pathology
+    \b(?:main\s+)?(?:pulmonary|interlobar)\s+(?:artery|arteries|trunk)\b 
+    (?:
+        \s+(?:is|are|appear|measuring|show|demonstrate)?
+    ){0,4}
+    \s+
+    \b(?:enlarg\w*|dilat\w*|prominen\w*|engorg\w*|widen\w*|ectasia)
+    |
+    # 4. "Pruning" (Specific sign of PAH)
+    \bperipheral\s+pruning

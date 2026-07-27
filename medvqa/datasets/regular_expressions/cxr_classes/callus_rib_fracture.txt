@@ -1,0 +1,7 @@
+
+    \bcallus
+    (?:
+        \s+(?:formation|is|seen|noted|at|in|on|the)?
+    ){0,4}
+    \s+
+    \b(?:ribs?|costal)

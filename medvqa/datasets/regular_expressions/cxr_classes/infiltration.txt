@@ -1,0 +1,4 @@
+
+    # Explicit legacy reporting terms ONLY.
+    # Generic opacities and densities are removed to prevent contamination.
+    \binfiltrat(?:e|es|ed|ing|ion|ive)?\b

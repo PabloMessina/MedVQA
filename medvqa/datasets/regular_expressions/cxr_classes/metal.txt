@@ -1,0 +1,13 @@
+
+    # Screws, Plates, Wires (Non-device hardware)
+    \b(?:metal|metallic)\s+(?:fragment|density|foreign\s+body)
+    |
+    \bscrews?
+    |
+    \bplates?
+    |
+    \bfixation
+    |
+    \bosteosynthesis
+    |
+    \bsternotomy\s+wires? # The most common "metal" in chest x-rays

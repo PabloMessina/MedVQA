@@ -1,14 +1,16 @@
-import json
-import pickle
-import os
 import datetime
+import json
 import logging
+import os
+import pickle
+from pathlib import Path
+from typing import List, Optional, Union
+
 import yaml
 from tqdm import tqdm
-from typing import Union, List, Optional
-from pathlib import Path
-from medvqa.utils.common import get_timestamp
+
 from medvqa.settings import CONFIGS_FOLDER, EXPERIMENTS_DIR
+from medvqa.utils.common import get_timestamp
 from medvqa.utils.hashing_utils import hash_string
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,8 @@ def load_json(path):
 
 
 def load_jsonl(path):
+    if isinstance(path, Path):
+        path = str(path)
     assert os.path.exists(path)
     assert os.path.isfile(path)
     assert path.endswith('.jsonl')

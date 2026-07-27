@@ -1,0 +1,28 @@
+
+    # 1. Direct Fibrosis Terms (Maximum recall)
+    # Catches fibrosis, fibrotic, fibrocalcific, fibroproliferative.
+    # We accept that it triggers on Cystic Fibrosis; the LLM will filter it.
+    \bfibro\w*
+    |
+    # 2. Scarring Terms
+    # Essential for stable lesion tracking.
+    \bscar\w*
+    |
+    # 3. High Precision ILD Indicators
+    \bhoneycomb\w*
+    |
+    # Catches both bronchiectasis and bronchiolectasis
+    \btraction\s+bronchi\w*
+    |
+    # 4. Proximity-based Architectural Distortion
+    # Allows up to 5 words between the terms, preventing cross-sentence bridging
+    \barchitectur\w*(?:\s+\w+){0,5}\s+distort\w*
+    |
+    \bdistort\w*(?:\s+\w+){0,5}\s+architectur\w*
+    |
+    # 5. Interstitial Lung Patterns
+    # Catches "disease", "abnormality", "changes", "process", "markings"
+    \binterstitial\s+lung\b
+    |
+    # 6. Clinical Acronyms
+    \b(?:ild|uip|ipf|nsip)\b

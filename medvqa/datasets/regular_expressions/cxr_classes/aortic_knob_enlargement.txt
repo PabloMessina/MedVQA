@@ -1,0 +1,34 @@
+
+    \b(?:
+        # 1. Adjective First
+        (?:
+            prominen\w*|enlarg\w*|bulky|widen\w*
+        )
+        (?:
+            \W+\w+
+        ){0,3}
+        \s+
+        aortic\s+knob
+
+        |
+
+        # 2. Anatomy First
+        aortic\s+knob
+        (?:
+            \W+\w+
+        ){0,3}
+        \s+
+        (?:
+            prominen\w*|enlarg\w*|bulky|widen\w*
+        )
+
+        |
+
+        # 3. Noun-form
+        (?:
+            prominence|enlargement|widening
+        )
+        \s+(?:of|in)\s+(?:the\s+)?
+        aortic\s+knob
+    )\b
+    

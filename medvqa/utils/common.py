@@ -1,13 +1,8 @@
-from dotenv import load_dotenv
-
-load_dotenv()
-
-from datetime import datetime
-import time
-import os
 import logging
+import time
+from datetime import datetime
 from enum import Enum
-from typing import List, Any
+from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +45,10 @@ def activate_determinism(seed=42, verbose=True):
     if verbose:
         from medvqa.utils.logging_utils import print_red
         print_red(f'Activating determinism(seed={seed})...', bold=True)
-    import torch
     import random
+
     import numpy as np
+    import torch
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
@@ -62,9 +58,10 @@ def activate_determinism(seed=42, verbose=True):
     np.random.seed(seed)
 
 def deactivate_determinism():
-    import torch
     import random
+
     import numpy as np
+    import torch
     torch.use_deterministic_algorithms(False)
     torch.backends.cudnn.benchmark = True  # Enables faster training for some models
     torch.backends.cudnn.deterministic = False

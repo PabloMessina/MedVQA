@@ -1,0 +1,48 @@
+
+    # 1. Direct variations and typos
+    telect|atelec|telct|ateclec|ateleect|atelext|aterlect|ateleft|atelechasis|aelectasis|atelexcta|atlect|atelet|
+    atelelct|atalect|atelact|atelecat|ateelct|atelact|acelectsis|atectasis|atelelec|ateletc|atlect|atelecat|ateltec|
+    acetlect|atalechat|altecta|atectatic
+    |
+    # 2. Shape descriptors
+    \b(?:plate|band|disc)[\s-]*like
+    |
+    # 3. Collapse (Bidirectional)
+    # DIRECTION A: "Collapse of the [Anatomy]"
+    \bcollaps\w*
+    (?:(?![.!?])\W+\w+){0,10}
+    \s+
+    (?:lung|lob(?:ar|e)|segment(?:al)?|l[lu]l|r[lmu]l|zone|field|base|basilar)
+    |
+    # DIRECTION B: "[Anatomy] is [Collapsed]"
+    \b(?:lung|lob(?:ar|e)|segment(?:al)?|l[lu]l|r[lmu]l|zone|field|base|basilar)
+    (?:(?![.!?])\W+\w+){0,10}
+    \s+
+    collaps\w*
+    |
+    # 4. Contextual Collapse
+    # Matches: "Underlying collapse", "Associated collapse", "Compressive collapse"
+    # These adjectives imply the lung context strongly enough to ignore distance.
+    \b(?:underlying|associated|adjacent|compressive|passive)\s+collaps\w*
+    |
+    # 5. Volume Loss
+    \bvolum\w*
+    (?:(?![.!?])\W+\w+){0,8}
+    \s+
+    (?:loss|diminished|reduc|decreas)
+    |
+    \b(?:loss|diminished|reduc|decreas)
+    (?:(?![.!?])\W+\w+){0,8}
+    \s+
+    volum\w*
+    |
+    # 6. Linear Opacities
+    \b(?:streaky|linear|lamellar)
+    (?:(?![.!?])\W+\w+){0,4}
+    \s+
+    (?:opaci|dens|markings|atele)
+    |
+    \b(?:opaci|dens)\w*
+    (?:(?![.!?])\W+\w+){0,4}
+    \s+
+    (?:streaky|linear|lamellar)

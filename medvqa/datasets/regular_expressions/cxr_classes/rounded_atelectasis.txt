@@ -1,0 +1,18 @@
+
+    # 1. Direct Terminology 
+    # Matches: "Rounded atelectasis", "round focal atelectasis"
+    \bround(?:ed)?\s+(?:\w+\s+){0,5}atelect\w*
+    |
+    # NEW: Matches "atelectasis, rounded" OR "atelectasis is seen with a rounded [shape]"
+    # Allows either a comma OR up to 5 intervening words.
+    \batelect\w*(?:,\s*|\s+(?:\w+\s+){1,5})round(?:ed)?\b
+    |
+    # 2. Distinct Synonyms
+    \bfolded\s+lung
+    |
+    \bblesovsky\w*
+    |
+    \batelect\w*[-\s]+pseudo[-\s]*tumor\b
+    |
+    # 3. Pathognomonic Visual Sign
+    \bcomet[-\s]+tail(?:\s+(?:sign|appearance|configuration|morphology|shadow))?\b

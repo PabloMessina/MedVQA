@@ -1,0 +1,42 @@
+
+    # 1. Direct diagnosis / adjectival form
+    \bpneumo[\s-]?mediastin\w*\b
+    |
+    # 2. Anatomy ... pathology (Fenced General Gap)
+    # Allows up to 6 of ANY words, provided they are not negations/normalcy terms
+    # and we do not cross a period or semicolon.
+    \bmediastin\w*\b
+    (?:
+        [\s,]+
+        (?!(?:no|not|without|clear|normal|stable|unremarkable|resolved)\b)
+        [^\s,\.;]+
+    ){0,6}
+    [\s,]+\b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
+    |
+    # 3. Pathology ... anatomy (Fenced General Gap)
+    \b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
+    (?:
+        [\s,]+
+        (?!(?:no|not|without|clear|normal|stable|unremarkable|resolved)\b)
+        [^\s,\.;]+
+    ){0,6}
+    [\s,]+\bmediastin\w*\b
+    |
+    # 4. Named radiographic signs used for pneumomediastinum
+    \bcontinuous\s+diaphragm(?:\s+sign)?\b
+    |
+    \bring\s+around\s+(?:the\s+)?artery(?:\s+sign)?\b
+    |
+    \btubular\s+artery(?:\s+sign)?\b
+    |
+    \bdouble\s+bronchial\s+wall(?:\s+sign)?\b
+    |
+    \bextrapleural\s+air(?:\s+sign)?\b
+    |
+    \bnaclerio(?:'s|s)?\s+v(?:\s+sign)?\b
+    |
+    \bthymic\s+wing(?:\s+sign)?\b
+    |
+    \bspinnaker(?:[-\s]sail)?(?:\s+sign)?\b
+    |
+    \bhaystack(?:\s+sign)?\b

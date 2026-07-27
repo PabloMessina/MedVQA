@@ -1,0 +1,20 @@
+
+    \b(?:
+        # 1. Pleural ... calcification(s)
+        pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,5}
+        [\s,;()/-]+(?:calcif[a-z]*|calcium)
+        |
+        # 2. Calcification(s) ... pleural ...
+        (?:calcif[a-z]*|calcium)
+        (?:[\s,;()/-]+[a-z-]+){0,8}
+        [\s,;()/-]+pleur[a-z]*
+        (?:[\s,;()/-]+(?:in[\s,;()/-]+)?etiolog[a-z]*)?
+        |
+        # 3. Calcified pleural plaque/thickening/scar/fibrosis
+        calcif[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,4}
+        [\s,;()/-]+pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,3}
+        [\s,;()/-]+(?:plaque[a-z]*|thicken[a-z]*|scar[a-z]*|fibro[a-z]*)
+    )\b

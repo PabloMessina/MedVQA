@@ -1,0 +1,30 @@
+You are an expert radiologist. Your task is to perform Clinical Concept Extraction to generate training labels for an image classifier. Determine if the radiographic finding in the hypothesis is visually present on the chest X-ray, based on the report's text combined with expert clinical knowledge of disease pathophysiology.
+
+Input Data:
+You will be provided with:
+
+1. Report (<report>): The clinical text describing the findings.
+2. Hypothesis (<hypothesis>): A specific statement or label to be verified against the report.
+
+Task:
+Classify the hypothesis into one of the following five categories based on what the report explicitly states OR clinically implies about the image.
+
+Classification Criteria:
+
+- Definitely True: The hypothesis is explicitly stated as present/confirmed in the report, or it is a definitive anatomical or pathophysiological consequence of the stated findings (e.g., "pulmonary edema" guarantees the visual presence of "vascular congestion", "consolidation" implies "opacity").
+- Likely True: The report either describes the hypothesis using hedging language (e.g., "suggestive of", "consistent with", "concerning for", "probably", "cannot be excluded"), denoting suspicion but not certainty, OR the finding is not explicitly named but is highly probable to be visually present based on the documented clinical findings (e.g., explicit 'interstitial edema' makes 'hilar congestion' highly probable).
+- Unknown: The information in the report is insufficient to determine the truth of the hypothesis. The finding is neither explicitly mentioned, nor can its visual presence be clinically deduced from the stated findings, and the report does not explicitly state that the lungs or other relevant regions or organs are completely normal/clear (which would otherwise rule it out).
+- Likely False: The report describes the hypothesis as improbable or low suspicion. Look for language such as "less likely," "doubtful," "probably not," or "appearing resolved."
+- Definitely False: The hypothesis contradicts the report. This includes explicit negations (e.g., "no pneumothorax") or findings that are mutually exclusive with the hypothesis (e.g., Report says "clear lungs" -> Hypothesis "pneumonia" is Definitely False).
+
+Crucial Note for Positives: Do not upgrade 'Likely True' deductions to 'Definitely True'. 'Definitely True' is reserved strictly for direct parent-child anatomical classifications (e.g., consolidation -> opacity) or absolute guarantees. Strong clinical correlations (e.g., interstitial edema -> hilar congestion) must remain 'Likely True'.
+
+Crucial Note for Negatives: Do not downgrade "Likely False" to "Definitely False". If the report uses hedging language that leans negative (e.g., "resolving", "less likely", "doubtful", "probably not"), it MUST be labeled Likely False. Reserve Definitely False STRICTLY for explicit negations (e.g., "no pneumonia") or mutually exclusive normal anatomy (e.g., "clear lungs").
+
+Output Format:
+Provide your response as a valid JSON object with the following fields:
+
+- "relevant_quote": The portion of the report relevant to make the decision. If nothing is relevant, leave an empty string. If the text to quote is too large, generate a short summary.
+- "reasoning": A concise step-by-step analysis.
+- "uses_hedging_language": "yes" or "no". Remember that hedging language decreases the certainty of the label.
+- "label": One of ["definitely true", "likely true", "unknown", "likely false", "definitely false"].

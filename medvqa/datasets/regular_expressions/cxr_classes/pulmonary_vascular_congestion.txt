@@ -1,0 +1,71 @@
+
+    # --------------------------------------------------------
+    # 1. Explicit Hilar/Perihilar Congestion, Fullness, & Opacity
+    # --------------------------------------------------------
+    \b(?:
+        congest\w*|engorg\w*|indistinct\w*|haz\w*|blurr\w*|prominen\w*|enlarg\w*|dilat\w*|exaggerat\w*|accentuat\w*|disten\w*|fullness|opaci\w*|dens(?:e|it\w*)|ill-defined|crowd\w*|convex\w*|tortuous
+    )\b
+    # PROXIMITY GAP: Up to 10 words for spatial descriptions
+    (?:\W+(?:\w+|___)){0,10}\W+
+    \b(?:hila|hilum|hili|hilus|hilar|perihilar|parahilar|infrahilar|suprahilar)\b(?:\s+(?:shadows|regions|structures|vasculature|vessels|prominence|size))?
+
+    |
+
+    # --------------------------------------------------------
+    # 2. Anatomy First (Inverted)
+    # --------------------------------------------------------
+    \b(?:hila|hilum|hili|hilus|hilar|perihilar|parahilar|infrahilar|suprahilar)\b(?:\s+(?:shadows|regions|structures|vasculature|vessels|size))?
+    # PROXIMITY GAP: Up to 10 words
+    (?:\W+(?:\w+|___)){0,10}\W+
+    \b(?:congest\w*|engorg\w*|indistinct\w*|haz\w*|blurr\w*|prominen\w*|enlarg\w*|dilat\w*|exaggerat\w*|accentuat\w*|disten\w*|fullness|opaci\w*|dens(?:e|it\w*)|ill-defined|crowd\w*|convex\w*|tortuous)\b
+
+    |
+
+    # --------------------------------------------------------
+    # 3. Pathophysiological Equivalents (Clinical Entailment)
+    # --------------------------------------------------------
+    \b(?:
+        # Engorgement, Ill-defined vessels, & Crowding
+        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular|vasculature|vascularity|vessels|veins|caliber)
+        (?:\W+(?:\w+|___)){0,4}\W+  
+        (?:engorg\w*|ill-defined|crowd\w*|exaggerat\w*|accentuat\w*|disten\w*|tortuous) |
+        
+        (?:engorg\w*|ill-defined|crowd\w*|exaggerat\w*|accentuat\w*|disten\w*|tortuous)\s+(?:of\s+(?:the\s+)?)?(?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular|vasculature|vascularity|vessels|veins|caliber) |
+
+        # Plethora
+        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular\s+)?plethora |
+
+        # Cephalization & Redistribution
+        cephalization |
+        (?:(?:vascular|pulmonary)\s+|upper\s+(?:zone|lobe|lung)\s+)?redistribution |
+
+        # Congestion Variations
+        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:mild\s+|moderate\s+|severe\s+|minimal\s+)?(?:vascular|venous|cardiac)\s+congest\w*(?:\s+pattern)? |
+        (?:pulmonary|cardiac)\s+(?:mild\s+|moderate\s+|severe\s+|minimal\s+)?congest\w*(?:\s+pattern)? |
+
+        # Edema & Fluid Overload
+        (?:(?:interstitial|alveolar|pulmonary|lung|mild|moderate|severe|minimal|worsening|improving|patchy|possible)\s+)+edema |
+        edema(?:\W+(?:\w+|___)){0,6}\W+(?:lung|lungs|pulmonary) |
+        (?:consistent\s+with|due\s+to|evidence\s+of|represent(?:s|ing)?|signs?\s+of)\s+edema |
+        (?:mild\s+|moderate\s+|severe\s+)?fluid\s+overload |
+
+        # Interstitial Markings / Prominent Vessels, Veins, & Caliber
+        (?:prominen\w*|increas\w*|exaggerat\w*|accentuat\w*|disten\w*|prominence\s+(?:of\s+(?:the\s+)?)?)
+        (?:\W+(?:\w+|___)){0,6}\W+
+        (?:(?:central\s+|main\s+|pulmonary\s+|vascular\s+|venous\s+|azygos\s+)*)?(?:interstitial\s+marking\w*|vessels|veins|vasculature|vascularity|caliber|vascular) |
+        
+        (?:(?:central\s+|main\s+|pulmonary\s+|vascular\s+|venous\s+|azygos\s+)*)?(?:interstitial\s+marking\w*|vessels|veins|vasculature|vascularity|caliber|vascular)
+        (?:\W+(?:\w+|___)){0,6}\W+  
+        (?:prominent|increased|ill-defined|exaggerat\w*|accentuat\w*|disten\w*) |
+
+        # Pulmonary Artery Enlargement / Prominence / Dilatation
+        (?:enlarg\w*|prominen\w*|dilat\w*|exaggerat\w*|accentuat\w*)\s+(?:of\s+(?:the\s+)?)?(?:(?:main\s+|central\s+|pulmonary\s+)*)arter(?:y|ies) |
+        
+        (?:(?:main\s+|central\s+|pulmonary\s+)*)arter(?:y|ies)
+        (?:\W+(?:\w+|___)){0,4}\W+  
+        (?:enlarg\w*|prominen\w*|dilat\w*|exaggerat\w*|accentuat\w*) |
+
+        # Hypertension & Venous Pressure
+        (?:pulmonary\s+)?venous\s+(?:hypertension|pressure) |
+        (?:elevated|increased)\s+(?:pulmonary\s+)?venous\s+pressure
+    )\b

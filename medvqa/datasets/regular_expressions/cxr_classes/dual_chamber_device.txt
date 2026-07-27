@@ -1,0 +1,7 @@
+
+    # Matches: "Dual chamber pacemaker", "Biventricular pacer"
+    \bdual\s+chamber
+    |
+    \bbiventricular
+    |
+    \btwo\s+leads?

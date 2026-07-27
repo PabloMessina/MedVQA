@@ -1,0 +1,50 @@
+
+    # --------------------------------------------------------
+    # 1. The Core Term (Noun & Adjective)
+    # Matches: "Nodule", "Nodules", "Nodulation", "Nodularity", "Mass", "Granulomas", "Granulomata", "Macronodules"
+    # --------------------------------------------------------
+    \b(?:nodules?|nodulation|nodularity|mass(?:es)?|granulomat?a?s?|macronodul\w*)\b
+    
+    |
+    
+    # --------------------------------------------------------
+    # 2. Specific Variations
+    # Matches: "Micronodules" (Miliary TB / Silicosis)
+    # --------------------------------------------------------
+    \bmicronodul\w*
+    
+    |
+    
+    # --------------------------------------------------------
+    # 3. Shape Descriptors (High Precision)
+    # Matches: "Nodular, left lower lobe opacity", "Nodular abnormality"
+    # Bridged with \W+ to tolerate commas, hyphens, and up to 3 filler words
+    # --------------------------------------------------------
+    \bnodular\W+(?:\w+\W+){0,3}(?:opac\w*|densit\w*|infiltrat\w*|pattern|lesions?|quality|appearance|thickening|foc(?:us|i)|component|process(?:es)?|shadows?|abnormalit(?:y|ies))
+    
+    |
+    
+    # --------------------------------------------------------
+    # 4. Rounded Opacities (Morphological equivalent to a nodule)
+    # Matches: "Rounded, hazy opacity", "Spherical shadow", "Spiculated lesion"
+    # --------------------------------------------------------
+    \b(?:round(?:ed)?|spherical|spiculated|ill-?defined)\W+(?:\w+\W+){0,3}(?:opac\w*|densit\w*|lesions?|shadows?|abnormalit(?:y|ies)) | \bcoin\s+(?:lesions?|shadows?)\b
+    
+    |
+    
+    # --------------------------------------------------------
+    # 5. Specific Radiographic Synonyms (LLM High-Recall Targets)
+    # Matches: "Calcified, right hilar lymph node", "Calcific shadow"
+    # Matches: "Cavitary lesion", "Cavitation in lesions", "Cavities"
+    # --------------------------------------------------------
+    \b(?:calcific|calcified)\W+(?:\w+\W+){0,3}(?:focus|foci|densit\w*|opac\w*|(?:lymph\s+)?nodes?|shadows?|abnormalit(?:y|ies))\b
+    |
+    \b(?:cavitary|cavitat(?:ing|ion))\s+(?:(?:in|of)\s+)?lesions?\b | \bcavit(?:y|ies)\b
+    
+    |
+    
+    # --------------------------------------------------------
+    # 6. Oncologic & Interventional Proxies (Confirmed by LLM reasoning)
+    # Matches: "Metastatic disease", "Mets", "Secondary deposits", "Fiducial markers", "Lung cancer"
+    # --------------------------------------------------------
+    \bmetastas(?:es|is)\b | \bmetastatic\s+(?:disease|deposits)\b | \bmets\b | \bsecondary\s+deposits\b | \bfiducial\s+(?:marker|seed)s?\b | \b(?:adeno)?carcinom\w*\b | \blung\s+cancer\b

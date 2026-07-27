@@ -1,0 +1,2 @@
+
+    \b(?:shoulder|humeral)\s+(?:prosthesis|arthroplasty|replacement)

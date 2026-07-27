@@ -1,0 +1,32 @@
+
+    \b(?:
+        # --------------------------------------------------------
+        # 1. Thyroid / goiter-type visible thoracic mass-like findings
+        # --------------------------------------------------------
+        (?:large\s+)?thyroid\s+goit(?:er|re) |
+        substernal\s+goit(?:er|re) |
+        thyromegaly
+        
+        |
+        
+        # --------------------------------------------------------
+        # 2. Explicit non-pulmonary thoracic soft-tissue mass terminology
+        # --------------------------------------------------------
+        (?:
+            mediastinal | paratracheal | subcarinal | retrosternal |
+            pleural | extrapleural | chest\s+wall
+        )\s+mass(?:es)?
+        
+        |
+        
+        # --------------------------------------------------------
+        # 3. Bulky thoracic adenopathy acting as a mass-equivalent
+        # --------------------------------------------------------
+        (?:bulky|extensive|marked|massive|large|confluent|mass[-]?like)\s+
+        (?:
+            mediastinal(?:\s+and\s+(?:right|left|bilateral)\s+hilar)? |
+            (?:right|left|bilateral)\s+hilar(?:\s+and\s+mediastinal)? |
+            central
+        )\s+(?:adenopathy|lymphadenopathy)
+    )\b
+    

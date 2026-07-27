@@ -1,0 +1,32 @@
+
+    \b(?:
+        # --------------------------------------------------------
+        # 1. Direct Thromboembolic Terminology
+        # --------------------------------------------------------
+        pulmonary\s+embol\w* |
+        pulmonary\s+thrombo-?embol\w* |
+        
+        # --------------------------------------------------------
+        # 2. The Abbreviation
+        # --------------------------------------------------------
+        pe |
+        
+        # --------------------------------------------------------
+        # 3. Specific / Severe Presentations
+        # --------------------------------------------------------
+        saddle\s+(?:pulmonary\s+)?embol\w* |
+        
+        # --------------------------------------------------------
+        # 4. Chronic Thromboembolic Disease
+        # --------------------------------------------------------
+        chronic\s+thromboembolic\s+(?:disease|pulmonary\s+hypertension) |
+        cteph |
+        
+        # --------------------------------------------------------
+        # 5. Eponymous Radiographic Signs (Apostrophe-tolerant)
+        # --------------------------------------------------------
+        westermark(?:'s)?\s+sign |
+        fleischner(?:'s)?\s+sign |
+        hampton(?:'s)?\s+hump
+    )\b
+    

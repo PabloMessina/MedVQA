@@ -1,0 +1,4 @@
+
+    \baortic\s+(?:valve|prosthesis|replacement)
+    |
+    \b(?:avr|tavi|tavr)\b

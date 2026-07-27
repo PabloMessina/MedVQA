@@ -1,0 +1,82 @@
+
+    # ==============================================================================
+    # 1. Anatomy ... (Up to 10 wildcard words) ... Descriptor
+    # ==============================================================================
+    \b(?:
+        (?:main\s+|central\s+|right\s+|left\s+)?
+        (?:
+            # Strict structural arteries
+            pulmonary\s+(?:artery|arteries|arterial|trunk|conus|outflow)|
+            
+            # Capacity/fluid terms (Added 'tree', 'bed', and 'peri-?' prefix)
+            (?:pulmonary\s+|mediastinal\s+)?(?:vasculature|vessels|vascular|vascularity|bed|tree|(?:peri-?)?hila|(?:peri-?)?hilar|(?:peri-?)?hilum|(?:peri-?)?hilus)
+        )|
+        interlobar\s+artery|
+        \b(?:main|central)\s+PA[s]?\b|
+        \b(?:MPA|PAH)\b
+    )\b
+    
+    (?:\W+\w+){0,10}\W+
+    
+    (?:
+        \b(?:
+            enlarg\w*|larg\w*|prominen\w*|dilat\w*| 
+            ectasi\w*|ectatic|                      
+            widen\w*|bulky|bulg\w*|aneurysm\w*|     
+            congesti\w*|engorg\w*|plethora|         
+            plump|distend\w*|prun\w*|full\w*|       
+            cephaliz\w*|redistribut\w*|             
+            hazi\w*|hazy|
+            increas\w*|accentuat\w*|                
+            hypertensi\w*|
+            expand\w*|expansi\w*|thick\w* # Added expand/expansion/thickening
+        )\b
+        |
+        # Catch numerical measurements (Added millimeters/centimeters)
+        (?:>|greater\s+than\s+)?\d{1,2}(?:\.\d+)?\s*(?:mm|cm|millimeters?|centimeters?)\b
+    )
+
+    |
+
+    # ==============================================================================
+    # 2. Descriptor ... (Up to 10 wildcard words) ... Anatomy
+    # ==============================================================================
+    (?:
+        \b(?:
+            enlarg\w*|larg\w*|prominen\w*|dilat\w*|
+            ectasi\w*|ectatic|
+            widen\w*|bulky|bulg\w*|aneurysm\w*|
+            congesti\w*|engorg\w*|plethora|
+            plump|distend\w*|prun\w*|full\w*|
+            cephaliz\w*|redistribut\w*|
+            hazi\w*|hazy|
+            increas\w*|accentuat\w*|
+            hypertensi\w*|
+            expand\w*|expansi\w*|thick\w*
+        )\b
+    )
+    
+    (?:\W+\w+){0,10}\W+
+    
+    \b(?:
+        (?:main\s+|central\s+|right\s+|left\s+)?
+        (?:
+            pulmonary\s+(?:artery|arteries|arterial|trunk|conus|outflow)|
+            (?:pulmonary\s+|mediastinal\s+)?(?:vasculature|vessels|vascular|vascularity|bed|tree|(?:peri-?)?hila|(?:peri-?)?hilar|(?:peri-?)?hilum|(?:peri-?)?hilus)
+        )|
+        interlobar\s+artery|
+        \b(?:main|central)\s+PA[s]?\b|
+        \b(?:MPA|PAH)\b
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 3. Explicit Disease States (No gaps needed)
+    #    Matches: "Pulmonary hypertension", "Cor pulmonale"
+    # ==============================================================================
+    \b(?:
+        pulmonary\s+hypertensi\w*|
+        cor\s+pulmonale
+    )\b
+

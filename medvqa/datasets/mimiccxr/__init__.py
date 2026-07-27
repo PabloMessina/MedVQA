@@ -1,31 +1,38 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-import os
-import re
 import glob
 import logging
+import os
+import re
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from pathlib import Path
-from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
-from medvqa.utils.files_utils import get_cached_json_file, get_cached_pickle_file, load_pickle, read_txt, save_pickle
+
 from medvqa.settings import (
-    MIMICCXR_CACHE_DIR,
-    MIMICCXR_JPG_IMAGES_SMALL_DIR,
-    MIMICCXR_JPG_IMAGES_MEDIUM_DIR,
-    MIMICCXR_JPG_IMAGES_LARGE_DIR,
-    MIMICCXR_METADATA_CSV_PATH,
-    MIMICCXR_SPLIT_CSV_PATH,
-    MIMICCXR_REPORTS_TXT_PATHS,
-    MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH,
-    MIMIC_CXR_LT_2023_TRAIN_CSV_PATH,
     MIMIC_CXR_LT_2023_DEV_CSV_PATH,
     MIMIC_CXR_LT_2023_TEST_CSV_PATH,
-    MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH,
+    MIMIC_CXR_LT_2023_TRAIN_CSV_PATH,
     MIMIC_CXR_LT_2024_TASK1_DEV_CSV_PATH,
+    MIMIC_CXR_LT_2024_TASK1_TRAIN_CSV_PATH,
+    MIMICCXR_CACHE_DIR,
+    MIMICCXR_DATASET_DIR,
+    MIMICCXR_JPG_IMAGES_LARGE_DIR,
+    MIMICCXR_JPG_IMAGES_MEDIUM_DIR,
+    MIMICCXR_JPG_IMAGES_SMALL_DIR,
+    MIMICCXR_METADATA_CSV_PATH,
+    MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH,
+    MIMICCXR_REPORTS_TXT_PATHS,
+    MIMICCXR_SPLIT_CSV_PATH,
 )
+from medvqa.utils.constants import CHEXPERT_LABELS, CXRLT2023_CLASSES
+from medvqa.utils.files_utils import (
+    get_cached_json_file,
+    get_cached_pickle_file,
+    load_pickle,
+    read_txt,
+    save_pickle,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +42,7 @@ MIMICCXR_IMAGE_ORIENTATIONS__RAW = ['PA', 'LATERAL', 'LL', 'AP', 'UNKNOWN', 'LAO
 MIMICCXR_IMAGE_ORIENTATIONS = ['UNKNOWN', 'PA', 'AP', 'LATERAL']
 
 def get_mimiccxr_image_orientation_id(o):
-    if type(o) != str:
+    if not isinstance(o, str):
         o = 'UNKNOWN'
     assert o in MIMICCXR_IMAGE_ORIENTATIONS__RAW
     if o == 'LL':
@@ -259,6 +266,11 @@ def get_path_to_report_text_dict():
 
     return path_to_report_text_dict
 
+def get_study_id_to_report_text_dict():
+    path_to_report_text_dict = get_path_to_report_text_dict()
+    study_id_to_report_text_dict = {int(os.path.basename(x).split('.')[0][1:]): text for x, text in path_to_report_text_dict.items()}
+    return study_id_to_report_text_dict
+
 def report_paths_generator():
     for x in range(10, 20):
         for filepath in Path(os.path.join(MIMICCXR_DATASET_DIR, f'files/p{x}/')).rglob("s*.txt"):
@@ -333,8 +345,8 @@ def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
     study_id = metadata['study_id']
     image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
     # Plot main image
-    from PIL import Image
     from matplotlib import pyplot as plt
+    from PIL import Image
     image = Image.open(image_path)
     image = image.convert('RGB')
     fig, ax = plt.subplots(1, figsize=figsize)
@@ -375,73 +387,6 @@ def visualize_image_report_and_other_images(dicom_id, figsize=(8, 8)):
         ax.imshow(_image)
         plt.show()
 
-def save_report_image_and_other_images_as_pdf(dicom_id, pdf_path):
-    import pdfkit
-    metadata = get_detailed_metadata_for_dicom_id(dicom_id)
-    assert len(metadata) == 1
-    metadata = metadata[0]
-    part_id = metadata['part_id']
-    patient_id = metadata['subject_id']
-    study_id = metadata['study_id']
-    image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, dicom_id)
-    # Generate html
-    html = f'''
-    <html>
-    <head>
-    <style>
-    .image {{
-        display: block;
-        margin-left: auto;
-        margin-right: auto;
-        width: 85%;
-    }}
-    </style>
-    </head>
-    <body>
-    '''
-    # Add main image
-    html += f'''
-    <h2>View position: {metadata['view_pos']}, dicom_id: {dicom_id}</h2>
-    <img src="{image_path}" class="image">
-    '''
-    # Add original report
-    html += f'''
-    <h2>Original report</h2>
-    '''
-    report_path = get_mimiccxr_report_path(part_id=part_id, subject_id=patient_id, study_id=study_id)
-    with open(report_path, 'r') as f:
-        report = f.read()
-    # we will use white-space: pre-wrap; to preserve newlines
-    html += f'''
-    <pre style="white-space: pre-wrap;">{report}</pre>
-    '''
-    # Add other images
-    html += f'''
-    <h2>Other images</h2>
-    '''
-    if len(metadata['dicom_id_view_pos_pairs']) == 1:
-        html += f'''
-        <p>No other images</p>
-        '''
-    else:
-        for _dicom_id, _view_pos in metadata['dicom_id_view_pos_pairs']:
-            if _dicom_id == dicom_id:
-                continue
-            _image_path = get_mimiccxr_large_image_path(part_id, patient_id, study_id, _dicom_id)
-            html += f'''
-            <h2>View position: {_view_pos}, dicom_id: {_dicom_id}</h2>
-            <img src="{_image_path}" class="image">
-            '''
-    html += '''
-    </body>
-    </html>
-    '''
-    # Save html to pdf
-    # NOTE: to avoid OSError: wkhtmltopdf reported an error:
-    #       Exit with code 1 due to network error: ProtocolUnknownError
-    # we add the following option: '--enable-local-file-access ""'
-    pdfkit.from_string(html, pdf_path, options={'enable-local-file-access': ''})
-
 def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, exclude_invalid_sentences=False,
                                             background_findings_and_impression_per_report_filepath=None):
     
@@ -457,7 +402,8 @@ def load_mimiccxr_reports_detailed_metadata(qa_adapted_reports_filename=None, ex
     elif background_findings_and_impression_per_report_filepath is not None:
         bfaipr_filename = os.path.basename(background_findings_and_impression_per_report_filepath)
         filename = f'{bfaipr_filename}__detailed_metadata.pkl'
-    else: assert False
+    else:
+        assert False
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, filename)
     if os.path.exists(cache_path):
         return get_cached_pickle_file(cache_path)
@@ -579,20 +525,25 @@ def get_detailed_metadata_for_dicom_id(dicom_id, qa_adapted_reports_filename=Non
 
 def _get_mimiccxr_split_dicom_ids(split_name):
     key = f'get_mimiccxr_{split_name}_dicom_ids()'
-    if key in _cache: return _cache[key]
+    if key in _cache:
+        return _cache[key]
     output = [x[0][2] for x in get_split_dict().items() if x[1] == split_name]
     _cache[key] = output
     return output
+
 def get_mimiccxr_train_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('train')
+
 def get_mimiccxr_val_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('validate')
+
 def get_mimiccxr_test_dicom_ids():
     return _get_mimiccxr_split_dicom_ids('test')
 
 def get_train_val_test_stats_per_chexpert_label(chexpert_labels_filename):
     cache_path = os.path.join(MIMICCXR_CACHE_DIR, f'train_val_test_chexpert_stats_per_label({chexpert_labels_filename}).pkl')
-    if os.path.exists(cache_path): return get_cached_pickle_file(cache_path)
+    if os.path.exists(cache_path):
+        return get_cached_pickle_file(cache_path)
 
     chexpert_labels_path = os.path.join(MIMICCXR_CACHE_DIR, chexpert_labels_filename)
     chexpert_labels = get_cached_pickle_file(chexpert_labels_path)
@@ -609,18 +560,28 @@ def get_train_val_test_stats_per_chexpert_label(chexpert_labels_filename):
         test_pos_count, test_neg_count = 0, 0
         for j in range(n):
             if splits[j] == 'train':
-                if chexpert_labels[j][i] == 1: train_pos_count += 1
-                elif chexpert_labels[j][i] == 0: train_neg_count += 1
-                else: assert False
+                if chexpert_labels[j][i] == 1:
+                    train_pos_count += 1
+                elif chexpert_labels[j][i] == 0:
+                    train_neg_count += 1
+                else:
+                    assert False
             elif splits[j] == 'validate':
-                if chexpert_labels[j][i] == 1: val_pos_count += 1
-                elif chexpert_labels[j][i] == 0: val_neg_count += 1
-                else: assert False
+                if chexpert_labels[j][i] == 1:
+                    val_pos_count += 1
+                elif chexpert_labels[j][i] == 0:
+                    val_neg_count += 1
+                else:
+                    assert False
             elif splits[j] == 'test':
-                if chexpert_labels[j][i] == 1: test_pos_count += 1
-                elif chexpert_labels[j][i] == 0: test_neg_count += 1
-                else: assert False
-            else: assert False
+                if chexpert_labels[j][i] == 1:
+                    test_pos_count += 1
+                elif chexpert_labels[j][i] == 0:
+                    test_neg_count += 1
+                else:
+                    assert False
+            else:
+                assert False
         label2stats[label_name] = {
             'train': {'positive': train_pos_count, 'negative': train_neg_count},
             'val': {'positive': val_pos_count, 'negative': val_neg_count},
@@ -676,7 +637,7 @@ def get_mimic_cxr_lt_2023_ridx2labels():
             else:
                 report_labels[report_idx] = labels[i]
     
-    n_nones = sum(1 for x in report_labels if type(x) == type(None))
+    n_nones = sum(1 for x in report_labels if x is None)
     assert n_nones == 0, f'{n_nones}/{n_reports} reports have None labels'
     report_labels = np.array(report_labels)
     return report_labels

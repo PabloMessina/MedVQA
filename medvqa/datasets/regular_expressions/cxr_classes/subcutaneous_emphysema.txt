@@ -1,0 +1,21 @@
+
+    # 1. Direct Subcutaneous Terms (High Precision)
+    # NOW CATCHES: "Subcutaneous gas", "SQ air", "Sub-Q emphysema"
+    \bs(?:ub)?(?:-)?(?:cutan\w*|q|sq|c)\s+(?:emphysema|gas|air)
+    |
+    # 2. Soft Tissue Terms
+    # Matches: "Soft tissue emphysema", "Air in the soft tissues"
+    \bsoft\s+tissue\s+(?:emphysema|gas|air)
+    |
+    # 3. Spatial "Leak" Detector (High Recall)
+    # Logic: "Air" or "Gas" ... followed by ... "Chest Wall / Neck / Axilla"
+    # Matches: "Gas in the left chest wall", "Air tracking into the supraclavicular region"
+    \b(?:gas|air)
+    # THE GAP: Allow up to 10 words (e.g., "seen tracking superiorly into the")
+    # Stop at periods to prevent false positives from other sentences.
+    (?:(?![.!?])\W+\w+){0,10}
+    # THE TARGET LOCATIONS (Strictly non-lung locations)
+    \s+(?:chest\s+wall|neck|axilla|supraclavicular)
+    |
+    # 4. Legacy/British Terminology
+    \bsurgical\s+emphysema

@@ -1,0 +1,5 @@
+
+    # Matches: "Lung abscess", "Abscesses"
+    # Note: If it says "Skin abscess", this might trigger. 
+    # For high recall, simple 'abscess' is usually fine in CXR context.
+    \babscess\w*

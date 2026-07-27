@@ -1,0 +1,37 @@
+
+    # ---------------------------------------------------------
+    # BRANCH 1: Direct Terms & Synonyms
+    # ---------------------------------------------------------
+    \b(?:fissural|interlobar)\s+(?:effusion|fluid|collection)\b
+    |
+    # ---------------------------------------------------------
+    # BRANCH 2: Syntax Inversion (Fissure comes before Fluid)
+    # Catches: "major fissure loculated fluid", "minor fissure effusion"
+    # ---------------------------------------------------------
+    \bfissur\w*
+    (?:\s+\S+){0,4}\s+               # Allow up to 4 words between (e.g., "loculated")
+    (?:effusion|fluid|loculation)\b
+    |
+    # ---------------------------------------------------------
+    # BRANCH 3: Shape-Based Implicit Fluid (Pseudotumor descriptors)
+    # Catches: "lenticular opacity along the minor fissure"
+    # ---------------------------------------------------------
+    \b(?:lenticular|biconvex|fusiform|mass-like)\s+
+    (?:opacity|density|collection|loculation|lesion)\w*
+    (?:\s+\S+){0,8}\s+               # Gap to find the anatomical location
+    \bfissur\w*
+    |
+    # ---------------------------------------------------------
+    # BRANCH 4: The "Fluid + Context" Engine (Expanded)
+    # Catches: Exotic verbs, intrusive clauses, and coreference
+    # ---------------------------------------------------------
+    \b(?:fluid|effusion|liquid|water|collection|loculation)\w*
+    (?:\s+\S+){0,18}\s+              # EXPANDED GAP: Up to 18 words to bypass long clauses/periods
+    (?:
+        # The Mandatory Semantic Bridge
+        in|within|along|extend\w*|track\w*|  # Standard
+        splay\w*|distend\w*|widen\w*|fill\w* # EXOTIC VERBS
+    )\s+
+    (?:the\s+)?
+    (?:\w+\s+){0,4}                  # Gap for "right minor", "oblique", etc.
+    \bfissur\w*

@@ -1,0 +1,6 @@
+
+    # Matches: "Kerley B lines", "Kerley A lines", "Prominent Kerley lines"
+    \bkerley\s*(?:lines?|[abc]\b)
+    |
+    # Matches: "Septal lines" (Synonym)
+    \bseptal\s+lines?

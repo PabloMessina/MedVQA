@@ -1,0 +1,77 @@
+
+    # ==============================================================================
+    # 1. ANATOMY ... followed by ... SHIFT / DEVIATION / DISPLACEMENT
+    # ==============================================================================
+    \b(?:
+        mediastin\w*(?:\s+(?:structures?|contents?))?|
+        trachea(?:l)?|
+        heart|
+        cardiac\s+silhouett\w*|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
+    (?:
+        \s+[^\s;:]+
+    ){0,8}
+    \s+
+    \b(?:
+        shift\w*|
+        deviat\w*|
+        displac\w*|
+        push\w*|
+        pull\w*|
+        drawn?|       # Added for volume loss traction
+        retract\w* # Added for volume loss traction
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 2. SHIFT / DEVIATION / DISPLACEMENT ... followed by ... ANATOMY
+    # ==============================================================================
+    \b(?:
+        shift\w*|
+        deviat\w*|
+        displac\w*|
+        push\w*|
+        pull\w*|
+        drawn?|
+        retract\w*
+    )\b
+    (?:
+        \s+[^\s;:]+
+    ){0,8}
+    \s+
+    \b(?:
+        mediastin\w*(?:\s+(?:structures?|contents?))?|
+        trachea(?:l)?|
+        heart|
+        cardiac\s+silhouett\w*|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 3. STATIC POSITION INDICATING SHIFT
+    # ==============================================================================
+    \b(?:
+        mediastin\w*(?:\s+(?:structures?|contents?))?|
+        trachea(?:l)?|
+        heart|
+        cardiac\s+silhouett\w*|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
+    (?:
+        \s+[^\s;:]+
+    ){0,6}
+    \s+
+    \b(?:lies|is|appears?|seems?|project\w*|locat\w*|situat\w*)\b
+    (?:
+        \s+[^\s;:]+
+    ){0,4}
+    \s+
+    # Expanded to catch "in the right hemithorax/chest"
+    \b(?:to\s+the\s+(?:left|right)(?:\s+of\s+midline)?|off\s+midline|in(?:to)?\s+the\s+(?:left|right)\s+(?:hemithorax|chest|side))\b

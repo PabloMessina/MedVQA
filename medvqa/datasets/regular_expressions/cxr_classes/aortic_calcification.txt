@@ -1,0 +1,60 @@
+
+    # ==============================================================================
+    # 1. ANATOMY ... followed by ... PATHOLOGY
+    #    Matches: "The aorta is tortuous and calcified"
+    #             "Aortic knob appears prominent and calcified"
+    # ==============================================================================
+    \b(?:
+        aort\w*|                # Aorta, Aortic
+        knob|arch|root          # Specific aortic parts
+    )\b
+    # THE FIX: Allow up to 6 arbitrary words
+    # This captures: "is tortuous and", "is unfolded and densely", etc.
+    (?:
+        \W+\w+
+    ){0,6}
+    \s+
+    \b(?:
+        calcif\w*|              # Calcified, calcification
+        atherosclero\w*|        # Atherosclerosis
+        atheroma\w*|            # Atheroma
+        sclero\w*|              # Sclerotic (common CXR shorthand for atherosclerosis)
+        plaque\w* # Plaques
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 2. PATHOLOGY ... followed by ... ANATOMY
+    #    Matches: "Calcified and tortuous aorta"
+    #             "Atherosclerotic changes of the thoracic aorta"
+    # ==============================================================================
+    \b(?:
+        calcif\w*|
+        atherosclero\w*|
+        atheroma\w*|
+        sclero\w*|
+        plaque\w*
+    )\b
+    # THE FIX: Allow up to 6 arbitrary words
+    # This captures: "changes involving the", "plaques within the"
+    (?:
+        \W+\w+
+    ){0,6}
+    \s+
+    \b(?:
+        aort\w*|
+        knob|arch|root
+    )\b
+
+    |
+
+    # ==============================================================================
+    # 3. STRONG STANDALONES (Context-Free)
+    #    "Atherosclerosis" implies Aorta in CXR contexts
+    # ==============================================================================
+    \b(?:
+        atherosclero\w+|
+        atheroma\w+
+    )\b
+    (?!\s+coronary) # Negative lookahead for coronary arteries

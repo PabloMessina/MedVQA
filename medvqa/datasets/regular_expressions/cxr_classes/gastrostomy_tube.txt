@@ -1,0 +1,7 @@
+
+    # Matches: "PEG tube", "G-tube"
+    \b(?:peg|g)\s+tube
+    |
+    \bgastrostomy
+    |
+    \bpercutaneous\s+endoscopic\s+gastrostomy

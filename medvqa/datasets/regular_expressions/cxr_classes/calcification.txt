@@ -1,0 +1,13 @@
+
+    \b(?:
+        # 1. The primary root (Safe)
+        # Matches: "Calcified", "Calcification", "Calcific" (e.g., "Calcific tendinitis")
+        calcif\w*
+        |
+        # 2. Specific variants
+        # "Calcinosis" (e.g., "Tumoral calcinosis" - rare but relevant)
+        calcinosis
+        |
+        # 3. Micro-calcifications (Rare in CXR, but good for completeness)
+        microcalcif\w*
+    )\b

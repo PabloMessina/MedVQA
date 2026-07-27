@@ -1,0 +1,5 @@
+
+    \b(?:
+        empyema\w*|          # "Empyema", "Empyemas", "Empyematous"
+        pyothorax            # Synonymous (pus in thorax), though rarer
+    )\b

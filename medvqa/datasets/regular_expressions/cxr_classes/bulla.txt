@@ -1,0 +1,8 @@
+
+    # 1. Direct Terminology (Singular, Plural, Adjective, Disease state)
+    # Matches: "Bulla", "Bullae", "Bullous", "Bullectomy", "Bullosis"
+    \bbull(?:a|ae|ous|ectomy|osis)\w*
+    |
+    # 2. Specific Syndrome
+    # "Vanishing lung syndrome" (Giant Bullous Emphysema)
+    \bvanishing\s+lung

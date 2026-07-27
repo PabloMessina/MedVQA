@@ -1,0 +1,8 @@
+
+    # 1. Standard phrasing (with optional specific intervening words)
+    # Matches: "azygos lobe", "azygous fissure", "azygos accessory lobe", "azigos vein fissure"
+    \b(?:azyg|azig)\w*(?:\s+(?:vein|accessory))?\s+(?:lobe|fissure)
+    |
+    # 2. Inverted phrasing
+    # Matches: "lobe of the azygos", "fissure of the azygos"
+    \b(?:lobe|fissure)\s+of\s+(?:the\s+)?(?:azyg|azig)\w*

@@ -1,0 +1,74 @@
+
+    # --------------------------------------------------------
+    # 1. Descriptor ... Anatomy
+    # Added: 'nodular', 'convex', 'dense'
+    # Added: 'juxtahilar'
+    # --------------------------------------------------------
+    \b(?:
+        prominen\w*|enlarg\w*|bulk\w*|
+        full\w*|widen\w*|thick\w*|
+        lobulat\w*|accentuat\w*|
+        hazy|haziness|indistinct\w*|
+        big|large|engorg\w*|increas\w*|exaggerat\w*|
+        nodular|convex|dense
+    )\b
+    (?:\W+\w+){0,8}
+    \W+
+    \b(?:
+        hila|hilum|hili|hilus|hilar|perihilar|suprahilar|infrahilar|juxtahilar|
+        hilar\W+(?:shadows|regions|silhouettes|structures|vasculature|markings|size)
+    )\b
+
+    |
+
+    # --------------------------------------------------------
+    # 2. Anatomy ... Descriptor
+    # --------------------------------------------------------
+    \b(?:
+        hila|hilum|hili|hilus|hilar|perihilar|suprahilar|infrahilar|juxtahilar|
+        hilar\W+(?:shadows|regions|silhouettes|structures|vasculature|markings|size)
+    )\b
+    (?:\W+\w+){0,8}
+    \W+
+    \b(?:
+        prominen\w*|enlarg\w*|bulk\w*|
+        full\w*|widen\w*|thick\w*|
+        lobulat\w*|accentuat\w*|
+        big|large|
+        hazy|haziness|indistinct\w*|
+        engorg\w*|increas\w*|exaggerat\w*|
+        nodular|convex|dense
+    )\b
+    
+    |
+    
+    # --------------------------------------------------------
+    # 3. Specific Entity: "Hilar Adenopathy"
+    # Added: Inverted syntax "Adenopathy ... Anatomy"
+    # Added: 'juxtahilar'
+    # --------------------------------------------------------
+    # Pattern A: Anatomy -> Adenopathy
+    \b(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar|central)\s+(?:lymph\s*)?(?:adenopathy|nodes|enlargement)\b
+    |
+    # Pattern B: Adenopathy -> [up to 8 words] -> Anatomy
+    \b(?:lymph\s*)?(?:adenopathy|nodes|enlargement)\b(?:\W+\w+){0,8}\W+(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar|central)\b
+
+    |
+
+    # --------------------------------------------------------
+    # 4. Hilar / Perihilar Masses, Lesions, & Opacities
+    # Added: 'consolidation', 'juxtahilar'
+    # --------------------------------------------------------
+    \b(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar)(?:\W+(?:region|zone|area))?(?:\W+\w+){0,5}\W+(?:mass(?:es)?|lesion(?:s)?|tumor(?:s)?|malignancy|opacit\w*|opacification|densit\w*|consolidation)\b
+    |
+    \b(?:mass(?:es)?|lesion(?:s)?|tumor(?:s)?|malignancy|opacit\w*|opacification|densit\w*|consolidation)(?:\W+\w+){0,12}\W+(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar)(?:\W+(?:region|zone|area))?\b
+
+    |
+
+    # --------------------------------------------------------
+    # 5. Pulmonary Artery / Vascular Enlargement
+    # --------------------------------------------------------
+    \b(?:enlarg\w*|dilat\w*|prominen\w*|large|big|engorg\w*|increas\w*|congest\w*)\b(?:\W+\w+){0,5}\W+(?:central\W+)?pulmonary\W+(?:arter\w*|vascular\w*|vasculature)(?:\W+caliber)?\b
+    |
+    \b(?:central\W+)?pulmonary\W+(?:arter\w*|vascular\w*|vasculature)(?:\W+caliber)?\b(?:\W+\w+){0,5}\W+(?:enlarg\w*|dilat\w*|prominen\w*|large|big|engorg\w*|increas\w*|congest\w*)\b
+

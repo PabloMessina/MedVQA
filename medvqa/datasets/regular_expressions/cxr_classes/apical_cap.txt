@@ -1,0 +1,22 @@
+
+    \b(?:
+        # 1. Cap / capping phrasing
+        (?:apic[a-z]*|biapic[a-z]*|bi-apic[a-z]*|pleur[a-z]*)
+        (?:[\s,;()/-]+(?:scar[a-z]*|fibro[a-z]*|mild|minimal|small|prominent|bilateral)){0,3}
+        [\s,;()/-]+cap[a-z]*
+        |
+        # 2. Apical / biapical thickening
+        (?:apic[a-z]*|biapic[a-z]*|bi-apic[a-z]*)
+        (?:[\s,;()/-]+pleur[a-z]*)?
+        [\s,;()/-]+thick[a-z]*
+        |
+        # 3. Apical / biapical scarring or fibrosis
+        (?:apic[a-z]*|biapic[a-z]*|bi-apic[a-z]*)
+        (?:[\s,;()/-]+pleur[a-z]*)?
+        [\s,;()/-]+(?:scar[a-z]*|fibro[a-z]*)
+        |
+        # 4. Thickening/fibrosis/scarring at the apex/apices
+        (?:pleur[a-z]*[\s,;()/-]+)?(?:thick[a-z]*|scar[a-z]*|fibro[a-z]*)
+        (?:[\s,;()/-]+(?:of|in|at|over|the|lung)){0,4}
+        [\s,;()/-]+(?:apex|apices|apic[a-z]*|biapic[a-z]*|bi-apic[a-z]*)
+    )\b

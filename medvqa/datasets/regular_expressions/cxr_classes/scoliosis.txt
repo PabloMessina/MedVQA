@@ -1,0 +1,35 @@
+
+    \b(?:
+        # ==============================================================================
+        # 1. Explicit Diagnostic Terms (Suffix Matching)
+        #    Matches: Scoliosis, Levoscoliosis, Dextroscoliosis, Rotoscoliosis, 
+        #    Kyphoscoliosis. \w* handles plurals like 'scolioses'.
+        # ==============================================================================
+        (?:[a-z]*scoliosis)\w*
+        |
+        # ==============================================================================
+        # 2. Adjective Form
+        #    Matches: "scoliotic curvature", "scoliotic deformity"
+        # ==============================================================================
+        scoliotic
+        |
+        # ==============================================================================
+        # 3. Descriptive: Lateral Curvature
+        #    Added optional 's' to capture "lateral curvatures".
+        # ==============================================================================
+        lateral\s+curvatures?
+        |
+        # ==============================================================================
+        # 4. Descriptive: Directional Curvature
+        #    Accounts for plurals (curvatures, convexities, deviations).
+        #    Uses [^.]*? to safely match terms within the same sentence, preventing 
+        #    false positives from jumping across periods.
+        # ==============================================================================
+        (?:curvatures?|convexit(?:y|ies)|deviations?)\s[^.]*?(?:spine|thoracic|lumbar|thoracolumbar)
+        |
+        # ==============================================================================
+        # 5. Shape Descriptors
+        #    Accounts for plurals in curvature and deformity.
+        # ==============================================================================
+        s-shaped\s+(?:spine|curvatures?|deformit(?:y|ies))
+    )\b

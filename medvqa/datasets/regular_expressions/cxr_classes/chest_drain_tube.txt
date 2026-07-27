@@ -1,0 +1,35 @@
+
+    # 1. Strong Anatomical Terms
+    \b(?:chest|thoracostomy|pleural|thoracic)\s+(?:tube|drain|catheter|port)
+    |
+    # 2. Pigtail
+    \bpigtail(?: \s+(?:catheter|drain|tube|placed|position|in\s+situ))?
+    |
+    # 3. Action-Based Contexts (Refined for Verb Conjugations)
+    # NOW MATCHES: "drain projects over", "drain is located", "drain positioned"
+    \bdrain\w*\b
+    (?:(?![.!?])\W+\w+){0,6}  # Safe gap (stops at periods)
+    \s+
+    \b(?:
+        place\w*|     # placement, placed, placing
+        remov\w*|     # removal, removed
+        clamp\w*|     # clamped
+        position\w*|  # position, positioned
+        locat\w*|     # located, location
+        project\w*|   # projects, projecting
+        overl\w*|    # overlying, overlays, overlies, overlap
+    )\b
+    |
+    # Reverse direction (Anchor ... Drain)
+    \b(?:
+        place\w*|
+        remov\w*|
+        clamp\w*|
+        position\w*|
+        locat\w*|
+        project\w*|
+        overl\w*
+    )\b
+    (?:(?![.!?])\W+\w+){0,6}
+    \s+
+    \bdrain\w*\b

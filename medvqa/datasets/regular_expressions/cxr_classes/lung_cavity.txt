@@ -1,0 +1,12 @@
+
+    \b(?:
+        # Explicit cavity language
+        cavit\w* |
+
+        # Common near-synonyms / descriptors
+        abscess\w* |
+        excavat\w* |
+
+        # Strong radiographic sign
+        (?:air|gas)\s*[-]?\s*fluid\s+levels?
+    )\b

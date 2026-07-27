@@ -1,0 +1,24 @@
+
+    # 1. Direct Diagnosis
+    # Matches: "Pneumoperitoneum"
+    \bpneumoperitoneum\w*
+    |
+    # 2. Descriptive: "Free Air" + Location
+    # Matches: "Free air under the diaphragm", "Free gas beneath the right hemidiaphragm"
+    # This is the most common way it is described in MIMIC.
+    \b(?:free\s+)?(?:air|gas)\b
+    (?:
+        \s+(?:is|seen|present|visualized|noted)?
+    ){0,3}
+    \s+
+    (?:under|below|beneath|inferior\s+to)\s+(?:the\s+)?
+    (?:\w+\s+){0,2} # Gap for "right", "left", "hemidiaphragm"
+    \bdiaphragm\w*
+    |
+    # 3. Location Adjectives + Air
+    # Matches: "Subdiaphragmatic free air", "Subphrenic gas", "Intraperitoneal free air"
+    \b(?:sub-?diaphragmatic|sub-?phrenic|infra-?diaphragmatic|intra-?peritoneal)\s+(?:free\s+)?(?:air|gas)
+    |
+    # 4. Rigler's Sign (Pathognomonic visual sign)
+    # Gas on both sides of the bowel wall 
+    \brigler\w*\s+sign

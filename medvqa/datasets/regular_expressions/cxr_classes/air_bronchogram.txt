@@ -1,0 +1,3 @@
+
+    # Matches: "Air bronchogram", "Air bronchograms"
+    \bair\s+bronchogram\w*

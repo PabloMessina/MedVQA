@@ -1,0 +1,24 @@
+
+    # 1. Direct Diagnosis / Lexical Variants
+    \b(?:hydro[\s-]*pneumotho\w*|pneumo[\s-]*hydrotho\w*|(?:hemo|pyo)[\s-]*pneumotho\w*)\b
+
+    |
+
+    # 2. Descriptive Air & Fluid Co-occurrence (~150 character window)
+    # Catches non-standard phrasing: "air-fluid level", "air and fluid collection", 
+    # "more fluid than air", or "air inclusion... abundant fluid".
+    (?:
+        \b(?:air|gas)\b[\s\S]{0,150}\b(?:fluid|liquid)\b
+      | \b(?:fluid|liquid)\b[\s\S]{0,150}\b(?:air|gas)\b
+    )
+
+    |
+
+    # 3. Separated Pneumothorax + Effusion (~800 character window)
+    # Roughly equal to 100-130 words. Safely jumps across sentences, newlines, 
+    # and intervening observations (like catheters or atelectasis).
+    (?:
+        \bpneumotho\w*[\s\S]{0,800}\b(?:effusion\w*|pleural\s+fluid|hydrotho\w*)\b
+      | \b(?:effusion\w*|pleural\s+fluid|hydrotho\w*)\b[\s\S]{0,800}\bpneumotho\w*
+    )
+    
