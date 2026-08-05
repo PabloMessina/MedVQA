@@ -1,25 +1,30 @@
-import os
 import argparse
-import sys
 import logging
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from nltk.tokenize import sent_tokenize
-from medvqa.utils.common import get_timestamp
-from medvqa.utils.logging_utils import setup_logging
+from tqdm import tqdm
+
 from medvqa.models.seq2seq_utils import apply_seq2seq_model_to_sentences
-from medvqa.datasets.rexgradient_160k import (
-    REXGRADIENT_160K_TEST_METADATA_JSON_PATH,
-    REXGRADIENT_160K_VAL_METADATA_JSON_PATH,
-    REXGRADIENT_160K_TRAIN_METADATA_JSON_PATH,
-    REXGRADIENT_160K_TEST_METADATA_CSV_PATH,
-    REXGRADIENT_160K_VAL_METADATA_CSV_PATH,
-    REXGRADIENT_160K_TRAIN_METADATA_CSV_PATH,
+from medvqa.settings import (
     REXGRADIENT_160K_LARGE_FAST_CACHE_DIR,
+    REXGRADIENT_160K_TEST_METADATA_CSV_PATH,
+    REXGRADIENT_160K_TEST_METADATA_JSON_PATH,
+    REXGRADIENT_160K_TRAIN_METADATA_CSV_PATH,
+    REXGRADIENT_160K_TRAIN_METADATA_JSON_PATH,
+    REXGRADIENT_160K_VAL_METADATA_CSV_PATH,
+    REXGRADIENT_160K_VAL_METADATA_JSON_PATH,
 )
-from medvqa.utils.text_data_utils import parse_facts, remove_consecutive_repeated_words_from_text
+from medvqa.utils.common import get_timestamp
 from medvqa.utils.files_utils import load_json, load_jsonl, save_json
+from medvqa.utils.logging_utils import setup_logging
+from medvqa.utils.text_data_utils import (
+    parse_facts,
+    remove_consecutive_repeated_words_from_text,
+)
 
 # Setup logging
 setup_logging()
@@ -72,7 +77,7 @@ def extract_facts(args):
     sentences_to_parse = list(sentences_to_parse) # Convert to list for indexing
     
     # Print example sentences
-    logger.info(f"Example sentences to parse:")
+    logger.info("Example sentences to parse:")
     indices = np.random.choice(len(sentences_to_parse), min(10, len(sentences_to_parse)), replace=False)
     for i in indices:
         logger.info(f"{i}: {sentences_to_parse[i]}")

@@ -1,6 +1,7 @@
 import os
 import warnings
 from pathlib import Path
+
 from dotenv import load_dotenv
 from platformdirs import user_cache_dir
 
@@ -47,8 +48,23 @@ EXPERIMENTS_DIR = os.path.join(WORKSPACE_DIR, 'experiments')
 # -- Cache directories --
 CACHE_DIR = os.path.join(WORKSPACE_DIR, 'cache')
 
+# -- Fast / large-fast workspaces (optional; fall back to WORKSPACE_DIR) --
+FAST_WORKSPACE_DIR = os.getenv('MEDVQA_FAST_WORKSPACE_DIR')
+raise_warning_if_none(FAST_WORKSPACE_DIR, "MEDVQA_FAST_WORKSPACE_DIR")
+if FAST_WORKSPACE_DIR is None:
+    FAST_WORKSPACE_DIR = WORKSPACE_DIR
+
+LARGE_FAST_WORKSPACE_DIR = os.getenv('MEDVQA_LARGE_FAST_WORKSPACE_DIR')
+raise_warning_if_none(LARGE_FAST_WORKSPACE_DIR, "MEDVQA_LARGE_FAST_WORKSPACE_DIR")
+if LARGE_FAST_WORKSPACE_DIR is None:
+    LARGE_FAST_WORKSPACE_DIR = WORKSPACE_DIR
+
+FAST_CACHE_DIR = os.path.join(FAST_WORKSPACE_DIR, 'cache')
+LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_WORKSPACE_DIR, 'cache')
+
 # -- Temporary directories --
 TMP_DIR = os.path.join(WORKSPACE_DIR, 'tmp')
+FAST_TMP_DIR = os.path.join(FAST_WORKSPACE_DIR, 'tmp')
 
 # -- Results directory --
 RESULTS_DIR = os.path.join(WORKSPACE_DIR, 'results')
@@ -105,6 +121,14 @@ MIMICCXR_SPLIT_CSV_PATH = os.path.join(MIMICCXR_JPG_DIR, 'mimic-cxr-2.0.0-split.
 MIMICCXR_CACHE_DIR = os.path.join(CACHE_DIR, 'mimiccxr')
 MIMICCXR_REPORTS_TXT_PATHS = os.path.join(MIMICCXR_CACHE_DIR, 'reports_txt_paths.pkl')
 MIMICCXR_PATH_TO_REPORT_TEXT_DICT_PATH = os.path.join(MIMICCXR_CACHE_DIR, 'path_to_report_text_dict.pkl')
+
+MIMICCXR_BACKGROUND_FINDINGS_AND_IMPRESSION_JSON_PATH = os.getenv(
+    'MIMICCXR_BACKGROUND_FINDINGS_AND_IMPRESSION_JSON_PATH'
+)
+raise_warning_if_none(
+    MIMICCXR_BACKGROUND_FINDINGS_AND_IMPRESSION_JSON_PATH,
+    "MIMICCXR_BACKGROUND_FINDINGS_AND_IMPRESSION_JSON_PATH",
+)
 
 # -- MIMIC-CXR-LT 2023 --
 MIMIC_CXR_LT_2023_TRAIN_CSV_PATH = os.getenv('MIMIC_CXR_LT_2023_TRAIN_CSV_PATH')
@@ -285,3 +309,17 @@ VINBIG_YOLOV5_LABELS_DIR = os.getenv('VINBIG_YOLOV5_LABELS_DIR')
 raise_warning_if_none(VINBIG_YOLOV5_LABELS_DIR, "VINBIG_YOLOV5_LABELS_DIR")
 
 VINBIG_CACHE_DIR = os.path.join(CACHE_DIR, 'vinbig')
+
+# -- ReXGradient-160K --
+REXGRADIENT_160K_DATASET_DIR = os.getenv('REXGRADIENT_160K_DATASET_DIR')
+raise_error_if_none(REXGRADIENT_160K_DATASET_DIR, "REXGRADIENT_160K_DATASET_DIR")
+
+REXGRADIENT_160K_TRAIN_METADATA_CSV_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'train_metadata.csv')
+REXGRADIENT_160K_TRAIN_METADATA_JSON_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'train_metadata.json')
+REXGRADIENT_160K_VAL_METADATA_CSV_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'valid_metadata.csv')
+REXGRADIENT_160K_VAL_METADATA_JSON_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'valid_metadata.json')
+REXGRADIENT_160K_TEST_METADATA_CSV_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'test_metadata.csv')
+REXGRADIENT_160K_TEST_METADATA_JSON_PATH = os.path.join(REXGRADIENT_160K_DATASET_DIR, 'test_metadata.json')
+REXGRADIENT_160K_LARGE_FAST_CACHE_DIR = os.path.join(LARGE_FAST_CACHE_DIR, 'rexgradient_160k')
+REXGRADIENT_160K_FAST_CACHE_DIR = os.path.join(FAST_CACHE_DIR, 'rexgradient_160k')
+REXGRADIENT_160K_FAST_TMP_DIR = os.path.join(FAST_TMP_DIR, 'rexgradient_160k')

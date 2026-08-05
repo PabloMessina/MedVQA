@@ -1,27 +1,30 @@
+import argparse
+import json
+import logging
 import os
 import re
-import argparse
-import re
 import sys
-import json
+from typing import Dict
+
 import numpy as np
-import logging
 import pandas as pd
 from tqdm import tqdm
-from typing import Dict
-from medvqa.datasets.rexgradient_160k import (
+
+from medvqa.settings import (
     REXGRADIENT_160K_FAST_CACHE_DIR,
     REXGRADIENT_160K_FAST_TMP_DIR,
     REXGRADIENT_160K_TEST_METADATA_CSV_PATH,
     REXGRADIENT_160K_TRAIN_METADATA_CSV_PATH,
     REXGRADIENT_160K_VAL_METADATA_CSV_PATH,
 )
-from medvqa.utils.text_data_utils import find_texts_matching_regex_in_parallel, sentence_tokenize_texts_in_parallel
-from medvqa.utils.logging_utils import setup_logging
-from medvqa.utils.text_data_utils import sort_sentences
-from medvqa.utils.openai_api_utils import run_common_boilerplate_for_api_requests
 from medvqa.utils.files_utils import load_jsonl
-
+from medvqa.utils.logging_utils import setup_logging
+from medvqa.utils.openai_api_utils import run_common_boilerplate_for_api_requests
+from medvqa.utils.text_data_utils import (
+    find_texts_matching_regex_in_parallel,
+    sentence_tokenize_texts_in_parallel,
+    sort_sentences,
+)
 
 INSTRUCTIONS = """Relevant facts:
 
@@ -111,11 +114,11 @@ def parse_llm_output(llm_response_str: str) -> Dict[str, str]:
     json_str = llm_response_str[start : end + 1]
     data = json.loads(json_str)
     if not isinstance(data, dict):
-        raise ValueError(f"Parsed data is not a dictionary: {data}")
+        raise TypeError(f"Parsed data is not a dictionary: {data}")
     if "reason" not in data or "facts" not in data:
         raise ValueError(f"Missing expected keys in parsed data: {data}")
     if not isinstance(data["reason"], str) or not isinstance(data["facts"], list):
-        raise ValueError(f"'reason' should be a string and 'facts' should be a list: {data}")
+        raise TypeError(f"'reason' should be a string and 'facts' should be a list: {data}")
     assert all(isinstance(fact, str) for fact in data["facts"]), f"All facts should be strings: {data['facts']}"
     return {
         "reason": data["reason"],

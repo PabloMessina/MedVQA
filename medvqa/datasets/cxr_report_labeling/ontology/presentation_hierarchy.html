@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Canonical CXR Ontology — Hierarchy</title>
+<style>
+  :root {
+    --bg:#0f172a; --panel:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --line:#334155;
+    --accent:#38bdf8;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:20px 28px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#1e293b,#0f172a); }
+  header h1 { margin:0 0 6px; font-size:22px; font-weight:650; }
+  header p { margin:0; color:var(--muted); font-size:13px; }
+  .stats { display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:12px; }
+  .stat b { color:var(--accent); font-size:16px; display:block; }
+  main { padding:18px 28px 40px; display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:14px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  h2 { margin:0 0 4px; font-size:14px; letter-spacing:.02em; }
+  .desc { color:var(--muted); font-size:11px; margin:0 0 8px; }
+  ul.tree, ul.tree ul { list-style:none; margin:4px 0 4px 14px; padding-left:12px; border-left:1px solid #334155; }
+  li.node { margin:3px 0; }
+  .name { font-weight:550; }
+  .id { color:var(--muted); font-size:10px; margin-left:6px; font-family: ui-monospace, monospace; }
+  .badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:999px; margin-left:6px; border:1px solid; }
+  .badge.kind { color:#94a3b8; border-color:#475569; }
+  .multi { color:#f472b6; font-size:10px; margin-left:4px; }
+  footer { padding:12px 28px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Canonical CXR classifier ontology</h1>
+  <p>Canonical chest radiograph classifier ontology · v1.0.0 · status: review · parent = is-a / label inheritance</p>
+  <div class="stats">
+    <div class="stat"><b>79</b> classes</div>
+    <div class="stat"><b>18</b> categories</div>
+    <div class="stat"><b>3</b> multi-parent classes</div>
+  </div>
+</header>
+<main>
+<section>
+  <h2>Global <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Image-level states and globally distributed findings.</p>
+  <ul class="tree"><li class="node"><span class="name">No finding</span> <span class="id">no_finding</span><span class="badge kind">state</span></li></ul>
+</section>
+<section>
+  <h2>Calcific findings <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Organizational group for thoracic calcific findings modeled under the Calcification umbrella class.</p>
+  <ul class="tree"><li class="node"><span class="name">Calcification</span> <span class="id">calcification</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Aortic calcification</span> <span class="id">aortic_calcification</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Calcified pulmonary nodule or granuloma</span> <span class="id">calcified_pulmonary_nodule_or_granuloma</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li><li class="node"><span class="name">Cardiac/valvular/pericardial calcification</span> <span class="id">cardiac_or_valvular_calcification</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pleural calcification</span> <span class="id">pleural_calcification</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Pulmonary opacity <span style="color:var(--muted);font-weight:400;font-size:12px">(11)</span></h2>
+  <p class="desc">Organizational group for pulmonary opacity patterns and related radiographic syndromes modeled under the Lung opacity umbrella class.</p>
+  <ul class="tree"><li class="node"><span class="name">Lung opacity</span> <span class="id">lung_opacity</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Atelectasis</span> <span class="id">atelectasis</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Lobar atelectasis</span> <span class="id">lobar_atelectasis</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Rounded atelectasis</span> <span class="id">rounded_atelectasis</span><span class="badge kind">finding</span></li></ul></li><li class="node"><span class="name">Consolidation</span> <span class="id">consolidation</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Fibrotic lung change</span> <span class="id">fibrotic_lung_change</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Focal pulmonary scarring</span> <span class="id">focal_pulmonary_scarring</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Ground-glass opacity/pattern</span> <span class="id">ground_glass_opacity_pattern</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Kerley lines</span> <span class="id">kerley_lines</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pneumonia</span> <span class="id">pneumonia</span><span class="badge kind">diagnosis</span></li><li class="node"><span class="name">Pulmonary edema</span> <span class="id">pulmonary_edema</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pulmonary nodule or mass</span> <span class="id">pulmonary_nodule_or_mass</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Reticular interstitial opacity/pattern</span> <span class="id">reticular_interstitial_opacity_pattern</span><span class="badge kind">finding</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Diagnostic label <span style="color:var(--muted);font-weight:400;font-size:12px">(3)</span></h2>
+  <p class="desc">Explicit supervised diagnostic labels retained separately from image morphology.</p>
+  <ul class="tree"><li class="node"><span class="name">Interstitial lung disease</span> <span class="id">interstitial_lung_disease</span><span class="badge kind">diagnosis</span></li><li class="node"><span class="name">Pneumonia</span> <span class="id">pneumonia</span><span class="multi">parents: Lung opacity</span></li><li class="node"><span class="name">Tuberculosis</span> <span class="id">tuberculosis</span><span class="badge kind">diagnosis</span></li></ul>
+</section>
+<section>
+  <h2>Focal lesion findings <span style="color:var(--muted);font-weight:400;font-size:12px">(4)</span></h2>
+  <p class="desc">Organizational group for discrete intrapulmonary nodules/masses, cavities, and thin-walled cystic or bullous lucencies.</p>
+  <ul class="tree"><li class="node"><span class="name">Pulmonary cavity</span> <span class="id">pulmonary_cavity</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pulmonary cyst or bulla</span> <span class="id">pulmonary_cyst_or_bulla</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pulmonary nodule or mass</span> <span class="id">pulmonary_nodule_or_mass</span><span class="multi">parents: Lung opacity</span><ul><li class="node"><span class="name">Calcified pulmonary nodule or granuloma</span> <span class="id">calcified_pulmonary_nodule_or_granuloma</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Pulmonary parenchyma <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Pulmonary findings not appropriately organized as opacity or focal-lesion subtypes.</p>
+  <ul class="tree"><li class="node"><span class="name">Emphysema</span> <span class="id">emphysema</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Lung volume <span style="color:var(--muted);font-weight:400;font-size:12px">(2)</span></h2>
+  <p class="desc">Findings describing reduced or increased lung volume.</p>
+  <ul class="tree"><li class="node"><span class="name">Hyperinflation</span> <span class="id">hyperinflation</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Low lung volume</span> <span class="id">low_lung_volume</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Pleura <span style="color:var(--muted);font-weight:400;font-size:12px">(9)</span></h2>
+  <p class="desc">Pleural fluid, gas, thickening, plaque, calcification, and focal pleural lesions.</p>
+  <ul class="tree"><li class="node"><span class="name">Costophrenic angle blunting</span> <span class="id">costophrenic_angle_blunting</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pleural effusion</span> <span class="id">pleural_effusion</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Hydropneumothorax</span> <span class="id">hydropneumothorax</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li><li class="node"><span class="name">Loculated/fissural effusion</span> <span class="id">loculated_or_fissural_pleural_effusion</span><span class="badge kind">finding</span></li></ul></li><li class="node"><span class="name">Pleural nodule or mass</span> <span class="id">pleural_nodule_or_mass</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pleural thickening</span> <span class="id">pleural_thickening</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Pleural calcification</span> <span class="id">pleural_calcification</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li><li class="node"><span class="name">Pleural plaque</span> <span class="id">pleural_plaque</span><span class="badge kind">finding</span></li></ul></li><li class="node"><span class="name">Pneumothorax</span> <span class="id">pneumothorax</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Hydropneumothorax</span> <span class="id">hydropneumothorax</span><span class="badge kind">finding</span><span class="multi">⟵ multi-parent</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Cardiomediastinal <span style="color:var(--muted);font-weight:400;font-size:12px">(14)</span></h2>
+  <p class="desc">Cardiac, vascular, hilar, and mediastinal contour or content findings.</p>
+  <ul class="tree"><li class="node"><span class="name">Aortic calcification</span> <span class="id">aortic_calcification</span><span class="multi">parents: Calcification</span></li><li class="node"><span class="name">Aortic tortuosity/elongation</span> <span class="id">aortic_tortuosity_or_elongation</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Cardiac/valvular/pericardial calcification</span> <span class="id">cardiac_or_valvular_calcification</span><span class="multi">parents: Calcification</span></li><li class="node"><span class="name">Enlarged cardiomediastinal silhouette</span> <span class="id">enlarged_cardiomediastinal_silhouette</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Aortic enlargement/ectasia</span> <span class="id">aortic_enlargement_or_ectasia</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Enlarged cardiac silhouette</span> <span class="id">enlarged_cardiac_silhouette</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Mediastinal widening</span> <span class="id">mediastinal_widening</span><span class="badge kind">finding</span></li></ul></li><li class="node"><span class="name">Enlarged pulmonary artery</span> <span class="id">enlarged_pulmonary_artery</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Hilar enlargement</span> <span class="id">hilar_enlargement</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Hilar or mediastinal nodal enlargement</span> <span class="id">hilar_or_mediastinal_nodal_enlargement</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Mediastinal mass</span> <span class="id">mediastinal_mass</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Mediastinal shift</span> <span class="id">mediastinal_shift</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pneumomediastinum</span> <span class="id">pneumomediastinum</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Pulmonary vascular congestion</span> <span class="id">pulmonary_vascular_congestion</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Airway <span style="color:var(--muted);font-weight:400;font-size:12px">(3)</span></h2>
+  <p class="desc">Tracheal and bronchial findings.</p>
+  <ul class="tree"><li class="node"><span class="name">Bronchial wall thickening</span> <span class="id">bronchial_wall_thickening</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Bronchiectasis</span> <span class="id">bronchiectasis</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Tracheal deviation</span> <span class="id">tracheal_deviation</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Diaphragm <span style="color:var(--muted);font-weight:400;font-size:12px">(4)</span></h2>
+  <p class="desc">Diaphragmatic contour, position, and hernia findings.</p>
+  <ul class="tree"><li class="node"><span class="name">Elevated/eventrated hemidiaphragm</span> <span class="id">elevated_or_eventrated_hemidiaphragm</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Flattened diaphragm</span> <span class="id">flattened_diaphragm</span><span class="badge kind">attribute</span></li><li class="node"><span class="name">Hernia</span> <span class="id">hernia</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Hiatal hernia</span> <span class="id">hiatal_hernia</span><span class="badge kind">finding</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Upper abdomen <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Clinically important upper-abdominal findings visible on CXR.</p>
+  <ul class="tree"><li class="node"><span class="name">Pneumoperitoneum</span> <span class="id">pneumoperitoneum</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Bone fracture findings <span style="color:var(--muted);font-weight:400;font-size:12px">(4)</span></h2>
+  <p class="desc">Organizational group for fractures of osseous structures visible on chest radiographs, modeled under the Bone fracture umbrella class.</p>
+  <ul class="tree"><li class="node"><span class="name">Bone fracture</span> <span class="id">bone_fracture</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Clavicle fracture</span> <span class="id">clavicle_fracture</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Rib fracture</span> <span class="id">rib_fracture</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Vertebral compression fracture</span> <span class="id">vertebral_compression_fracture</span><span class="badge kind">finding</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Musculoskeletal <span style="color:var(--muted);font-weight:400;font-size:12px">(5)</span></h2>
+  <p class="desc">Non-fracture thoracic osseous and spinal findings.</p>
+  <ul class="tree"><li class="node"><span class="name">Degenerative osseous change</span> <span class="id">degenerative_osseous_change</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Focal osseous lesion</span> <span class="id">focal_osseous_lesion</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Kyphosis</span> <span class="id">kyphosis</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Radiographic osteopenia</span> <span class="id">radiographic_osteopenia</span><span class="badge kind">finding</span></li><li class="node"><span class="name">Scoliosis</span> <span class="id">scoliosis</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Support device <span style="color:var(--muted);font-weight:400;font-size:12px">(13)</span></h2>
+  <p class="desc">Therapeutic lines, tubes, implants, prostheses, surgical hardware, and device-associated attributes modeled under the Support device present umbrella.</p>
+  <ul class="tree"><li class="node"><span class="name">Support device present</span> <span class="id">support_device_present</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Breast implant</span> <span class="id">breast_implant</span><span class="badge kind">device</span></li><li class="node"><span class="name">Device abnormality</span> <span class="id">device_abnormality</span><span class="badge kind">attribute</span></li><li class="node"><span class="name">Pacemaker/ICD</span> <span class="id">pacemaker_or_icd</span><span class="badge kind">device</span></li><li class="node"><span class="name">Prosthetic cardiac valve</span> <span class="id">prosthetic_cardiac_valve</span><span class="badge kind">device</span></li><li class="node"><span class="name">Sternotomy wires</span> <span class="id">sternotomy_wires</span><span class="badge kind">device</span></li><li class="node"><span class="name">Support line present</span> <span class="id">support_line_present</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Central venous catheter</span> <span class="id">central_venous_catheter</span><span class="badge kind">device</span></li></ul></li><li class="node"><span class="name">Support tube present</span> <span class="id">support_tube_present</span><span class="badge kind">finding</span><ul><li class="node"><span class="name">Chest tube</span> <span class="id">chest_tube</span><span class="badge kind">device</span></li><li class="node"><span class="name">Endotracheal tube</span> <span class="id">endotracheal_tube</span><span class="badge kind">device</span></li><li class="node"><span class="name">Enteric tube</span> <span class="id">enteric_tube</span><span class="badge kind">device</span></li></ul></li><li class="node"><span class="name">Vascular graft/stent</span> <span class="id">vascular_graft_or_stent</span><span class="badge kind">device</span></li></ul></li></ul>
+</section>
+<section>
+  <h2>Soft tissue <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Extra-osseous chest-wall and subcutaneous findings.</p>
+  <ul class="tree"><li class="node"><span class="name">Subcutaneous emphysema</span> <span class="id">subcutaneous_emphysema</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Other <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Image-recognizable findings not fitting another anatomic category.</p>
+  <ul class="tree"><li class="node"><span class="name">Nontherapeutic foreign body</span> <span class="id">nontherapeutic_foreign_body</span><span class="badge kind">finding</span></li></ul>
+</section>
+<section>
+  <h2>Anatomic variant <span style="color:var(--muted);font-weight:400;font-size:12px">(1)</span></h2>
+  <p class="desc">Visible benign anatomic variants.</p>
+  <ul class="tree"><li class="node"><span class="name">Azygos lobe</span> <span class="id">azygos_lobe</span><span class="badge kind">finding</span></li></ul>
+</section>
+</main>
+<footer>Generated by generate_presentations.py from canonical_cxr_ontology.yaml</footer>
+</body></html>

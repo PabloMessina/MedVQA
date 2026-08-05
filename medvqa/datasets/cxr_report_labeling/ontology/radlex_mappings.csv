@@ -1,0 +1,80 @@
+class_id,class_name,radlex,radlex_match,needs_review,notes
+no_finding,No finding,RID13173 | normal,close,yes,Generic normal descriptor; not specific to a normal chest radiograph.
+calcification,Calcification,RID5196 | calcification,exact,no,
+lung_opacity,Lung opacity,RID28530 | opacity,exact,no,RadLex preferred label is generic opacity; established old mapping.
+ground_glass_opacity_pattern,Ground-glass opacity/pattern,RID28531 | ground-glass opacity,exact,no,
+consolidation,Consolidation,RID43255 | consolidation,exact,no,
+pneumonia,Pneumonia,RID5350 | pneumonia,exact,no,
+tuberculosis,Tuberculosis,RID29116 | tuberculosis,exact,no,
+interstitial_lung_disease,Interstitial lung disease,RID28799 | interstitial lung disease,exact,no,
+atelectasis,Atelectasis,RID28493 | atelectasis,exact,no,
+lobar_atelectasis,Lobar atelectasis,RID28493 | atelectasis,broader,yes,No lobar-specific concept; RadLex atelectasis is broader. Related descriptor: RID28506 | collapse.
+rounded_atelectasis,Rounded atelectasis,RID28494 | rounded atelectasis,exact,no,
+reticular_interstitial_opacity_pattern,Reticular interstitial opacity/pattern,RID43271 | reticular pattern,close,yes,Good morphology match; ontology additionally specifies pulmonary/interstitial localization.
+kerley_lines,Kerley lines,composite: RID43273 | septal lines; RID43275 | Kerley B lines,composite,yes,Septal-lines umbrella plus explicit Kerley B-line subtype; verify whether this best covers all Kerley-line wording.
+pulmonary_edema,Pulmonary edema,RID4866 | pulmonary edema,exact,no,
+fibrotic_lung_change,Fibrotic lung change,RID3821 | interstitial fibrosis,close,yes,Closest broad lung-fibrosis concept; related narrower RID28836 | idiopathic pulmonary fibrosis.
+focal_pulmonary_scarring,Focal pulmonary scarring,RID3829 | scar,broader,yes,Generic scar concept; no dedicated focal pulmonary-scarring term found.
+pulmonary_nodule_or_mass,Pulmonary nodule or mass,composite: RID50149 | pulmonary nodule; RID39056 | lung mass,composite,no,Ontology intentionally merges nodule and mass.
+calcified_pulmonary_nodule_or_granuloma,Calcified pulmonary nodule or granuloma,RID3953 | granuloma,broader,yes,No calcified pulmonary granuloma term found. Generic granuloma lacks both pulmonary localization and calcification; do not treat as exact.
+pulmonary_cavity,Pulmonary cavity,RID46014 | cavitated,close,yes,Descriptor rather than a dedicated pulmonary-cavity finding.
+pulmonary_cyst_or_bulla,Pulmonary cyst or bulla,composite: RID3890 | cyst; RID28502 | bulla; RID28495 | bleb,composite,yes,Cyst is generic; bulla/bleb are direct subtypes. No single merged pulmonary concept found.
+emphysema,Emphysema,RID4799 | emphysema,exact,no,Removed the old COPD component because COPD-only wording is excluded by the current class.
+bronchiectasis,Bronchiectasis,RID28496 | bronchiectasis,exact,no,
+bronchial_wall_thickening,Bronchial wall thickening,RID46027 | bronchial wall thickening,exact,no,
+low_lung_volume,Low lung volume,no direct match,none,yes,"Only separate descriptor/anatomy terms were found (low, lung, volume); no coherent RadLex concept."
+hyperinflation,Hyperinflation,RID5884 | hyperinflated,close,yes,Descriptor match; RID28537 | air trapping is related but not equivalent.
+pleural_effusion,Pleural effusion,RID34539 | pleural effusion,exact,no,
+loculated_or_fissural_pleural_effusion,Loculated/fissural effusion,RID34539 | pleural effusion,broader,yes,No loculated/fissural subtype term found.
+costophrenic_angle_blunting,Costophrenic angle blunting,composite: RID1534 | costophrenic sulcus; RID5869 | blunted,composite,yes,Anatomy + descriptor only; no dedicated finding concept.
+pneumothorax,Pneumothorax,RID5352 | pneumothorax,exact,no,
+hydropneumothorax,Hydropneumothorax,no direct match,none,yes,Not present as preferred label or synonym in this RadLex export.
+pleural_thickening,Pleural thickening,no direct match,none,yes,No direct finding; pleural plaque is narrower/different.
+pleural_plaque,Pleural plaque,RID43269 | pleural plaque,exact,no,
+pleural_calcification,Pleural calcification,RID5196 | calcification,broader,yes,No pleural-specific calcification concept; pleural plaque is related but not equivalent.
+pleural_nodule_or_mass,Pleural nodule or mass,composite: RID3875 | nodule; RID3874 | mass,composite,yes,Generic nodule/mass concepts; pleural localization is not encoded.
+enlarged_cardiomediastinal_silhouette,Enlarged cardiomediastinal silhouette,no direct match,none,yes,No cardiomediastinal-silhouette enlargement concept found.
+enlarged_cardiac_silhouette,Enlarged cardiac silhouette,no direct match,none,yes,Cardiomegaly is not a preferred label or synonym in this RadLex export; avoid anatomy/descriptor composition as exact.
+pulmonary_vascular_congestion,Pulmonary vascular congestion,RID4863 | congestion,close,yes,Generic congestion; pulmonary vascular localization not encoded.
+enlarged_pulmonary_artery,Enlarged pulmonary artery,no direct match,none,yes,"Pulmonary artery anatomy exists (RID974), but no enlargement finding term."
+aortic_enlargement_or_ectasia,Aortic enlargement/ectasia,RID4743 | dilation,close,yes,Descriptor only; apply to aorta. Aneurysm terms are narrower/different.
+aortic_tortuosity_or_elongation,Aortic tortuosity/elongation,RID5916 | tortuous,close,yes,Descriptor only; no dedicated aortic-tortuosity concept.
+aortic_calcification,Aortic calcification,RID5196 | calcification,broader,yes,General calcification; aortic localization not encoded.
+cardiac_or_valvular_calcification,Cardiac/valvular/pericardial calcification,composite: RID50146 | coronary artery calcification; RID5196 | calcification,composite,yes,"No umbrella covering cardiac, valvular, and pericardial calcification. Generic calcification is needed for non-coronary sites."
+hilar_enlargement,Hilar enlargement,no direct match,none,yes,"Pulmonary hilum anatomy exists (RID34566), but no hilar-enlargement finding."
+hilar_or_mediastinal_nodal_enlargement,Hilar or mediastinal nodal enlargement,RID3798 | lymphadenopathy,broader,yes,RadLex lymphadenopathy is anatomy-agnostic; the ontology restricts the finding to hilar or mediastinal nodes.
+mediastinal_widening,Mediastinal widening,no direct match,none,yes,Only separate widened/enlargement descriptors and mediastinum anatomy were found.
+mediastinal_mass,Mediastinal mass,RID3874 | mass,broader,yes,Generic mass; mediastinal localization not encoded.
+mediastinal_shift,Mediastinal shift,no direct match,none,yes,No dedicated finding concept in this RadLex export.
+pneumomediastinum,Pneumomediastinum,RID28523 | pneumomediastinum,exact,no,
+tracheal_deviation,Tracheal deviation,no direct match,none,yes,Only trachea anatomy and generic deviation/deviated descriptors were found.
+elevated_or_eventrated_hemidiaphragm,Elevated/eventrated hemidiaphragm,composite: RID5248 | eventration; RID5842 | elevated position; RID28909 | hemidiaphragm,composite,yes,"No single merged finding concept; eventration is direct, elevation requires descriptor + anatomy."
+flattened_diaphragm,Flattened diaphragm,composite: RID5880 | flattened; RID1524 | diaphragm,composite,yes,Anatomy + descriptor only; no dedicated finding concept.
+hernia,Hernia,RID4895 | hernia,exact,no,Umbrella; related subtypes include hiatal and diaphragmatic hernia.
+hiatal_hernia,Hiatal hernia,RID4897 | hiatal hernia,exact,no,
+pneumoperitoneum,Pneumoperitoneum,RID4803 | pneumoperitoneum,exact,no,
+bone_fracture,Bone fracture,RID4650 | fracture,exact,no,Umbrella fracture concept; not limited to the CXR field of view.
+clavicle_fracture,Clavicle fracture,RID4650 | fracture,broader,yes,No clavicle-specific fracture concept; clavicle anatomy is RID1854.
+rib_fracture,Rib fracture,RID4650 | fracture,broader,yes,No rib-specific fracture concept; rib anatomy is RID2471.
+vertebral_compression_fracture,Vertebral compression fracture,RID4658 | compression fracture,close,yes,Compression-fracture concept does not encode vertebral localization.
+focal_osseous_lesion,Focal osseous lesion,RID38780 | lesion,broader,yes,Generic lesion; no focal osseous-lesion concept found.
+degenerative_osseous_change,Degenerative osseous change,composite: RID5076 | osteophyte; RID3555 | osteoarthritis; RID5121 | spondylosis deformans,composite,yes,Representative manifestations; no single umbrella matching the ontology scope.
+radiographic_osteopenia,Radiographic osteopenia,RID5388 | osteopenia,exact,no,
+scoliosis,Scoliosis,RID4756 | scoliosis,exact,no,
+kyphosis,Kyphosis,RID4759 | kyphosis,exact,no,
+support_device_present,Support device present,RID29033 | medical device,close,yes,Broad medical-device concept; current ontology requires visible therapeutic hardware on CXR.
+support_line_present,Support line present,RID5576 | catheter,close,yes,Closest umbrella; catheter is broader/different from the ontology line-only scope.
+support_tube_present,Support tube present,RID5555 | tube,close,yes,Generic tube concept; current ontology is therapeutic support tubes on CXR.
+endotracheal_tube,Endotracheal tube,RID5557 | endotracheal tube,exact,no,
+enteric_tube,Enteric tube,composite: RID5566 | nasogastric tube; RID5562 | gastric tube; RID5570 | orogastric tube,composite,yes,No single enteric-tube umbrella found; representative included tube types.
+central_venous_catheter,Central venous catheter,RID5578 | central venous catheter,exact,no,
+chest_tube,Chest tube,RID5573 | thoracostomy tube,exact,no,Equivalent device concept.
+pacemaker_or_icd,Pacemaker/ICD,composite: RID5436 | pacemaker; RID5434 | automated implantable cardiac defibrillator,composite,no,Ontology intentionally merges pacemaker and ICD.
+prosthetic_cardiac_valve,Prosthetic cardiac valve,RID5550 | prosthetic cardiac valve,exact,no,
+vascular_graft_or_stent,Vascular graft/stent,composite: RID50361 | vascular stent; RID3751 | graft,composite,yes,Vascular stent is direct; graft is generic and does not encode vascular localization.
+breast_implant,Breast implant,RID34710 | breast implant,exact,no,
+sternotomy_wires,Sternotomy wires,no direct match,none,yes,Median sternotomy is a procedure and does not itself establish visible wires; no wire-device concept found.
+device_abnormality,Device abnormality,RID4753 | malposition,close,yes,"Covers position abnormality, but not the full integrity scope (fracture, discontinuity, disconnection)."
+subcutaneous_emphysema,Subcutaneous emphysema,no direct match,none,yes,Not present as preferred label or synonym in this RadLex export.
+nontherapeutic_foreign_body,Nontherapeutic foreign body,RID5425 | foreign body,broader,yes,RadLex foreign body is generic; the ontology excludes therapeutic devices and hardware.
+azygos_lobe,Azygos lobe,RID43259 | azygos fissure,close,yes,Azygos fissure is the defining structure; no azygos-lobe term found.

@@ -1,0 +1,663 @@
+schema_version: 1.0.0
+ontology:
+  id: canonical_cxr_ontology
+  name: "Canonical chest radiograph classifier ontology"
+  version: 1.0.0
+  status: review
+  description: "Image-oriented multilabel ontology harmonizing the current canonical CXR classes with CXR-LT 2024, PUCCXR, and VinDr-CXR."
+  source_of_truth: "This YAML document under medvqa/datasets/cxr_report_labeling/ontology/ is authoritative; generated representations must preserve its semantics."
+  parent_semantics: "A parent edge is a true semantic is-a or label-inheritance relation, so a positive child propagates to every parent. Organizational membership is represented only by category."
+
+categories:
+  - {id: global, name: "Global", description: "Image-level states and globally distributed findings."}
+  - {id: calcific_findings, name: "Calcific findings", description: "Organizational group for thoracic calcific findings modeled under the Calcification umbrella class."}
+  - {id: pulmonary_opacity, name: "Pulmonary opacity", description: "Organizational group for pulmonary opacity patterns and related radiographic syndromes modeled under the Lung opacity umbrella class."}
+  - {id: diagnostic_label, name: "Diagnostic label", description: "Explicit supervised diagnostic labels retained separately from image morphology."}
+  - {id: focal_lesion_findings, name: "Focal lesion findings", description: "Organizational group for discrete intrapulmonary nodules/masses, cavities, and thin-walled cystic or bullous lucencies."}
+  - {id: pulmonary_parenchyma, name: "Pulmonary parenchyma", description: "Pulmonary findings not appropriately organized as opacity or focal-lesion subtypes."}
+  - {id: lung_volume, name: "Lung volume", description: "Findings describing reduced or increased lung volume."}
+  - {id: pleura, name: "Pleura", description: "Pleural fluid, gas, thickening, plaque, calcification, and focal pleural lesions."}
+  - {id: cardiomediastinal, name: "Cardiomediastinal", description: "Cardiac, vascular, hilar, and mediastinal contour or content findings."}
+  - {id: airway, name: "Airway", description: "Tracheal and bronchial findings."}
+  - {id: diaphragm, name: "Diaphragm", description: "Diaphragmatic contour, position, and hernia findings."}
+  - {id: upper_abdomen, name: "Upper abdomen", description: "Clinically important upper-abdominal findings visible on CXR."}
+  - {id: bone_fracture_findings, name: "Bone fracture findings", description: "Organizational group for fractures of osseous structures visible on chest radiographs, modeled under the Bone fracture umbrella class."}
+  - {id: musculoskeletal, name: "Musculoskeletal", description: "Non-fracture thoracic osseous and spinal findings."}
+  - {id: support_device, name: "Support device", description: "Therapeutic lines, tubes, implants, prostheses, surgical hardware, and device-associated attributes modeled under the Support device present umbrella."}
+  - {id: soft_tissue, name: "Soft tissue", description: "Extra-osseous chest-wall and subcutaneous findings."}
+  - {id: other, name: "Other", description: "Image-recognizable findings not fitting another anatomic category."}
+  - {id: anatomic_variant, name: "Anatomic variant", description: "Visible benign anatomic variants."}
+
+classes:
+  - id: no_finding
+    name: "No finding"
+    category: global
+    parents: []
+    kind: state
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Normal", relationship: near}], vindr_cxr: [{class_name: "No finding", relationship: exact}]}
+    preliminary_definition: "Adequate chest radiograph with none of the modeled abnormal findings or support devices/hardware present."
+    notes: ["Requires sufficient image quality and coverage.", "Mutually inconsistent with any positive modeled abnormality or device label."]
+  - id: calcification
+    name: "Calcification"
+    category: calcific_findings
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Calcified granuloma", relationship: narrower}, {class_name: "Calcified heart valve", relationship: narrower}, {class_name: "Pleural plaques", relationship: narrower}], cxrlt2024: [{class_name: "Calcification of the Aorta", relationship: narrower}], vindr_cxr: [{class_name: "Calcification", relationship: exact}]}
+    preliminary_definition: "Any radiopaque calcific density in the chest field of view, including nonspecific calcification and localized aortic, cardiac/valvular, pleural, pulmonary, nodal, or other soft-tissue calcification."
+    notes: ["Umbrella classifier label.", "Positive specific calcification subtypes should propagate to this parent.", "May also be used when only a nonspecific or unlocalized calcification annotation is available."]
+  - id: lung_opacity
+    name: "Lung opacity"
+    category: pulmonary_opacity
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Ground glass pattern", relationship: narrower}], cxrlt2024: [{class_name: "Lung Opacity", relationship: exact}, {class_name: "Infiltration", relationship: partial}], vindr_cxr: [{class_name: "Lung Opacity", relationship: exact}, {class_name: "Infiltration", relationship: partial}]}
+    preliminary_definition: "Any increased pulmonary attenuation on CXR, including nonspecific opacity and more specific airspace, alveolar, interstitial, atelectatic, edematous, fibrotic, scar-like, or nodular patterns."
+    notes: ["Umbrella classifier label present in multiple datasets.", "Positive specific opacity subtypes, pulmonary nodule or mass, and pneumonia should propagate to this parent.", "Absorbs nonspecific airspace, alveolar, interstitial, and infiltrate wording when no more specific child applies.", "May also be used when only a nonspecific opacity annotation is available."]
+  - id: ground_glass_opacity_pattern
+    name: "Ground-glass opacity/pattern"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Ground glass pattern", relationship: exact}], cxrlt2024: [{class_name: "Lung Opacity", relationship: broader}, {class_name: "Infiltration", relationship: partial}], vindr_cxr: [{class_name: "Lung Opacity", relationship: broader}, {class_name: "Infiltration", relationship: partial}]}
+    preliminary_definition: "Hazy pulmonary opacity that preserves underlying bronchovascular margins as judged on CXR."
+    notes: ["CXR sensitivity and distinction from subtle consolidation are limited.", "Require explicit report-supported pattern terminology."]
+  - id: consolidation
+    name: "Consolidation"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Consolidation", relationship: exact}], cxrlt2024: [{class_name: "Consolidation", relationship: exact}], vindr_cxr: [{class_name: "Consolidation", relationship: exact}]}
+    preliminary_definition: "Dense airspace opacity that obscures underlying vessel margins and may contain air bronchograms."
+    notes: ["Does not by itself establish pneumonia."]
+  - id: pneumonia
+    name: "Pneumonia"
+    category: diagnostic_label
+    parents: [lung_opacity]
+    kind: diagnosis
+    dataset_mappings: {puccxr: [{class_name: "Pneumonia", relationship: exact}], cxrlt2024: [{class_name: "Pneumonia", relationship: exact}], vindr_cxr: [{class_name: "Pneumonia", relationship: exact}]}
+    preliminary_definition: "Explicit radiographic or report-level diagnosis of pneumonia supported by the CXR interpretation."
+    notes: ["Nonexclusive diagnostic target.", "Positive pneumonia propagates to lung opacity via label inheritance.", "Lung opacity, consolidation, infiltrate, and other opacity morphology do not propagate to pneumonia."]
+  - id: tuberculosis
+    name: "Tuberculosis"
+    category: diagnostic_label
+    parents: []
+    kind: diagnosis
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Tuberculosis", relationship: near}], vindr_cxr: [{class_name: "Tuberculosis", relationship: near}]}
+    preliminary_definition: "Thoracic tuberculosis on CXR: explicit active or suspected TB involving lung, pleura, nodes, or other thoracic structures, or currently visible radiographic sequelae explicitly attributed to prior TB."
+    notes: ["Includes pulmonary, pleural, empyema, nodal, and miliary manifestations when TB-attributed.", "Includes visible healed or inactive TB sequelae when currently shown and TB-attributed.", "History, latent TB, or exposure alone is insufficient.", "Do not derive from cavity, fibrosis, scarring, granuloma, adenopathy, or pleural findings without an explicit TB link."]
+  - id: interstitial_lung_disease
+    name: "Interstitial lung disease"
+    category: diagnostic_label
+    parents: []
+    kind: diagnosis
+    dataset_mappings: {puccxr: [{class_name: "Reticular interstitial pattern", relationship: partial}, {class_name: "Pulmonary fibrosis", relationship: narrower}], cxrlt2024: [{class_name: "Fibrosis", relationship: narrower}], vindr_cxr: [{class_name: "ILD", relationship: exact}]}
+    preliminary_definition: "Explicit report-level diagnosis or diagnostic impression of interstitial lung disease on CXR."
+    notes: ["Nonexclusive diagnostic target.", "Do not infer from interstitial or reticular opacity, reticulation, fibrosis, or scarring alone."]
+  - id: atelectasis
+    name: "Atelectasis"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Atelectasis", relationship: exact}], cxrlt2024: [{class_name: "Atelectasis", relationship: exact}], vindr_cxr: [{class_name: "Atelectasis", relationship: exact}]}
+    preliminary_definition: "Pulmonary volume loss with associated increased opacity or displacement of fissures, vessels, hilum, or mediastinum."
+    notes: ["Supports both unlocalized labels and named subtypes."]
+  - id: lobar_atelectasis
+    name: "Lobar atelectasis"
+    category: pulmonary_opacity
+    parents: [atelectasis]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Atelectasis", relationship: broader}], cxrlt2024: [{class_name: "Lobar Atelectasis", relationship: exact}], vindr_cxr: [{class_name: "Atelectasis", relationship: broader}]}
+    preliminary_definition: "Atelectasis localized to a pulmonary lobe with compatible lobar volume-loss signs."
+    notes: ["Use only when lobar localization is explicit and reliable."]
+  - id: rounded_atelectasis
+    name: "Rounded atelectasis"
+    category: pulmonary_opacity
+    parents: [atelectasis]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Atelectasis", relationship: broader}], cxrlt2024: [{class_name: "Round(ed) Atelectasis", relationship: exact}], vindr_cxr: [{class_name: "Atelectasis", relationship: broader}]}
+    preliminary_definition: "Rounded peripheral atelectatic opacity with pleural association and characteristic converging bronchovascular markings when visible."
+    notes: ["May mimic a pulmonary mass.", "Confident distinction can require CT."]
+  - id: reticular_interstitial_opacity_pattern
+    name: "Reticular interstitial opacity/pattern"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Reticular interstitial pattern", relationship: exact}], cxrlt2024: [{class_name: "Fibrosis", relationship: partial}, {class_name: "Infiltration", relationship: partial}], vindr_cxr: [{class_name: "ILD", relationship: partial}, {class_name: "Pulmonary fibrosis", relationship: partial}]}
+    preliminary_definition: "Network-like pulmonary linear opacities forming a reticular pattern on CXR."
+    notes: ["Does not establish a specific interstitial disease or fibrosis."]
+  - id: kerley_lines
+    name: "Kerley lines"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Kerley lines", relationship: exact}], cxrlt2024: [{class_name: "Edema", relationship: partial}], vindr_cxr: [{class_name: "Edema", relationship: partial}]}
+    preliminary_definition: "Visible linear opacities produced by thickened pulmonary interlobular septa, including Kerley A, B, and C lines and equivalent septal-line descriptions on CXR."
+    notes: ["May coexist with edema or vascular congestion but does not by itself establish edema, congestion, or a specific cause.", "Does entail visible septal-line morphology when positive.", "Exclude bare ultrasound B-lines without clear CXR or Kerley context."]
+  - id: pulmonary_edema
+    name: "Pulmonary edema"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Edema", relationship: near}, {class_name: "Kerley lines", relationship: narrower}], cxrlt2024: [{class_name: "Edema", relationship: near}], vindr_cxr: [{class_name: "Edema", relationship: near}]}
+    preliminary_definition: "Interstitial or alveolar pulmonary fluid accumulation visible on CXR and interpreted as pulmonary edema."
+    notes: ["Radiographic finding; etiology need not be specified.", "May coexist with but is not equivalent to vascular congestion.", "Does not include peripheral or soft-tissue edema."]
+  - id: fibrotic_lung_change
+    name: "Fibrotic lung change"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pulmonary fibrosis", relationship: near}], cxrlt2024: [{class_name: "Fibrosis", relationship: near}], vindr_cxr: [{class_name: "Pulmonary fibrosis", relationship: near}, {class_name: "ILD", relationship: partial}]}
+    preliminary_definition: "Chronic fibrotic parenchymal remodeling with coarse reticulation, architectural distortion, volume loss, honeycombing, or traction bronchiectasis, beyond isolated focal scarring."
+    notes: ["Does not assert a specific cause.", "Not all interstitial lung disease is fibrotic.", "Distinct from focal pulmonary scarring; isolated apical or limited scars do not establish this class."]
+  - id: focal_pulmonary_scarring
+    name: "Focal pulmonary scarring"
+    category: pulmonary_opacity
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pulmonary fibrosis", relationship: broader}], cxrlt2024: [{class_name: "Fibrosis", relationship: broader}], vindr_cxr: [{class_name: "Pulmonary fibrosis", relationship: broader}]}
+    preliminary_definition: "Focal or limited chronic linear, apical, or pleuroparenchymal opacity with scar-like distortion."
+    notes: ["Includes apical scarring and other limited postinfectious or post-inflammatory scars.", "Does not by itself establish fibrotic lung change.", "Distinguish from diffuse fibrotic lung change when annotation permits."]
+  - id: pulmonary_nodule_or_mass
+    name: "Pulmonary nodule or mass"
+    category: focal_lesion_findings
+    parents: [lung_opacity]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Nodule", relationship: exact}, {class_name: "Lung Mass", relationship: exact}, {class_name: "Granuloma", relationship: partial}], cxrlt2024: [{class_name: "Nodule", relationship: exact}, {class_name: "Mass", relationship: exact}, {class_name: "Lung Lesion", relationship: near}], vindr_cxr: [{class_name: "Nodule/Mass", relationship: exact}, {class_name: "Lung tumor", relationship: partial}]}
+    preliminary_definition: "Discrete intrapulmonary nodular or mass-like opacity of any size, without requiring a nodule-versus-mass size cutoff."
+    notes: ["Nodule and mass are merged because CXR size boundaries are often unreliable.", "Does not imply malignancy.", "Positive labels propagate to lung opacity.", "Calcified nodules and granulomas also support this class and may additionally support the calcified nodule/granuloma class."]
+  - id: calcified_pulmonary_nodule_or_granuloma
+    name: "Calcified pulmonary nodule or granuloma"
+    category: focal_lesion_findings
+    parents: [calcification, pulmonary_nodule_or_mass]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Calcified granuloma", relationship: near}, {class_name: "Granuloma", relationship: partial}], cxrlt2024: [{class_name: "Granuloma", relationship: near}], vindr_cxr: [{class_name: "Calcification", relationship: broader}]}
+    preliminary_definition: "Intrapulmonary nodule or granuloma with convincing calcification, or an explicitly calcified pulmonary granulomatous focus."
+    notes: ["Requires pulmonary localization and calcification or calcified-granuloma wording.", "Positive labels propagate to calcification, pulmonary nodule or mass, and lung opacity.", "Noncalcified granulomas belong under pulmonary nodule or mass only."]
+  - id: pulmonary_cavity
+    name: "Pulmonary cavity"
+    category: focal_lesion_findings
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Cavitation", relationship: near}], cxrlt2024: [{class_name: "Tuberculosis", relationship: partial}], vindr_cxr: [{class_name: "Lung cavity", relationship: exact}, {class_name: "Tuberculosis", relationship: partial}]}
+    preliminary_definition: "Gas-containing lucency within a pulmonary opacity, mass, or nodule with a discernible wall."
+    notes: ["Separate from thin-walled cyst and bulla.", "Does not establish tuberculosis or another cause."]
+  - id: pulmonary_cyst_or_bulla
+    name: "Pulmonary cyst or bulla"
+    category: focal_lesion_findings
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Bulla", relationship: exact}], cxrlt2024: [{class_name: "Bulla", relationship: exact}], vindr_cxr: [{class_name: "Lung cyst", relationship: near}, {class_name: "Emphysema", relationship: partial}]}
+    preliminary_definition: "Discrete thin-walled intrapulmonary lucency described as a cyst, bulla, or bleb, without requiring a cyst-versus-bulla distinction."
+    notes: ["Cyst versus bulla is often unreliable on CXR and better established by CT.", "Separate from thick-walled cavity and from honeycombing as a fibrotic pattern."]
+  - id: emphysema
+    name: "Emphysema"
+    category: pulmonary_parenchyma
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Emphysema", relationship: exact}], vindr_cxr: [{class_name: "Emphysema", relationship: exact}, {class_name: "COPD", relationship: partial}]}
+    preliminary_definition: "Hyperlucent lungs with vascular attenuation or bullous change compatible with emphysematous destruction."
+    notes: ["Does not by itself establish clinical COPD."]
+  - id: bronchiectasis
+    name: "Bronchiectasis"
+    category: airway
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Bronchiectasis", relationship: exact}], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "Radiographic bronchial dilatation suggested by tram-track lines, ring shadows of dilated bronchi, or report-supported airway enlargement, including traction bronchiectasis and, by ontology convention, bronchiolectasis."
+    notes: ["CXR sensitivity is limited.", "Exclude CT-only historical diagnoses without radiographic attribution.", "By convention includes bronchiolectasis when CXR-attributed.", "Bare ring shadows without bronchial or bronchiectatic attribution are insufficient.", "No lung_opacity parent: increased parenchymal density is not an unavoidable component of bronchial dilatation."]
+  - id: bronchial_wall_thickening
+    name: "Bronchial wall thickening"
+    category: airway
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "Visible thickening of the bronchial walls or peribronchial tissues producing bronchial or peribronchial cuffing."
+    notes: ["Subjective finding that should be distinguished from bronchiectasis and nonspecific interstitial or bronchovascular prominence.", "Peribronchial cuffing is treated as supportive CXR morphology for this class.", "No lung_opacity parent: primarily an airway-wall/peribronchial finding."]
+  - id: low_lung_volume
+    name: "Low lung volume"
+    category: lung_volume
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "Reduced overall inspiratory lung expansion on the available projection, whether from technique, effort, or physiology, reflected by report-supported low volumes, hypoinflation, or poor inspiration."
+    notes: ["Technical inspiration and physiology may both contribute.", "Important confounder for opacity and atelectasis.", "Do not equate with focal/lobar/unilateral volume loss or isolated elevated/eventrated hemidiaphragm.", "Low rib count or elevated diaphragms support only when the report links them to reduced inspiration or low volumes."]
+  - id: hyperinflation
+    name: "Hyperinflation"
+    category: lung_volume
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hyperinflated lung", relationship: near}, {class_name: "Flattened diaphragm", relationship: partial}], cxrlt2024: [{class_name: "Emphysema", relationship: partial}], vindr_cxr: [{class_name: "COPD", relationship: partial}, {class_name: "Emphysema", relationship: partial}]}
+    preliminary_definition: "Increased overall lung volume with excessive expansion on the available projection, including report-supported hyperinflation, hyperexpansion, overdistention, or hyperaeration."
+    notes: ["Does not establish COPD or emphysema.", "Assess in light of projection and inspiration.", "Global/generalized class: focal or unilateral overinflation alone is insufficient.", "Flattened or low diaphragms support only when the report links them to increased lung volumes; bare flattening belongs with flattened_diaphragm."]
+  - id: pleural_effusion
+    name: "Pleural effusion"
+    category: pleura
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural effusion", relationship: exact}], cxrlt2024: [{class_name: "Pleural Effusion", relationship: exact}], vindr_cxr: [{class_name: "Pleural effusion", relationship: exact}]}
+    preliminary_definition: "Fluid in the pleural space producing meniscus, dependent opacity, or other compatible pleural-fluid morphology."
+    notes: ["Supports unlocalized fluid and localized subtypes."]
+  - id: loculated_or_fissural_pleural_effusion
+    name: "Loculated/fissural effusion"
+    category: pleura
+    parents: [pleural_effusion]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural effusion", relationship: broader}], cxrlt2024: [{class_name: "Fissure", relationship: partial}, {class_name: "Pleural Effusion", relationship: broader}], vindr_cxr: [{class_name: "Pleural effusion", relationship: broader}]}
+    preliminary_definition: "Non-free pleural fluid confined by adhesions or collecting within an interlobar fissure."
+    notes: ["Frontal-only imaging may mimic pleural mass or thickening.", "The source label Fissure is too ambiguous for direct equivalence."]
+  - id: costophrenic_angle_blunting
+    name: "Costophrenic angle blunting"
+    category: pleura
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Costophrenic angle blunting", relationship: exact}], cxrlt2024: [{class_name: "Pleural Effusion", relationship: partial}, {class_name: "Pleural Other", relationship: partial}], vindr_cxr: [{class_name: "Pleural effusion", relationship: partial}]}
+    preliminary_definition: "Loss of the normally sharp costophrenic angle, sulcus, or recess on an appropriate projection."
+    notes: ["Pleural fluid is common but scarring and other causes are possible.", "Does not inherit from pleural effusion; require explicit costophrenic contour wording.", "Exclude cardiophrenic-angle findings and technical nonvisualization."]
+  - id: pneumothorax
+    name: "Pneumothorax"
+    category: pleura
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pneumothorax", relationship: exact}], cxrlt2024: [{class_name: "Pneumothorax", relationship: exact}], vindr_cxr: [{class_name: "Pneumothorax", relationship: exact}]}
+    preliminary_definition: "Pleural gas with a visible visceral pleural line and absent peripheral lung markings or equivalent compatible signs."
+    notes: ["Supine projection can substantially alter appearance."]
+  - id: hydropneumothorax
+    name: "Hydropneumothorax"
+    category: pleura
+    parents: [pleural_effusion, pneumothorax]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural effusion", relationship: partial}, {class_name: "Pneumothorax", relationship: partial}], cxrlt2024: [{class_name: "Hydropneumothorax", relationship: exact}], vindr_cxr: [{class_name: "Pleural effusion", relationship: partial}, {class_name: "Pneumothorax", relationship: partial}]}
+    preliminary_definition: "Concurrent pleural gas and fluid, often producing a straight air-fluid level."
+    notes: ["Multiple inheritance intentionally propagates both pleural effusion and pneumothorax."]
+  - id: pleural_thickening
+    name: "Pleural thickening"
+    category: pleura
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural thickening", relationship: exact}], cxrlt2024: [{class_name: "Pleural Thickening", relationship: exact}], vindr_cxr: [{class_name: "Pleural thickening", relationship: exact}]}
+    preliminary_definition: "Focal or diffuse increased pleural density or width consistent with pleural thickening."
+    notes: ["Pleural plaque and pleural calcification are distinct subtypes that propagate to this parent; they are not synonyms of each other or of nonspecific thickening."]
+  - id: pleural_plaque
+    name: "Pleural plaque"
+    category: pleura
+    parents: [pleural_thickening]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural plaques", relationship: exact}], cxrlt2024: [{class_name: "Pleural Other", relationship: broader}], vindr_cxr: [{class_name: "Pleural thickening", relationship: partial}, {class_name: "Calcification", relationship: broader}]}
+    preliminary_definition: "Discrete focal pleural thickening with plaque or plaque-like morphology, whether calcified or noncalcified."
+    notes: ["Do not require calcification.", "Positive plaque labels propagate to pleural thickening.", "Pleural calcification is labeled separately only when calcification is explicit.", "Generic thickening, scarring, or asbestos exposure without plaque/plaque-like wording is insufficient."]
+  - id: pleural_calcification
+    name: "Pleural calcification"
+    category: pleura
+    parents: [pleural_thickening, calcification]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural plaques", relationship: partial}], cxrlt2024: [{class_name: "Pleural Other", relationship: broader}], vindr_cxr: [{class_name: "Calcification", relationship: broader}]}
+    preliminary_definition: "Calcific density localized to the pleura."
+    notes: ["May coexist with pleural plaque but is not equivalent.", "Positive labels propagate to pleural thickening and calcification."]
+  - id: pleural_nodule_or_mass
+    name: "Pleural nodule or mass"
+    category: pleura
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Pleural mass", relationship: near}], cxrlt2024: [{class_name: "Pleural Other", relationship: broader}, {class_name: "Mass", relationship: partial}], vindr_cxr: [{class_name: "Other lesion", relationship: broader}]}
+    preliminary_definition: "Focal pleural-based soft-tissue opacity described as a nodule or mass."
+    notes: ["Keep separate from pulmonary lesions and diffuse pleural thickening.", "Do not split by size until localization is reliable."]
+  - id: enlarged_cardiomediastinal_silhouette
+    name: "Enlarged cardiomediastinal silhouette"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Cardiomegaly", relationship: narrower}, {class_name: "Mediastinal enlargement", relationship: narrower}], cxrlt2024: [{class_name: "Enlarged Cardiomediastinum", relationship: exact}], vindr_cxr: [{class_name: "Cardiomegaly", relationship: narrower}, {class_name: "Aortic enlargement", relationship: narrower}]}
+    preliminary_definition: "Enlargement or widening of the cardiac, mediastinal, or combined cardiomediastinal silhouette on CXR."
+    notes: ["Umbrella classifier label.", "Positive cardiac, mediastinal-widening, and aortic-enlargement subtypes should propagate to this parent.", "May also be used when only nonspecific enlarged cardiomediastinum wording is available."]
+  - id: enlarged_cardiac_silhouette
+    name: "Enlarged cardiac silhouette"
+    category: cardiomediastinal
+    parents: [enlarged_cardiomediastinal_silhouette]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Cardiomegaly", relationship: near}], cxrlt2024: [{class_name: "Cardiomegaly", relationship: near}, {class_name: "Enlarged Cardiomediastinum", relationship: broader}], vindr_cxr: [{class_name: "Cardiomegaly", relationship: near}]}
+    preliminary_definition: "Cardiac silhouette larger than expected for projection and thoracic size."
+    notes: ["AP projection and low inspiration can exaggerate size.", "Does not prove chamber enlargement or cardiomyopathy.", "Positive labels propagate to enlarged cardiomediastinal silhouette."]
+  - id: pulmonary_vascular_congestion
+    name: "Pulmonary vascular congestion"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Vascular redistribution", relationship: near}], cxrlt2024: [{class_name: "Edema", relationship: partial}], vindr_cxr: [{class_name: "Edema", relationship: partial}]}
+    preliminary_definition: "Prominent or redistributed pulmonary vessels indicating increased pulmonary vascular volume or pressure."
+    notes: ["Distinct from established pulmonary edema."]
+  - id: enlarged_pulmonary_artery
+    name: "Enlarged pulmonary artery"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Pulmonary Hypertension", relationship: partial}, {class_name: "Hilum", relationship: partial}], vindr_cxr: [{class_name: "Enlarged PA", relationship: exact}]}
+    preliminary_definition: "Enlargement of the main or central pulmonary arterial contour on CXR."
+    notes: ["Does not by itself establish pulmonary hypertension.", "Hilar enlargement is nonspecific."]
+  - id: aortic_enlargement_or_ectasia
+    name: "Aortic enlargement/ectasia"
+    category: cardiomediastinal
+    parents: [enlarged_cardiomediastinal_silhouette]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Aortic elongation", relationship: partial}], cxrlt2024: [{class_name: "Enlarged Cardiomediastinum", relationship: partial}], vindr_cxr: [{class_name: "Aortic enlargement", relationship: exact}]}
+    preliminary_definition: "Increased caliber or ectatic contour of the thoracic aorta visible on CXR."
+    notes: ["Does not assert aneurysm.", "Distinct from tortuosity or elongation.", "Positive labels propagate to enlarged cardiomediastinal silhouette."]
+  - id: aortic_tortuosity_or_elongation
+    name: "Aortic tortuosity/elongation"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Aortic elongation", relationship: exact}], cxrlt2024: [{class_name: "Tortuous Aorta", relationship: exact}], vindr_cxr: [{class_name: "Aortic enlargement", relationship: partial}]}
+    preliminary_definition: "Elongated or tortuous thoracic aortic contour independent of definite caliber enlargement."
+    notes: ["Shape and caliber abnormalities may coexist."]
+  - id: aortic_calcification
+    name: "Aortic calcification"
+    category: cardiomediastinal
+    parents: [calcification]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Aortic atheromatosis", relationship: partial}], cxrlt2024: [{class_name: "Calcification of the Aorta", relationship: exact}], vindr_cxr: [{class_name: "Calcification", relationship: broader}]}
+    preliminary_definition: "Calcific density localized to the wall or contour of the thoracic aorta."
+    notes: ["Does not require an atherosclerosis diagnosis.", "Positive labels propagate to calcification."]
+  - id: cardiac_or_valvular_calcification
+    name: "Cardiac/valvular/pericardial calcification"
+    category: cardiomediastinal
+    parents: [calcification]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Calcified heart valve", relationship: narrower}], cxrlt2024: [], vindr_cxr: [{class_name: "Calcification", relationship: broader}]}
+    preliminary_definition: "Calcific density localized to a native cardiac valve or annulus, myocardium, pericardium, coronary arteries, or another cardiac structure."
+    notes: ["Includes coronary and pericardial calcification by design.", "Separate aortic valve/annulus calcification from aortic wall/root/arch calcification (aortic_calcification).", "Separate from prosthetic valve hardware.", "Positive labels propagate to calcification."]
+  - id: hilar_enlargement
+    name: "Hilar enlargement"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hilar enlargement", relationship: exact}], cxrlt2024: [{class_name: "Hilum", relationship: partial}, {class_name: "Adenopathy", relationship: partial}], vindr_cxr: []}
+    preliminary_definition: "Enlargement or abnormal prominence of one or both hila without assigning vascular, nodal, or mass etiology."
+    notes: ["Cause remains unspecified."]
+  - id: hilar_or_mediastinal_nodal_enlargement
+    name: "Hilar or mediastinal nodal enlargement"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hilar enlargement", relationship: partial}, {class_name: "Mediastinal enlargement", relationship: partial}], cxrlt2024: [{class_name: "Adenopathy", relationship: near}], vindr_cxr: []}
+    preliminary_definition: "Hilar or mediastinal contour abnormality interpreted radiographically as enlarged lymph nodes."
+    notes: ["Radiographic inference does not establish pathologic lymphadenopathy.", "Hilar enlargement alone is insufficient."]
+  - id: mediastinal_widening
+    name: "Mediastinal widening"
+    category: cardiomediastinal
+    parents: [enlarged_cardiomediastinal_silhouette]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Mediastinal enlargement", relationship: near}], cxrlt2024: [{class_name: "Enlarged Cardiomediastinum", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Generalized widening of the mediastinal contour beyond that expected for projection and patient positioning, including named regional widening such as the superior mediastinum."
+    notes: ["Portable AP technique and rotation can mimic widening.", "Keep separate from a focal mediastinal mass.", "Unqualified mediastinal enlargement is insufficient if focal or not contour-widening.", "Positive labels propagate to enlarged cardiomediastinal silhouette; the parent does not propagate downward."]
+  - id: mediastinal_mass
+    name: "Mediastinal mass"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Mediastinal mass", relationship: exact}], cxrlt2024: [{class_name: "Mass", relationship: partial}, {class_name: "Adenopathy", relationship: partial}], vindr_cxr: [{class_name: "Other lesion", relationship: broader}]}
+    preliminary_definition: "Focal mediastinal soft-tissue opacity or contour abnormality characterized as a mass or mass-like lesion."
+    notes: ["Require mass or mass-like framing; nonspecific mediastinal opacity is insufficient.", "Do not equate with diffuse mediastinal widening.", "Adenopathy supports only when described as a nodal or conglomerate mass."]
+  - id: mediastinal_shift
+    name: "Mediastinal shift"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [], vindr_cxr: [{class_name: "Mediastinal shift", relationship: exact}]}
+    preliminary_definition: "Displacement of mediastinal structures from their expected central position."
+    notes: ["Distinguish true shift from patient rotation.", "Tracheal deviation may coexist but is not equivalent."]
+  - id: pneumomediastinum
+    name: "Pneumomediastinum"
+    category: cardiomediastinal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Pneumomediastinum", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Gas outlining mediastinal structures outside the normal airway or esophagus."
+    notes: ["Distinguish from pneumothorax and subcutaneous emphysema."]
+  - id: tracheal_deviation
+    name: "Tracheal deviation"
+    category: airway
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [], vindr_cxr: [{class_name: "Mediastinal shift", relationship: partial}]}
+    preliminary_definition: "Tracheal air column displaced from its expected position after accounting for patient rotation and positioning."
+    notes: ["Keep separate from global mediastinal shift; neither automatically entails the other.", "Rotation and positioning are major technical confounders.", "Do not infer from scoliosis alone, but count explicit tracheal deviation even when scoliosis is the stated cause."]
+  - id: elevated_or_eventrated_hemidiaphragm
+    name: "Elevated/eventrated hemidiaphragm"
+    category: diaphragm
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hemidiaphragm elevation", relationship: exact}], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "A right or left hemidiaphragm is abnormally elevated or has a focal elevated contour compatible with eventration."
+    notes: ["CXR often cannot distinguish eventration, weakness, paralysis, and other causes.", "Do not infer paralysis.", "Exclude generalized bilateral elevation attributed solely to low lung volumes or poor inspiration.", "Distinct from flattened_diaphragm."]
+  - id: flattened_diaphragm
+    name: "Flattened diaphragm"
+    category: diaphragm
+    parents: []
+    kind: attribute
+    dataset_mappings: {puccxr: [{class_name: "Flattened diaphragm", relationship: exact}], cxrlt2024: [{class_name: "Emphysema", relationship: partial}], vindr_cxr: [{class_name: "COPD", relationship: partial}, {class_name: "Emphysema", relationship: partial}]}
+    preliminary_definition: "Reduced normal curvature of the diaphragmatic dome, including explicitly flattened or straightened diaphragmatic contour."
+    notes: ["Direct feature associated with but not implying hyperinflation, emphysema, or COPD.", "Distinguish contour flattening from merely low diaphragm position and account for projection.", "Distinct from elevated_or_eventrated_hemidiaphragm."]
+  - id: hernia
+    name: "Hernia"
+    category: diaphragm
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hiatal hernia", relationship: narrower}], cxrlt2024: [{class_name: "Hernia", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Any hernia visible on CXR, including hiatal, other diaphragmatic, and thoracic-wall lung herniation."
+    notes: ["Umbrella classifier label.", "Positive hiatal hernia labels should propagate to this parent.", "May also be used for non-hiatal or unspecified hernia wording."]
+  - id: hiatal_hernia
+    name: "Hiatal hernia"
+    category: diaphragm
+    parents: [hernia]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Hiatal hernia", relationship: exact}], cxrlt2024: [{class_name: "Hernia", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Retrocardiac or lower mediastinal herniation through the esophageal hiatus, often with an air-fluid level."
+    notes: ["Positive labels propagate to hernia.", "Distinct from non-hiatal diaphragmatic and chest-wall lung hernias."]
+  - id: pneumoperitoneum
+    name: "Pneumoperitoneum"
+    category: upper_abdomen
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Pneumoperitoneum", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Free intraperitoneal gas visible beneath the diaphragm or elsewhere on the included upper abdomen."
+    notes: ["Projection and patient position affect sensitivity."]
+  - id: bone_fracture
+    name: "Bone fracture"
+    category: bone_fracture_findings
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Fracture", relationship: exact}], cxrlt2024: [{class_name: "Fracture", relationship: exact}], vindr_cxr: [{class_name: "Rib fracture", relationship: narrower}, {class_name: "Clavicle fracture", relationship: narrower}]}
+    preliminary_definition: "Any osseous fracture visible on CXR, including nonspecific fracture annotations and site-specific rib, clavicle, vertebral, or other included bone fractures within the field of view."
+    notes: ["Umbrella classifier label.", "Positive site-specific fracture subtypes should propagate to this parent.", "May also be used when only a nonspecific fracture annotation is available.", "Includes acute, healing, and residual/sequelae when currently visible.", "Anatomic scope is the CXR field of view rather than a strict thoracic-only boundary."]
+  - id: clavicle_fracture
+    name: "Clavicle fracture"
+    category: bone_fracture_findings
+    parents: [bone_fracture]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Fracture", relationship: broader}], cxrlt2024: [{class_name: "Clavicle Fracture", relationship: exact}], vindr_cxr: [{class_name: "Clavicle fracture", relationship: exact}]}
+    preliminary_definition: "Acute, healing, or residual/sequelae of a clavicle fracture visible on CXR."
+    notes: ["Includes callus, deformity, nonunion, or malunion when attributable to a clavicle fracture.", "Positive labels propagate to bone fracture."]
+  - id: rib_fracture
+    name: "Rib fracture"
+    category: bone_fracture_findings
+    parents: [bone_fracture]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Rib fracture", relationship: exact}], cxrlt2024: [{class_name: "Rib Fracture", relationship: exact}], vindr_cxr: [{class_name: "Rib fracture", relationship: exact}]}
+    preliminary_definition: "Acute, healing, or residual/sequelae of one or more rib fractures visible on CXR."
+    notes: ["Includes callus or fracture deformity when attributable to a rib fracture.", "Sensitivity is limited for subtle or nondisplaced fractures.", "Positive labels propagate to bone fracture."]
+  - id: vertebral_compression_fracture
+    name: "Vertebral compression fracture"
+    category: bone_fracture_findings
+    parents: [bone_fracture]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Fracture", relationship: broader}], cxrlt2024: [{class_name: "Fracture", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Loss of vertebral body height characterized as a compression fracture or compression deformity visible on CXR."
+    notes: ["Lateral views materially improve assessment.", "Includes acute, healing, and residual compression deformity when currently visible.", "Require compression-fracture or compression-deformity characterization; nonspecific wedging is insufficient.", "Any vertebral level currently visible on the CXR may qualify.", "Positive labels propagate to bone fracture."]
+  - id: focal_osseous_lesion
+    name: "Focal osseous lesion"
+    category: musculoskeletal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Bone lesion", relationship: near}], cxrlt2024: [{class_name: "Fracture", relationship: partial}], vindr_cxr: [{class_name: "Other lesion", relationship: broader}]}
+    preliminary_definition: "One or more discrete lytic, sclerotic, expansile, or otherwise abnormal lesions in a bone within the CXR field of view."
+    notes: ["Does not imply benignity or malignancy.", "Exclude uncomplicated fracture morphology unless an underlying lesion is stated.", "Anatomic scope is the CXR field of view rather than a strict thoracic-only boundary."]
+  - id: degenerative_osseous_change
+    name: "Degenerative osseous change"
+    category: musculoskeletal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Degenerative changes", relationship: near}], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "Visible spondylotic or arthritic osseous change within the CXR field of view, including osteophytes or joint-space degeneration."
+    notes: ["Anatomic scope is the CXR field of view rather than a strict thoracic-only boundary.", "Distinct from scoliosis, kyphosis, fracture, and focal osseous lesion."]
+  - id: radiographic_osteopenia
+    name: "Radiographic osteopenia"
+    category: musculoskeletal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Osteopenia", relationship: near}], cxrlt2024: [{class_name: "Osteopenia", relationship: near}], vindr_cxr: []}
+    preliminary_definition: "Subjectively reduced osseous radiodensity on CXR suggestive of osteopenia."
+    notes: ["Does not constitute quantitative bone-density measurement.", "Expect substantial observer and exposure dependence."]
+  - id: scoliosis
+    name: "Scoliosis"
+    category: musculoskeletal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Scoliosis", relationship: exact}], cxrlt2024: [{class_name: "Scoliosis", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Lateral curvature of the included spine visible on CXR."
+    notes: ["Distinguish structural curvature from apparent curvature caused by rotation or positioning."]
+  - id: kyphosis
+    name: "Kyphosis"
+    category: musculoskeletal
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Kyphosis", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Excessive thoracic sagittal curvature visible on an appropriate projection."
+    notes: ["Strongly projection-dependent and principally assessed on lateral views."]
+  - id: support_device_present
+    name: "Support device present"
+    category: support_device
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Lines", relationship: narrower}, {class_name: "Tubes", relationship: narrower}, {class_name: "Pacemaker", relationship: narrower}, {class_name: "Artificial heart valve", relationship: narrower}], cxrlt2024: [{class_name: "Support Devices", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Any therapeutic medical device, line, tube, implant, prosthesis, or surgical/fixation hardware visible on CXR, including nonspecific device mentions and named device subtypes."
+    notes: ["Umbrella classifier label.", "Positive support-line, support-tube, specific device, sternotomy-wire, and device-abnormality labels should propagate to this parent.", "Also covers otherwise unnamed therapeutic hardware (e.g., surgical clips, staples, plates, screws, coils, markers) when currently visible.", "May also be used when only a nonspecific support-device annotation is available."]
+  - id: support_line_present
+    name: "Support line present"
+    category: support_device
+    parents: [support_device_present]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Lines", relationship: exact}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "One or more therapeutic intravascular or vascular-access lines visible on CXR, including nonspecific line mentions and named line subtypes."
+    notes: ["Umbrella for lines; preserves line-versus-tube distinction.", "Use alone when line type is unspecified.", "Positive named line subtypes should propagate to this parent and thereby to support device present."]
+  - id: support_tube_present
+    name: "Support tube present"
+    category: support_device
+    parents: [support_device_present]
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Tubes", relationship: exact}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "One or more therapeutic tubes visible on CXR, including nonspecific tube mentions and named tube subtypes."
+    notes: ["Umbrella for tubes; preserves line-versus-tube distinction.", "Use alone when tube type is unspecified.", "Positive named tube subtypes should propagate to this parent and thereby to support device present."]
+  - id: endotracheal_tube
+    name: "Endotracheal tube"
+    category: support_device
+    parents: [support_tube_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Tubes", relationship: broader}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "A tube identified as an endotracheal tube whose radiopaque course or tip is visible on CXR, including when malpositioned."
+    notes: ["Tip position and malposition should be assessed separately and do not negate presence.", "Distinct from tracheostomy tube.", "Positive labels propagate to support tube present and support device present."]
+  - id: enteric_tube
+    name: "Enteric tube"
+    category: support_device
+    parents: [support_tube_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Tubes", relationship: broader}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "An enteral feeding or decompression tube (e.g., NG/OG, Dobhoff, NJ, gastrostomy, PEG) whose course or tip is visible on CXR, including when malpositioned."
+    notes: ["Tip location and malposition should be assessed separately and do not negate presence.", "Positive labels propagate to support tube present and support device present."]
+  - id: central_venous_catheter
+    name: "Central venous catheter"
+    category: support_device
+    parents: [support_line_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Lines", relationship: broader}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "A catheter identified as a central venous access device whose course or tip is visible on CXR, including PICC and implanted venous ports; includes malpositioned intended CVCs."
+    notes: ["Includes PICC, ports, and unspecified central venous catheters within this class (no separate PICC leaf).", "Exclude true arterial monitoring lines and pulmonary artery/Swan-Ganz catheters.", "Tip position and malposition do not negate presence.", "Positive labels propagate to support line present and support device present."]
+  - id: chest_tube
+    name: "Chest tube"
+    category: support_device
+    parents: [support_tube_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Tubes", relationship: broader}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "A tube or catheter identified as a pleural drainage device whose course or tip is visible on CXR, including when malpositioned."
+    notes: ["Require pleural or thoracostomy context for generic pigtail catheters.", "Position, function, and malposition do not negate presence.", "Positive labels propagate to support tube present and support device present."]
+  - id: pacemaker_or_icd
+    name: "Pacemaker/ICD"
+    category: support_device
+    parents: [support_device_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Pacemaker", relationship: narrower}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Permanent implanted cardiac rhythm device hardware (pacemaker, ICD, or CRT) or associated leads visible on CXR, including retained leads without a generator."
+    notes: ["Merged because device subtype may not be reliably distinguished.", "Describes hardware presence, not a complete or functioning system.", "Exclude temporary pacing wires, loop recorders/ILR, and LVADs.", "Positive labels propagate to support device present."]
+  - id: prosthetic_cardiac_valve
+    name: "Prosthetic cardiac valve"
+    category: support_device
+    parents: [support_device_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Artificial heart valve", relationship: near}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Visible prosthetic heart-valve apparatus, including mechanical, bioprosthetic, and TAVR/TAVI prostheses."
+    notes: ["Separate from native cardiac or valvular calcification.", "Exclude annuloplasty rings and other valve-repair hardware alone.", "Valve position and type are not encoded here.", "Positive labels propagate to support device present."]
+  - id: vascular_graft_or_stent
+    name: "Vascular graft/stent"
+    category: support_device
+    parents: [support_device_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Aortic endoprosthesis", relationship: narrower}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "A vascular stent, stent-graft, endoprosthesis, or other vascular prosthesis visible within the CXR field of view."
+    notes: ["Requires vascular localization; unspecified stent is insufficient.", "Includes coronary stents and aortic endoprostheses/TEVAR/visible EVAR when currently shown.", "Positive labels propagate to support device present."]
+  - id: breast_implant
+    name: "Breast implant"
+    category: support_device
+    parents: [support_device_present]
+    kind: device
+    dataset_mappings: {puccxr: [], cxrlt2024: [], vindr_cxr: []}
+    preliminary_definition: "One or more breast implants or prostheses visible or explicitly identified on the current CXR, including ruptured or otherwise abnormal implants."
+    notes: ["Kept distinct from lines and tubes despite organizational placement.", "Do not infer from dense breasts, gynecomastia, mastectomy without implant, or capsular calcification alone.", "Positive labels propagate to support device present."]
+  - id: sternotomy_wires
+    name: "Sternotomy wires"
+    category: support_device
+    parents: [support_device_present]
+    kind: device
+    dataset_mappings: {puccxr: [{class_name: "Sternotomy", relationship: near}], cxrlt2024: [{class_name: "Support Devices", relationship: broader}], vindr_cxr: []}
+    preliminary_definition: "Metallic sternal closure wires, cables, or equivalent wire-based median sternotomy closure hardware visible on CXR."
+    notes: ["Targets visible wire/cable hardware rather than surgical history alone.", "Require sternal localization for cerclage wording.", "Sternal plates are not included under this wire-focused class.", "Positive labels propagate to support device present."]
+  - id: device_abnormality
+    name: "Device abnormality"
+    category: support_device
+    parents: [support_device_present]
+    kind: attribute
+    dataset_mappings: {puccxr: [{class_name: "Lines", relationship: partial}, {class_name: "Tubes", relationship: partial}], cxrlt2024: [{class_name: "Support Devices", relationship: partial}], vindr_cxr: []}
+    preliminary_definition: "A currently visible therapeutic device has a radiographically characterized abnormality of course, location, tip position, or structural integrity."
+    notes: ["Implies a visible device is present and therefore propagates to support device present.", "Includes malposition, migration, kinking/coiling, fracture, discontinuity, or disconnection when explicitly characterized.", "Do not judge raw tip measurements independently; exclude clinical malfunction without a visible abnormality; exclude nearby complications with an otherwise normal device.", "Should coexist with a device identity label when the device type is known."]
+  - id: subcutaneous_emphysema
+    name: "Subcutaneous emphysema"
+    category: soft_tissue
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Subcutaneous emphysema", relationship: exact}], cxrlt2024: [{class_name: "Subcutaneous Emphysema", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Gas lucencies track within chest-wall or neck soft tissues."
+    notes: ["Distinct from pulmonary emphysema and pneumomediastinum."]
+  - id: nontherapeutic_foreign_body
+    name: "Nontherapeutic foreign body"
+    category: other
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [{class_name: "Abnormal foreign body", relationship: near}], cxrlt2024: [], vindr_cxr: [{class_name: "Other lesion", relationship: broader}]}
+    preliminary_definition: "Unexpected internal or retained foreign material not intended as a medical device, prosthesis, or therapeutic implant."
+    notes: ["Explicitly exclude expected therapeutic devices and postoperative hardware.", "Retained device fragments belong with device abnormality / support device classes when identified as device-related.", "External artifacts (ECG stickers, jewelry, clothing) are out of scope for this class.", "A separate external_artifact class may be added later if needed."]
+  - id: azygos_lobe
+    name: "Azygos lobe"
+    category: anatomic_variant
+    parents: []
+    kind: finding
+    dataset_mappings: {puccxr: [], cxrlt2024: [{class_name: "Azygos Lobe", relationship: exact}], vindr_cxr: []}
+    preliminary_definition: "Accessory azygos fissure and arch create the characteristic right upper-lung azygos lobe appearance."
+    notes: ["Benign anatomic variant that can mimic a line or focal abnormality."]

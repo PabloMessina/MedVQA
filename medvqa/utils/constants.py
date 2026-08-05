@@ -1,5 +1,6 @@
-import numpy as np
 import os
+
+import numpy as np
 
 CHEXPERT_LABELS = [ # Note: I'm annotating roughly equivalent labels in the Chest ImaGenome dataset
     'No Finding', # NOT abnormal
@@ -1490,7 +1491,6 @@ UNIFIED_CXRLT2024_VINDRCXR_CLASSES = [
     'Fissural Thickening', # In CXR-LT 2024 as 'Fissure'. NOTE: "fissure" is just anatomy, so we focus on the "thickening" abnormality.
     'Granuloma', # CXR-LT 2024
     'Hernia', # CXR-LT 2024
-    'Hilar Congestion', # In CXR-LT 2024 as 'Hilum'. NOTE: "hilum" is just anatomy, so we focus on the "congestion" abnormality.
     'Hilar Enlargement', # In CXR-LT 2024 as 'Hilum'. NOTE: "hilum" is just anatomy, so we focus on the "enlargement" abnormality.
     'Hydropneumothorax', # CXR-LT 2024. NOTE: Technically 'Hydropneumothorax' can fall under 'Pleural Other' as well.
     'Infiltration', # CXR-LT 2024, VinDr-CXR
@@ -1518,6 +1518,7 @@ UNIFIED_CXRLT2024_VINDRCXR_CLASSES = [
     'Pulmonary Fibrosis', # In CXR-LT 2024 as 'Fibrosis'. In VinDr-CXR as 'Pulmonary fibrosis'
     'Pulmonary Hypertension', # CXR-LT 2024
     'Pulmonary Infarction', # In CXR-LT 2024 as 'Infarction'.
+    'Pulmonary Vascular Congestion', # In CXR-LT 2024 as 'Hilum' (via Hilar Congestion). NOTE: "hilum" is just anatomy; we focus on pulmonary vascular congestion.
     'Osteopenia', # CXR-LT 2024
     'Rib Fracture', # CXR-LT 2024, VinDr-CXR
     'Rounded Atelectasis', # In CXR-LT 2024 as 'Round(ed) Atelectasis', VinDr-CXR only has 'Atelectasis'
@@ -1542,7 +1543,7 @@ UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES = {
     'Aortic Enlargement': ['Aortic Enlargement'],
     'Aortic Tortuosity': ['Aortic Tortuosity'],
     'Azygos Lobe': ['Azygos Lobe'],
-    'Bone Fracture': ['Fracture'],
+    'Bone Fracture': ['Bone Fracture'],
     'Bulla': ['Bulla'],
     'Calcification': ['Calcification'],
     'Cardiomegaly': ['Cardiomegaly'],
@@ -1557,8 +1558,8 @@ UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES = {
     'Fissural Thickening': ['Fissural Thickening'],
     'Granuloma': ['Granuloma'],
     'Hernia': ['Hernia'],
-    'Hilar Congestion': ['Hilar Congestion'],
     'Hilar Enlargement': ['Hilar Enlargement'],
+    'Pulmonary Vascular Congestion': ['Pulmonary Vascular Congestion'],
     'Hydropneumothorax': ['Hydropneumothorax'],
     'Infiltration': ['Infiltration'],
     'Interstitial Lung Disease': ['Interstitial Lung Disease'],
@@ -1615,7 +1616,7 @@ CXRLT2024_CLASS_TO_UNIFIED_CXRLT2024_VINDRCXR_CLASSES = {
     'Fracture': 'Bone Fracture',
     'Granuloma': 'Granuloma',
     'Hernia': 'Hernia',
-    'Hilum': ['Hilar Congestion', 'Hilar Enlargement'], # NOTE: "hilum" is just anatomy, so we focus on the "congestion" and "enlargement" abnormalities.
+    'Hilum': ['Pulmonary Vascular Congestion', 'Hilar Enlargement'], # NOTE: "hilum" is just anatomy; congestion → Pulmonary Vascular Congestion.
     'Hydropneumothorax': 'Hydropneumothorax',
     'Infarction': 'Pulmonary Infarction',
     'Infiltration': 'Infiltration',
@@ -1654,6 +1655,83 @@ for x in CXRLT2024_CLASSES:
         assert all(y in UNIFIED_CXRLT2024_VINDRCXR_CLASSES for y in assigned_classes)
     else:
         assert assigned_classes in UNIFIED_CXRLT2024_VINDRCXR_CLASSES
+
+
+CANONICAL_CXR_CLASSES = [
+    'Airspace Opacity',
+    'Aortic Calcification',
+    'Aortic Ectasia/Enlargement',
+    'Aortic Tortuosity',
+    'Atelectasis',
+    'Azygos Lobe',
+    'Breast Implant',
+    'Bronchial/Peribronchial Thickening',
+    'Bronchiectasis',
+    'Calcified Pulmonary Granuloma',
+    'Central Venous Catheter',
+    'Chest Tube',
+    'Clavicle Fracture',
+    'Consolidation',
+    'Costophrenic Angle Blunting',
+    'Degenerative Osseous Changes',
+    'Device Malposition',
+    'Diaphragmatic Eventration',
+    'Diaphragmatic Hernia',
+    'Elevated Hemidiaphragm',
+    'Emphysema',
+    'Endotracheal Tube',
+    'Enlarged Cardiac Silhouette',
+    'Enlarged Pulmonary Artery',
+    'Enteric Tube',
+    'Fissural Pleural Effusion',
+    'Focal Bone Lesion',
+    'Foreign Body',
+    'Hiatal Hernia',
+    'Hilar Enlargement',
+    'Hilar/Mediastinal Lymphadenopathy',
+    'Hydropneumothorax',
+    'Hyperinflation',
+    'Indeterminate Focal Pulmonary Lesion',
+    'Interstitial Lung Disease',
+    'Interstitial Opacity',
+    'Kyphosis',
+    'Lobar Atelectasis',
+    'Loculated Pleural Effusion',
+    'Low Lung Volumes',
+    'Lung Cavity',
+    'Lung Opacity',
+    'Median Sternotomy',
+    'Mediastinal Shift',
+    'Mediastinal Widening',
+    'Osteopenia',
+    'Other Support Device',
+    'Other Thoracic Fracture',
+    'PICC',
+    'Pacemaker/ICD',
+    'Pleural Calcification',
+    'Pleural Effusion',
+    'Pleural Nodule/Mass',
+    'Pleural Thickening',
+    'Pneumomediastinum',
+    'Pneumonia',
+    'Pneumoperitoneum',
+    'Pneumothorax',
+    'Postoperative Thoracic Changes',
+    'Prosthetic Heart Valve',
+    'Pulmonary Cyst/Bulla',
+    'Pulmonary Edema',
+    'Pulmonary Fibrosis',
+    'Pulmonary Nodule/Mass',
+    'Pulmonary Scarring',
+    'Pulmonary Vascular Congestion',
+    'Rib Fracture',
+    'Rounded Atelectasis',
+    'Scoliosis',
+    'Subcutaneous Emphysema',
+    'Tracheal Deviation',
+    'Tuberculosis',
+    'Vertebral Compression Fracture'
+]
 
 
 _CXR_CLASS_PHRASES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'cxr_classes')
@@ -1740,8 +1818,10 @@ for x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES:
     if x.startswith('Enlarged'):
         assert 'larger than normal' in phrase
         assert ' '.join(x.split()[1:]).lower() in phrase.lower()
-    elif "in the pleura" in phrase:
-        assert x.startswith('Pleural')
-        assert x.split()[1].lower() in phrase.lower()
+    elif x.startswith('Pleural'):
+        # Pleural* classes: require the second token (e.g. Effusion) in the phrase.
+        assert x.split()[1].lower().rstrip('/') in phrase.lower() or all(
+            y in phrase.lower() for y in x.lower().replace('/', ' ').split()
+        ), f"{x} not reflected in phrase: {phrase[:120]}..."
     else:
-        assert all(y in phrase.lower() for y in x.lower().split()), f"{x} not in {phrase}"
+        assert all(y in phrase.lower() for y in x.lower().replace('/', ' ').split()), f"{x} not in {phrase}"

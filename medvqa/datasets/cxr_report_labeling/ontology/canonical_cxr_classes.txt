@@ -1,0 +1,79 @@
+Aortic calcification
+Aortic enlargement/ectasia
+Aortic tortuosity/elongation
+Atelectasis
+Azygos lobe
+Bone fracture
+Breast implant
+Bronchial wall thickening
+Bronchiectasis
+Calcification
+Calcified pulmonary nodule or granuloma
+Cardiac/valvular/pericardial calcification
+Central venous catheter
+Chest tube
+Clavicle fracture
+Consolidation
+Costophrenic angle blunting
+Degenerative osseous change
+Device abnormality
+Elevated/eventrated hemidiaphragm
+Emphysema
+Endotracheal tube
+Enlarged cardiac silhouette
+Enlarged cardiomediastinal silhouette
+Enlarged pulmonary artery
+Enteric tube
+Fibrotic lung change
+Flattened diaphragm
+Focal osseous lesion
+Focal pulmonary scarring
+Ground-glass opacity/pattern
+Hernia
+Hiatal hernia
+Hilar enlargement
+Hilar or mediastinal nodal enlargement
+Hydropneumothorax
+Hyperinflation
+Interstitial lung disease
+Kerley lines
+Kyphosis
+Lobar atelectasis
+Loculated/fissural effusion
+Low lung volume
+Lung opacity
+Mediastinal mass
+Mediastinal shift
+Mediastinal widening
+No finding
+Nontherapeutic foreign body
+Pacemaker/ICD
+Pleural calcification
+Pleural effusion
+Pleural nodule or mass
+Pleural plaque
+Pleural thickening
+Pneumomediastinum
+Pneumonia
+Pneumoperitoneum
+Pneumothorax
+Prosthetic cardiac valve
+Pulmonary cavity
+Pulmonary cyst or bulla
+Pulmonary edema
+Pulmonary nodule or mass
+Pulmonary vascular congestion
+Radiographic osteopenia
+Reticular interstitial opacity/pattern
+Rib fracture
+Rounded atelectasis
+Scoliosis
+Sternotomy wires
+Subcutaneous emphysema
+Support device present
+Support line present
+Support tube present
+Tracheal deviation
+Tuberculosis
+Vascular graft/stent
+Vertebral compression fracture

@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://medvqa.example/schemas/canonical-cxr-ontology.schema.json",
+  "title": "Canonical CXR Ontology",
+  "description": "Schema for the canonical chest-radiograph classifier ontology after YAML-to-JSON parsing. JSON Schema cannot verify that category and parent identifiers resolve, that identifiers are globally unique, or that the parent graph is acyclic; those constraints require a separate semantic validation pass.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ontology", "categories", "classes"],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this serialization schema, independent of the ontology content version.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "ontology": {
+      "description": "Metadata describing this ontology release.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "status", "description", "source_of_truth", "parent_semantics"],
+      "properties": {
+        "id": {
+          "description": "Stable snake_case ontology identifier.",
+          "$ref": "#/$defs/snakeCaseId"
+        },
+        "name": {
+          "description": "Human-readable ontology name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "description": "Ontology content version.",
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "status": {
+          "description": "Maturity of this ontology release.",
+          "enum": ["draft", "review", "approved", "deprecated"]
+        },
+        "description": {
+          "description": "Scope and intended use of the ontology.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_of_truth": {
+          "description": "Statement identifying the authoritative representation.",
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_semantics": {
+          "description": "Meaning of class parent edges and the required propagation behavior.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "categories": {
+      "description": "Organizational groupings only; category records are not image-classifier labels.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/category"
+      }
+    },
+    "classes": {
+      "description": "Complete set of intended image-classifier outputs. Identifier uniqueness, reference existence, and graph validity require semantic validation beyond JSON Schema.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/class"
+      }
+    }
+  },
+  "$defs": {
+    "snakeCaseId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+    },
+    "category": {
+      "description": "A non-classifier organizational grouping.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description"],
+      "properties": {
+        "id": {
+          "description": "Stable snake_case category identifier; class category references must resolve to one such identifier.",
+          "$ref": "#/$defs/snakeCaseId"
+        },
+        "name": {
+          "description": "Human-readable category name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "description": "Organizational scope of the category and any important exclusions.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "class": {
+      "description": "One classifier output label.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "category", "parents", "kind", "dataset_mappings", "preliminary_definition", "notes"],
+      "properties": {
+        "id": {
+          "description": "Stable snake_case class identifier, unique across classes.",
+          "$ref": "#/$defs/snakeCaseId"
+        },
+        "name": {
+          "description": "Preferred human-readable label.",
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "description": "Identifier of an organizational category. Reference existence requires semantic validation.",
+          "$ref": "#/$defs/snakeCaseId"
+        },
+        "parents": {
+          "description": "True semantic is-a or label-inheritance parents only. Every identifier must resolve to another classifier class; organizational grouping belongs in category. Existence and acyclicity require semantic validation.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/snakeCaseId"
+          }
+        },
+        "kind": {
+          "description": "Semantic role of the classifier output.",
+          "enum": ["finding", "diagnosis", "device", "attribute", "state", "fallback"]
+        },
+        "dataset_mappings": {
+          "description": "Mappings to each audited source dataset. Empty arrays explicitly mean no useful mapping.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["puccxr", "cxrlt2024", "vindr_cxr"],
+          "properties": {
+            "puccxr": {
+              "description": "Mappings to PUCCXR labels, preserving source spelling and capitalization.",
+              "$ref": "#/$defs/mappingList"
+            },
+            "cxrlt2024": {
+              "description": "Mappings to CXR-LT 2024 labels, preserving source spelling and capitalization.",
+              "$ref": "#/$defs/mappingList"
+            },
+            "vindr_cxr": {
+              "description": "Mappings to VinDr-CXR labels, preserving source spelling and capitalization.",
+              "$ref": "#/$defs/mappingList"
+            }
+          }
+        },
+        "preliminary_definition": {
+          "description": "Concise medically careful description of what is visible or predictably inferable on chest radiography.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "description": "Explicit caveats concerning hierarchy, propagation, projection, ambiguity, or annotation.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "mappingList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mapping"
+      }
+    },
+    "mapping": {
+      "description": "One semantic mapping to a source class.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class_name", "relationship"],
+      "properties": {
+        "class_name": {
+          "description": "Source class name with exact source capitalization.",
+          "type": "string",
+          "minLength": 1
+        },
+        "relationship": {
+          "description": "Relation of the source class to the canonical class: exact/near equivalence, or source broader, narrower, or partially overlapping.",
+          "enum": ["exact", "near", "broader", "narrower", "partial"]
+        }
+      }
+    }
+  }
+}

@@ -8,4 +8,4 @@ tmp/
 *.pt
 *.jpg
 *.png
-agent_aux/
+.agent/

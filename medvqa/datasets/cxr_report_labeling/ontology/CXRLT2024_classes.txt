@@ -1,0 +1,45 @@
+Adenopathy
+Atelectasis
+Azygos Lobe
+Calcification of the Aorta
+Cardiomegaly
+Clavicle Fracture
+Consolidation
+Edema
+Emphysema
+Enlarged Cardiomediastinum
+Fibrosis
+Fissure
+Fracture
+Granuloma
+Hernia
+Hydropneumothorax
+Infarction
+Infiltration
+Kyphosis
+Lobar Atelectasis
+Lung Lesion
+Lung Opacity
+Mass
+Nodule
+Normal
+Pleural Effusion
+Pleural Other
+Pleural Thickening
+Pneumomediastinum
+Pneumonia
+Pneumoperitoneum
+Pneumothorax
+Pulmonary Embolism
+Pulmonary Hypertension
+Rib Fracture
+Round(ed) Atelectasis
+Subcutaneous Emphysema
+Support Devices
+Tortuous Aorta
+Tuberculosis
+Bulla
+Cardiomyopathy
+Hilum
+Osteopenia
+Scoliosis

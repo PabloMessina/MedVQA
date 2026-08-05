@@ -2,12 +2,11 @@ import itertools
 import os
 import re
 from multiprocessing import Pool
-from typing import Dict, List, Optional, Set, Union
 
 # ================================ Pattern Loading ================================
 
 _CXR_CLASSES_DIR = os.path.join(os.path.dirname(__file__), 'cxr_classes')
-_PATTERN_CACHE: Dict[str, re.Pattern] = {}
+_PATTERN_CACHE: dict[str, re.Pattern] = {}
 
 
 def _load_pattern(name: str) -> re.Pattern:
@@ -54,6 +53,14 @@ _CLASS_NAME_TO_REGEX_PATTERNS = {
         'Rounded Atelectasis',
     ],
     'Azygos Lobe': _load_pattern('azygos_lobe'),
+    'Bone Fracture': [
+        _load_pattern('fracture'),
+        'Callus Rib Fracture',
+        'Clavicle Fracture',
+        'Humeral Fracture',
+        'Rib Fracture',
+        'Vertebral Fracture',
+    ],
     'Bulla': _load_pattern('bulla'),
     'Calcification': [
         _load_pattern('calcification'),
@@ -101,14 +108,6 @@ _CLASS_NAME_TO_REGEX_PATTERNS = {
         _load_pattern('fissure_thickening'),
         'Major Fissure Thickening',
         'Minor Fissure Thickening',
-    ],
-    'Fracture': [
-        _load_pattern('fracture'),
-        'Callus Rib Fracture',
-        'Clavicle Fracture',
-        'Humeral Fracture',
-        'Rib Fracture',
-        'Vertebral Fracture',
     ],
     'Gastrostomy Tube': _load_pattern('gastrostomy_tube'),
     'Granuloma': _load_pattern('granuloma'),
@@ -315,19 +314,19 @@ _sanity_check_regular_expressions() # If no error is raised, the regular express
 
 # ================================ Helper Functions ================================
 
-PatternDefinition = Union[re.Pattern, List[Union[re.Pattern, str]]]
+PatternDefinition = re.Pattern | list[re.Pattern | str]
 
 def _search_worker(pattern, text):
     """A simple worker to be used by multiprocessing pools."""
     return 1 if pattern.search(text) else 0
 
 def collect_reports_matching_class(
-    reports: List[str],
+    reports: list[str],
     class_name: str,
-    class_match_cache: Dict[str, List[int]],
-    class_to_regex_patterns: Optional[Dict[str, PatternDefinition]] = _CLASS_NAME_TO_REGEX_PATTERNS,
-    num_processes: Optional[int] = 1,
-) -> List[int]:
+    class_match_cache: dict[str, list[int]],
+    class_to_regex_patterns: dict[str, PatternDefinition] | None = _CLASS_NAME_TO_REGEX_PATTERNS,
+    num_processes: int | None = 1,
+) -> list[int]:
     """Recursively collects report indices that match regex patterns for a class.
 
     This function finds all report indices that match the regex pattern(s)
@@ -387,7 +386,7 @@ def collect_reports_matching_class(
                 )
                 matching_report_indices.update(sub_matches)
             else:
-                raise ValueError(f"Expected sub_pattern to be a regex pattern or a string, got {type(sub_pattern)}")
+                raise TypeError(f"Expected sub_pattern to be a regex pattern or a string, got {type(sub_pattern)}")
     else: # It's a single regex pattern
         patterns_to_check.append(pattern_definition)
 
@@ -410,6 +409,6 @@ def collect_reports_matching_class(
                 if sub_pattern.search(report_text):
                     matching_report_indices.add(i)
 
-    sorted_indices = sorted(list(matching_report_indices))
+    sorted_indices = sorted(matching_report_indices)
     class_match_cache[class_name] = sorted_indices
     return sorted_indices
