@@ -1,0 +1,47 @@
+{
+  "class_id": "ground_glass_opacity_pattern",
+  "positives": [
+    "Ground-glass opacity in the lower lobes.",
+    "Ground glass pattern bilaterally.",
+    "Patchy GGO in the right lung.",
+    "Ground-glass density in the left upper lobe.",
+    "Ground-glass change is present.",
+    "There is diffuse ground glass opacification with areas of nodular consolidation.",
+    "Mild diffuse patchy groundglass opacification, predominantly in the lower zones.",
+    "Right lower lung airspace opacity representing underlying groundglass.",
+    "Increasing ground glass hazy density in the left mid lung zone, as characterized on the prior chest CT.",
+    "Persistent diffuse bilateral peribronchial ground-glass opacities, better evaluated on recent CT.",
+    "Medial to this region are ground-glass opacities corresponding to a known complex ground-glass nodule on prior chest CT.",
+    "Diffuse peripheral reticular pattern and ground glass opacities consistent with fibrotic changes seen on prior CT thorax.",
+    "Subtle ground glass opacities in the bilateral lung fields, better seen on the CT examination.",
+    "Left upper lobe ground glass and consolidation, better seen on subsequent CT.",
+    "Apical predominant subtle ground glass opacities better seen on the CT thorax.",
+    "Haziness throughout the right lower lung zone may reflect groundglass opacities, better evaluated on recent CT.",
+    "Right perihilar opacification represents perihilar ground-glass opacities, better seen on the prior CT.",
+    "Subtle ground-glass opacity in the left lung base is better appreciated on same-day CT.",
+    "Diffuse bilateral ground-glass opacities have progressed since the prior radiograph and are better demonstrated on CT.",
+    "Ground glass opacities in the right lung are better seen on prior CT.",
+    "Subtle ground-glass opacities in the right lung are better assessed on prior CT.",
+    "Patchy GG opacities in the lower lobes.",
+    "Transient GG opacities in the left upper lobe.",
+    "Redemonstration of superimposed ground glass opacity, which appears stable, as demonstrated on CT of the chest.",
+    "There is hazy ground-glass opacity in the right lung, similar to the appearance on the prior CT.",
+    "Underlying bilateral ground-glass airspace opacities are better characterized on recent CTA.",
+    "Hazy bilateral airspace opacification may reflect persistent ground-glass opacification as noted on prior CTA.",
+    "Right basilar ground-glass opacities are unchanged, as on recent chest CT."
+  ],
+  "negatives": [
+    "Dense consolidation in the right lower lobe.",
+    "Patchy airspace opacity without ground-glass wording.",
+    "Hazy perihilar opacification, favor edema.",
+    "Reticular interstitial opacities bilaterally.",
+    "Alveolar infiltrates in the left lung.",
+    "Interval improvement in grated opacity at the lung bases.",
+    "Known left upper lobe ground glass opacity seen on prior CT is not well appreciated on this limited exam.",
+    "Increased interstitial lung markings are likely due to ground-glass opacities described on the most recent CT chest."
+  ],
+  "negation_soft": [
+    "No ground-glass opacity is identified.",
+    "Ground-glass change seen on prior CT not visible on CXR."
+  ]
+}

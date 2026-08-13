@@ -1,0 +1,47 @@
+{
+  "class_id": "breast_implant",
+  "positives": [
+    "Bilateral breast implants.",
+    "Right silicone breast implant.",
+    "Saline breast prosthesis on the left.",
+    "Ruptured breast implant.",
+    "Breast augmentation implants visible.",
+    "Bilateral saline tissue expanders.",
+    "Left tissue expander in place.",
+    "Bilateral breast prostheses.",
+    "Right breast expander.",
+    "Stable postmastectomy changes on the left with an implant.",
+    "The patient has had bilateral mammary implants.",
+    "The patient is after placement of bilateral subcutaneous expanders.",
+    "Again seen is the bilateral subcutaneous expanders.",
+    "Interval breast augmentation with increased overlying density of the implants.",
+    "Breast augmentation devices in place.",
+    "Status post left breast augmentation, with a tissue expanded.",
+    "Bilateral augmentation mammoplasties again noted.",
+    "Incidental note of bilateral breast augmentation.",
+    "Breast augmentation noted.",
+    "Again seen are bilateral breast augmentation.",
+    "Bilateral breast augmentation.",
+    "Status post right mastectomy with axillary node dissection and breast augmentation.",
+    "Bilateral breast prosthetic implants noted.",
+    "Bilateral breasts implants are again seen.",
+    "Overlying soft tissues and breasts prostheses.",
+    "Bilateral breasts implants.",
+    "Asymmetric breast contours are stable with a left-sided prosthesis.",
+    "Again there is a prosthesis involving the left breast.",
+    "There is an implant in the left breast.",
+    "Asymmetric size of the breast tissue with implant in the left noted.",
+    "Round opacity projecting over right breast consistent with previously seen implant."
+  ],
+  "negatives": [
+    "Dense breast tissue.",
+    "Gynecomastia.",
+    "Post mastectomy changes without implant.",
+    "Capsular calcification alone.",
+    "Chest wall soft tissue opacity.",
+    "Right breast prosthesis explantation."
+  ],
+  "negation_soft": [
+    "No breast implants."
+  ]
+}

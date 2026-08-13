@@ -1,0 +1,443 @@
+# ==============================================================================
+# hilar_or_mediastinal_nodal_enlargement
+# Explicit hilar/mediastinal adenopathy, lymphadenopathy, or enlarged nodes.
+#
+# Match: location-qualified or central/intrathoracic adenopathy; enlarged /
+# prominent / bulky hilar|mediastinal|paratracheal|pretracheal nodes; lymph-node
+# enlargement / nodal enlargement; lymph-node / nodal mass or conglomerate;
+# sized/large located nodes; location-qualified LAD; calcified nodes with
+# enlargement; peritracheal mediastinal widening → adenopathy; paratracheal
+# mass/bulge with nodal language; hedged DDx (or/versus; attributable/represent).
+#
+# Do NOT match: bare hilar prominence/enlargement/fullness; mediastinal widening
+# without nodal attribution; calcified lymph nodes without adenopathy wording;
+# negated / rule-out / indication-only / "not excluded" phrasing; non-chest
+# adenopathy (abdominal, axillary, cervical, pelvic, etc.).
+# ==============================================================================
+
+\b(?:
+        # ------------------------------------------------------------------
+        # Shared pieces (comments only). All lookbehinds are fixed-width.
+        # ------------------------------------------------------------------
+
+        # 1. hilar/mediastinal/paratracheal OR-pair + adenopathy
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bno\sdefinite\s)(?<!\bwithout\sdefinite\s)
+        (?<!\bno\sevident\s)(?<!\bno\sappreciable\s)
+        (?<!\bno\sconvincing\s)(?<!\bwithout\sconvincing\s)
+        (?<!\bno\ssignificant\s)(?<!\bwithout\ssignificant\s)
+        (?<!\bno\ssignificantly\s)(?<!\bof\ssignificant\s)
+        (?<!\bno\svisibly\s)(?<!\bno\sobvious\s)(?<!\bno\sovert\s)
+        (?<!\bno\smajor\s)(?<!\bno\sgross\s)
+        (?<!r/o\s)(?<!\brule\sout\s)(?<!\?\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
+        (?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal)\s+or\s+(?:hilar|mediastinal|paratracheal)\s+
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?!\s*\?)(?!\s*:\s*none)
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+
+        |
+
+        # 2. Location-specific adenopathy / lymphadenopathy (incl. common typos)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bno\sdefinite\s)(?<!\bwithout\sdefinite\s)
+        (?<!\bno\sevident\s)(?<!\bno\sappreciable\s)
+        (?<!\bno\sconvincing\s)(?<!\bwithout\sconvincing\s)
+        (?<!\bno\ssignificant\s)(?<!\bwithout\ssignificant\s)
+        (?<!\bno\ssignificantly\s)(?<!\bof\ssignificant\s)
+        (?<!\bno\svisibly\s)(?<!\bno\sobvious\s)(?<!\bno\sovert\s)
+        (?<!\bno\smajor\s)(?<!\bno\sgross\s)
+        (?<!r/o\s)(?<!\brule\sout\s)(?<!\?\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
+        (?:(?:right|left|bilateral)\s+)?
+        (?:
+            hilar
+            | mediastinal
+            | mediastonal
+            | paratracheal
+            | peritracheal
+            | pretracheal
+            | subcarinal
+            | suprahilar
+            | infrahilar
+            | aortopulmonary
+            | aortopulmonic
+            | ap\ window
+            | tracheobronchial
+            | mediastinal\ and\ hilar
+            | mediastonal\ and\ hilar
+            | hilar\ and\ mediastinal
+            | hilar\ and\ mediastonal
+            | right[-\s]sided
+            | left[-\s]sided
+        )\s+
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?!\s*\?)(?!\s*:\s*none)
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s+shown\s+on)
+
+        |
+
+        # 3. Thoracic-qualified adenopathy without a named station
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bno\sdefinite\s)(?<!\bwithout\sdefinite\s)
+        (?<!\bno\sevident\s)(?<!\bno\sappreciable\s)
+        (?<!\bno\sconvincing\s)(?<!\bwithout\sconvincing\s)
+        (?<!\bno\ssignificant\s)(?<!\bwithout\ssignificant\s)
+        (?<!\bno\ssignificantly\s)(?<!\bof\ssignificant\s)
+        (?<!\bno\svisibly\s)(?<!\bno\sobvious\s)(?<!\bno\sovert\s)
+        (?<!\bno\smajor\s)(?<!\bno\sgross\s)
+        (?<!r/o\s)(?<!\brule\sout\s)(?<!\?\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
+        (?:central|extensive|bulky|symmetric|symmetrical|intrathoracic|multifocal)\s+
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?!\s*\?)(?!\s*:\s*none)
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s+shown\s+on)
+
+        |
+
+        # 4. Bare adenopathy ONLY when not immediately preceded by a station /
+        #    non-chest site / leftover negation noun / comma-list tail
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bpneumothorax,\s)(?<!\beffusions,\s)(?<!\beffusion,\s)
+        (?<!\bedema,\s)(?<!\bpneumonia,\s)(?<!\bnodules,\s)
+        (?<!\bno\sdefinite\s)(?<!\bwithout\sdefinite\s)
+        (?<!\bno\sevident\s)(?<!\bno\sappreciable\s)
+        (?<!\bno\sconvincing\s)(?<!\bwithout\sconvincing\s)
+        (?<!\bor\sconvincing\s)
+        (?<!\bno\ssignificant\s)(?<!\bwithout\ssignificant\s)
+        (?<!\bof\ssignificant\s)
+        (?<!\bno\ssignificantly\s)(?<!\bno\svisibly\s)
+        (?<!\bno\sobvious\s)(?<!\bno\sovert\s)(?<!\bno\smajor\s)
+        (?<!r/o\s)(?<!\brule\sout\s)(?<!\?\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?<!\bnegative\sfor\s)(?<!\bnegative\sof\s)
+        (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
+        (?<!\bsuggest\snew\s)(?<!\bunderlying\s)(?<!\bthe\s)
+        (?<!\bhilar\s)(?<!\bmediastinal\s)(?<!\bmediastonal\s)(?<!\bparatracheal\s)
+        (?<!\bperitracheal\s)(?<!\bpretracheal\s)(?<!\bsubcarinal\s)
+        (?<!\binfrahilar\s)(?<!\bsuprahilar\s)(?<!\bcentral\s)(?<!\bthoracic\s)
+        (?<!\bextensive\s)(?<!\bbulky\s)(?<!\benlarged\s)
+        (?<!\baortopulmonary\s)(?<!\baortopulmonic\s)
+        (?<!\babdominal\s)(?<!\baxillary\s)(?<!\bcervical\s)(?<!\bneck\s)
+        (?<!\binguinal\s)(?<!\bpelvic\s)(?<!\bsidewall\s)(?<!\bretroperitoneal\s)
+        (?<!\bsupraclavicular\s)(?<!\binternal\smammary\s)(?<!\bmesenteric\s)
+        (?<!\bintra\sthoracic\s)(?<!\bintrathoracic\s)
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?!\s*\?)(?!\s*:\s*none)
+        (?!\s+elsewhere)(?!\s+shown\s+on)(?!\s+seen\s+on\s+prior)
+        (?!\s*,\s*or\s+(?:a\s+)?mass(?:es)?)
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s+at\s+the\s+aortopulmon)
+
+        |
+
+        # 5. Enlarged / prominent / bulky located nodes
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\ssignificantly\s)(?<!\bno\svisibly\s)
+        (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+        (?<!\bno\sappreciable\s)(?<!\bno\sevident\s)
+        (?:(?:single|a|an|mildly|mild|moderately|pathologically)\s+)?
+        (?:enlarged|prominent|bulky)\s+
+        (?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal|subcarinal|peritracheal)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)\b
+
+        |
+
+        # 6. Generic lymph-node / nodal enlargement phrasing
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bor\s)
+        (?<!\bno\ssignificantly\s)(?<!\bno\svisibly\s)
+        (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+        (?<!\bno\sappreciable\s)(?<!\bno\sevident\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bcentral\s)
+        (?<!\babdominal\s)(?<!\bpelvic\s)(?<!\baxillary\s)(?<!\bcervical\s)
+        (?<!\bretroperitoneal\s)
+        (?:enlarged\s+lymph[\s\-]?nodes?|lymph[\s\-]?node\s+enlargement|nodal\s+enlargement|multifocal\s+lymph[\s\-]?node\s+enlargement)\b
+        (?!\s+(?:are\s+)?(?:seen|found)\s+in\s+the\s+(?:abdomen|pelvis|neck))
+        (?!\s+in\s+the\s+(?:abdomen|pelvis|neck|right\s+side|left\s+side))
+        (?!\s+are\s+found)
+
+        |
+
+        # 7. Measured enlarged lymph node (e.g. "1.1 cm, enlarged lymph node")
+        (?<!\bno\s)(?<!\bnot\s)
+        (?<!\bno\ssignificantly\s)(?<!\bno\svisibly\s)
+        (?<!\bretroperitoneal\s)
+        (?:\d+(?:\.\d+)?\s*(?:cm|mm)\s*,?\s*)?
+        enlarged\s+lymph[\s\-]?node\b
+        (?!\s+is\s+seen\s+in\s+the\s+(?:abdomen|pelvis|neck))
+        (?!\s+in\s+the\s+(?:abdomen|pelvis|neck|right\s+side|left\s+side))
+        (?!\s+along\s+the)
+
+        |
+
+        # 8. Paratracheal mass/bulge with nodal / adenopathy language nearby
+        (?:(?:right|left|lower|upper)\s+)?(?:para|peri)?tracheal(?:\s+mediastinal)?\s+(?:mass|bulge|buldge)
+        (?:(?![.!?])(?:.){0,90}?)
+        (?:nodal|(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy))
+
+        |
+
+        # 9. Mass adjacent to paratracheal region ... nodal
+        mass\s+adjacent\s+to\s+(?:(?:the\s+)?(?:right|left)\s+)?paratracheal\s+region
+        (?:(?![.!?])(?:.){0,80}?)nodal
+
+        |
+
+        # 10. Hedged DDx: hilar/mediastinal/hila finding attributed to adenopathy /
+        #     lymphoid enlargement (incl. vascular-vs-nodal and mass-or-adenopathy)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bor\s)(?<!\bnor\s)
+        (?<!\brule\sout\s)(?<!r/o\s)(?<!\?\s)
+        (?<!\bout\sbilateral\s)(?<!\bout\sright\s)(?<!\bout\sleft\s)
+        (?:
+            (?:(?:right|left|bi(?:\-|\s)?)?(?:hilar|hilum|hila)|bihilar|paratracheal(?:\s+stripe)?|suprahilar|infrahilar|perihilar|mediastinal)
+            | (?:(?:right|left|bilateral)\s+)?(?:hilar|hilum|hila)\s+region
+            | (?:pulmonary\s+)?hilum
+        )
+        [^.]{0,140}?
+        (?:
+            # congestion/vascularity OR/VERSUS lymphadenopathy (optional adj)
+            (?:(?:mass|masses)\s+(?:or|versus)\s+|(?<!\bmass\s)(?<!\bmasses\s)\b(?:or|versus)\s+)
+            (?:(?:mild|extensive|bulky|underlying|possible|probable)\s+)?
+            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            |
+            # attribution verbs → optional intervening DDx → (underlying) adenopathy
+            (?:
+                due(?:\s+(?:largely|mainly|mostly|in\s+part))?\s+to
+                | secondary(?:\s+to)?
+                | represent(?:s|ing)?
+                | reflect(?:s|ing)?
+                | related\s+to
+                | from
+                | suggest(?:s|ing)?
+                | compatible\s+with
+                | consistent\s+with
+                | worrisome\s+for
+                | concerning\s+for
+            )
+            \s+
+            (?:
+                # direct: underlying adenopathy / mass or adenopathy
+                (?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
+                (?:(?:mass|masses)\s+or\s+)?
+                (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement|(?:nodule/)?lymph[\s\-]?nodes?)
+                |
+                # gap then or/versus (optional adj) lymphadenopathy
+                [^.]{0,70}?
+                \b(?:or|versus)\s+
+                (?:(?:mild|extensive|bulky|underlying|possible|probable)\s+)?
+                (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            )
+            |
+            # secondary to X or/versus lymphadenopathy
+            (?:may\s+be\s+)?secondary\s+to\s+[^.]{0,70}?
+            \b(?:or|versus)\s+(?:(?:mild|extensive|bulky|underlying)\s+)?
+            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            |
+            # prominence of the hila and (underlying) lymphadenopathy
+            \band\s+(?:(?:underlying|possible|probable)\s+)?
+            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+        )
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s+less\s+likely)
+        (?!\s*,\s*more\s+likely)
+
+        |
+
+        # 11. Mediastinal widening / fullness attributed to lymphadenopathy
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:widening|fullness|prominence)\s+of\s+(?:the\s+)?(?:(?:superior|upper)\s+)?mediastinum
+        [^.]{0,120}?
+        (?:
+            (?:
+                due(?:\s+(?:largely|mainly|mostly|in\s+part))?\s+to
+                | attributable\s+to
+                | secondary(?:\s+to)?
+                | related\s+to
+                | relat(?:e|es|ed)\s+to
+                | from
+                | suggest(?:s|ing)?
+                | represent(?:s|ing)?
+                | reflect(?:s|ing)?
+                | compatible\s+with
+                | consistent\s+with
+                | perhaps\s+related\s+to
+            )
+            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
+            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            |
+            \bor\s+(?:lymphadenopathy|adenopathy)
+        )
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+
+        |
+
+        # 12. Aortopulmonic / aortopulmonary station lymphadenopathy
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bor\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)(?<!\bnegative\sfor\s)
+        (?:
+            (?:the\s+)?(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+            \s+at\s+the\s+aortopulmon(?:ic|ary)(?:\s+(?:level|window))?
+            |
+            aortopulmon(?:ic|ary)(?:\s+(?:level|window))?\s+
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        )
+        (?!\s*\?)(?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+
+        |
+
+        # 13. DDx alternatives: finding OR located adenopathy/lymphadenopathy
+        #     (covers "aorta or mediastinal lymphadenopathy", "PA or hilar adenopathy")
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?:
+            (?:may\s+(?:also\s+)?)?(?:represent(?:s|ing)?|reflect(?:s|ing)?|be)
+            | (?:enlarged|prominent|irregular(?:\s+contour(?:\s+to)?)?)\s+
+              (?:(?:right|left|bilateral)\s+)?
+              (?:(?:pulmonary\s+)?(?:artery|arteries)|ascending\s+aorta|azygos(?:\s+consolidation)?|contour)
+            | (?:could\s+be\s+due\s+to|due\s+to|secondary\s+to)
+        )
+        [^.]{0,90}?
+        \bor\s+(?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|mediastonal|paratracheal|pretracheal|peritracheal)\s+
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?!\s*\?)(?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s+shown\s+on)
+
+        |
+
+        # 14. Pulmonary-artery / vessel-contour DDx with bare lymphadenopathy
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:
+            (?:irregular\s+)?contour\s+to\s+(?:(?:the|left|right)\s+)?(?:pulmonary\s+)?artery
+            | (?:(?:right|left|bilateral)\s+)?(?:pulmonary\s+)?(?:artery|arteries)
+        )
+        [^.]{0,100}?
+        (?:
+            (?:could\s+be\s+due\s+to|due\s+to|secondary\s+to|related\s+to)\s+
+            [^.]{0,70}?\bor\s+(?:lymphadenopathy|adenopathy)
+            |
+            \bor\s+(?:lymphadenopathy|adenopathy)
+        )
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+        (?!\s*,\s*more\s+likely)
+
+        |
+
+        # 15. Peritracheal/paratracheal mediastinal widening → lymphadenopathy
+        #     (location-first order; not "widening of the mediastinum")
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!r/o\s)(?<!\brule\sout\s)
+        (?:(?:right|left|bilateral)\s+)?
+        (?:peri|para)?tracheal\s+mediastinal\s+widening
+        [^.]{0,100}?
+        (?:
+            (?:
+                due(?:\s+(?:largely|mainly|mostly|in\s+part))?\s+to
+                | attributable\s+to
+                | secondary(?:\s+to)?
+                | related\s+to
+                | relat(?:e|es|ed)\s+to
+                | from
+                | suggest(?:s|ing)?
+                | represent(?:s|ing)?
+                | reflect(?:s|ing)?
+                | compatible\s+with
+                | consistent\s+with
+            )
+            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
+            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            |
+            \bor\s+(?:(?:mild|extensive|bulky|underlying)\s+)?
+            (?:lymphadenopathy|adenopathy)
+        )
+        (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
+        (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
+
+        |
+
+        # 16. Enlargement of located (lymph) nodes (word-order hole)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?:(?:mild|mildly|moderate|moderately|slight|slightly)\s+)?
+        enlargement\s+of\s+
+        (?:(?:the\s+)?(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)\b
+
+        |
+
+        # 17. Located lymph-node / nodal mass or conglomerate
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!r/o\s)(?<!\brule\sout\s)
+        (?:(?:right|left|bilateral|rounded|large|stable)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
+        (?:lymph[\s\-]?node\s+mass(?:es)?|nodal\s+mass(?:es)?|lymph[\s\-]?node\s+conglomerate)\b
+
+        |
+
+        # 18. Sized / large located lymph node (pathologic bulk without "enlarged")
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!r/o\s)(?<!\brule\sout\s)
+        (?:
+            (?:stable\s+)?\d+(?:\.\d+)?\s*(?:cm|mm)\s+
+            | (?:large|bulky|pathologic(?:ally)?)\s+
+        )
+        (?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)\b
+
+        |
+
+        # 19. Calcified located lymph nodes with enlargement stated
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        calcified\s+
+        (?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)
+        [^.]{0,80}?
+        (?:enlarged|enlargement|adenopathy|lymphadenopathy)\b
+
+        |
+
+        # 20. Location-qualified LAD abbreviation
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!r/o\s)(?<!\brule\sout\s)(?<!\?\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+        (?:(?:right|left|bilateral)\s+)?
+        (?:
+            hilar
+            | mediastinal
+            | paratracheal
+            | pretracheal
+            | mediastinal\ and\ hilar
+            | hilar\ and\ mediastinal
+        )\s+
+        LAD\b
+        (?!\s+cannot)(?!\s+is\s+not)
+
+)

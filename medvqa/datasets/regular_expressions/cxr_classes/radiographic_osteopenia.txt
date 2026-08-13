@@ -1,0 +1,196 @@
+# ==============================================================================
+# radiographic_osteopenia
+# Prompt-faithful: osteopenia / osteoporotic change / osseous demineralization /
+# decreased bone mineralization or density on the *current* CXR.
+#
+# Precision polish vs baseline FPs:
+# - clause-local scan blocks negation (no evidence / unremarkable for / …),
+#   history/hx/indication comorbidity lists, and r/o–eval-for.
+# - demineralization lexicon excludes bare "demineralizing" (lytic DDx).
+# Do NOT chase "gracile" alone (not in prompt; leftover FN = bad gold).
+# Fixed-width lookbehinds only as adjacent belt-and-suspenders (stdlib re).
+#
+# FN-fit (fn_mine_fit_shared):
+# - Restart scan at although|though|however|but|noting|limited by so
+#   "No acute …, although bones are osteopenic" can match the later finding.
+# - Exception / notable restarts: except for|other than|aside from|
+#   with the exception of|notable for; unremarkable with … osteopenia.
+# - Reversed density / mineralization-of-bones orders.
+# - Lexicon: osteopaenia, hypo/underminerali*, rarefaction (anatomy-framed).
+# - Washed-out appearance of (the) bones (noun-phrase order).
+# - Scan through "no congestive failure" run-on before demineralization.
+# ==============================================================================
+
+(?:
+        # ------------------------------------------------------------------
+        # Clause-local tempered scan (negation / history / indication)
+        # Restart at contrastive / noting / limited-by / exception / notable
+        # so leading "No …" or "unremarkable …" does not permanently block a
+        # later affirmative osteopenia mention.
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but|noting)\s+
+            |
+            \blimited\s+by\s+
+            |
+            \b(?:
+                except\s+for|
+                other\s+than|
+                aside\s+from|
+                with\s+the\s+exception\s+of|
+                notable\s+for
+            )\s+
+            |
+            \bunremarkable\s+with\s+
+        )
+        (?:
+            (?:
+                (?=\bno\s+longer\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # Run-on: "NO CONGESTIVE FAILURE DEMINERALIZATION" — allow
+                # first char of "no" so demineralization remains reachable.
+                (?=\bno\s+congestive\s+failure\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    unremarkable|
+                    history|h/?o|hx
+                )\b)
+                (?!\bno\s+evidence\b)
+                (?!\bwithout\s+evidence\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bplease\s+rule\s+out\b)
+                [^.!?;:\n]
+            )
+        ){0,320}
+
+        (?<!\bnot\s)
+        (?<!\bno\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bno\sevidence\sfor\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bunremarkable\sfor\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bh/o\s)
+
+        (?:
+            # ==============================================================
+            # 1. Explicit medical terms
+            #    osteopenia/osteopaenia/osteopenic; osteoporosis/osteoporotic;
+            #    demineralized / demineralization (not "demineralizing");
+            #    hypo/undermineralization
+            # ==============================================================
+            \b(?:
+                osteop(?:ae|e)ni\w*|
+                osteoporo\w*|
+                deminerali[sz](?:ed|ation)s?|
+                hypominerali[sz]\w*|
+                under[\s-]?minerali[sz]\w*
+            )\b
+
+            |
+
+            # ==============================================================
+            # 2. Descriptive: low / decreased bone density or mineralization
+            # ==============================================================
+            \b(?:
+                decreas\w*|low|diminished|reduced|poor|loss\s+of
+            )\b
+            (?:
+                \s+(?:diffuse|generalized|overall|gross|severe|mild)
+            ){0,2}
+            \s+
+            \b(?:
+                bone|osseous|skeletal|vertebral|spinal|bony
+            )\b
+            (?:
+                \s+(?:mineral|matrix)
+            ){0,2}
+            \s+
+            \b(?:
+                density|mineralization|mineralisation|content|mass
+            )\b
+
+            |
+
+            # ==============================================================
+            # 2b. Reversed: "(bone|osseous) density is decreased/low/…"
+            # ==============================================================
+            \b(?:
+                bone|osseous|skeletal|bony
+            )\b
+            \s+
+            \bdensity\b
+            (?:
+                \s+(?:is|are|appears?|seems?|looks?)
+            )?
+            \s+
+            \b(?:
+                decreas\w*|low|diminished|reduced|poor
+            )\b
+
+            |
+
+            # ==============================================================
+            # 2c. "decreased mineralization of the bones"
+            # ==============================================================
+            \b(?:
+                decreas\w*|low|diminished|reduced|poor|loss\s+of
+            )\b
+            (?:
+                \s+(?:diffuse|generalized|overall|gross|severe|mild)
+            ){0,2}
+            \s+
+            \bminerali[sz]ation\b
+            \s+of\s+(?:the\s+)?
+            \b(?:bones?|osseous|skeletal|vertebral|spinal|bony)(?:\s+structures?)?\b
+
+            |
+
+            # ==============================================================
+            # 2d. "Washed-out appearance of the bones" (noun-phrase order)
+            # ==============================================================
+            \bwashed[\s-]?out\s+appearance\s+of\s+(?:the\s+)?bones?\b
+
+            |
+
+            # ==============================================================
+            # 3. Anatomy … descriptor
+            #    "bones appear osteopenic", "osseous structures washed out",
+            #    "osseous rarefaction", "bones are undermineralized"
+            # ==============================================================
+            \b(?:
+                bones?|osseous|skeletal|structures?|
+                spine|vertebra\w*|ribs?|clavicles?
+            )\b
+            (?:
+                \s+(?:are|appear|show|demonstrate|look|diffusely|grossly|very)
+            ){0,3}
+            \s+
+            \b(?:
+                osteop(?:ae|e)ni\w*|osteoporo\w*|
+                deminerali[sz](?:ed|ation)s?|
+                hypominerali[sz]\w*|
+                under[\s-]?minerali[sz]\w*|
+                raref(?:action|ied)|
+                washed\s+out
+            )\b
+        )
+)

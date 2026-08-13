@@ -1,91 +1,520 @@
+# ==============================================================================
+# lobar_atelectasis
+# Explicit lobar / bilobar / multilobar atelectasis or collapse; atelectasis or
+# collapse of a named lobe (or lobe acronym); complete/total/airless involvement
+# or complete volume loss of a named lobe; Golden S / Luftsichel as lobar-collapse
+# evidence on the current CXR.
+#
+# Do NOT match: linear / plate-like / discoid / band-like / subsegmental /
+# segmental / basilar / dependent / rounded / lingular atelectasis alone;
+# whole-lung or hemithorax collapse alone; retrocardiac atelectasis alone;
+# consolidation / pneumonia / lobar opacity / nonspecific volume loss without
+# explicit lobar atelectasis or collapse; negated or "rather than" collapse;
+# resolved / previous / r/o-exclude phrasing.
+# ==============================================================================
 
-    # ---------------------------------------------------------
-    # 1. Explicit "Lobar" Terminology (Added Multi/Bi-lobar)
-    # ---------------------------------------------------------
-    \b(?:multi-?|bi-?)?lobar\s+(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+(?:
+    # ------------------------------------------------------------------
+    # 1. Explicit lobar / bilobar / multilobar + atelectasis|collapse
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!rather\sthan\s)
+    (?<!not\scomplete\s)
+    (?<!\bor\s)
+    (?<!\bprevious\s)
+    (?<!\bprior\s)
+    (?<!\bexclude\s)
+    (?<!\bexcluding\s)
+    (?<!\bresolved\s)
+    (?<!\bresolving\s)
+    \b(?:multi[-\s]?|bi[-\s]?)?lobar
+    (?:\s+and\s+segmental)?
+    \s+(?:atelect\w*|collaps\w*)
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
     |
-    # ---------------------------------------------------------
-    # 2. Specific Lobe Acronyms -> Pathology (Upgraded Gap)
-    # ---------------------------------------------------------
-    \b(?:lul|rul|rml|rll|lll)\b
-    (?:\W+\w+){0,7}\W+
-    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
-    |
-    # ---------------------------------------------------------
-    # 3. Pathology -> Specific Lobe Acronyms (Upgraded Gap)
-    # ---------------------------------------------------------
-    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)\b
-    (?:\W+\w+){0,7}\W+
-    \b(?:lul|rul|rml|rll|lll)\b
-    |
-    # ---------------------------------------------------------
-    # 4. Full Anatomy / Compound Lobes / Lingula -> Pathology (Added Bilateral/Both)
-    # ---------------------------------------------------------
-    \b(?:
-        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
-        |
-        lingul\w*
-    )\b
-    (?:\W+\w+){0,7}\W+
-    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
-    |
-    # ---------------------------------------------------------
-    # 5. Pathology -> Full Anatomy / Compound Lobes / Lingula (Added Bilateral/Both)
-    # ---------------------------------------------------------
-    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)\b
-    (?:\W+\w+){0,7}\W+
+    # ------------------------------------------------------------------
+    # 2. Pathology of <named lobe | acronym | multiple lobes>
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!linear\s)
+    (?<!platelike\s)
+    (?<!plate-like\s)
+    (?<!plate\slike\s)
+    (?<!subsegmental\s)
+    (?<!segmental\s)
+    (?<!basilar\s)
+    (?<!bibasilar\s)
+    (?<!rounded\s)
+    (?<!lingular\s)
+    (?<!dependent\s)
+    (?<!residual\sof\spneumonia\sand\s)
+    \b(?:atelect\w*|collaps\w*)\s+(?:of|involving|affecting)\s+(?:the\s+)?(?:entire\s+|whole\s+)?
     (?:
-        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
         |
-        lingul\w*
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:lul|rul|rml|rll|lll)
+        |
+        (?:multiple|several|both|two|three)\s+lobes?
+        |
+        # Lingula + named lobe (reverse of §6b lobe→lingula order)
+        lingula\s+and\s+(?:the\s+)?
+        (?:
+            (?<!segment\sof\sthe\s)
+            (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+            |
+            (?<!segment\sof\sthe\sright\s)
+            (?<!segment\sof\sthe\sleft\s)
+            (?:upper|middle|lower)\s+lobe
+        )
+    )\b
+    (?!\s+attributable)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # ------------------------------------------------------------------
+    # 3. Named lobe(s) -> atelectasis|collapse (clause-local; skip subtype adj)
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!\bno\sleft\s)
+    (?<!\bno\sright\s)
+    (?<!\bwithout\s)
+    (?<!\bresolved\s)
+    (?<!\bresolving\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bresolution\sof\sthe\s)
+    (?<!\bsubsegmental\s)
+    (?<!\bprevious\s)
+    (?<!\bprior\s)
+    (?<!\bexclude\s)
+    (?<!\bexcluding\s)
+    (?<!\blinear\sopacities\sin\sthe\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\s)
+    (?<!\blinear\sopacities\sin\sthe\sleft\s)
+    (?<!\blinear\sopacities\sin\sthe\sright\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\sleft\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\sright\s)
+    (?<!\bsubsegmental\sright\s)
+    (?<!\bsubsegmental\sleft\s)
+    (?<!\bexclude\sright\s)
+    (?<!\bexclude\sleft\s)
+    (?<!\bexcluding\sright\s)
+    (?<!\bexcluding\sleft\s)
+    (?<!\bresolution\sof\sthe\sright\s)
+    (?<!\bresolution\sof\sthe\sleft\s)
+    (?<!\bresolution\sof\sright\s)
+    (?<!\bresolution\sof\sleft\s)
+    (?<!\bresolved\sright\s)
+    (?<!\bresolved\sleft\s)
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:multiple|several|both|two|three)\s+lobes?
+    )\b
+    (?!due\s+to\s+pneumonia)
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|discoid|bandlike|band-like|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|lingula|patchy|streaky|subpleural|infiltrat\w*|suggestive|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial|presumably|laterally)\b)\w+){0,8}
+    [^\w.!?;:\n]+
+    (?!(?:linear|platelike|plate-like|plate\slike|discoid|bandlike|band-like|band\slike|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|patchy|streaky|partial|remaining|subpleural)\s+)
+    (?!rather\s+than\s+)
+    (?!versus\s+(?:focal\s+)?(?:consolidat|atelect))
+    (?<!could\sreflect\s)
+    (?<!due\sto\spneumonia\sor\s)
+    (?:atelect\w*|collaps\w*)
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # ------------------------------------------------------------------
+    # 4. Atelectasis|collapse -> named lobe(s)
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?<!linear\s)
+    (?<!platelike\s)
+    (?<!plate-like\s)
+    (?<!plate\slike\s)
+    (?<!discoid\s)
+    (?<!bandlike\s)
+    (?<!band-like\s)
+    (?<!band\slike\s)
+    (?<!subsegmental\s)
+    (?<!segmental\s)
+    (?<!basilar\s)
+    (?<!bibasilar\s)
+    (?<!dependent\s)
+    (?<!rounded\s)
+    (?<!lingular\s)
+    (?<!patchy\s)
+    (?<!streaky\s)
+    (?<!residual\sof\spneumonia\sand\s)
+    \b(?:atelect\w*|collaps\w*)\b
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|discoid|bandlike|band-like|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|lingula|patchy|streaky|subpleural|infiltrat\w*|suggestive|suspicious|infection|differential|fibrosis|segments?|remaining|partial|presumably|laterally)\b)\w+){0,8}
+    [^\w.!?;:\n]+
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:multiple|several|both|two|three)\s+lobes?
+    )\b
+    (?!\s+attributable)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # ------------------------------------------------------------------
+    # 5. Lobe acronym <-> pathology (tighter gap; block PNA/rather-than)
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!segment\sof\sthe\s)
+    (?<!segment\sof\s)
+    (?<!\bresolved\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bsubsegmental\s)
+    (?<!\bexclude\s)
+    \b(?:lul|rul|rml|rll|lll)\b
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|pna|pneumonia|linear|platelike|plate-like|subsegmental|segmental|basilar|rounded|lingular|infiltrat\w*|suggestive|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial)\b)\w+){0,5}
+    [^\w.!?;:\n]+
+    (?!(?:linear|platelike|plate-like|plate\slike|discoid|bandlike|band-like|subsegmental|segmental|basilar|rounded|lingular|partial|remaining)\s+)
+    (?!rather\s+than\s+)
+    (?:atelect\w*|collaps\w*)
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    (?<!linear\s)
+    (?<!platelike\s)
+    (?<!plate-like\s)
+    (?<!subsegmental\s)
+    (?<!segmental\s)
+    (?<!basilar\s)
+    (?<!rounded\s)
+    (?<!residual\sof\spneumonia\sand\s)
+    \b(?:atelect\w*|collaps\w*)\b
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|subsegmental|segmental|basilar|rounded|lingular|infiltrat\w*|fibrosis|segments?|remaining|partial|presumably)\b)\w+){0,5}
+    [^\w.!?;:\n]+
+    (?<!segment\sof\sthe\s)
+    (?<!segment\sof\s)
+    \b(?:lul|rul|rml|rll|lll)\b
+    (?!\s+attributable)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # Adjacent / hyphenated: "RUL collapse", "left lower lobe atelectasis"
+    (?<!\bno\s)
+    (?<!segment\sof\sthe\s)
+    (?<!segment\sof\s)
+    (?<!\bresolved\s)
+    (?<!\bresolving\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bsubsegmental\s)
+    (?<!\bexclude\s)
+    (?<!\bprevious\s)
+    (?<!\bprior\s)
+    \b(?:lul|rul|rml|rll|lll)[-\s]+(?:atelect\w*|collaps\w*)
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!\s+versus)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    (?<!\bno\s)
+    (?<!\bno\sleft\s)
+    (?<!\bno\sright\s)
+    (?<!\bresolved\s)
+    (?<!\bresolving\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bresolution\sof\sthe\s)
+    (?<!\bsubsegmental\s)
+    (?<!\bprevious\s)
+    (?<!\bprior\s)
+    (?<!\bexclude\s)
+    (?<!\bexcluding\s)
+    (?<!\blinear\sopacities\sin\sthe\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\s)
+    (?<!\blinear\sopacities\sin\sthe\sleft\s)
+    (?<!\blinear\sopacities\sin\sthe\sright\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\sleft\s)
+    (?<!\blinear\sairspace\sopacities\sin\sthe\sright\s)
+    (?<!\bsubsegmental\sright\s)
+    (?<!\bsubsegmental\sleft\s)
+    (?<!\bexclude\sright\s)
+    (?<!\bexclude\sleft\s)
+    (?<!\bexcluding\sright\s)
+    (?<!\bexcluding\sleft\s)
+    (?<!\bresolution\sof\sthe\sright\s)
+    (?<!\bresolution\sof\sthe\sleft\s)
+    (?<!\bresolution\sof\sright\s)
+    (?<!\bresolution\sof\sleft\s)
+    (?<!\bresolved\sright\s)
+    (?<!\bresolved\sleft\s)
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)\s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+    )[-\s]+(?:atelect\w*|collaps\w*)
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!\s+versus)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # ------------------------------------------------------------------
+    # 6. Airless / complete|total|severe atelectasis|collapse of a named lobe
+    # ------------------------------------------------------------------
+    # Named lobe(s) is/are [largely|essentially|...] airless
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:both|bilateral)\s+(?:upper|middle|lower)\s+lobes?
+    )\s+(?:is|are)\s+(?:(?:largely|essentially|nearly|almost|completely?|totally?)\s+)?airless\b
+    |
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+    )\b
+    (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
+    (?:(?:is|are|remains?|appears?)\s+)?
+    (?:(?:presumably|likely|possibly)\s+)?
+    (?:
+        airless
+        |
+        (?:(?:largely|essentially)\s+)?airless
+        |
+        (?:near(?:ly)?\s+|almost\s+)?completely?\s+(?:atelect\w*|collaps\w*|airless)
+        |
+        (?:near(?:ly)?\s+|almost\s+)?totally?\s+(?:atelect\w*|collaps\w*)
+        |
+        severely(?:,?\s+if\s+not\s+entirely)?\s+(?:atelect\w*|collaps\w*|airless)
+        |
+        (?:near(?:ly)?\s+)?complete\s+(?:volum\w*\s+loss|loss\s+of\s+volume)
+    )
+    |
+    \b(?:
+        (?:near(?:ly)?\s+|almost\s+)?completely?\s+(?:atelectatic|collapsed|airless)
+        |
+        (?:near(?:ly)?\s+|almost\s+)?totally?\s+(?:atelectatic|collapsed)
+        |
+        severely(?:,?\s+if\s+not\s+entirely)?\s+(?:atelectatic|collapsed|airless)
+        |
+        (?:(?:largely|essentially)\s+)?airless
+    )\b
+    (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
+    (?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
     )\b
     |
-    # ---------------------------------------------------------
-    # 6. Eponymous Signs
-    # ---------------------------------------------------------
-    \bgolden\s+s\s+(?:sign|appearance)
+    # Complete/total volume loss of a named lobe (prompt-supported; not mild/nonspecific)
+    \b(?:near(?:ly)?\s+)?(?:complete|total)\s+(?:volum\w*\s+loss|loss\s+of\s+volume)\b
+    (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
+    (?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobe
+    )\b
+    |
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobe
+    )\b
+    (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
+    (?:near(?:ly)?\s+)?(?:complete|total)\s+(?:volum\w*\s+loss|loss\s+of\s+volume)
+    |
+    # Noun airlessness of/in a named lobe (± atelectasis attribution)
+    \bairlessness\s+(?:in|of|involving|throughout)\s+(?:the\s+)?
+    (?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobe
+        |
+        (?:lul|rul|rml|rll|lll)
+    )\b
+    |
+    # Airless + lobe acronym (adjacent)
+    \bairless\s+(?:lul|rul|rml|rll|lll)\b
+    |
+    \b(?:lul|rul|rml|rll|lll)\s+(?:is|are|appears?|remains?)?\s*airless\b
+    |
+    # ------------------------------------------------------------------
+    # 6b. Named lobe + lingula(r) coordination → atelectasis|collapse
+    # Entire-lobe + lingula/lingular juxtaposition (not lingular-only subtype).
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?<!\bresolved\s)
+    (?<!\bresolving\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bprevious\s)
+    (?<!\bprior\s)
+    (?<!\bexclude\s)
+    (?<!\bexcluding\s)
+    (?<!\bsubsegmental\s)
+    (?<!linear\s)
+    (?<!segmental\s)
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobes?
+    )
+    \s+and\s+lingul(?:a|ar)
+    (?:
+        # Adjacent: "lobe and lingular atelectasis" / "atelectasis/collapse"
+        [-\s/]+(?:atelect\w*|collaps\w*)
+        |
+        # Verb path: "lobe and lingula are|remain collapsed"
+        \s+(?:is|are|remain(?:s)?|appears?|appear)
+        (?:[^\w.!?;:\n]+\w+){0,3}[^\w.!?;:\n]+
+        (?:atelect\w*|collaps\w*)
+    )
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # Named lobe including (the) lingula → collapsed/atelectasis
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?<!\bresolved\s)
+    (?<!linear\s)
+    (?<!segmental\s)
+    (?<!subsegmental\s)
+    \b(?:
+        (?<!segment\sof\sthe\s)
+        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        |
+        (?<!segment\sof\sthe\sright\s)
+        (?<!segment\sof\sthe\sleft\s)
+        (?:upper|middle|lower)\s+lobe
+    )
+    \s+including\s+(?:the\s+)?lingula
+    (?:
+        [-\s/]+(?:atelect\w*|collaps\w*)
+        |
+        \s+(?:is|are|remain(?:s)?|appears?|appear)
+        (?:[^\w.!?;:\n]+\w+){0,3}[^\w.!?;:\n]+
+        (?:atelect\w*|collaps\w*)
+    )
+    (?!\s+have\s+(?:nearly\s+)?cleared)
+    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    |
+    # ------------------------------------------------------------------
+    # 7. Eponymous lobar-collapse signs
+    # ------------------------------------------------------------------
+    \bgolden(?:'s)?\s+s-?(?:\s+)?(?:sign|appearance)\b
+    |
+    \bgolden-s(?:\s+)?(?:sign|appearance)?\b
+    |
+    \bgolden(?:'s)?\s+sign\b
+    |
+    \b(?:reverse\s+)?s-?sign\s+of\s+golden\b
+    |
+    \bs\s+sign\s+of\s+golden\b
+    |
+    \breverse\s+golden(?:'s)?\s+s-?(?:\s+)?(?:sign|appearance)?\b
     |
     \bluftsichel\w*
     |
-    # ---------------------------------------------------------
-    # 7. Cross-Sentence Coreference
-    # ---------------------------------------------------------
+    \bluft\s+sichel\w*
+    |
+    # ------------------------------------------------------------------
+    # 8. Named lobe ... (near) complete/total/severe atelectasis|collapse|airless
+    # Longer clause gap than §6 so visualization hedges ("is not well
+    # visualized ... may be near completely atelectatic") still count.
+    # Require complete/total/severe — do not fire on "lobe ... likely atelectasis".
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!segment\sof\sthe\s)
+    (?<!segment\sof\s)
+    (?<!\bresolved\s)
+    (?<!\bresolution\sof\s)
+    (?<!\bresolution\sof\sthe\s)
+    (?<!\bsubsegmental\s)
+    (?<!\bexclude\s)
     \b(?:
-        (?:(?:right|left|bilateral|both)\s+)?(?:upper|middle|lower)(?:\s+and\s+(?:upper|middle|lower))?\s+lob(?:e|es|ar)
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
+          (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
+          \s+lobes?
         |
-        (?:lul|rul|rml|rll|lll|lingul\w*)
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:lul|rul|rml|rll|lll)
     )\b
-    (?:\s+\S+){0,10}\s+
-    \b(?:this|which|it)\b
-    (?:\W+\w+){0,6}\W+
-    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
+    (?:[^\w.!?;:\n]+\w+){0,16}[^\w.!?;:\n]+
+    (?:(?:may\s+be|appears(?:\s+to\s+be)?|is|are|remains?|presumably)\s+)?
+    (?:(?:presumably|likely|possibly)\s+)?
+    (?:
+        (?:near(?:ly)?\s+|almost\s+)?(?:completely?|totally?)\s+(?:atelect\w*|collaps\w*|airless)
+        |
+        severely(?:,?\s+if\s+not\s+entirely)?\s+(?:atelect\w*|collaps\w*|airless)
+        |
+        (?:(?:largely|essentially)\s+)?airless
+    )
     |
-    # ---------------------------------------------------------
-    # 8. Complete Lung Collapse (Multi-lobar)
-    # ---------------------------------------------------------
-    \b(?:complet\w*|total|entire|whole)\s+(?:right|left)\s+lung\b
-    (?:\W+\w+){0,7}\W+
-    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)
-    |
-    \b(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)\b
-    (?:\W+\w+){0,7}\W+
-    (?:complet\w*|total|entire|whole|the\s+entire)\s+(?:right|left)\s+lung\b
-    |
-    \b(?:right|left)\s+lung\b
-    (?:\W+\w+){0,7}\W+
-    (?:complet\w*|total|entirely?|whole)\W+(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume|airless)
-    |
-    # ---------------------------------------------------------
-    # 9. Opacified/Airless Hemithorax with Volume Loss
-    # ---------------------------------------------------------
-    (?:opacifi\w*|opaque|airless)[\s\S]{1,40}hemi\s*-?thorax[\s\S]{1,120}(?:volum\w*\s+loss|loss\s+of\s+volume|atelect\w*|collaps\w*)
-    |
-    hemi\s*-?thorax[\s\S]{1,40}(?:opacifi\w*|opaque|airless)[\s\S]{1,120}(?:volum\w*\s+loss|loss\s+of\s+volume|atelect\w*|collaps\w*)
-    |
-    # ---------------------------------------------------------
-    # 10. Retrocardiac Anatomical Equivalent (Left Lower Lobe)
-    # Catches: "retrocardiac opacity compatible with volume loss", "retrocardiac atelectasis"
-    # ---------------------------------------------------------
-    \bretrocardiac\b[\s\S]{1,80}(?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)
-    |
-    (?:atelect\w*|collaps\w*|volum\w*\s+loss|loss\s+of\s+volume)[\s\S]{1,80}\bretrocardiac\b
+    # ------------------------------------------------------------------
+    # 9. Named-lobe finding attributed to atelectasis from mucous plugging
+    # (classic entire-lobe collapse; same clause only)
+    # ------------------------------------------------------------------
+    (?<!\bno\s)
+    (?<!segment\sof\sthe\s)
+    (?<!linear\s)
+    (?<!subsegmental\s)
+    (?<!segmental\s)
+    \b(?:
+        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobes?
+        |
+        (?:upper|middle|lower)\s+lobes?
+        |
+        (?:lul|rul|rml|rll|lll)
+    )\b
+    (?:[^\w.!?;:\n]+\w+){0,20}[^\w.!?;:\n]+
+    atelect\w*\s+due\s+to\s+(?:a\s+)?(?:mucous?|mucus)\s+plugg\w*
+)

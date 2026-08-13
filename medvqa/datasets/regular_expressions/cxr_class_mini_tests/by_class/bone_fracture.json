@@ -1,0 +1,47 @@
+{
+  "class_id": "bone_fracture",
+  "positives": [
+    "Multiple rib fractures.",
+    "Acute left clavicle fracture.",
+    "Healed rib fracture deformity.",
+    "Vertebral compression fracture.",
+    "Nondisplaced sternal fracture.",
+    "Acute fracture of the right scapula.",
+    "Depressed fracture of the inferior portion of the sternum.",
+    "Fracture-dislocation of the right shoulder.",
+    "Tiny avulsive fracture of the posterior superior glenoid.",
+    "Fracture involving the greater tuberosity.",
+    "Right-sided scapular fracture.",
+    "Apparent sternal fractures.",
+    "There is a metallic fixation device in the sternum with apparent sternal fractures.",
+    "Prior fractures of thoracic vertebral bodies and the sternum.",
+    "Comminuted fracture of the surgical neck of the right proximal humerus.",
+    "Nondisplaced fracture at the surgical neck of the left humerus.",
+    "Old fracture of the surgical neck of the right humerus.",
+    "Potential nondisplaced fracture with slight irregularity in the sternal body.",
+    "Old healed right proximal humeral diaphyseal fracture.",
+    "Chronic deformity of the proximal right humerus suggests prior fracture.",
+    "Fracture through the greater tubercle of the right humerus.",
+    "Pathologic fracture through the base of the acromion on the right.",
+    "Fracture of the lateral margin of the scapula.",
+    "Lucency through the left scapular spine, potentially representing a nondisplaced fracture.",
+    "There is deformity of the scapula compatible with the patient's known scapular fracture.",
+    "Depressed fracture of the upper sternum.",
+    "Cortical irregularity of the mid sternum concerning for a nondisplaced fracture.",
+    "Minimal cortical irregularity about the lower sternal body suspicious for nondisplaced fracture.",
+    "There is some evidence of callus formation."
+  ],
+  "negatives": [
+    "Lytic rib lesion with cortical expansion.",
+    "Degenerative endplate osteophytes.",
+    "Sternal wires from prior surgery.",
+    "History of remote fracture.",
+    "Fractured PICC line.",
+    "Left humeral fracture, not directly imaged.",
+    "Status post resection of first 3 ribs of the right chest."
+  ],
+  "negation_soft": [
+    "No acute fracture.",
+    "No fracture identified."
+  ]
+}

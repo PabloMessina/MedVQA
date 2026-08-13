@@ -1,71 +1,344 @@
+# ==============================================================================
+# pulmonary_vascular_congestion
+# Prompt-faithful: explicit pulmonary/venous/central/hilar/perihilar congestion
+# or engorgement; congestive vessel distention; elevated pulmonary venous
+# pressure; cephalization; upper-lobe venous diversion; vascular redistribution.
+# Plethora / indistinctness / haziness only when tied to congestion / engorgement
+# / elevated venous pressure (not edema alone).
+#
+# Do NOT match: edema alone, hilar enlargement, enlarged PA / PAH, increased
+# blood flow, bare vascular plethora/prominence, cardiomegaly, effusion, Kerley
+# lines, crowding from low volumes, congestive failure alone.
+#
+# Precision notes:
+# - Qualifiers use (?:adj\s+)? — never bare \s* (eats lookbehind boundary space).
+# - Terminating \b / explicit suffixes — never open \w* before resolved/improved.
+# - Extra lookbehinds for "no … pulmonary vascular congestion" short-arm bypass.
+# Fixed-width lookbehinds only (stdlib re). Eval lowercases + squashes space.
+# ==============================================================================
 
-    # --------------------------------------------------------
-    # 1. Explicit Hilar/Perihilar Congestion, Fullness, & Opacity
-    # --------------------------------------------------------
-    \b(?:
-        congest\w*|engorg\w*|indistinct\w*|haz\w*|blurr\w*|prominen\w*|enlarg\w*|dilat\w*|exaggerat\w*|accentuat\w*|disten\w*|fullness|opaci\w*|dens(?:e|it\w*)|ill-defined|crowd\w*|convex\w*|tortuous
-    )\b
-    # PROXIMITY GAP: Up to 10 words for spatial descriptions
-    (?:\W+(?:\w+|___)){0,10}\W+
-    \b(?:hila|hilum|hili|hilus|hilar|perihilar|parahilar|infrahilar|suprahilar)\b(?:\s+(?:shadows|regions|structures|vasculature|vessels|prominence|size))?
+(?:
+  # --------------------------------------------------------------------------
+  # A. Congestion lexicon
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sfor\s)
+      (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+      (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)
+      (?<!\bno\ssigns\sfor\s)(?<!\bno\ssign\sfor\s)
+      (?<!\bsigns\sof\s)(?<!\bsign\sof\s)
+      (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+      (?<!\bno\sdefinite\sevidence\sof\s)(?<!\bno\sdefinite\sevidence\sfor\s)
+      (?<!\bno\sconvincing\sevidence\sof\s)(?<!\bno\sconvincing\sevidence\sfor\s)
+      (?<!\bno\sovert\s)(?<!\bno\sfrank\s)(?<!\bno\sevident\s)
+      (?<!\bno\scurrent\s)(?<!\bno\snew\s)(?<!\bno\sappreciable\s)
+      (?<!\bwithout\ssignificant\s)(?<!\bwithout\sdefinite\s)
+      (?<!\bwithout\sappreciable\s)(?<!\bwithout\sovert\s)(?<!\bwithout\sfrank\s)
+      (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+      (?<!\bresolution\sof\s)(?<!\bresolving\s)
+      (?<!\bresolution\sof\sprevious\s)(?<!\bresolution\sof\sprior\s)
+      (?<!\bimprovement\sin\s)(?<!\bimprovement\sof\s)
+      (?<!\bdecrease\sin\s)(?<!\breduction\sin\s)(?<!\breduction\sin\sthe\sdegree\sof\s)
+      (?<!\bdecrease\sin\spulmonary\s)(?<!\breduction\sin\spulmonary\s)
+      (?<!\bimprovement\sin\spulmonary\s)(?<!\bimprovement\sof\spulmonary\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\bevaluation\sfor\s)
+      (?<!\bassess\sfor\s)(?<!\bassessment\sfor\s)
+      (?<!\bconcern\sfor\s)(?<!\bconcerns\sfor\s)(?<!\bconcern\sof\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)
+      (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\sof\s)
+      (?<!\bprevious\s)(?<!\bpreviously\s)(?<!\bprior\s)
+      (?<!\bpreviously\snoted\s)(?<!\bpreviously\sseen\s)
+      (?<!\bpreviously\sdescribed\s)(?<!\bpreviously\sexisting\s)
+      (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)(?<!\bnor\sof\s)
+      (?<!\sor\s)(?<!\bvs\.\s)(?<!\bvs\s)(?<!\bversus\s)
+      (?<!\?)(?<!//\s)(?<!\be/o\s)
+      # short-arm bypass: match starts at "vascular" after "pulmonary "
+      (?<!\bno\sevidence\sof\spulmonary\s)
+      (?<!\bno\sevidence\sfor\spulmonary\s)
+      (?<!\bwithout\sevidence\sof\spulmonary\s)
+      (?<!\bno\spulmonary\s)(?<!\bwithout\spulmonary\s)
+      (?<!\bno\sevidence\sof\scentral\s)(?<!\bno\sevidence\sfor\scentral\s)
+      (?<!\bno\sconvincing\sevidence\sof\spulmonary\s)
+      (?<!\bno\sconvincing\sevidence\sfor\spulmonary\s)
+      (?<!\bno\ssignificant\spulmonary\s)
+      (?<!\bno\sdefinite\spulmonary\s)
+      (?<!\bno\sovert\spulmonary\s)
+      (?<!\bno\sappreciable\spulmonary\s)
+      (?<!\bno\scurrent\spulmonary\s)
+      (?<!\bno\scurrent\scentral\s)
+      (?<!\bno\scentral\s)(?<!\bno\scentral\spulmonary\s)
+      (?<!\bno\svenous\s)(?<!\bno\scentral\svenous\s)
+      (?<!\bno\sevidence\sof\svenous\s)(?<!\bno\sevidence\sfor\svenous\s)
+      (?<!\bno\sevidence\sof\scentral\svenous\s)
+      (?<!\bwithout\svenous\s)(?<!\bwithout\scentral\svenous\s)
+      (?<!\bno\spulmonary\sor\smediastinal\s)
+      (?<!\bwithout\sdefinite\spulmonary\s)
+      (?<!\bwithout\scentral\spulmonary\s)
+      (?<!\bwithout\sappreciable\spulmonary\s)
+      (?<!\bno\sevidence\sof\sacute\s)(?<!\bno\sevidence\sof\sacute\spulmonary\s)
+      (?<!\bno\sevidence\sfor\sacute\s)(?<!\bno\sevidence\sfor\sacute\spulmonary\s)
+      (?<!\bresolution\sof\sprevious\spulmonary\s)(?<!\bresolution\sof\sprior\spulmonary\s)
+      # mid-list negation
+      (?<!\bno\spneumonia,\s)
+      (?<!\bno\sacute\spneumonia,\s)
+      (?<!\bno\sacute\sfocal\spneumonia,\s)
+      (?<!\bno\sevidence\sof\sacute\spneumonia,\s)
+      (?<!\bno\sevidence\sof\sacute\sfocal\spneumonia,\s)
+      (?<!\bno\sevidence\sof\sacute\spneumonia\sor\s)
+      (?<!\bno\spneumothorax,\s)
+      (?<!\bno\spulmonary\sedema,\s)
+      (?<!\bno\sfocal\sconsolidation,\s)
+      (?<!\bwithout\sevidence\sof\sacute\spneumonia\sor\s)
+      (?<!\breduction\sin\sthe\sdegree\sof\s)
+      (?<!\breduction\sin\sthe\sdegree\sof\spulmonary\s)
+      (?<!\bdecrease\sin\sthe\sdegree\sof\s)
+      (?:
+          (?:(?:mild|moderate|severe|marked|minimal|trace|new|acute|persistent|stable|worsening|increasing|increased|residual|overt|frank|central|hilar|perihilar|bilateral|diffuse|some|suspected|possible|probable|interval|borderline|underlying)\s+){0,3}
+      )?
+      (?:
+          pulmonary\s+vascul(?:ar|atur\w*)\s+congest(?:ion|ed|ive)?\b
+          |
+          pulmonary\s+vessels?\s+congest(?:ion|ed|ive)?\b
+          |
+          pulmonary\s+venous\s+congest(?:ion|ed|ive)?\b
+          |
+          (?:central\s+|hilar\s+|perihilar\s+)(?:pulmonary\s+)?vascul(?:ar|atur\w*)\s+congest(?:ion|ed|ive)?\b
+          |
+          (?<!\bpulmonary\s)(?:passive\s+)?(?:central\s+)?venous\s+congest(?:ion|ed|ive)?\b
+          |
+          (?:pulm(?:onary)?\s+)?congest(?:ive)?\s+pattern\b
+          |
+          pulmonary\s+congest(?:ion|ed|ive)?\b
+          |
+          vasc(?:ular|ukar)?\s+congest(?:ion|ed|ive)?\b
+          |
+          (?:hilar|perihilar|central)\s+congest(?:ion|ed|ive)?\b
+          |
+          (?:pulmonary\s+or\s+mediastinal\s+|mediastinal\s+)?vascular\s+congest(?:ion|ed|ive)?\b
+          |
+          may\s+indicate\s+mild\s+congestion\b
+      )
+      (?!\s*(?:is\s+)?(?:has\s+)?(?:resolved|cleared|improved|normalized)(?:\b|,|\.|$))
+      (?!\s+could\s+produce)
+      (?!\s+(?:is\s+)?seen\s+on\b.{0,60}?has\s+resolved)
+  )
 
-    |
+  |
 
-    # --------------------------------------------------------
-    # 2. Anatomy First (Inverted)
-    # --------------------------------------------------------
-    \b(?:hila|hilum|hili|hilus|hilar|perihilar|parahilar|infrahilar|suprahilar)\b(?:\s+(?:shadows|regions|structures|vasculature|vessels|size))?
-    # PROXIMITY GAP: Up to 10 words
-    (?:\W+(?:\w+|___)){0,10}\W+
-    \b(?:congest\w*|engorg\w*|indistinct\w*|haz\w*|blurr\w*|prominen\w*|enlarg\w*|dilat\w*|exaggerat\w*|accentuat\w*|disten\w*|fullness|opaci\w*|dens(?:e|it\w*)|ill-defined|crowd\w*|convex\w*|tortuous)\b
+  # --------------------------------------------------------------------------
+  # B. Engorgement / congested / distended vessels
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sfor\s)
+      (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+      (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)(?<!\bno\sappreciable\s)(?<!\bno\sfrank\s)
+      (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+      (?<!\bwithout\sfrank\s)(?<!\bwithout\sappreciable\s)(?<!\bno\sfrank\s)
+      (?<!\bresolution\sof\s)(?<!\bimprovement\sin\s)
+      (?<!\bresolution\sof\sprevious\s)(?<!\bresolution\sof\sprior\s)
+      (?<!\bdecrease\sin\s)(?<!\breduction\sin\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\bconcern\sfor\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bhistory\sof\s)
+      (?<!\bprevious\s)(?<!\bpreviously\s)(?<!\bprior\s)
+      (?<!\bno\sevidence\sof\spulmonary\s)(?<!\bno\spulmonary\s)
+      (?<!\bno\sappreciable\spulmonary\s)(?<!\bwithout\sappreciable\spulmonary\s)
+      (?<!\bno\spulmonary\sor\smediastinal\s)
+      (?<!\bwithout\spulmonary\s)(?<!\bwithout\spulmonary\sor\smediastinal\s)
+      (?<!\sor\s)(?<!\?)(?<!//\s)
+      (?:
+          (?:mild(?:ly)?|moderate|moderately|severe|marked|borderline|new|interval|persistent|stable|increasing|increased|central|hilar|perihilar|bilateral|diffuse|some)\s+
+      )?
+      (?:
+          (?:pulmonary|pulm|central\s+pulm(?:onary)?|hilar|perihilar|upper[- ]lobe)\s+
+          (?:and\s+mediastinal\s+)?
+          vascul(?:ature|ar(?:ity)?|att?ure)?\s+
+          engorg(?:ed|ement|ment|emetn)\b
+          |
+          (?:pulmonary\s+and\s+mediastinal|mediastinal\s+and\s+pulmonary)\s+
+          vascul(?:ature|ar(?:ity)?)?\s+
+          (?:are\s+|is\s+)?(?:mildly\s+)?engorged\b
+          |
+          engorg(?:ed|ement|ment|emetn)\s+
+          (?:of\s+)?(?:the\s+)?
+          (?:pulmonary|pulm|central\s+pulm(?:onary)?|hilar|perihilar|upper[- ]lobe)\s+
+          (?:and\s+mediastinal\s+)?
+          (?:vascul(?:ature|ar(?:ity)?)|vessels?|veins?)
+          |
+          engorg(?:ed|ement|ment|emetn)\s+(?:of\s+)?(?:the\s+)?(?:central\s+)?venous\s+(?:vascul(?:ature|ar(?:ity)?)|vessels?|veins?)
+          |
+          engorg(?:ed|ement|ment|emetn)\s+of\s+(?:the\s+)?indistinct\s+pulmonary\s+(?:vascul(?:ature|ar(?:ity)?)|vessels?)
+          |
+          engorged\s+(?:pulmonary|pulm|hilar|perihilar|central)\s+(?:vasculature|vessels?|veins?)
+          |
+          congested\s+pulmonary\s+vasculature\b
+          |
+          pulmonary\s+vasculature\s+(?:is\s+|are\s+|appears?\s+|again\s+)?(?:still\s+|borderline\s+|mildly\s+|somewhat\s+|diffusely\s+|substantially\s+)?(?:more\s+)?(?:engorged|congested)\b
+          |
+          pulmonary\s+(?:and\s+mediastinal\s+)?vasculature\s+(?:are\s+|is\s+)?(?:mildly\s+|diffusely\s+|substantially\s+)?(?:more\s+)?engorged\b
+          |
+          pulmonary\s+vessels?\s+(?:are\s+)?(?:still\s+|mildly\s+|diffusely\s+)?engorged\b
+          |
+          pulmonary\s+xxxx\s+(?:are\s+|is\s+)?engorged\b
+          |
+          (?:distended|distention\s+of)\s+(?:central\s+)?pulmonary\s+(?:veins?|vessels?|vasculature)
+          |
+          perivascular\s+haze\s+and\s+distended\s+vessels?
+          |
+          (?:upper[- ]lobe\s+|pulmonary\s+|central\s+|hilar\s+|perihilar\s+|mediastinal\s+)?vascular\s+engorgement\b
+          |
+          upper[- ]lobe\s+(?:shows\s+)?vascular\s+engorgement\b
+          |
+          (?:mild\s+|moderate\s+|severe\s+|marked\s+|borderline\s+|suspected\s+|probable\s+)?hilar\s+engorg(?:ement|ment|emetn)\b
+          |
+          engorged\s+hilar\s+vasculature\b
+          |
+          pulmonary\s+(?:venous|vein)\s+engorgement\b
+          |
+          vascular\s+venous\s+engorg(?:ement|ment|emetn|ed)\b
+          |
+          central\s+veins?\s+engorg(?:ement|ment|emetn|ed)\b
+          |
+          (?:central\s+)?pulm(?:onary)?\s+vasculature\s+engorg(?:ed|ement|ment|emetn)\b
+          |
+          (?:central\s+)?pulm(?:onary)?\s+vesseld?\s+engorg(?:ed|ement|ment|emetn)\b
+          |
+          indistinctness\s+of\s+engorged\s+vessels?
+          |
+          mediastinal\s+venous\s+engorg(?:ement|ed)\b
+          |
+          mediastinal\s+veins?\s+(?:are\s+)?(?:(?:still|borderline|mildly)\s+){0,3}engorged\b
+          |
+          mediastinal\s+vascul(?:ature|ar(?:ity)?)\s+(?:is\s+|are\s+|appears?\s+)?(?:mildly\s+|still\s+|diffusely\s+)?engorged\b
+          |
+          (?:upper\s+lung\s+and\s+mediastinal|mediastinal\s+and\s+upper)\s+vasculature\s+showed\s+greater\s+engorgement\b
+          |
+          pulmonary\s+vascularity\s+(?:is\s+|remains\s+)?(?:mildly\s+)?engorged\b
+      )
+      (?!\s*(?:has\s+)?(?:resolved|cleared|improved|normalized)(?:\b|,|\.|$))
+  )
 
-    |
+  |
 
-    # --------------------------------------------------------
-    # 3. Pathophysiological Equivalents (Clinical Entailment)
-    # --------------------------------------------------------
-    \b(?:
-        # Engorgement, Ill-defined vessels, & Crowding
-        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular|vasculature|vascularity|vessels|veins|caliber)
-        (?:\W+(?:\w+|___)){0,4}\W+  
-        (?:engorg\w*|ill-defined|crowd\w*|exaggerat\w*|accentuat\w*|disten\w*|tortuous) |
-        
-        (?:engorg\w*|ill-defined|crowd\w*|exaggerat\w*|accentuat\w*|disten\w*|tortuous)\s+(?:of\s+(?:the\s+)?)?(?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular|vasculature|vascularity|vessels|veins|caliber) |
+  # --------------------------------------------------------------------------
+  # C. Cephalization / redistribution / upper-zone diversion
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sfor\s)
+      (?<!\bwithout\sevidence\sof\s)
+      (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+      (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+      (?<!\bresolution\sof\s)(?<!\bevaluate\sfor\s)(?<!\bconcern\sfor\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bhistory\sof\s)
+      (?<!\bprevious\s)(?<!\bpreviously\s)(?<!\bprior\s)
+      (?<!\bno\svascular\s)(?<!\bwithout\svascular\s)
+      (?<!\sor\s)(?<!\?)(?<!//\s)
+      (?:
+          (?:mild|slight|moderate|marked|new|persistent|stable|typical)\s+
+      )?
+      (?:
+          ceph+ali[sz](?:ation|ed)\b
+          |
+          cepphalized\s+flow\b
+          |
+          (?:vascular|pulmonary\s+vascular)\s+re-?distribut(?:ion|ed)\b
+          |
+          (?:upper[- ](?:zone|lobe)|cephalad)\s+(?:vascular\s+)?re-?distribut(?:ion|ed)\b
+          |
+          re-?distribution\s+of\s+(?:the\s+)?(?:upper[- ]lobe\s+)?vasculature\b
+          |
+          upper[- ]lobe\s+venous\s+diversion\b
+          |
+          prominent\s+upper[- ]lobe\s+vessels?\b
+          |
+          upper[- ]zone\s+re-?distribution\b
+          |
+          vascular\s+upper(?:[- ]zone)?\s+re-?distribut(?:ion|ed)\b
+      )
+  )
 
-        # Plethora
-        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:vascular\s+)?plethora |
+  |
 
-        # Cephalization & Redistribution
-        cephalization |
-        (?:(?:vascular|pulmonary)\s+|upper\s+(?:zone|lobe|lung)\s+)?redistribution |
+  # --------------------------------------------------------------------------
+  # D. Elevated pulmonary venous pressure / venous hypertension
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\sevidence\sof\s)(?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+      (?<!\bresolution\sof\s)(?<!\bevaluate\sfor\s)(?<!\bconcern\sfor\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bhistory\sof\s)
+      (?<!\bprevious\s)(?<!\bpreviously\s)(?<!\bprior\s)
+      (?<!\sor\s)(?<!\?)(?<!//\s)
+      (?:
+          (?:mild|minimal|some|moderate|marked|continued|persistent|new)\s+
+      )?
+      (?:
+          (?:elevation\s+of\s+)?pulmonary\s+venous\s+(?:pressure|hypertension)\b
+          |
+          elevat(?:ion|ed)\s+(?:of\s+)?(?:the\s+)?pulmonary\s+venous\s+pressure\b
+          |
+          venous\s+hypertension\b
+          |
+          elevated\s+pulmonary\s+venous\s+pressure\b
+      )
+  )
 
-        # Congestion Variations
-        (?:(?:central\s+|main\s+|pulmonary\s+)*)?(?:mild\s+|moderate\s+|severe\s+|minimal\s+)?(?:vascular|venous|cardiac)\s+congest\w*(?:\s+pattern)? |
-        (?:pulmonary|cardiac)\s+(?:mild\s+|moderate\s+|severe\s+|minimal\s+)?congest\w*(?:\s+pattern)? |
+  |
 
-        # Edema & Fluid Overload
-        (?:(?:interstitial|alveolar|pulmonary|lung|mild|moderate|severe|minimal|worsening|improving|patchy|possible)\s+)+edema |
-        edema(?:\W+(?:\w+|___)){0,6}\W+(?:lung|lungs|pulmonary) |
-        (?:consistent\s+with|due\s+to|evidence\s+of|represent(?:s|ing)?|signs?\s+of)\s+edema |
-        (?:mild\s+|moderate\s+|severe\s+)?fluid\s+overload |
+  # --------------------------------------------------------------------------
+  # E. Attribution-tied haziness / CHF-linked vascular prominence
+  #    (require congestion / engorgement / PVP / CHF — not edema alone)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\sevidence\sof\s)(?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+      (?<!\bevaluate\sfor\s)(?<!\bconcern\sfor\s)(?<!\brule\sout\s)
+      (?<!\bprevious\s)(?<!\bpreviously\s)(?<!\bprior\s)
+      (?<!\bpreviously\sseen\s)(?<!\sor\s)(?<!\?)(?<!//\s)
+      (?:
+          (?:(?:slight|mild|diffuse|upper[- ]zone|increased)\s+)?vascular\s+plethora\s+(?:compatible|consistent)\s+with\s+(?:chf|congest\w*|elevated\s+pulmonary\s+venous\s+pressure)
+          |
+          (?:(?:slight|mild|diffuse|upper[- ]zone|increased)\s+)?vascular\s+plethora.{0,100}?(?:reflect|suggest|indicate|consistent|compatible).{0,40}?(?:chf|congestive\s+heart\s+failure)\b
+          |
+          (?:hazy|indistinct|blurred|effaced)\s+pulmonary\s+vasculature
+          .{0,80}?
+          (?:engorg|congest|elevated\s+pulmonary\s+venous)
+          |
+          pulmonary\s+vasculature\s+(?:is\s+|appears?\s+)?(?:prominent\s+and\s+)?(?:slightly\s+)?indistinct
+          .{0,80}?
+          (?:engorg|congest|elevated\s+pulmonary\s+venous)
+          |
+          indistinctness\s+of\s+pulmonary\s+vessels?\s+suggests?\s+.{0,40}?elevated\s+pulmonary\s+venous
+          |
+          perivascular\s+haze.{0,40}?(?:congest|engorg|venous\s+pressure)
+          |
+          pulmonary\s+vasculature\s+consistent\s+with\s+congestive\s+heart\s+failure
+          |
+          prominence\s+of\s+(?:the\s+)?(?:bilateral\s+)?hila\s+and\s+pulmonary\s+vasculature\s+consistent\s+with\s+congestive
+          |
+          pulmonary\s+congestive\s+pattern\b
+          |
+          mild\s+degree\s+of\s+pulmonary\s+congestive\s+pattern\b
+      )
+      (?!\s*(?:has\s+)?(?:resolved|cleared|improved|normalized)(?:\b|,|\.|$))
+  )
 
-        # Interstitial Markings / Prominent Vessels, Veins, & Caliber
-        (?:prominen\w*|increas\w*|exaggerat\w*|accentuat\w*|disten\w*|prominence\s+(?:of\s+(?:the\s+)?)?)
-        (?:\W+(?:\w+|___)){0,6}\W+
-        (?:(?:central\s+|main\s+|pulmonary\s+|vascular\s+|venous\s+|azygos\s+)*)?(?:interstitial\s+marking\w*|vessels|veins|vasculature|vascularity|caliber|vascular) |
-        
-        (?:(?:central\s+|main\s+|pulmonary\s+|vascular\s+|venous\s+|azygos\s+)*)?(?:interstitial\s+marking\w*|vessels|veins|vasculature|vascularity|caliber|vascular)
-        (?:\W+(?:\w+|___)){0,6}\W+  
-        (?:prominent|increased|ill-defined|exaggerat\w*|accentuat\w*|disten\w*) |
+  |
 
-        # Pulmonary Artery Enlargement / Prominence / Dilatation
-        (?:enlarg\w*|prominen\w*|dilat\w*|exaggerat\w*|accentuat\w*)\s+(?:of\s+(?:the\s+)?)?(?:(?:main\s+|central\s+|pulmonary\s+)*)arter(?:y|ies) |
-        
-        (?:(?:main\s+|central\s+|pulmonary\s+)*)arter(?:y|ies)
-        (?:\W+(?:\w+|___)){0,4}\W+  
-        (?:enlarg\w*|prominen\w*|dilat\w*|exaggerat\w*|accentuat\w*) |
-
-        # Hypertension & Venous Pressure
-        (?:pulmonary\s+)?venous\s+(?:hypertension|pressure) |
-        (?:elevated|increased)\s+(?:pulmonary\s+)?venous\s+pressure
-    )\b
+  # --------------------------------------------------------------------------
+  # F. Improved-but-present congestion (residual congestion on current CXR)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+      (?:
+          (?:slight\s+)?interval\s+improvement\s+in\s+(?:pulmonary\s+)?vascular\s+congestion\b
+          |
+          (?:there\s+appears\s+to\s+be\s+some\s+)?improvement\s+in\s+pulmonary\s+vascular\s+congestion\b
+          |
+          improvement\s+of\s+(?:pulmonary\s+)?vascular\s+congestion\b
+          |
+          (?:mild\s+)?vascular\s+congestion\s+(?:has\s+)?improved\b
+          |
+          (?:pulmonary\s+)?vascular\s+congestion\s+improved\b
+          |
+          mediastinal\s+vascular\s+engorg(?:ement|ment|emetn)\s+(?:has\s+)?improved\b
+      )
+  )
+)

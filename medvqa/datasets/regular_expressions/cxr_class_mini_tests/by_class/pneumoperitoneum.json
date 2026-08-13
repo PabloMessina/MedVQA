@@ -1,0 +1,48 @@
+{
+  "class_id": "pneumoperitoneum",
+  "positives": [
+    "Pneumoperitoneum.",
+    "Free air beneath the right hemidiaphragm.",
+    "Free subdiaphragmatic air.",
+    "Rigler sign consistent with pneumoperitoneum.",
+    "Free intraperitoneal air.",
+    "Findings consistent with pneumoperitoneum.",
+    "Lucency projecting over the liver is compatible with pneumoperitoneum.",
+    "Continuous lucency under the diaphragm is consistent with pneumoperitoneum secondary to PEG tube.",
+    "Gas is seen in abdomen, consistent with pneumoperitoneum, post-op.",
+    "Cupola sign consistent with pneumoperitoneum.",
+    "Free air in the abdomen.",
+    "Probable free air in the abdomen.",
+    "Continued free air in the abdomen compatible with bowel perforation.",
+    "Intra-abdominal free air.",
+    "Free intra-abdominal air.",
+    "Abdominal free air.",
+    "There is persistent large volume intra-abdominal free air.",
+    "Presence of free intraabdominal air.",
+    "There has been interval development of intra-abdominal free air.",
+    "A large collection of air is demonstrated under the right hemidiaphragm.",
+    "A large volume of extraluminal gas is identified beneath the central and right aspects of the diaphragm.",
+    "Possible extraluminal air in the left upper quadrant of the abdomen.",
+    "Interval decrease in the previously seen pneumoperitoneum.",
+    "Interval further decrease of previously seen subphrenic air.",
+    "Previously noted free subphrenic air is unchanged from prior film.",
+    "Compared to the previous radiograph, unchanged evidence of large amounts of subdiaphragmatic air.",
+    "Previously seen pneumoperitoneum is now less apparent.",
+    "The current image does not show evidence of a right pneumothorax but the large pneumoperitoneum is seen in unchanged manner.",
+    "This may represent extraluminal air.",
+    "Extraluminal free air in the left upper quadrant."
+  ],
+  "negatives": [
+    "Normal gastric bubble.",
+    "Chilaiditi sign.",
+    "Pneumomediastinum.",
+    "Subcutaneous emphysema.",
+    "Basilar pneumothorax.",
+    "No free intraperitoneal air is identified.",
+    "History of pneumoperitoneum; current film shows no free air."
+  ],
+  "negation_soft": [
+    "No pneumoperitoneum.",
+    "No free intraperitoneal air."
+  ]
+}

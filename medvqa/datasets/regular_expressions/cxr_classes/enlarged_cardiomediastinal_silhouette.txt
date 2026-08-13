@@ -1,0 +1,483 @@
+# ==============================================================================
+# enlarged_cardiomediastinal_silhouette (umbrella / mid-node)
+# Hierarchy-aware residual polish: children cover most cardiomegaly / widening /
+# aortic ectasia; keep prompt-supported parent phrasing children miss.
+# Avoid: tortuosity/unfolding alone; projection/rotation/poor-inspiration
+# attribution; bare PA/hilar prominence; loose thick/full/prominent gaps;
+# mediastinal shift / pneumomediastinum / mass-without-widening; negated forms;
+# LVH with WNL heart size; technique-widened mediastinum; paratracheal vessels.
+# ==============================================================================
+
+\b(?:
+        # ------------------------------------------------------------------
+        # A. Cardiomegaly / megacardia (named finding)
+        # ------------------------------------------------------------------
+        (?<!no\sevidence\sof\s)(?<!no\ssign\sof\s)(?<!no\ssigns\sof\s)
+        (?<!without\sfrank\s)(?<!without\sovert\s)(?<!without\s)
+        (?<!no\sgross\s)(?<!no\scurrent\s)(?<!negative\sfor\s)
+        (?<!rather\sthan\strue\s)(?<!than\strue\s)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bor\s)
+        (?:cardiomegaly|cadiomegaly|megacardia|cardionegaly|cardiome\s*galy|\bcardiome\b)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+cannot\s+be\s+(?:assessed|evaluated|determined|excluded))
+
+        |
+
+        # ------------------------------------------------------------------
+        # B. Cardiac / heart silhouette enlargement (path → anatomy)
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!unlikely\s)
+        (?:enlarged|dilated|hypertrophied|globular|massive)
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+
+        (?:cardiac|heart|cardiopericardial)\s+silhouette
+        (?!\s+is\s+unlikely)
+
+        |
+
+        # Cardiac/heart silhouette → size language (clause-local).
+        # Omit bare borderline/top-normal and silhouette→LVH (WNL heart size).
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!accentuate\sthe\s)
+        (?:cardiac|heart|cardiopericardial)\s+silhouette(?:\s+size)?
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal)\b)\w+){0,8}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|globular|massive|increased)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+than\s+it\s+is\s+now)
+
+        |
+
+        # Silhouette … slightly/mildly enlarged (longer gap)
+        (?<!no\s)(?<!without\s)
+        (?:cardiac|heart|cardiopericardial)\s+silhouette
+        (?:[^\w.!?;:]+\w+){0,12}[^\w.!?;:]+
+        (?:slightly|mildly|moderately|severely|markedly)\s+enlarg\w*
+
+        |
+
+        # Enlargement / dilatation / increased prominence OF cardiac/heart silhouette
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)(?<!reduced\s)
+        (?:enlarg\w*|dilat\w*|increased\s+prominence)\b
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:the[^\w.!?;:]+)?
+        (?:cardiac|heart|cardiopericardial)\s+silhouette
+        (?!\s+is\s+unlikely)
+
+        |
+
+        # Noun enlargement without "of" (e.g. "minimal enlargement cardiac silhouette")
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:enlargement|dilatation)\s+(?:the\s+)?
+        (?:cardiac|heart|cardiopericardial)\s+silhouette
+        (?!\s+is\s+unlikely)
+
+        |
+
+        \benl\s+of\s+(?:the\s+)?(?:cardiac|heart)\s+silhouette\b
+
+        |
+
+        # Heart / cardiac size → enlarged / increased / larger (not bare borderline)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:heart|cardiac)\s+size
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal)\b)\w+){0,10}[^\w.!?;:]+
+        (?:enlarg\w*|enalrged|dilat\w*|increased|larger)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+than\s+(?:it\s+is\s+now|on\s+(?:the\s+)?(?:current|present|today)))
+
+        |
+
+        # Heart → enlarg/dilat (short safe gap); require enlarg after borderline
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        heart\s+
+        (?:
+            (?:size\s+)?(?:is\s+|remains?\s+|appears?\s+|being\s+|continues\s+to\s+be\s+)?
+            (?:(?:mildly|moderately|markedly|severely|slightly|persistently|persistenly|still|quite|borderline|somewhat|diffusely|grossly|frankly|stably|stable)\s+|(?:to\s+))*
+            (?:enlarg\w*|enalrged|dilat\w*|hypertroph\w*)\b
+            |
+            (?:is\s+|remains?\s+|appears?\s+)?borderline\s+enlarg\w*\b
+            |
+            (?:remains?\s+|is\s+|appears?\s+)?(?:stably\s+|stable\s+)?large\b
+        )
+        (?!\s+is\s+unlikely)
+
+        |
+
+        # Cardiac enlargement / dilatation / hypertrophy
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!unlikely\s)(?<!negative\sfor\s)
+        cardiac(?:\s+and\s+pulmonary\s+arterial)?\s+(?:enlarg\w*|dilat\w*|hypertroph\w*)\b
+        (?!\s+is\s+unlikely)
+
+        |
+
+        # Upper-limits / top-normal ONLY when paired with enlarg/elevated hedge
+        (?:upper\s+limits?\s+of\s+normal|top[\s-]?normal)
+        \s+or\s+(?:slightly|mildly)\s+(?:enlarg\w*|elevated)\b
+
+        |
+
+        (?:cardiac\s+silhouette|heart(?:\s+size)?)\s+
+        (?:is\s+|appears?\s+|at\s+the\s+)?
+        (?:upper\s+limits?\s+of\s+normal|top[\s-]?normal)
+        (?:\s+in\s+size)?
+        (?:
+            \s+or\s+(?:slightly|mildly)\s+(?:enlarg\w*|elevated)
+            |
+            \s*,\s*to\s+(?:slightly|mildly)\s+enlarg\w*
+        )
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:
+            increased\s+heart\s+size
+            |
+            increasing\s+(?:heart|cardiac)\s+size
+            |
+            (?:increased|increase\s+in)\s+(?:cardiac|heart)\s+(?:size|diameter)
+            |
+            (?:interval\s+)?increase\s+in\s+(?:heart|cardiac)\s+size
+            |
+            (?:interval\s+)?increase\s+in\s+(?:the\s+)?(?:cardiac|heart)\s+silhouette
+            |
+            transverse\s+cardiac\s+diameter\s+has\s+increased
+        )
+
+        |
+
+        # Chamber enlargement (not isolated hypertrophy / LVH with WNL size)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!possible\s)
+        (?:
+            (?:left|right)\s+(?:ventricular|atrial)\s+(?:enlarg\w*|dilat\w*)
+            |
+            (?:enlarged|dilated)\s+(?:left|right)\s+(?:ventricle|atrium|ventricular\s+chamber|atrial\s+chamber)
+            |
+            (?:left|right)\s+(?:ventricle|atrium)\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:enlarg\w*|dilat\w*)
+        )
+
+        |
+
+        # Elevated CTR
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!normal\s)
+        (?:
+            (?:elevated|increased|high|enlarged)\s+(?:cardiothoracic|cardio[\s-]?thoracic)\s+ratio
+            |
+            (?:cardiothoracic|cardio[\s-]?thoracic)\s+ratio\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|enlarged)
+            |
+            \bctr\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|>|greater)
+        )
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:globular|massive|\blarge\b)\s+(?:appearing\s+)?(?:enlarged\s+)?heart\b
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!or\s)
+        enlarged\s+heart\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # C. Cardiomediastinal / cardiac mediastinal silhouette enlargement
+        #    Residual parent (FN-fit fn_mine_fit_shared): intervening but/stable;
+        #    mediastinal↔cardiac order; superior mediastinal; bare cardiomediastinum
+        #    remains/stably; increased silhouette size; broad/large; bare mediastinal
+        #    silhouette enlargement-of. Avoid prominent-PA / technique.
+        #    Token: cardio[\s-]?mediastinal | cardiac and (superior) mediastinal |
+        #           mediastinal and cardiac
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:enlarged|widened|dilated|large\b|\bbroad\b)
+        (?:\s+(?:and|but)\s+(?:ill-defined|poorly[\s-]?defined|indistinct|stable|unchanged|persistent))?
+        \s+(?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+
+        (?:silhouette|contour)s?\b
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+
+        (?:silhouette|contour)s?
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal|unremarkable)\b)\w+){0,6}[^\w.!?;:]+
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)(?<!not\sappear\s)
+        (?:enlarg\w*|widen(?:ed|ing)|\bwide\b|dilat\w*|\blarge\b|\blarger\b|\bbroad\b)\b
+        (?!\s+is\s+unlikely)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)
+        (?:enlarg\w*|widen(?:ed|ing)|dilat\w*)\b
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:the[^\w.!?;:]+)?
+        (?:(?:post-?operative|postop(?:erative)?)[^\w.!?;:]+)?
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|contour)s?\b
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+enlarg\w*\b
+
+        |
+
+        # Increased (size of) cardiomediastinal / mediastinal silhouette
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)(?<!reduced\s)
+        (?:persistently\s+|stably\s+|stable\s+|unchanged\s+)?
+        increased\s+
+        (?:
+            (?:size\s+of\s+(?:the\s+)?)?
+            (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|contour)s?
+            (?:\s+size)?
+            |
+            size\s+of\s+(?:the\s+)?
+            (?:(?:right|left|upper|superior|lower)\s+)?
+            mediastinal\s+(?:silhouette|contour)s?
+        )\b
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+
+        |
+
+        # Bare cardiomediastinum (no "silhouette") — residual parent phrasing
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:enlarged|widened|dilated|large\b|\bbroad\b)\s+cardio[\s-]?mediastinum\b
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:enlargement|widening)\s+of\s+(?:the\s+)?cardio[\s-]?mediastinum\b
+
+        |
+
+        # Bare cardiomediastinum → remains / stably / is enlarged|widened
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        cardio[\s-]?mediastinum
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal|unremarkable|shift(?:ing)?)\b)\w+){0,6}[^\w.!?;:]+
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)
+        (?:enlarg\w*|widen(?:ed|ing)|\bwide\b|dilat\w*|\blarge\b|\blarger\b)\b
+        (?!\s+is\s+unlikely)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+
+        |
+
+        # Bare "cardiomediastinal widening" / "widening of the cardiomediastinal"
+        # (adjective form without -um / silhouette)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bor\s)
+        (?<!\bevidence\sof\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+        (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bassess\sfor\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\?\s)
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal)\s+widening\b
+        (?!\s+is\s+anticipated)
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:enlargement|widening)\s+of\s+(?:the\s+)?
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal)\b
+        (?!\s+(?:fat|vessel|vessels|lymph|node|adenopathy|mass)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # Residual: "widening of the heart and upper mediastinum"
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        widen(?:ed|ing)\s+of\s+(?:the\s+)?(?:heart|cardiac\s+silhouette)
+        \s+and\s+(?:the\s+)?(?:upper\s+|superior\s+)?mediastinum\b
+
+        |
+
+        # Fullness of mediastinal / cardiomediastinal contour or silhouette
+        # (not mass/paratracheal fullness; not bare prominence)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        fullness\s+of\s+(?:the\s+)?
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal)\s+
+        (?:silhouette|contour)s?\b
+        (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|paratracheal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b|hematoma|seroma|goiter|thyroid))
+
+        |
+
+        # Bare mediastinal silhouette/contour enlargement (residual; children
+        # cover some; keep parent lexicon for mini-tests / composed holes)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!cardio)(?<!cardio-)
+        (?:(?:mildly|moderately|severely|markedly|slightly|persistently|stably|stable|unchanged|persistent)\s+)?
+        (?:enlarged|widened|dilated|large\b|\bbroad\b)
+        (?:\s+(?:and|but)\s+(?:ill-defined|poorly[\s-]?defined|indistinct|stable|unchanged|persistent))?
+        \s+(?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        mediastinal\s+(?:silhouette|contour)s?\b
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification|adenopathy|lymphadenopathy|mass\b))
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)(?<!cardio)(?<!cardio-)
+        (?:enlarg\w*|widen(?:ed|ing)|dilat\w*)\b
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:the[^\w.!?;:]+)?
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)[^\w.!?;:]+)?
+        mediastinal\s+(?:silhouette|contour)s?\b
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification|adenopathy|lymphadenopathy))
+
+        |
+
+        # Anatomy → enlarged/widened (not "contour … represent enlarged PA/mass")
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!cardio)(?<!cardio-)
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        mediastinal\s+(?:silhouette|contour)s?
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal|unremarkable|represent(?:ing)?|reflect(?:ing)?|suggest(?:ing|s)?)\b)\w+){0,6}[^\w.!?;:]+
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)
+        (?:enlarg\w*|widen(?:ed|ing)|\bwide\b|dilat\w*|\blarge\b|\blarger\b|\bbroad\b)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+(?:central\s+)?(?:pulmonary\s+)?arter)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
+
+        |
+
+        # ------------------------------------------------------------------
+        # D. Mediastinal widening / enlarged mediastinum (not bare prominence
+        #    of PA / interstitial / hilar; not paratracheal thickening alone)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bor\s)(?<!,\s)
+        (?<!\bno\sabnormal\s)(?<!\bno\stypical\s)(?<!\bno\sdefinite\s)
+        (?<!\bno\ssignificant\s)(?<!\bno\sobvious\s)(?<!\bno\sovert\s)
+        (?<!\bno\sapparent\s)(?<!\bno\spneumothorax\s)
+        (?<!\bevidence\sof\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+        (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bassess\sfor\s)
+        (?<!\bpresence\sof\s)(?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\?\s)
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        mediastinal\s+widening
+        (?!\s+is\s+anticipated)
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)
+        (?<!\br/o\s)(?<!\bassess\sfor\s)(?<!\bapparent\s)(?<!\?\s)(?<!\bfor\s)
+        (?:\bwide\b|widen(?:ed|ing))\s+
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        mediastinum\b
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        widen(?:ed|ing)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,6}[^\w.!?;:]+
+        of\s+(?:the\s+)?
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        (?:mediastinum\b|mediastinal\s+(?:contour|silhouette|contents|soft\s+tissue|region)\b)
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # Anatomy → widened / wide (not "contour … represent enlarged PA")
+        (?<!\bno\s)(?<!\bwithout\s)(?<!cardio)(?<!cardio-)
+        (?:(?:right|left|upper|superior|lower|anterior|posterior)\s+)?
+        (?:mediastinum|mediastinal\s+(?:contour|silhouette|contents))
+        (?:[^\w.!?;:]+(?!(?:without|no|not|nor|denies|absent|normal)\b)\w+){0,5}[^\w.!?;:]+
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bappreciably\s)
+        (?:widen(?:ed|ing)|\bwide\b)\b
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,55}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,40}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # Increase in mediastinal size / caliber / width
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\btransient\s)
+        (?:
+            (?:increase(?:d|s)?|enlargement)\s+in\s+(?:the\s+)?
+            (?:size|caliber|width|diameter)\s+of\s+(?:the\s+)?
+            (?:(?:right|left|upper|superior|lower)\s+)?
+            mediastinum\b
+            |
+            (?:increase(?:d|s)?|enlargement)\s+in\s+(?:the\s+)?
+            (?:(?:right|left|upper|superior|lower)\s+)?
+            mediastinal\s+(?:caliber|size|width|diameter)
+            |
+            increase(?:d|s)?\s+in\s+size\s+of\s+(?:the\s+)?
+            (?:(?:right|left|upper|superior|lower)\s+)?
+            mediastinum\b
+        )
+
+        |
+
+        # Named-region enlargement (tight; not bare mediastinal prominence)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:
+            (?:enlarged|widened)\s+(?:(?:right|left)\s+)?(?:superior|upper)\s+mediastinum\b
+            |
+            (?:enlargement|widening)\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper)\s+mediastinum\b
+            |
+            (?:enlargement|widening)\s+of\s+(?:the\s+)?mediastinum\b
+            (?!\s+(?:drain|drains|clip|clips|tube|tubes|catheter|wire|wires|fat|vessel|vessels|vein|veins|lymph|node|adenopathy|mass)\b)
+        )
+
+        |
+
+        # (Peri/para)tracheal widening (not bare thickening/fullness / vessels-on-CT)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:
+            widen(?:ed|ing)\s+of\s+(?:the\s+)?(?:(?:right|left|upper|lower)\s+)?(?:peri|para)tracheal\w*
+            (?!\s+area\b)
+            (?![^\n.!?;:]{0,120}(?:merely\s+)?blood\s+vessels)
+            |
+            (?:(?:right|left|upper|lower)\s+)?(?:peri|para)tracheal\s+widen(?:ed|ing)\w*
+            (?!\s+area\b)
+            (?![^\n.!?;:]{0,120}(?:merely\s+)?blood\s+vessels)
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # E. Aortic enlargement / ectasia / dilatation (not tortuosity alone)
+        # ------------------------------------------------------------------
+        # ecta[st]\w* covers both ectatic and ectasia (ectas\w* alone misses ectatic)
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:(?:ascending|descending|thoracic|lower\s+thoracic|upper\s+thoracic|visualized(?:\s+thoracic)?)\s+)?(?<!abdominal\s)(?:aorta\b|aortic\b)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,6}[^\w.!?;:]+
+        (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)(?<!non-)
+        (?:enlarged|dilat\w*|ecta[st]\w*|aneurysmal|widen(?:ed|ing)|\blarge\b|increased\s+(?:caliber|diameter|size))\b
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!/)(?<!no\ssignificant\s)(?<!no\ssignificant\saneurysmal\s)(?<!non-)
+        (?:dilat\w*|ecta[st]\w*|aneurysmal|widen(?:ed|ing)|increased\s+(?:caliber|diameter|size))
+        (?:[^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|cardiac\b|heart\b|atrium\b|ventricle\b|reflect\b|suggest\b|secondary\b|by\b|opacity\b|hernia\b|hiatal\b|effusion\b)\w+){0,5}[^\w.!?;:]+
+        (?:(?:ascending|descending|thoracic|lower\s+thoracic|upper\s+thoracic|visualized(?:\s+thoracic)?)\s+)?(?<!abdominal\s)(?:aorta\b|aortic\b)
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!no\ssignificant\s)(?<!no\ssignificant\saneurysmal\s)
+        (?:enlarg\w*|dilat\w*|ectasia|widening|aneurysm(?:al)?\s+(?:dilat\w*|enlarg\w*)|increased\s+(?:caliber|diameter|size))
+        (?:[^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|tortu\w*|unfold\w*|uncoil\w*|elongat\w*)\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:the[^\w.!?;:]+)?
+        (?:(?:ascending|descending|thoracic|visualized|lower|upper)[^\w.!?;:]+)*
+        (?<!abdominal\s)(?:aorta\b|aortic\b)
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!/)(?<!no\ssignificant\s)(?<!non-)
+        (?:enlarged|dilated|ectatic|aneurysmal|\blarge\b|\bwide\b)
+        \s+(?:(?:ascending|descending|thoracic)\s+)?
+        (?:aortic\s+knob|aortic\s+arch|aorta\b|thoracic\s+aorta\b)
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!abdominal\s)
+        aortic\s+(?:enlarg\w*|ectasia|dilat\w*|knob\s+(?:is\s+)?enlarg\w*|arch\s+(?:is\s+)?(?:enlarg\w*|dilat\w*|ectas\w*))
+)

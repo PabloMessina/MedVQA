@@ -1,42 +1,358 @@
+# ==============================================================================
+# pneumomediastinum
+# Extraluminal air/gas in the mediastinum on the current CXR.
+#
+# Match: pneumomediastinum / mediastinal air|gas|emphysema|lucency;
+# cardiomediastinal / paramediastinal / intramediastinal paraphrases;
+# rare named CXR signs used for mediastinal air (not bare continuous diaphragm).
+#
+# FN-fit (fn_mine_fit_shared): allow along|associated|continuous|chest|, with PM;
+# soften previous(ly) in tempered scan for comparison/current-affirm clauses;
+# although|though contrastive restart; arm 1b appears stable; arm 1c
+# decrease/increase before previously described PM.
+#
+# Do NOT match: negated / resolved / resolution-of / previous-only;
+# indication / rule-out / assess-for; isolated subcutaneous emphysema;
+# mediastinal clips + subcutaneous emphysema; air-fluid levels;
+# continuous diaphragm secondary to pneumoperitoneum.
+# ==============================================================================
 
-    # 1. Direct diagnosis / adjectival form
-    \bpneumo[\s-]?mediastin\w*\b
-    |
-    # 2. Anatomy ... pathology (Fenced General Gap)
-    # Allows up to 6 of ANY words, provided they are not negations/normalcy terms
-    # and we do not cross a period or semicolon.
-    \bmediastin\w*\b
-    (?:
-        [\s,]+
-        (?!(?:no|not|without|clear|normal|stable|unremarkable|resolved)\b)
-        [^\s,\.;]+
-    ){0,6}
-    [\s,]+\b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
-    |
-    # 3. Pathology ... anatomy (Fenced General Gap)
-    \b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
-    (?:
-        [\s,]+
-        (?!(?:no|not|without|clear|normal|stable|unremarkable|resolved)\b)
-        [^\s,\.;]+
-    ){0,6}
-    [\s,]+\bmediastin\w*\b
-    |
-    # 4. Named radiographic signs used for pneumomediastinum
-    \bcontinuous\s+diaphragm(?:\s+sign)?\b
-    |
-    \bring\s+around\s+(?:the\s+)?artery(?:\s+sign)?\b
-    |
-    \btubular\s+artery(?:\s+sign)?\b
-    |
-    \bdouble\s+bronchial\s+wall(?:\s+sign)?\b
-    |
-    \bextrapleural\s+air(?:\s+sign)?\b
-    |
-    \bnaclerio(?:'s|s)?\s+v(?:\s+sign)?\b
-    |
-    \bthymic\s+wing(?:\s+sign)?\b
-    |
-    \bspinnaker(?:[-\s]sail)?(?:\s+sign)?\b
-    |
-    \bhaystack(?:\s+sign)?\b
+(?:
+        # ------------------------------------------------------------------
+        # 1. Direct: pneumo[- ]mediastin*
+        # Clause-local tempered scan (consolidation-style).
+        # Allows contrastive "no <other>, but/although … pneumomediastinum".
+        # Restart at although|though|however|but (SQ-style).
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # Contrastive: "no pneumothorax, but/although … pneumomediastinum"
+                # Only scan BEFORE contrastive marker; do not allow when "no"
+                # already scopes pneumomediastinum (e.g. "no PM, but PTX").
+                (?=\bno\b(?:(?!pneumo[\s-]?mediastin)(?!(?:although|though|,?\s*(?:but|however))\b)[^.!?;:\n]){0,90}(?:although|though|,?\s*(?:but|however))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bplease\s+rule\s+out\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?<!\bpresent\swith\s)
+        (?<!\bpresents\swith\s)
+        (?<!\bpresented\swith\s)
+        (?<!\bpatient\swith\s)
+        (?<!\bwoman\swith\s)
+        (?<!\bman\swith\s)
+        (?<!\bmale\swith\s)
+        (?<!\bfemale\swith\s)
+        (?:
+            # Affirmative with-PM (keep bare indication "with PM" blocked).
+            (?:(?:consistent|compatible|along|associated|continuous)\swith\s)
+            |
+            (?:emphysema\swith\s)
+            |
+            (?:(?:chest|bilaterally)\swith\s)
+            |
+            (?:,\swith\s)
+            |
+            (?:(?<!\bwith\s)(?<!\bw/\s))
+        )
+        \bpneumo[\s-]?mediastin\w*\b
+        (?!\?)
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)|
+            has\s+not\s+progressed
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1b. Previously seen PM still present on current film
+        # (again identified / still present / decreased / appears stable).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,120}?
+        \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        \bpneumo[\s-]?mediastin\w*\b
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        [^.!?;:\n]{0,100}
+        \b(?:
+            again\s+(?:identified|seen|noted|visualized|appreciated|demonstrated|evident)|
+            (?:still|remains?)\s+(?:present|seen|identified|evident|visualized|appreciated)|
+            persist\w*|
+            residual|
+            appears?\s+(?:stable|unchanged|similar|improved|decreased|increased)|
+            (?:has|have|is|are)\s+(?:decreased|improved|increased|stable|unchanged)
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1c. Interval decrease/increase … previously described PM
+        # (quantity/verb before "previously", not after as in 1b).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,100}?
+        \b(?:
+            (?:(?:there\s+has\s+been|has\s+been|have\s+been|has|have)\s+)?
+            (?:a\s+)?(?:slight|mild|small|moderate)?\s*(?:interval\s+)?
+            (?:decrease|increase|improvement|worsening)
+        )\b
+        [^.!?;:\n]{0,80}?
+        \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        \bpneumo[\s-]?mediastin\w*\b
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Compact mediastinal air / gas / emphysema / lucency phrases
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bplease\s+rule\s+out\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            mediastinal\s+(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))
+            |
+            (?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\s+(?:in|within|of)\s+(?:the\s+)?(?:upper\s+|superior\s+|lower\s+|anterior\s+)?mediastin\w*
+            |
+            (?:streaky\s+)?lucenc(?:y|ies)\s+(?:in|within|along|over|overlying|of)\s+(?:(?:the|left|right|bilateral|upper|superior|lower|anterior)\s+){0,3}mediastin\w*
+            |
+            mediastinum\s+with\s+(?:free\s+)?(?:air|gas)\b
+            |
+            # Intramediastinal / intra-mediastinal air|gas (single token)
+            intra[\s-]?mediastinal\s+(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))
+            |
+            # Paramediastinal air/lucency (not bare medial PTX)
+            paramediastinal\s+(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))
+        )
+        (?!\s+fluid)
+        (?!\?)
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2b. Air/lucency outlining|surrounding cardiomediastinal / heart border
+        # (cardiomediastinal is one token — not matched by \bmediastin)
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            (?:curvilinear\s+)?(?:air|gas|lucenc(?:y|ies))\s+
+            (?:outlining|surrounding|along|over|overlying)\s+
+            (?:the\s+)?(?:(?:left|right|bilateral)\s+)?
+            (?:
+                cardiomediastinal\s+(?:contours?|silhouette|structures?)
+                |
+                (?:left|right)\s+heart\s+borders?
+                |
+                heart\s+borders?
+            )
+            |
+            (?:air|gas)\s+outlining\s+(?:the\s+)?cardiomediastinal\s+silhouette
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Short fenced: mediastin* … air|gas|emphysema|lucency
+        # Blocks subcutaneous / clips in the gap; rejects air-fluid.
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \bmediastin\w*\b
+        (?:
+            [\s,]+
+            (?!(?:
+                no|not|without|clear|normal|stable|unremarkable|resolved|
+                subcutaneous|subcut|clips?|nodes?|lymphadenopathy|surgical|
+                contours?|structures?|silhouette|shift|tracheal|column|size|heart
+            )\b)
+            [^\s,\.;]+
+        ){0,5}
+        [\s,]+(?<!\btracheal\s)(?<!\broom\s)\b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
+        (?!\s+column)
+        (?!\s+fluid)
+        (?!\s+levels?)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Short fenced reverse: air|gas|emphysema|lucency … mediastin*
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?<!\broom\s)
+        (?<!\btracheal\s)
+        \b(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\b
+        (?!\s+column)
+        (?!\s+fluid)
+        (?:
+            [\s,]+
+            (?!(?:no|not|without|clear|normal|stable|unremarkable|resolved|subcutaneous|subcut|clips?)\b)
+            [^\s,\.;:]+
+        ){0,6}
+        [\s,]+\bmediastin\w*\b
+        (?!\s+(?:are|is)\s+stable)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Named radiographic signs (exclude bare continuous diaphragm).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies
+                )\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            ring\s+around\s+(?:the\s+)?artery(?:\s+sign)?
+            |
+            tubular\s+artery(?:\s+sign)?
+            |
+            double\s+bronchial\s+wall(?:\s+sign)?
+            |
+            naclerio(?:'s|s)?\s+v(?:\s+sign)?
+            |
+            thymic\s+wing(?:\s+sign)?
+            |
+            spinnaker(?:[-\s]sail)?(?:\s+sign)?
+            |
+            haystack(?:\s+sign)?
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. Air/gas tracking about / into the (superior) mediastinum
+        # Prompt-faithful residual (not isolated SQ emphysema).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?<!\broom\s)
+        (?<!\btracheal\s)
+        \b(?:soft\s+tissue\s+)?(?:air|gas)\b
+        (?:
+            \s+(?:is\s+(?:also\s+)?noted\s+)?tracking\b
+            .{0,220}?
+            \b(?:about|in|within|along)\s+(?:the\s+)?(?:superior\s+|upper\s+|anterior\s+)?mediastin\w*
+            |
+            (?:[^.!?;]){0,100}?
+            \b(?:about|in|within)\s+(?:the\s+)?(?:superior|upper)\s+mediastin\w*
+        )
+)

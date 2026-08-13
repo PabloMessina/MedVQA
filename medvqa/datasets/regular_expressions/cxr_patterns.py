@@ -6,281 +6,186 @@ from multiprocessing import Pool
 # ================================ Pattern Loading ================================
 
 _CXR_CLASSES_DIR = os.path.join(os.path.dirname(__file__), 'cxr_classes')
-_PATTERN_CACHE: dict[str, re.Pattern] = {}
+# Cache key: (directory, stem) so workdir copies do not collide with production.
+_PATTERN_CACHE: dict[tuple[str, str], re.Pattern] = {}
+
+
+def clear_pattern_cache() -> None:
+    _PATTERN_CACHE.clear()
+
+
+def load_pattern(name: str, directory: str | None = None) -> re.Pattern:
+    """Load a VERBOSE regex pattern from ``<directory>/<name>.txt``.
+
+    ``directory`` defaults to the package ``cxr_classes`` folder. Call
+    :func:`clear_pattern_cache` after editing files on disk.
+    """
+    directory = os.path.abspath(directory or _CXR_CLASSES_DIR)
+    key = (directory, name)
+    if key not in _PATTERN_CACHE:
+        path = os.path.join(directory, f'{name}.txt')
+        with open(path, 'r', encoding='utf-8') as f:
+            body = f.read()
+        _PATTERN_CACHE[key] = re.compile(body, re.IGNORECASE | re.VERBOSE)
+    return _PATTERN_CACHE[key]
 
 
 def _load_pattern(name: str) -> re.Pattern:
-    """Load a VERBOSE regex pattern from cxr_classes/<name>.txt."""
-    if name not in _PATTERN_CACHE:
-        path = os.path.join(_CXR_CLASSES_DIR, f'{name}.txt')
-        with open(path, 'r') as f:
-            body = f.read()
-        _PATTERN_CACHE[name] = re.compile(body, re.IGNORECASE | re.VERBOSE)
-    return _PATTERN_CACHE[name]
+    """Load from the package cxr_classes dir (used by composition tables)."""
+    return load_pattern(name, directory=_CXR_CLASSES_DIR)
 
 
-# ================================ Class Name to Regex Mapping ================================
-
+# Canonical ontology IDs as keys. Composition OR-includes YAML children
+# (and optional non-ontology helper stems) for high-recall candidate finding.
+# Label inheritance for released labels remains in canonical_cxr_ontology.yaml.
 _CLASS_NAME_TO_REGEX_PATTERNS = {
-    'Abscess': _load_pattern('abscess'),
-    'Adenopathy': _load_pattern('adenopathy'),
-    'Air Bronchogram': _load_pattern('air_bronchogram'),
-    'Alveolar Pattern': _load_pattern('alveolar_pattern'),
-    'Aortic Aneurysm': _load_pattern('aortic_aneurysm'),
-    'Aortic Calcification': _load_pattern('aortic_calcification'),
-    'Aortic Ectasia': _load_pattern('aortic_ectasia'),
-    'Aortic Endoprosthesis': _load_pattern('aortic_endoprosthesis'),
-    'Aortic Enlargement': [
-        _load_pattern('aortic_enlargement'),
-        'Aortic Aneurysm',
-        'Aortic Ectasia',
-        'Aortic Knob Enlargement',
-        'Aortic Tortuosity',
-    ],
-    'Aortic Knob Enlargement': _load_pattern('aortic_knob_enlargement'),
-    'Aortic Tortuosity': _load_pattern('aortic_tortuosity'),
-    'Apical Cap': _load_pattern('apical_cap'),
-    'Artificial Heart Valve': [
-        _load_pattern('artificial_heart_valve'),
-        'Artificial Aortic Heart Valve',
-        'Artificial Mitral Heart Valve',
-    ],
-    'Artificial Aortic Heart Valve': _load_pattern('artificial_aortic_heart_valve'),
-    'Artificial Mitral Heart Valve': _load_pattern('artificial_mitral_heart_valve'),
-    'Atelectasis': [
-        _load_pattern('atelectasis'),
-        'Lobar Atelectasis',
-        'Rounded Atelectasis',
-    ],
-    'Azygos Lobe': _load_pattern('azygos_lobe'),
-    'Bone Fracture': [
-        _load_pattern('fracture'),
-        'Callus Rib Fracture',
-        'Clavicle Fracture',
-        'Humeral Fracture',
-        'Rib Fracture',
-        'Vertebral Fracture',
-    ],
-    'Bulla': _load_pattern('bulla'),
-    'Calcification': [
+    'calcification': [
         _load_pattern('calcification'),
-        'Aortic Calcification',
-        'Pleural Calcification',
+        'calcified_pulmonary_nodule_or_granuloma',
+        'pleural_calcification',
+        'aortic_calcification',
+        'cardiac_or_valvular_calcification',
     ],
-    'Callus Rib Fracture': _load_pattern('callus_rib_fracture'),
-    'Cardiomegaly': _load_pattern('cardiomegaly'),
-    'Catheter': [
-        _load_pattern('catheter'),
-        'Central Venous Catheter',
-    ],
-    'Central Venous Catheter': [
-        _load_pattern('central_venous_catheter'),
-        'Central Venous Catheter via Jugular Vein',
-        'Central Venous Catheter via Subclavian Vein',
-        'Reservoir Central Venous Catheter',
-    ],
-    'Central Venous Catheter via Jugular Vein': _load_pattern('central_venous_catheter_via_jugular_vein'),
-    'Central Venous Catheter via Subclavian Vein': _load_pattern('central_venous_catheter_via_subclavian_vein'),
-    'Chest Drain Tube': _load_pattern('chest_drain_tube'),
-    'Clavicle Fracture': _load_pattern('clavicle_fracture'),
-    'Consolidation': _load_pattern('consolidation'),
-    'COPD/Emphysema': _load_pattern('copd_emphysema'),
-    'Costophrenic Angle Blunting': _load_pattern('costophrenic_angle_blunting'),
-    'Dual Chamber Device': _load_pattern('dual_chamber_device'),
-    'Edema': _load_pattern('edema'),
-    'Empyema': _load_pattern('empyema'),
-    'Endotracheal Tube': _load_pattern('endotracheal_tube'),
-    'Enlarged Cardiomediastinum': [
-        'Cardiomegaly',
-        'Mediastinal Enlargement',
-    ],
-    'Enlarged PA': _load_pattern('enlarged_pulmonary_artery'),
-    'Pulmonary Fibrosis': _load_pattern('pulmonary_fibrosis'),
-    'Fissural Effusion': [
-        _load_pattern('fissural_effusion'),
-        'Pseudotumor',
-    ],
-    'Fissural Abnormality': [
-        'Fissural Effusion',
-        'Fissural Thickening',
-    ],
-    'Fissural Thickening': [
-        _load_pattern('fissure_thickening'),
-        'Major Fissure Thickening',
-        'Minor Fissure Thickening',
-    ],
-    'Gastrostomy Tube': _load_pattern('gastrostomy_tube'),
-    'Granuloma': _load_pattern('granuloma'),
-    'Ground Glass Pattern': _load_pattern('ground_glass_pattern'),
-    'Hernia': [
-        _load_pattern('hernia'),
-        'Hiatal Hernia',
-    ],
-    'Hiatal Hernia': _load_pattern('hiatal_hernia'),
-    'Hilar Enlargement': _load_pattern('hilar_enlargement'),
-    'Humeral Fracture': _load_pattern('humeral_fracture'),
-    'Humeral Prosthesis': _load_pattern('humeral_prosthesis'),
-    'Hydropneumothorax': _load_pattern('hydropneumothorax'),
-    'ICD': _load_pattern('icd'),
-    'Infiltration': [
-        _load_pattern('infiltration'),
-        'Alveolar Pattern',
-        'Consolidation',
-    ],
-    'Interstitial Lung Disease': [
-        _load_pattern('interstitial_lung_disease'),
-        'Reticulonodular Interstitial Pattern',
-        'Reticular Interstitial Pattern',
-        'Kerley Lines',
-        'Ground Glass Pattern',
-        'Miliary Opacities',
-        'Pulmonary Fibrosis',
-    ],
-    'Kerley Lines': _load_pattern('kerley_lines'),
-    'Kyphosis': _load_pattern('kyphosis'),
-    'Lobar Atelectasis': _load_pattern('lobar_atelectasis'),
-    'Loculated Pleural Effusion': _load_pattern('loculated_pleural_effusion'),
-    'Lung Cavity': _load_pattern('lung_cavity'),
-    'Lung Cyst': [
-        _load_pattern('lung_cyst'),
-        'Bulla',
-    ],
-    'Lung Lesion': [
-        _load_pattern('lung_lesion'),
-        'Granuloma',
-        'Lung Tumor',
-        'Nodule',
-        'Pseudonodule',
-        'Pulmonary Mass',
-    ],
-    'Lung Opacity': [
+    'lung_opacity': [
         _load_pattern('lung_opacity'),
-        'Abscess',
-        'Air Bronchogram',
-        'Alveolar Pattern',
-        'Atelectasis',
-        'Consolidation',
-        'Edema',
-        'Granuloma',
-        'Ground Glass Pattern',
-        'Infiltration',
-        'Kerley Lines',
-        'Lung Cavity',
-        'Lung Cyst',
-        'Miliary Opacities',
-        'Nodule',
-        'Pseudonodule',
-        'Pulmonary Fibrosis',
-        'Pulmonary Mass',
-        'Reticular Interstitial Pattern',
-        'Reticulonodular Interstitial Pattern',
+        'ground_glass_opacity_pattern',
+        'consolidation',
+        'pneumonia',
+        'atelectasis',
+        'reticular_interstitial_opacity_pattern',
+        'kerley_lines',
+        'pulmonary_edema',
+        'fibrotic_lung_change',
+        'focal_pulmonary_scarring',
+        'pulmonary_nodule_or_mass',
+        # B1: infiltration / alveolar_pattern / air_bronchogram / abscess /
+        # miliary_opacities helpers merged into lung_opacity.txt residual arms.
     ],
-    'Lung Tumor': _load_pattern('lung_tumor'),
-    'Major Fissure Thickening': _load_pattern('major_fissure_thickening'),
-    'Mammary Prosthesis': _load_pattern('mammary_prosthesis'),
-    'Mass': [
-        _load_pattern('mass'),
-        'Lung Tumor',
-        'Pulmonary Mass',
-        'Thoracic Masslike Finding',
+    'ground_glass_opacity_pattern': _load_pattern('ground_glass_opacity_pattern'),
+    'consolidation': _load_pattern('consolidation'),
+    'pneumonia': _load_pattern('pneumonia'),
+    'tuberculosis': _load_pattern('tuberculosis'),
+    'interstitial_lung_disease': _load_pattern('interstitial_lung_disease'),
+    'atelectasis': [
+        _load_pattern('atelectasis'),
+        'lobar_atelectasis',
+        'rounded_atelectasis',
     ],
-    'Mediastinal Enlargement': _load_pattern('mediastinal_enlargement'),
-    'Mediastinal Shift': _load_pattern('mediastinal_shift'),
-    'Metal': _load_pattern('metal'),
-    'Miliary Opacities': _load_pattern('miliary_opacities'),
-    'Minor Fissure Thickening': _load_pattern('minor_fissure_thickening'),
-    'Nasogastric Tube': _load_pattern('nasogastric_tube'),
-    'Nodule': _load_pattern('nodule'),
-    'Osteopenia': _load_pattern('osteopenia'),
-    'Pacemaker': [
-        _load_pattern('pacemaker'),
-        'ICD',
-        'Dual Chamber Device',
-        'Single Chamber Device',
+    'lobar_atelectasis': _load_pattern('lobar_atelectasis'),
+    'rounded_atelectasis': _load_pattern('rounded_atelectasis'),
+    'reticular_interstitial_opacity_pattern': _load_pattern('reticular_interstitial_opacity_pattern'),
+    'kerley_lines': _load_pattern('kerley_lines'),
+    'pulmonary_edema': _load_pattern('pulmonary_edema'),
+    'fibrotic_lung_change': _load_pattern('fibrotic_lung_change'),
+    'focal_pulmonary_scarring': _load_pattern('focal_pulmonary_scarring'),
+    'pulmonary_nodule_or_mass': [
+        _load_pattern('pulmonary_nodule_or_mass'),
+        'calcified_pulmonary_nodule_or_granuloma',
     ],
-    'Pleural Calcification': [
-        _load_pattern('pleural_calcification'),
-        'Pleural Plaques',
-    ],
-    'Pleural Effusion': [
+    'calcified_pulmonary_nodule_or_granuloma': _load_pattern('calcified_pulmonary_nodule_or_granuloma'),
+    'pulmonary_cavity': _load_pattern('pulmonary_cavity'),
+    'pulmonary_cyst_or_bulla': _load_pattern('pulmonary_cyst_or_bulla'),
+    'emphysema': _load_pattern('emphysema'),
+    'bronchiectasis': _load_pattern('bronchiectasis'),
+    'bronchial_wall_thickening': _load_pattern('bronchial_wall_thickening'),
+    'low_lung_volume': _load_pattern('low_lung_volume'),
+    'hyperinflation': _load_pattern('hyperinflation'),
+    'pleural_effusion': [
         _load_pattern('pleural_effusion'),
-        'Costophrenic Angle Blunting',
-        'Empyema',
-        'Fissural Effusion',
-        'Loculated Pleural Effusion',
+        'loculated_or_fissural_pleural_effusion',
+        'hydropneumothorax',
     ],
-    'Pleural Nodule/Mass': _load_pattern('pleural_nodule_mass'),
-    'Pleural Plaques': _load_pattern('pleural_plaques'),
-    'Pleural Scarring': _load_pattern('pleural_scarring'),
-    'Pleural Thickening': [
-        _load_pattern('pleural_thickening'),
-        'Pleural Calcification',
-        'Pleural Plaques',
-        'Pleural Scarring',
-        'Apical Cap',
-    ],
-    'Pneumomediastinum': _load_pattern('pneumomediastinum'),
-    'Pneumonia': [
-        _load_pattern('pneumonia'),
-        'Consolidation',
-        'Infiltration',
-        'Lung Cavity',
-        'Air Bronchogram',
-    ],
-    'Pneumoperitoneum': _load_pattern('pneumoperitoneum'),
-    'Pneumothorax': [
+    'loculated_or_fissural_pleural_effusion': _load_pattern('loculated_or_fissural_pleural_effusion'),
+    'costophrenic_angle_blunting': _load_pattern('costophrenic_angle_blunting'),
+    'pneumothorax': [
         _load_pattern('pneumothorax'),
-        'Hydropneumothorax',
+        'hydropneumothorax',
     ],
-    'Prosthesis': [
-        _load_pattern('prosthesis'),
-        'Artificial Heart Valve',
-        'Humeral Prosthesis',
-        'Mammary Prosthesis',
-        'Aortic Endoprosthesis',
+    'hydropneumothorax': _load_pattern('hydropneumothorax'),
+    'pleural_thickening': [
+        _load_pattern('pleural_thickening'),
+        'pleural_plaque',
+        'pleural_calcification',
     ],
-    'Pseudonodule': _load_pattern('pseudonodule'),
-    'Pseudotumor': _load_pattern('pseudotumor'),
-    'Pulmonary Embolism': _load_pattern('pulmonary_embolism'),
-    'Pulmonary Hypertension': _load_pattern('pulmonary_hypertension'),
-    'Pulmonary Infarction': _load_pattern('pulmonary_infarction'),
-    'Pulmonary Mass': [
-        _load_pattern('pulmonary_mass'),
-        'Lung Tumor',
+    'pleural_plaque': _load_pattern('pleural_plaque'),
+    'pleural_calcification': _load_pattern('pleural_calcification'),
+    'pleural_nodule_or_mass': _load_pattern('pleural_nodule_or_mass'),
+    'enlarged_cardiomediastinal_silhouette': [
+        _load_pattern('enlarged_cardiomediastinal_silhouette'),
+        'enlarged_cardiac_silhouette',
+        'aortic_enlargement_or_ectasia',
+        'mediastinal_widening',
     ],
-    'Pulmonary Vascular Congestion': _load_pattern('pulmonary_vascular_congestion'),
-    'Reservoir Central Venous Catheter': _load_pattern('reservoir_central_venous_catheter'),
-    'Reticular Interstitial Pattern': [
-        _load_pattern('reticular_interstitial_pattern'),
-        'Kerley Lines',
-        'Pulmonary Fibrosis',
+    'enlarged_cardiac_silhouette': _load_pattern('enlarged_cardiac_silhouette'),
+    'pulmonary_vascular_congestion': _load_pattern('pulmonary_vascular_congestion'),
+    'enlarged_pulmonary_artery': _load_pattern('enlarged_pulmonary_artery'),
+    'aortic_enlargement_or_ectasia': _load_pattern('aortic_enlargement_or_ectasia'),
+    'aortic_tortuosity_or_elongation': _load_pattern('aortic_tortuosity_or_elongation'),
+    'aortic_calcification': _load_pattern('aortic_calcification'),
+    'cardiac_or_valvular_calcification': _load_pattern('cardiac_or_valvular_calcification'),
+    'hilar_enlargement': _load_pattern('hilar_enlargement'),
+    'hilar_or_mediastinal_nodal_enlargement': _load_pattern('hilar_or_mediastinal_nodal_enlargement'),
+    'mediastinal_widening': _load_pattern('mediastinal_widening'),
+    'mediastinal_mass': _load_pattern('mediastinal_mass'),
+    'mediastinal_shift': _load_pattern('mediastinal_shift'),
+    'pneumomediastinum': _load_pattern('pneumomediastinum'),
+    'tracheal_deviation': _load_pattern('tracheal_deviation'),
+    'elevated_or_eventrated_hemidiaphragm': _load_pattern('elevated_or_eventrated_hemidiaphragm'),
+    'flattened_diaphragm': _load_pattern('flattened_diaphragm'),
+    'hernia': [
+        _load_pattern('hernia'),
+        'hiatal_hernia',
     ],
-    'Reticulonodular Interstitial Pattern': [
-        _load_pattern('reticulonodular_interstitial_pattern'),
-        'Miliary Opacities',
+    'hiatal_hernia': _load_pattern('hiatal_hernia'),
+    'pneumoperitoneum': _load_pattern('pneumoperitoneum'),
+    'bone_fracture': [
+        _load_pattern('bone_fracture'),
+        'clavicle_fracture',
+        'rib_fracture',
+        'vertebral_compression_fracture',
     ],
-    'Rib Fracture': _load_pattern('rib_fracture'),
-    'Rounded Atelectasis': _load_pattern('rounded_atelectasis'),
-    'Scoliosis': _load_pattern('scoliosis'),
-    'Single Chamber Device': _load_pattern('single_chamber_device'),
-    'Subcutaneous Emphysema': _load_pattern('subcutaneous_emphysema'),
-    'Support Devices': [
-        _load_pattern('support_devices'),
-        'Pacemaker',
-        'Catheter',
-        'Endotracheal Tube',
-        'Tracheostomy Tube',
-        'Nasogastric Tube',
-        'Chest Drain Tube',
-        'Gastrostomy Tube',
-        'Artificial Heart Valve',
-        'Prosthesis',
-        'Metal',
+    'clavicle_fracture': _load_pattern('clavicle_fracture'),
+    'rib_fracture': _load_pattern('rib_fracture'),
+    'vertebral_compression_fracture': _load_pattern('vertebral_compression_fracture'),
+    'focal_osseous_lesion': _load_pattern('focal_osseous_lesion'),
+    'degenerative_osseous_change': _load_pattern('degenerative_osseous_change'),
+    'radiographic_osteopenia': _load_pattern('radiographic_osteopenia'),
+    'scoliosis': _load_pattern('scoliosis'),
+    'kyphosis': _load_pattern('kyphosis'),
+    'support_device_present': [
+        _load_pattern('support_device_present'),
+        'support_line_present',
+        'support_tube_present',
+        'pacemaker_or_icd',
+        'prosthetic_cardiac_valve',
+        'vascular_graft_or_stent',
+        'breast_implant',
+        'sternotomy_wires',
+        'device_abnormality',
     ],
-    'Thoracic Masslike Finding': _load_pattern('thoracic_masslike'),
-    'Tracheostomy Tube': _load_pattern('tracheostomy_tube'),
-    'Tuberculosis': _load_pattern('tuberculosis'),
-    'Vertebral Fracture': _load_pattern('vertebral_fracture'),
+    'support_line_present': [
+        _load_pattern('support_line_present'),
+        'central_venous_catheter',
+    ],
+    'support_tube_present': [
+        _load_pattern('support_tube_present'),
+        'endotracheal_tube',
+        'enteric_tube',
+        'chest_tube',
+    ],
+    'endotracheal_tube': _load_pattern('endotracheal_tube'),
+    'enteric_tube': _load_pattern('enteric_tube'),
+    'central_venous_catheter': _load_pattern('central_venous_catheter'),
+    'chest_tube': _load_pattern('chest_tube'),
+    'pacemaker_or_icd': _load_pattern('pacemaker_or_icd'),
+    'prosthetic_cardiac_valve': _load_pattern('prosthetic_cardiac_valve'),
+    'vascular_graft_or_stent': _load_pattern('vascular_graft_or_stent'),
+    'breast_implant': _load_pattern('breast_implant'),
+    'sternotomy_wires': _load_pattern('sternotomy_wires'),
+    'device_abnormality': _load_pattern('device_abnormality'),
+    'subcutaneous_emphysema': _load_pattern('subcutaneous_emphysema'),
+    'nontherapeutic_foreign_body': _load_pattern('nontherapeutic_foreign_body'),
+    'azygos_lobe': _load_pattern('azygos_lobe'),
 }
 
 def _sanity_check_regular_expressions():

@@ -1,0 +1,46 @@
+{
+  "class_id": "hernia",
+  "positives": [
+    "Large hiatal hernia.",
+    "Bochdalek diaphragmatic hernia.",
+    "Intrathoracic stomach from herniation.",
+    "Traumatic diaphragmatic hernia with viscera in the chest.",
+    "Lung herniation through the chest wall.",
+    "Aerated lung to the right of the trachea may be herniated from the left side.",
+    "Stomach and bowel are herniated through the right diaphragm.",
+    "Finding compatible with a right Bochdalek hernia.",
+    "Again seen is evidence of Bochdalek hernia.",
+    "Large herniation of abdominal contents in the left hemithorax.",
+    "Redemonstration of herniation of abdominal contents into the left chest.",
+    "Loops of bowel have herniated through a diaphragmatic defect.",
+    "Herniation of abdominal contents across a diaphragmatic defect into the chest.",
+    "The gas-filled stomach herniates through the left hemidiaphragm.",
+    "Partial herniation of the left lung through the lateral chest wall.",
+    "Focal herniation of a portion of the liver through the diaphragm.",
+    "Likely herniation of subdiaphragmatic fat.",
+    "Herniation of the right hemidiaphragm is present.",
+    "Moderate-sized hernia transmits a loop of gut.",
+    "Large left hernia with air-fluid levels.",
+    "Left-sided hernia may be diaphragmatic or hiatal.",
+    "Left paracardiac hernia containing large bowel.",
+    "Gut herniation into the left lower hemithorax.",
+    "Posterior fat containing hernia on the right.",
+    "Large hernia in the left basal hemithorax.",
+    "Large hernia containing stomach and large bowel loops.",
+    "Herniation of large bowel above the left hemidiaphragm.",
+    "Opacity adjacent to the right heart border consistent with a fat containing hernia.",
+    "A massive hernia with organoaxial gastric volvulus is again seen.",
+    "Large hernia in the retrocardiac region.",
+    "The stomach, which herniates into the left hemithorax.",
+    "Gas-filled loops of bowel within the left hemithorax suggesting a large hernia.",
+    "Hernia projecting over the left hemithorax."
+  ],
+  "negatives": [
+    "Retrocardiac opacity favored to represent pneumonia.",
+    "Elevated hemidiaphragm without bowel gas above it.",
+    "Eventration of the left hemidiaphragm."
+  ],
+  "negation_soft": [
+    "No hernia identified."
+  ]
+}

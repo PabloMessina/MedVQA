@@ -1,26 +1,21 @@
-"""K1 complexity / K2 round-robin stratified / K3 random sampling."""
+"""K1 complexity / K2 round-robin stratified / K3 complexity-spaced sampling."""
 
 from __future__ import annotations
 
 import logging
-import random
-from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
-from medvqa.datasets.cxr_report_labeling.class_registry import (
-    ClassRegistry,
-    resolve_regex_pattern_name,
-)
+from medvqa.datasets.cxr_report_labeling.class_registry import ClassRegistry
 from medvqa.datasets.cxr_report_labeling.complexity import score_reports
 from medvqa.datasets.cxr_report_labeling.label_semantics import (
     NORMAL_CLASS,
-    SUPPORT_DEVICES_CLASS,
-    is_normal_disqualifying_positive,
 )
-from medvqa.datasets.cxr_report_labeling.schemas import sample_record
-from medvqa.datasets.regular_expressions.cxr_patterns import collect_reports_matching_class
+from medvqa.datasets.cxr_report_labeling.schemas import report_text_hash, sample_record
+from medvqa.datasets.regular_expressions.cxr_patterns import (
+    collect_reports_matching_class,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +75,13 @@ def normal_proxy_indices(
     srr_positives: Optional[Dict[str, Set[int]]] = None,
 ) -> Set[int]:
     """
-    Normal candidates: SRR No Finding, or no non-Support-Devices regex hits.
-    Support-Devices-only still eligible.
+    no_finding candidates: SRR No Finding and/or no positive regex hits.
+
+    Any regex-backed positive (including support devices) disqualifies, matching
+    canonical no_finding semantics.
     """
     disqualified: Set[int] = set()
-    for class_id, idxs in regex_positives.items():
-        if class_id == SUPPORT_DEVICES_CLASS:
-            continue
+    for idxs in regex_positives.values():
         disqualified |= idxs
     candidates = set(range(n_reports)) - disqualified
     if srr_positives and "No Finding" in srr_positives:
@@ -100,16 +95,29 @@ def _round_robin_sample(
     strata: Dict[str, List[int]],
     k: int,
     already_chosen: Set[int],
+    *,
+    is_blocked: Optional[Callable[[int], bool]] = None,
+    on_pick: Optional[Callable[[int], None]] = None,
 ) -> List[Tuple[int, str]]:
     """
     Round-robin over strata (rarest-first). Each stratum list must be sorted
     by complexity descending. Returns (index, stratum_name) pairs.
+
+    ``is_blocked(idx)`` if provided skips candidates (e.g. duplicate report text).
+    ``on_pick(idx)`` runs when an index is selected (e.g. claim its text hash).
     """
     # Sort strata by size ascending (rarest first) for tie-friendly coverage
     names = sorted(strata.keys(), key=lambda n: (len(strata[n]), n))
     pointers = {n: 0 for n in names}
     chosen: List[Tuple[int, str]] = []
     chosen_set = set(already_chosen)
+
+    def _skip(idx: int) -> bool:
+        if idx in chosen_set:
+            return True
+        if is_blocked is not None and is_blocked(idx):
+            return True
+        return False
 
     progress = True
     while len(chosen) < k and progress:
@@ -119,7 +127,7 @@ def _round_robin_sample(
                 break
             lst = strata[name]
             p = pointers[name]
-            while p < len(lst) and lst[p] in chosen_set:
+            while p < len(lst) and _skip(lst[p]):
                 p += 1
             pointers[name] = p
             if p < len(lst):
@@ -127,8 +135,34 @@ def _round_robin_sample(
                 pointers[name] = p + 1
                 chosen.append((idx, name))
                 chosen_set.add(idx)
+                if on_pick is not None:
+                    on_pick(idx)
                 progress = True
     return chosen
+
+
+def complexity_spaced_indices(
+    remaining_sorted_by_complexity_desc: Sequence[int],
+    k: int,
+) -> List[int]:
+    """
+    Pick k evenly spaced ranks from a complexity-sorted leftover list.
+
+    With N remaining and k picks, split into (k+1) bins and take the last
+    index of each of the first k bins: (i+1)*N // (k+1) - 1.
+    Example: N=100, k=4 -> indices 19, 39, 59, 79.
+    """
+    n = len(remaining_sorted_by_complexity_desc)
+    if k <= 0:
+        return []
+    if k > n:
+        raise ValueError(f"Requested k3={k} > remaining={n}")
+    if k == n:
+        return list(remaining_sorted_by_complexity_desc)
+    return [
+        remaining_sorted_by_complexity_desc[((i + 1) * n) // (k + 1) - 1]
+        for i in range(k)
+    ]
 
 
 def sample_dataset(
@@ -145,10 +179,17 @@ def sample_dataset(
     srr_class_names: Optional[Sequence[str]] = None,
     seed: int = 0,
     num_regex_processes: int = 1,
+    seen_report_text_hashes: Optional[Set[str]] = None,
 ) -> List[dict]:
     """
-    Sample K1+K2+K3 reports without replacement.
+    Sample K1+K2+K3 reports without replacement by index and by report text hash.
+
+    ``seen_report_text_hashes`` is updated in-place with hashes of chosen reports
+    so callers can enforce content-uniqueness across datasets.
+
+    ``seed`` is retained for API compatibility; K3 is deterministic given scores.
     """
+    del seed  # K3 no longer uses RNG; keep arg for callers/notebooks.
     n = len(reports)
     if k1 + k2 + k3 > n:
         raise ValueError(f"Requested {k1}+{k2}+{k3} > {n} reports for {dataset}")
@@ -168,8 +209,35 @@ def sample_dataset(
         assert srr_class_names is not None
         srr_positives = compute_srr_positive_sets(srr_label_vectors, srr_class_names)
 
+    seen = seen_report_text_hashes if seen_report_text_hashes is not None else set()
+    seen_before = len(seen)
+
+    def _hash_at(idx: int) -> str:
+        r = reports[idx]
+        h = r.get("report_text_hash")
+        if h:
+            return h
+        return report_text_hash(r["report_text"])
+
+    def is_blocked(idx: int) -> bool:
+        return _hash_at(idx) in seen
+
+    def claim(idx: int) -> None:
+        seen.add(_hash_at(idx))
+
     # --- K1 ---
-    k1_idxs = order_by_complexity[:k1]
+    k1_idxs: List[int] = []
+    for idx in order_by_complexity:
+        if is_blocked(idx):
+            continue
+        k1_idxs.append(idx)
+        claim(idx)
+        if len(k1_idxs) >= k1:
+            break
+    if len(k1_idxs) < k1:
+        raise ValueError(
+            f"Could only pick K1={len(k1_idxs)}/{k1} content-unique reports for {dataset}"
+        )
     chosen: Set[int] = set(k1_idxs)
     samples: List[dict] = []
     for idx in k1_idxs:
@@ -208,7 +276,13 @@ def sample_dataset(
     # Drop empty strata
     strata = {k: v for k, v in strata.items() if v}
 
-    k2_picks = _round_robin_sample(strata, k2, chosen)
+    k2_picks = _round_robin_sample(
+        strata, k2, chosen, is_blocked=is_blocked, on_pick=claim
+    )
+    if len(k2_picks) < k2:
+        raise ValueError(
+            f"Could only pick K2={len(k2_picks)}/{k2} content-unique reports for {dataset}"
+        )
     for idx, stratum in k2_picks:
         chosen.add(idx)
         r = reports[idx]
@@ -227,14 +301,27 @@ def sample_dataset(
             )
         )
 
-    # --- K3 ---
-    remaining = [i for i in range(n) if i not in chosen]
-    rng = random.Random(seed)
-    if k3 > len(remaining):
-        raise ValueError(f"Not enough remaining reports for K3 on {dataset}")
-    k3_idxs = rng.sample(remaining, k3)
+    # --- K3: evenly spaced ranks among remaining, by complexity descending ---
+    # Keep at most one index per report_text_hash (highest complexity first).
+    remaining_unique: List[int] = []
+    pending_hashes: Set[str] = set()
+    for i in order_by_complexity:
+        if i in chosen:
+            continue
+        h = _hash_at(i)
+        if h in seen or h in pending_hashes:
+            continue
+        pending_hashes.add(h)
+        remaining_unique.append(i)
+    if k3 > len(remaining_unique):
+        raise ValueError(
+            f"Not enough remaining content-unique reports for K3 on {dataset} "
+            f"(need {k3}, have {len(remaining_unique)})"
+        )
+    k3_idxs = complexity_spaced_indices(remaining_unique, k3)
     for idx in k3_idxs:
         chosen.add(idx)
+        claim(idx)
         r = reports[idx]
         samples.append(
             sample_record(
@@ -243,7 +330,7 @@ def sample_dataset(
                 report_id=r["report_id"],
                 report_text=r["report_text"],
                 source_refs=r.get("source_refs", {}),
-                sampling_method="random",
+                sampling_method="complexity_spaced",
                 complexity_score=scores[idx],
                 split=r.get("split"),
                 extra={k: r[k] for k in ("study_id",) if k in r},
@@ -251,12 +338,14 @@ def sample_dataset(
         )
 
     logger.info(
-        "%s sampled %d (K1=%d K2=%d K3=%d)",
+        "%s sampled %d (K1=%d K2=%d K3=%d); seen_hashes %d -> %d",
         dataset,
         len(samples),
         k1,
         len(k2_picks),
         k3,
+        seen_before,
+        len(seen),
     )
     return samples
 

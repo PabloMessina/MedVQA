@@ -1,0 +1,199 @@
+# ==============================================================================
+# bronchiectasis
+# Radiographic bronchial dilatation on the current CXR.
+#
+# Match: bronchiectasis / bronchiectatic / bronchiolectasis; tram-track(s)/
+#        tram tracking; ring shadows of dilated bronchi; finding-style
+#        dilated bronchus/bronchi/airways with hedge/size modifiers or
+#        left anchors (with/around/reflective + optional article);
+#        bronchial ectasia / dilatation; ectatic bronchi; dilatation/
+#        dilation/ectasia of bronchi; mild/persistent airways dilation;
+#        dilated pulmonary airways; varicose bronchi; signet-ring of
+#        dilated airways; bronchi appear dilated; "except for …
+#        bronchiectasis" after an unrelated clause-local negation.
+#
+# Do NOT match: indication / PMH / history-only; eval/assess/rule-out;
+#        differential lists; bare "ectasis" (atelectasis OCR); ungated
+#        "fluid/mucus within (severely) dilated bronchi"; CT/history alone;
+#        bronchial wall thickening / peribronchial cuffing alone;
+#        ectasia of the aorta; dilated pulmonary arteries; procedural
+#        post/status-post airway dilation; signet-ring cell cancer.
+# ==============================================================================
+
+(?:
+        # ------------------------------------------------------------------
+        # 1. bronchiecta* / bronchiolecta* — clause-local tempered scan
+        #    Clause boundaries omit ":" so "INDICATION: … bronchiectasis"
+        #    stays one clause and hits the indication fence.
+        # ------------------------------------------------------------------
+        (?:^|[.!?;\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bplease\s+rule\s+out\b)
+                (?!\bconcern(?:ing)?\s+for\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bh/o\b)
+                (?!\bpmhx\b)
+                (?!\bclinical\s+history\b)
+                (?!\bindication\b)
+                (?!\bdifferential\b)
+                [^.!?;\n]
+            )
+        ){0,220}
+        \b(?:bronchiecta\w*|bronchiolecta\w*)\b
+        (?!\?)
+        # MIMIC indication / PMH tails
+        (?!\s*[.,;:]?\s*//)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1b. Rescue: unrelated "no … except for [hedged] bronchiectasis"
+        #     (tempered scan otherwise sticks at the first "no")
+        # ------------------------------------------------------------------
+        \b(?:except\s+for|aside\s+from|other\s+than)\s+
+        (?:(?:possible|probable|likely|mild|mildly|suspected)\s+)?
+        \b(?:bronchiecta\w*|bronchiolecta\w*)\b
+        (?!\?)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Tram-track / tram tracking / tramlines
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \btram[-\s]?track(?:s|ing)?\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Ring shadows of dilated bronchi (prompt-explicit)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)
+        \bring\s+shadows?\s+of\s+dilated\s+bronchi\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4a. Hedge/size-modified dilated bronchus/bronchi/airways
+        #     (avoids bare "within … dilated" CT fluid phrasing)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!within\s)(?<!within\sa\s)(?<!within\san\s)
+        (?:(?:mild(?:ly)?|small|clustered|few|several|possible|probable|likely|suspected|unusual|tubular|focal|marked(?:ly)?|moderate(?:ly)?)\s+)+
+        dilated\s+(?:pulmonary\s+)?(?:bronchus|bronchi|airways?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4a2. Bare dilated pulmonary airways (prompt synonym; not arteries)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!within\s)(?<!within\sa\s)(?<!within\san\s)
+        \bdilated\s+pulmonary\s+airways?\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4b. Left-anchored dilated airways (with/around/reflective)
+        #     Optional comma-list tokens (e.g. "reflect cavitation, dilated");
+        #     "represent fluid within …" still fails (no comma after fluid).
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:
+            with|
+            around|
+            associated\s+with|
+            represent(?:ing|s)?|
+            reflect(?:ing|s)?|
+            suggest(?:ing|ive\s+of)?|
+            consistent\s+with|
+            compatible\s+with|
+            due\s+to|
+            from
+        )
+        \s+
+        (?:(?!\b(?:fluid|mucus|material)\b)[\w-]+,\s+)*
+        (?:(?:a|an|the)\s+)?
+        (?:(?:mild(?:ly)?|small|clustered|few|several|possible|probable|likely|suspected|severely|markedly|moderately|unusual|tubular|focal)\s+)*
+        dilated\s+(?:pulmonary\s+)?(?:bronchus|bronchi|airways?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Bronchial ectasia / dilatation / dilation (prompt synonyms)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bhistory\sof\s)
+        \bbronchial\s+(?:ectas\w*|dilat(?:ation|ion|ed|ing|e)?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. Ectatic bronchi/bronchus/airways (morphology; not bare ectasis)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \b(?:(?:tubular|cystic|focal|varicose|cylindrical|mild(?:ly)?)\s+)?
+        ectatic\s+(?:bronchus|bronchi|airways?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 7. Dilatation/dilation/ectasia of (the) bronchi — plural only
+        #     (avoids procedural "dilation of bronchus"; aorta ectasia)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bhistory\sof\s)
+        (?<!\bpost\s)(?<!\bafter\s)
+        \b(?:(?:mild(?:ly)?|persistent(?:ly)?|focal|marked(?:ly)?|moderate(?:ly)?)\s+)*
+        (?:dilatation|dilation|ectasia)\s+of\s+(?:the\s+)?bronchi\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 8. Mild/persistent airways?/airway dilatation|dilation
+        #     Requires severity hedge; skips bare procedural airway dilation
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bhistory\sof\s)
+        (?<!\bpost\s)(?<!\bafter\s)(?<!\bstatus\spost\s)
+        \b(?:(?:mild(?:ly)?|persistent(?:ly)?|focal|marked(?:ly)?|moderate(?:ly)?)\s+)+
+        airways?\s+dilat(?:ation|ion)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 9. Varicose bronchi (classic bronchiectasis morphology)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \bvaricose\s+(?:bronchus|bronchi|airways?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 10. Signet-ring appearance of dilated airways (not signet-ring cell)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \bsignet[-\s]?ring\s+(?:appearance\s+)?(?:of\s+)?dilated\s+(?:bronchus|bronchi|airways?)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 11. Bronchi/bronchus/airways appear dilated
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \b(?:the\s+)?(?:bronchi|bronchus|airways?)\s+appear(?:s|ing)?\s+dilated\b
+    )

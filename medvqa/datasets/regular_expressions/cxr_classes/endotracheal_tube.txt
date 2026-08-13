@@ -1,5 +1,307 @@
+    # Currently visible endotracheal tube (ETT / ET tube / oral-nasal ETT).
+    # Malposition (high/low/mainstem/esophageal) still counts as presence.
+    # Avoid: trach alone; other tubes; intubation history alone; O2 tubing;
+    #        removal / no-longer-visualized / cannot-assess clauses when local.
+    # NOTE: never write backslash-tan / tab escapes in lookbehinds — use \san.
+    # FN-fit (fn_mine_fit_shared): pre-noun stable/unchanged/redemonstration;
+    #   clavicles plural; endotracheal catheter; asyndetic ETT+NG; decimal
+    #   intubated↔carina walk; narrow "is no longer" (not hyperinflated);
+    #   tip of the tube + carina (anaphoric).
 
-    # Matches: "ETT", "Endotracheal tube"
-    \bett\b
+    # Shared absence lookbehinds for named-device arms (inline where needed).
+
+    # --------------------------------------------------------------------------
+    # 1a. "tip of the ETT" — tip not seen ≠ device absent (prompt: tip ≠ presence)
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sa\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \btip\s+of\s+(?:the\s+)?(?:
+            endotracheal\s+tubes?
+            |
+            e\.?\s*t\.?\s*[- ]?\s*tubes?
+            |
+            e\.?t\.?t\.?
+            |
+            # Dictation / spacing variants of endotracheal tube
+            endo[\s-]+tracheal\s+tubes?
+            |
+            end\s+tracheal\s+tubes?
+            |
+            into\s+tracheal\s+tubes?
+            |
+            indicate\s+tracheal\s+tubes?
+            |
+            tracheal\s+tubes?
+            |
+            intubation\s+tubes?
+            |
+            airway\s+tubes?
+        )\b
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:was|were)\s+removed\b)
+    )
+
     |
-    \bendotracheal\s+tube
+
+    # --------------------------------------------------------------------------
+    # 1. Explicit names / abbreviations (presence)
+    #    Do not block "NG tube and endotracheal tube" (list lookbehind was overbroad).
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\spreviously\sdemonstrated\s)
+        (?<!removal\sof\schest\stube\sand\s)
+        (?<!removal\sof\sthe\schest\stube\sand\s)
+        (?<!removal\sof\sright\schest\stube\sand\s)
+        (?<!removal\sof\sleft\schest\stube\sand\s)
+        (?<!removal\sof\sthe\sright\schest\stube\sand\s)
+        (?<!removal\sof\sthe\sleft\schest\stube\sand\s)
+        (?<!removal\sof\snasogastric\stube\sand\s)
+        (?<!removal\sof\sthe\snasogastric\stube\sand\s)
+        (?<!removal\sof\sng\stube\sand\s)
+        (?<!removal\sof\sthe\sng\stube\sand\s)
+        (?<!lack\sof\svisualization\sof\s)
+        (?<!non-visualization\sof\s)
+        (?<!nonvisualization\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bstatus\spost\s)
+        (?<!\bs/p\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bnot\ssee\san\s)
+        (?<!\bnot\ssee\sa\s)
+        (?<!\bnot\ssee\sthe\s)
+        (?<!\bnot\ssee\sa\sdefinite\s)
+        \b(?:
+            # ETT / E.T.T.
+            e\.?t\.?t\.?
+            |
+            # ET tube / ET-tube / E.T. tube
+            e\.?\s*t\.?\s*[- ]?\s*tubes?
+            |
+            # Endotracheal tube (optional "and <other> tubes")
+            endotracheal\s+tubes?
+            |
+            endotracheal\s+and\s+(?:\w+\s+){0,2}tubes?
+            |
+            # Endotracheal catheter (synonym device noun)
+            endotracheal\s+catheters?
+            |
+            # Asyndetic ETT+NG: "endotracheal nasogastric tubes"
+            endotracheal\s+nasogastric\s+tubes?
+            |
+            # Current endotracheal intubation (not history/indication alone)
+            endotracheal\s+intubation
+            |
+            # Dictation typo: "endotracheal to" / "endotracheal to tube"
+            # Gap allows decimals (4.5 cm) — bare (?![.!?]). stops at '.' in numbers.
+            endotracheal\s+to(?:\s+tubes?)?(?=(?:[^.!?\n]|\.(?=\d)){0,40}?\b(?:
+                visuali[sz]ed|terminates?|placed|tip|carina|bronchus|clavicular|clavicle|advanced|remains|redemonstrat
+            )\b)
+            |
+            # Spacing / hyphen variants: "endo tracheal" / "endo- tracheal"
+            endo[\s-]+tracheal(?:\s+tubes?)?
+            |
+            # Truncation typo: "end tracheal tube"
+            end\s+tracheal\s+tubes?
+            |
+            # Dictation: "into tracheal" / "indicate tracheal" for endotracheal
+            (?:into|indicate)\s+tracheal\s+tubes?
+            |
+            # Bare "endotracheal" as device noun (comma list / remains / position)
+            endotracheal(?=\s*(?:,|remains\b|is\b|has\b|in\b|at\b|tip\b|position\b|unchanged\b|stable\b|terminates?\b))
+            |
+            # Oral / nasal endotracheal (tube optional when named as such)
+            (?:oral|nasal)\s+endotracheal(?:\s+tubes?)?
+            |
+            # "ET and ... tubes" (e.g. ET and nasogastric / drainage tubes)
+            et\s+and\s+(?:\w+\s+){0,3}tubes?
+            |
+            # ET tip (no "tube" word) — presence via tip phrasing
+            e\.?\s*t\.?\s+tip
+        )\b
+        # Local post-match absence / removal (allow short gaps within the clause)
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:was|were)\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:has|have|had)\s+been\s+replaced\s+with\b)
+        (?!(?:(?![.!?]).){0,40}?\bcannot\s+be\s+(?:assessed|ascertained|determined|visuali[sz]ed|identified)\b)
+        (?!(?:(?![.!?]).){0,40}?\bcan\s+not\s+be\s+(?:assessed|ascertained|determined|visuali[sz]ed|identified)\b)
+        # Narrow: absence of device, not cuff-state ("is no longer hyperinflated")
+        (?!(?:(?![.!?]).){0,40}?\bis\s+no\s+longer\s+(?:(?:well|clearly|definitely)\s+)?(?:visuali[sz]ed|identified|seen|present|appreciated|in\s+(?:place|position)|evident)\b)
+        (?!(?:(?![.!?]).){0,40}?\bare\s+no\s+longer\s+(?:(?:well|clearly|definitely)\s+)?(?:visuali[sz]ed|identified|seen|present|appreciated|in\s+(?:place|position)|evident)\b)
+        (?!(?:(?![.!?]).){0,50}?\bis\s+not\s+(?:well\s+|clearly\s+|definitely\s+)?(?:visuali[sz]ed|identified|seen)\b)
+        (?!(?:(?![.!?]).){0,50}?\bnot\s+(?:well\s+|clearly\s+|definitely\s+)?(?:visuali[sz]ed|identified|seen)\b)
+        # Device-list ending in removal: "ETT, and Swan-Ganz catheter removal"
+        (?!(?:,\s*(?:and\s+)?[\w./-]+(?:\s+[\w./-]+){0,2}){1,5}\s+removal\b)
+    )
+
+    |
+
+    # --------------------------------------------------------------------------
+    # 1b. Bare "ET" as airway tube with film-position context (not other ET abbrs)
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bhistory\sof\s)
+        \b(?:the\s+)?e\.?t\.?\b
+        (?!\s*tubes?\b)   # covered by section 1
+        (?!\.?t\.?\b)     # not ETT
+        (?:(?![.!?])\W+(?!without\b|no\b|not\b)\w+){0,14}
+        \W+
+        \b(?:carina|bronchus|mainstem|clavicular|clavicles?|trachea)\b
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+    )
+
+    |
+
+    # --------------------------------------------------------------------------
+    # 1c. Synonym tubes with carina / tip / position (not trach alone)
+    #     tracheal tube | intubation tube | airway tube
+    # --------------------------------------------------------------------------
+    # Pre-noun presence framing (stable/unchanged/redemonstration/lucency)
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sa\s)
+        (?<!\bhistory\sof\s)
+        (?<!\btracheostomy\s)
+        (?<!\btrach\s)
+        (?<!\binner\s)
+        (?<!\bprotective\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \b(?:
+            (?:unchanged|stable)\s+(?:appearance\s+of\s+(?:the\s+)?)?(?:midline\s+)?
+            |
+            redemonstrat(?:ion|ed)\s+of\s+(?:an?\s+)?
+            |
+            lucency\s+surrounding\s+(?:the\s+)?
+            |
+            surrounding\s+(?:the\s+)?
+        )
+        (?:tracheal|intubation|airway)\s+tubes?\b
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:was|were)\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\breplaced\s+by\s+(?:a\s+)?tracheostomy\b)
+    )
+    |
+    # Post-noun tip / site / stability gate
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\sthe\sinner\s)
+        (?<!removal\sof\sinner\s)
+        (?<!\bhistory\sof\s)
+        (?<!\btracheostomy\s)
+        (?<!\btracheostomy,\swith\s)
+        (?<!\btrach\s)
+        (?<!\binner\s)
+        (?<!\bprotective\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \b(?:tracheal|intubation|airway)\s+tubes?\b
+        # Gap allows decimals (4.5 cm) — bare (?![.!?]). stops at '.' in numbers.
+        (?=(?:[^.!?\n]|\.(?=\d)){0,55}?\b(?:
+            tip|terminates?|carina|bronchus|mainstem|clavicular|clavicles?|
+            thoracic\s+inlet|redemonstrat|advanced|placed|placement|unchanged|stable|
+            position|in\s+place|projects?|seen|upper\s+airway
+        )\b)
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:was|were)\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\bis\s+no\s+longer\s+(?:(?:well|clearly|definitely)\s+)?(?:visuali[sz]ed|identified|seen|present|appreciated|in\s+(?:place|position)|evident)\b)
+        (?!(?:(?![.!?]).){0,50}?\bnot\s+(?:well\s+|clearly\s+|definitely\s+)?(?:visuali[sz]ed|identified|seen|assess)\b)
+        (?!(?:(?![.!?]).){0,40}?\breplaced\s+by\s+(?:a\s+)?tracheostomy\b)
+        (?!(?:(?![.!?]).){0,40}?\bif\s+any\b)
+    )
+
+    |
+
+    # --------------------------------------------------------------------------
+    # 1d. Anaphoric "tip of the tube" + carina/mainstem (ETT tip without noun)
+    #     Carina gate avoids NG-in-stomach; trach lookbehinds reduce trach FPs.
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\btracheostomy\s)
+        (?<!\btrach\s)
+        (?<!\bchest\s)
+        (?<!\bng\s)
+        (?<!\bnasogastric\s)
+        (?<!\bfeeding\s)
+        (?<!\benteric\s)
+        \btip\s+of\s+(?:the\s+)?tubes?\b
+        (?=(?:[^.!?\n]|\.(?=\d)){0,55}?\b(?:carina|bronchus|mainstem)\b)
+        (?!(?:(?![.!?]).){0,55}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:was|were)\s+removed\b)
+    )
+
+    |
+
+    # --------------------------------------------------------------------------
+    # 2. Intubation with explicit tip / carina / mainstem language on this film
+    #    (not bare "intubated" / history / indication alone)
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)
+        \b(?:re)?intubat(?:ed|ion|ing)\b
+        # Decimal-aware walk (2.5 cm) — bare (?![.!?])\W stops at '.' in numbers.
+        (?:(?:[^\w.!?\n]|\.(?=\d))+(?!without\b|no\b|not\b)\w+){0,14}
+        (?:[^\w.!?\n]|\.(?=\d))+
+        \b(?:tip|carina|mainstem|trachea)\b
+    )
+    |
+    (?:
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bpreferential\sright\s)(?<!\bpreferential\sleft\s)
+        \b(?:tip|carina|mainstem)\b
+        (?:(?:[^\w.!?\n]|\.(?=\d))+(?!without\b|no\b|not\b)\w+){0,10}
+        (?:[^\w.!?\n]|\.(?=\d))+
+        \b(?:re)?intubat(?:ed|ion|ing)\b
+        (?!(?:(?![.!?]).){0,55}?\bcould\s+(?:produce|result|cause|explain|account)\b)
+    )
+
+    |
+
+    # --------------------------------------------------------------------------
+    # 3. Interval intubation as a current-film finding (not history/indication)
+    # --------------------------------------------------------------------------
+    (?:
+        (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)
+        (?<!\bhistory\sof\s)(?<!\bprior\s)(?<!\bprevious\s)
+        (?<!\bindication:\s)
+        \binterval\s+intubation\b
+    )

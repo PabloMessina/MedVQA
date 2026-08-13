@@ -1,0 +1,53 @@
+{
+  "class_id": "clavicle_fracture",
+  "positives": [
+    "Midshaft left clavicle fracture.",
+    "Distal clavicle fracture on the right.",
+    "Healed clavicular fracture with callus.",
+    "Acute comminuted clavicle fracture.",
+    "Old remote clavicle fracture deformity.",
+    "Re-demonstration of left rib, clavicle and scapular fractures.",
+    "There is a fracture of the distal third of the left clavicle.",
+    "Foreshortening and periosteal new bone formation at the distal left clavicle consistent with prior trauma.",
+    "Multiple fractures involving the left ribcage, left mid shaft clavicle and the left scapula.",
+    "Subtle irregularity through the mid-to-distal left clavicle consistent with nondisplaced fracture.",
+    "Post traumatic deformity is again seen in the right clavicle.",
+    "An old fracture deformity is seen in the right distal clavicle.",
+    "Comminuted fracture of the midshaft of the left clavicle.",
+    "An old healed fracture is noted of the distal left clavicle.",
+    "The left clavicle exhibits a midshaft fracture.",
+    "Oblique fracture of the distal 3rd of the left clavicle.",
+    "Known fractures of the right clavicle, right scapula, and multiple ribs appear stable.",
+    "Mildly comminuted fracture at the junction of the middle and lateral thirds of the left clavicle.",
+    "Displaced fracture of the mid one-third of the right clavicle.",
+    "Old fracture, right mid clavicle.",
+    "There is an oblique fracture of the midshaft of the left clavicle.",
+    "Mildly displaced comminuted fracture of the lateral component of the right clavicle.",
+    "Chronic fracture deformity of the right mid-clavicle.",
+    "There is a mildly displaced transverse fracture at the junction of the medial and middle one-third of the shaft of the left clavicle.",
+    "Chronic fracture right humerus and right clavicle.",
+    "Deformities of the bilateral clavicles compatible with healed prior fractures.",
+    "Small non-displaced fracture of the distal tip of the right clavicle.",
+    "Non-displaced fracture of the distal end of the right clavicle.",
+    "Right midclavicular deformity is likely a healed prior fracture.",
+    "Interval placement of left clavicular internal fixation device with fracture reduction.",
+    "Fracture involving the left glenoid as well as the left distal clavicle.",
+    "Previous healed clavicular and left humeral deformity, probably from prior fractures.",
+    "Fracture in the mid portion of the right clavicle is non healed, could be acute.",
+    "Fractures are again demonstrated in the right clavicle, right scapula, and multiple right ribs.",
+    "A left mid clavicular minimally displaced fracture is noted.",
+    "Callus formation in the mid right clavicle consistent with a chronic healing fracture."
+  ],
+  "negatives": [
+    "Left rib fractures.",
+    "Acromioclavicular separation.",
+    "Nonspecific clavicular contour irregularity.",
+    "Lytic lesion of the clavicle.",
+    "Right humerus fracture.",
+    "No evidence of clavicular fractures or rib fractures.",
+    "There is no evidence of right clavicle fracture or associated right rib fractures."
+  ],
+  "negation_soft": [
+    "No clavicle fracture."
+  ]
+}

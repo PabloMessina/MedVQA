@@ -1,0 +1,49 @@
+{
+  "class_id": "sternotomy_wires",
+  "positives": [
+    "Median sternotomy wires intact.",
+    "Sternal closure wires in place.",
+    "Fractured sternotomy wire.",
+    "Sternal cerclage wires visible.",
+    "Retained sternotomy wire fragment.",
+    "Sternal suture wires are intact.",
+    "Clamshell sternotomy wires are in place.",
+    "Median sternotomy incision wires are present.",
+    "XXXX sternotomy XXXX are again noted.",
+    "Status post median sternotomy with cerclage wires.",
+    "Status post median sternotomy with broken superior most cerclage wire.",
+    "Status post median sternotomy, with intact cerclage wires.",
+    "Intact median sternotomy and cerclage wires.",
+    "A manubrial cerclage wire is again seen.",
+    "Status post clamshell sternotomy with discontinuous cerclage wires.",
+    "Cerclage wires reapproximating a clamshell incision.",
+    "Status post sternotomy with a vertically oriented cerclage wire.",
+    "Sternotomy and XXXX cerclage XXXX appear intact.",
+    "Fractured cerclage wires and diastasis of an old sternal fracture.",
+    "Patient is status post median sternotomy with wires which appear intact.",
+    "Patient is status post median sternotomy, wires which appear intact.",
+    "The patient is status post median sternotomy with intact appearing wires.",
+    "Sternal fixation wires are aligned and intact.",
+    "Surgical clips in the left neck and sternal fixation wires are consistent with prior median sternotomy.",
+    "Sternal fixation wires and hardware again seen.",
+    "Status post median sternotomy, with multiple intact mediastinal wires.",
+    "Multiple wires and sternal clamps are seen from a prior sternotomy.",
+    "Wires seen from prior median sternotomy and CABG.",
+    "There is evidence of prior, remote median sternotomy with wires in place.",
+    "The patient is status post sternotomy with wires and mediastinal clips.",
+    "Status post heart transplant reveals sternal wiring.",
+    "Stable poststernotomy changes with mediastinal wires."
+  ],
+  "negatives": [
+    "Sternal plate and screws.",
+    "Surgical clips only.",
+    "History of CABG without visible wires.",
+    "Rib fixation hardware.",
+    "Pacemaker generator.",
+    "Status post removal of sternal wires.",
+    "Concern for sternotomy wire as cause of pain."
+  ],
+  "negation_soft": [
+    "No sternotomy wires."
+  ]
+}

@@ -1,0 +1,644 @@
+# ==============================================================================
+# device_abnormality (leaf)
+# Visible abnormal course / location / tip OR structural abnormality of a
+# therapeutic device (malposition, kink, coil, fracture, mainstem ETT, etc.).
+#
+# Precision-first: never bare fracture/coil/migration (bone FX / embolization
+# coils / Kerley lines / orthopedic wires). Do NOT match device presence alone,
+# numerical tip location alone (e.g. "ETT tip 4 cm above carina"),
+# satisfactory/appropriate/good positioning, or PTX near a normal device.
+# NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+# ==============================================================================
+
+(?:
+        # ------------------------------------------------------------------
+        # A1. Malposition-family BEFORE device (wider gap OK)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bno\sevidence\sof\s)
+        (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)(?<!\br/o\s)
+        \b(?:
+            malposition(?:ed)?|
+            misplac(?:ed|ement)|
+            misdirect(?:ed|ion)|
+            aberran(?:t|tly)|
+            kink(?:ed|ing)|
+            coil(?:ed|ing)|
+            dislodg(?:ed|ement)|
+            disconnect(?:ed|ion)|
+            discontinuit(?:y|ies)|
+            migrat(?:ed|ing|ion)|
+            inadvertent(?:ly)?|
+            unintended
+        )\b
+        (?:(?![.!?])\W+\w+){0,3}\W+
+        \b(?:
+            endotracheal\s+tubes?|ett|et\s+tubes?|tracheostomy\s+tubes?|
+            nasogastric\s+tubes?|orogastric\s+tubes?|ng\s+tubes?|enteric\s+tubes?|
+            feeding\s+tubes?|dobb?hoff(?:\s+tubes?)?|
+            chest\s+tubes?|thoracostomy\s+tubes?|pigtail(?:\s+catheters?)?|
+            central\s+(?:venous\s+)?(?:lines?|catheters?)|picc(?:\s+lines?)?|cvc|
+            swan[- ]ganz|pulmonary\s+artery\s+catheters?|
+            (?:intra[- ]?aortic\s+)?balloon\s+pumps?|iabps?|
+            (?:transesophageal\s+)?temperature\s+probes?|
+            (?:pacemaker|icd|pacer)\s+leads?|pacemakers?|icds?|
+            (?:pacer|pacemaker|icd|defibrillator)(?:\s+and\s+(?:pacer|pacemaker|icd|defibrillator))?\s+wires?|
+            (?:venous|vascular|dialysis|pleurx)\s+(?:catheters?|lines?)|
+            sternotomy\s+wires?|
+            catheters?|tubes?|leads?|drains?|devices?|probes?|pumps?
+        )\b
+
+        |
+
+        # A2. Fractured/broken BEFORE device — tight gap (avoid "broken hip, post PICC")
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \b(?:fractur(?:ed|e|ing)|broken)\b
+        (?:\W+(?:pacemaker|icd|pacer|sternotomy|catheter|tube|lead|wire|line|picc|ett|device)\w*){0,1}
+        \W+
+        \b(?:
+            endotracheal\s+tubes?|ett|
+            (?:pacemaker|icd|pacer)\s+leads?|
+            sternotomy\s+wires?|
+            catheters?|tubes?|leads?|picc(?:\s+lines?)?|devices?
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # B. Device THEN abnormality (clause-local)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!\bevaluate\sfor\s)
+        \b(?:
+            endotracheal\s+tubes?|ett|et\s+tubes?|tracheostomy\s+tubes?|
+            nasogastric\s+tubes?|orogastric\s+tubes?|ng\s+tubes?|enteric\s+tubes?|
+            feeding\s+tubes?|dobb?hoff(?:\s+tubes?)?|
+            chest\s+tubes?|thoracostomy\s+tubes?|pigtail(?:\s+catheters?)?|
+            central\s+(?:venous\s+)?(?:lines?|catheters?)|picc(?:\s+lines?)?|cvc|
+            swan[- ]ganz|pulmonary\s+artery\s+catheters?|
+            (?:intra[- ]?aortic\s+)?balloon\s+pumps?|iabps?|
+            (?:transesophageal\s+)?temperature\s+probes?|
+            (?:pacemaker|icd|pacer)\s+leads?|pacemakers?|icds?|
+            (?:pacer|pacemaker|icd|defibrillator)(?:\s+and\s+(?:pacer|pacemaker|icd|defibrillator))?\s+wires?|
+            (?:venous|vascular|dialysis|pleurx)\s+(?:catheters?|lines?)|
+            (?:cordis\s+)?sheaths?|cordis|
+            sternotomy\s+wires?|
+            catheters?|tubes?|leads?|drains?|devices?|probes?|pumps?
+        )\b
+        (?:(?![.!?])\W+(?!evaluate\s+for|eval\s+for)\w+){0,8}\W+
+        \b(?:
+            malposition(?:ed)?|
+            misplac(?:ed|ement)|
+            misdirect(?:ed|ion)|
+            aberran(?:t|tly)|
+            kink(?:ed|ing)|
+            (?:coil(?:ed|ing)|looped?)\s+(?:in|within|into|back|upon|on)\s+(?:the\s+)?
+                (?:airway|bronch\w*|trachea|lung|hypopharynx|oropharynx|nasopharynx|
+                   right\s+atrium|left\s+atrium|nose|axilla)|
+            fractur(?:ed|e|ing)|
+            broken|
+            dislodg(?:ed|ement)|
+            disconnect(?:ed|ion)|
+            discontinuit(?:y|ies)|
+            migrat(?:ed|ing|ion)|
+            dislocation|
+            perforation|
+            atypical(?:ly)?|
+            redundant\s+loop
+        )\b
+
+        |
+
+        \b(?:
+            with\s+a\s+kink|
+            kink\s+in\s+(?:the\s+)?(?:distal|proximal|mid)\b|
+            \bis\s+kinked\b|
+            kinking\s+of\s+(?:the\s+)?(?:mid|distal|proximal)\s+course\s+of\s+(?:the\s+)?
+                (?:catheters?|tubes?|lines?|leads?|picc|drains?)
+        )\b
+
+        |
+
+        # Sideport / coiled-on-itself / curved-back (named tube/catheter nearby)
+        \b(?:
+            side\s*ports?\s+(?:is\s+|are\s+|again\s+)?(?:noted\s+|appears?\s+to\s+be\s+|appear\s+to\s+be\s+)?
+                (?:to\s+be\s+|have\s+(?:the\s+)?)?
+                (?:outside\s+(?:the\s+)?(?:pleural\s+space|chest|thorax)|coming\s+out\s+of\s+(?:the\s+)?(?:pleural\s+space|chest|thorax))|
+            (?:coil(?:ed|ing)|looped?)\s+upon\s+itself|
+            curved\s+back\s+on\s+itself|
+            (?:is|now)\s+malpositioned
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # C. Airway malposition phrases
+        # ------------------------------------------------------------------
+        \b(?:
+            (?:right|left)\s+main(?:stem|\s+stem)\s+intubat\w*|
+            mainstem\s+intubat\w*|
+            (?:right|left)\s+main(?:stem|\s+stem)?\s+bronchus\s+intubat\w*|
+            intubat\w*\s+(?:of\s+)?(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)?(?:\s+bronchus)?|
+            esophageal\s+intubat\w*|
+            (?:tip|tube)\s+(?:(?:extending|extends?|entering|enters?|projecting|residing|located|is|lies|overlying|overlies|terminates?|terminating|abuts?)\s+)?
+                (?:into\s+|in\s+|within\s+|towards?\s+|toward\s+|over\s+|at\s+the\s+origin\s+of\s+)(?:the\s+)?(?:proximal\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+            (?:tip|tube)\s+(?:is\s+|appears?\s+)?(?:overlying|overlies)\s+(?:the\s+)?(?:proximal\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+            (?:tip|tube)\s+(?:is\s+|appears?\s+)?(?:at\s+the\s+origin\s+of)\s+(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+            points?\s+towards?\s+(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)?(?:\s+bronchus)?
+        )\b
+
+        |
+
+        # ETT too high / too low
+        \b(?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+        (?:(?![.!?])\W+\w+){0,6}\W+
+        (?:
+            too\s+(?:high|low)|
+            (?:slightly\s+)?(?:high|low)\s+in\s+(?:position|the\s+trachea)|
+            (?:is|appears?|remains?)\s+(?:slightly\s+)?(?:high|low)(?:\s+in\s+position)?
+        )\b
+
+        |
+
+        \b(?:tube|tip|ett)\b
+        (?:(?![.!?])\W+\w+){0,10}\W+
+        \btoo\s+(?:high|low)\b
+
+        |
+
+        # ETT tip at clavicles / thoracic inlet — gap forbids satisfactory/good/
+        # appropriate wording; also exclude "between the clavicles and carina"
+        \b(?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+        (?:(?![.!?]|\bsatisfactory\b|\bappropriate\b|\bgood\s+position\b|\bstandard\s+(?:position|placement)\b)\W+\w+){0,10}\W+
+        (?:
+            (?:tip|distal\s+tip)\s+
+            (?:is\s+|lies\s+|projects?\s+|projecting\s+|terminates?\s+|terminating\s+)?
+            (?:just\s+)?(?:above|below|at)\s+(?:the\s+)?(?:level\s+of\s+)?(?:the\s+)?
+            (?:proximal\s+)?(?:clavicles?|clavicular\s+heads?|thoracic\s+inlet)
+            |
+            (?:with\s+(?:its\s+)?tip\s+)?(?:at\s+)?(?:the\s+)?(?:level\s+of\s+)?(?:the\s+)?(?:proximal\s+)?clavicles?
+        )\b
+        (?!\s+and\s+(?:the\s+)?carina)
+        (?!(?:(?![.!?]).){0,40}(?:satisfactory|appropriate|good|standard)\s+(?:position|placement))
+
+        |
+        #    Do NOT match bare tip-in-esophagus or coiled-in-stomach.
+        # ------------------------------------------------------------------
+        \b(?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff|esophageal)\s+tubes?\b
+        (?:(?![.!?])\W+\w+){0,12}\W+
+        (?:
+            (?:coil(?:ed|ing)|looped?|curl(?:ed|ing)?)\s+(?:in|within|into|back)\s+(?:the\s+)?
+                (?:airway|bronch\w*|trachea|lung|hypopharynx|oropharynx|nasopharynx|nose)|
+            (?:in|within|into)\s+(?:the\s+)?(?:right|left)\s+lung|
+            (?:is\s+|appears?\s+|terminates?\s+|terminating\s+|lies\s+)?
+                (?:in|within|into)\s+(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+            high\s+position|
+            not\s+(?:definitely\s+)?(?:seen|visualized)\s+(?:within\s+(?:the\s+)?abdomen|below\s+(?:the\s+)?(?:diaphragm|thoracic\s+inlet))|
+            (?:would\s+)?(?:need|needs)\s+to\s+be\s+advanced|
+            should\s+be\s+advanced|
+            side\s+port\s+(?:appears?\s+to\s+)?project(?:s|ing)?\s+over\s+(?:the\s+)?neck
+        )\b
+
+        |
+
+        \b(?:tubes?|catheters?)\b
+        (?:(?![.!?])\W+\w+){0,4}\W+
+        (?:coil(?:ed|ing)|looped?)\s+(?:in|within|into)\s+(?:the\s+)?
+        (?:airway|bronch\w*|trachea|lung|hypopharynx|oropharynx|nasopharynx|right\s+atrium|left\s+atrium|axilla)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # E. Aberrant / atypical course
+        # ------------------------------------------------------------------
+        \b(?:
+            (?:aberrant|atypical|unusual|abnormal)\s+course\s+of\s+(?:the\s+)?
+            (?:
+                endotracheal\s+tubes?|ett|swan[- ]ganz|picc|cvc|
+                (?:central\s+)?(?:venous\s+)?(?:catheters?|lines?)|
+                (?:pacemaker|icd|pacer)\s+leads?|catheters?|tubes?|leads?
+            )
+            |
+            (?:
+                endotracheal\s+tubes?|ett|swan[- ]ganz|picc|
+                (?:central\s+)?(?:venous\s+)?(?:catheters?|lines?)|
+                (?:pacemaker|icd|pacer)\s+leads?|catheters?|tubes?|leads?
+            )
+            (?:(?![.!?])\W+\w+){0,5}\W+
+            (?:is|appears?|demonstrates?)\s+(?:aberrant|atypical|unusual|abnormal)
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # F. Reposition / withdraw recommendations (device-scoped)
+        # ------------------------------------------------------------------
+        # Standalone call-to-action (exclude "repositioning and repeat exam")
+        \b(?:
+            recommend(?:ed|ing)?\s+re(?:-)?position(?:ing)?\b(?!\s+and\s+repeat)|
+            recommend(?:ed|ing)?\s+(?:withdraw(?:al|ing)?|advanc\w*|retract\w*|pulling\s+back|pull\s+back)\b|
+            recommend(?:ed|ing)?\s+re(?:-)?imaging\s+after\s+re(?:-)?position(?:ing)?|
+            requires?\s+re(?:-)?position(?:ing)?|
+            (?:should|needs?\s+to)\s+be\s+(?:re(?:-)?positioned|withdrawn|advanced|pulled\s+back|retracted)|
+            re(?:-)?positioning\s+is\s+suggest(?:ed|ion)|
+            consider\s+withdrawal|
+            worrisome\s+for\s+positioning|
+            concerning\s+for\s+(?:malposition|perforation|dislocation|migration)|
+            tip\s+(?:is\s+)?not\s+(?:in|within)\s+(?:the\s+)?expected|
+            (?:slightly\s+)?lateral\s+to\s+(?:the\s+)?expected
+        )\b
+
+        |
+
+        # Device-first then recommend (allow one sentence break)
+        \b(?:
+            endotracheal\s+tubes?|ett|et\s+tubes?|
+            nasogastric\s+tubes?|ng\s+tubes?|enteric\s+tubes?|feeding\s+tubes?|
+            chest\s+tubes?|pigtail(?:\s+catheters?)?|
+            central\s+(?:venous\s+)?(?:lines?|catheters?)|picc(?:\s+lines?)?|cvc|
+            swan[- ]ganz|catheters?|tubes?|leads?
+        )\b
+        (?:(?:(?![.!?])\W+\w+){0,12}|(?:(?![.!?])\W+\w+){0,8}\W*[.!?]\W*(?:\w+\W+){0,6})
+        \W+
+        \b(?:
+            recommend(?:ed|ing)?\s+(?:re(?:-)?position|withdraw|advanc|retract|pulling\s+back|pull\s+back)|
+            requires?\s+re(?:-)?position|
+            (?:should|needs?\s+to)\s+be\s+(?:re(?:-)?positioned|withdrawn|advanced|pulled\s+back)
+        )\b
+
+        |
+
+        # Device + wrong-direction course (not bare "coursing cephalad")
+        \b(?:
+            picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+            (?:venous|vascular)\s+(?:catheters?|lines?)|catheters?|tubes?|leads?
+        )\b
+        (?:(?![.!?])\W+\w+){0,10}\W+
+        \b(?:
+            tip\s+(?:extends?|extending)\s+(?:beyond|cephalad|superiorly)|
+            projecting\s+superiorly|
+            coursing\s+(?:superiorly|cephalad)|
+            turned\s+cephalad|
+            extends?\s+up\s+the\s+(?:right\s+|left\s+)?(?:internal\s+)?jugular|
+            tip\s+(?:projecting|projects?|situated)\s+(?:over\s+)?(?:the\s+)?(?:right\s+|left\s+)?axilla
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # G. Interval / apparent retraction of a named support device
+        # ------------------------------------------------------------------
+        \b(?:
+            interval\s+retraction\s+of\s+(?:(?:the|a|an|left|right|left-sided|right-sided)\s+){0,3}
+            (?:
+                endotracheal\s+tubes?|ett|feeding\s+tubes?|nasogastric\s+tubes?|ng\s+tubes?|
+                enteric\s+tubes?|picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+                swan[- ]ganz|pulmonary\s+artery\s+catheters?|chest\s+tubes?|catheters?|tubes?|leads?|lines?
+            )
+            |
+            (?:apparent\s+)?(?:slight\s+)?retraction\s+of\s+(?:(?:the|a|an|left|right|left-sided|right-sided)\s+){0,3}
+            (?:
+                endotracheal\s+tubes?|ett|feeding\s+tubes?|nasogastric\s+tubes?|
+                picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+                subclavian\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?)|
+                swan[- ]ganz|pulmonary\s+artery\s+catheters?|catheters?|tubes?|leads?|lines?
+            )
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # H. Lead dislocation / catheter fracture / sternal wire fracture
+        # ------------------------------------------------------------------
+        \b(?:
+            lead\s+dislocation|
+            broken\s+(?:catheter|tube|lead)\s+segment|
+            (?:catheter|tube|lead)\s+fracture|
+            fractur(?:ed|e)\s+(?:catheter|tube|lead)|
+            fractur(?:ed|e)\s+sternal\s+wires?|
+            sternal\s+wires?\s+(?:are\s+)?(?:seen\s+)?(?:with\s+)?(?:multiple\s+)?fractur\w*|
+            sternotomy\s+wires?\s+(?:are\s+)?(?:again\s+)?(?:seen\s+)?with\s+multiple\s+fractures|
+            fractures?\s+and\s+disconnections?\s+involving|
+            multiple\s+fractured\s+sternal\s+wires?|
+            fractur(?:e|ed|ing)\s+of\s+the\s+superior\s+wire|
+            (?:median\s+)?sternotomy\s+with\s+multiple\s+fractured\s+wires?|
+            fractured\s+median\s+sternotomy\s+wires?|
+            fracturing\s+of\s+the\s+distal\s+\d*\s*cerclage\s+wires?|
+            broken\s+epicardial\s+(?:pacer\s+)?wires?
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # I. Additional high-precision malposition cues
+        # ------------------------------------------------------------------
+        \b(?:
+            # ETT at/beyond carina (too deep) — NOT "above the carina"
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:tip|distal\s+tip|terminat\w*)\s+
+            (?:is\s+|lies\s+|projects?\s+|residing\s+)?
+            (?:approximately\s+)?(?:\d+\s*(?:mm|cm)\s+)?
+            (?:distal\s+to|beyond|past)\s+(?:the\s+)?carina
+            |
+            (?:endotracheal\s+tubes?|ett)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:tip|distal\s+tip)\s+(?:is\s+|lies\s+|at\s+|to\s+)?(?:at\s+)?(?:the\s+)?carina\b
+            |
+            (?:malpositioned\s*,?\s+likely\s+in\s+(?:the\s+)?azygos|
+                (?:catheter|line|picc|cvc|tube)\b
+                (?:(?![.!?])\W+\w+){0,8}\W+
+                (?:in\s+(?:the\s+)?azygos\s+vein|azygos\s+(?:vein\s+)?(?:malposition|position)))|
+            (?:drain|tube|catheter)\w*\s+(?:is\s+)?(?:substantially\s+)?(?:if\s+not\s+entirely\s+)?extrathoracic|
+            extrathoracic\s+(?:drain|tube|catheter)|
+            (?:endotracheal\s+tubes?|ett|tube|catheter|line|picc)\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            advancement\s+by\s+(?:approximately\s+)?\d
+        )\b
+        |
+
+        # J. Mainstem tip / directed / encroaching (ETT-scoped)
+        \b(?:
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            (?:
+                (?:tip|distal\s+tip)\s+
+                (?:appears?\s+to\s+be\s+|is\s+|projects?\s+|projecting\s+|lies\s+|terminates?\s+|terminating\s+|ending\s+|seen\s+ending\s+|overlying\s+|overlies\s+|abuts?\s+)?
+                (?:
+                    (?:in|within|just\s+within|into)\s+(?:the\s+)?(?:proximal\s+)?(?:right|left)\s+main(?:stem|\s+stem|\s+bronchus)|
+                    (?:the\s+)?(?:proximal\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+                    at\s+the\s+origin\s+of\s+(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+                    encroaches?\s+(?:upon\s+|the\s+)?(?:origin\s+of\s+)?(?:the\s+)?(?:right|left)\s+bronchus|
+                    (?:the\s+)?carina\b(?:(?![.!?])\W+\w+){0,6}\W+(?:is\s+)?directed\s+towards?\s+(?:the\s+)?(?:right|left)\s+main(?:stem)?|
+                    (?:is\s+)?directed\s+towards?\s+(?:the\s+)?(?:right|left)\s+main(?:stem)?|
+                    pointing\s+towards?\s+(?:the\s+)?(?:right|left)\s+main(?:stem)?
+                )
+                |
+                advancing\s+into\s+(?:the\s+)?(?:right|left)\s+main(?:\s+bronchus)?
+            )
+            |
+            tip\s+(?:of\s+(?:the\s+)?(?:endotracheal\s+tubes?|ett|et\s+tubes?))?\s+
+                (?:is\s+|appears?\s+)?(?:overlying|overlies)\s+(?:the\s+)?(?:proximal\s+)?(?:right|left)\s+main(?:stem|\s+stem)(?:\s+bronchus)?|
+            tip\s+(?:is\s+)?at\s+the\s+level\s+of\s+the\s+carina\s+pointing\s+toward
+        )\b
+
+        |
+
+        # K. Device-scoped retract/advance recommendations (no bare "warranted")
+        \b(?:
+            consider\s+(?:slight\s+)?(?:further\s+)?retraction\b|
+            should\s+be\s+(?:slightly\s+)?retracted\b|
+            (?:could|may)\s+be\s+retracted\b|
+            retract(?:ion)?\s+(?:by\s+|of\s+)?(?:approximately\s+)?\d|
+            retract\s+approximately\s+\d|
+            \d\s*cm\s+of\s+retraction\s+would\s+be\s+needed|
+            retraction\s+(?:by\s+)?(?:approximately\s+)?\d[^.!?]{0,40}(?:recommend|warrant|needed|suggest)|
+            (?:recommend|warrant)\w*\s+retraction\b|
+            (?:further\s+)?advancement\s+recommended|
+            should\s+be\s+(?:slightly\s+)?(?:advanced|withdrawn|pulled\s+back)\b
+        )\b
+
+        |
+
+        # L. Named-device interim retraction (require slightly/interim/interval)
+        \b(?:
+            (?:picc(?:\s+(?:line|catheter))?|central\s+(?:venous\s+)?(?:line|catheter)|
+               (?:ij|internal\s+jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:line|catheter)|
+               feeding\s+tubes?|nasogastric\s+tubes?|enteric\s+tubes?|
+               umbilical\s+(?:venous|arterial)\s+catheters?|uvc|uac|
+               (?:pacemaker|icd|pacer)\s+leads?|catheters?|leads?)\b
+            (?:(?![.!?]|\bsatisfactory\b|\bappropriate\b|\bgood\s+position\b)\W+\w+){0,8}\W+
+            (?:has\s+been\s+|have\s+been\s+|been\s+)?
+            (?:slightly\s+retracted|retracted\s+in\s+the\s+interim|retracted\s+slightly)\b
+            |
+            (?:has\s+been\s+slightly\s+retracted|retracted\s+in\s+the\s+interim|been\s+retracted\s+in\s+the\s+interim|
+               interval\s+(?:retraction|withdrawal)\s+of\s+(?:(?:the|a|an|left|right)\s+){0,3}(?:endotracheal\s+tubes?|ett|picc|swan[- ]ganz|catheter|tube|line|lead|feeding\s+tubes?|nasogastric\s+tubes?))\b
+        )\b
+
+        |
+
+        # M. Enteric/NG coiled at abnormal sites (not stomach alone)
+        \b(?:
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff|naso/?orogastric|keofeeding)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,12}\W+
+            (?:coil(?:ed|ing)|looped?)
+            (?:\W+\w+){0,4}\W+
+            (?:in|within|into|over|upon|back|at)\s+(?:the\s+)?
+            (?:mid(?:dle)?\s+|upper\s+|lower\s+|proximal\s+|distal\s+)?
+            (?:neck|pharynx|nasopharynx|esophag\w*|hypopharynx|oropharynx|hiatal\s+hernia|proximal\s+esophagus)
+            |
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            coil(?:ed|ing)\s+(?:up\s+)?(?:upon|on)\s+itself
+            |
+            (?:nasogastric|orogastric|enteric|feeding|ng)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            tip\s+(?:remains\s+)?(?:in|within)\s+(?:the\s+)?right\s+atrium
+            |
+            (?:nasogastric|enteric|feeding|orogastric)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,12}\W+
+            (?:
+                (?:course|courses|coursing)\s+(?:along\s+)?(?:the\s+)?(?:expected\s+course\s+of\s+)?(?:the\s+)?(?:left|right)\s+mainstem
+                |
+                extends?\s+only\s+to\s+(?:the\s+)?(?:distal\s+)?esophag\w*
+                |
+                coil(?:ed|ing)\s+within\s+(?:the\s+)?(?:patient'?s\s+)?hiatal
+                |
+                coiled\s+back\s+(?:upon|on)\s+itself
+                (?:(?![.!?])\W+\w+){0,8}\W+
+                (?:tip\s+)?(?:in\s+(?:the\s+)?region\s+of\s+)?(?:the\s+)?(?:proximal\s+)?esophag\w*
+            )
+        )\b
+
+        |
+
+        # N. PICC/CVC/Umb coiled or looped; Swan only with abnormal site
+        \b(?:
+            (?:picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+               (?:ij|internal\s+jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?)|
+               umbilical\s+(?:venous|arterial)\s+catheters?|uvc|uac)\b
+            (?:(?![.!?])(?:\W+(?!stable\b|unchanged\b)\w+)){0,8}
+            \W+
+            (?:coil(?:ed|ing)|looped?|folded\s+back|curled|loops?\s+back)
+            |
+            swan[- ]ganz\b
+            (?:(?![.!?])(?:\W+(?!stable\b|unchanged\b)\w+)){0,8}
+            \W+
+            (?:coil(?:ed|ing)|folded\s+back|loops?\s+back|
+               looped?\s+(?:within|in)\s+(?:the\s+)?(?:ivc|right\s+atrium|azygou?s|neck|ventricle))
+            |
+            (?:tip\s+of\s+the\s+central\s+line|central\s+line\s+tip|catheter\s+tip|picc\s+tip)\b
+            (?:(?![.!?])(?:\W+(?!stable\b|unchanged\b)\w+)){0,4}
+            \W+
+            loops?\s+back\s+upon\s+itself
+            |
+            (?:picc|central\s+(?:venous\s+)?(?:line|catheter)|
+               (?:ij|internal\s+jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:line|catheter))\b
+            (?:(?![.!?])(?:\W+(?!stable\b|unchanged\b)\w+)){0,6}
+            \W+
+            (?:coil(?:ed|ing)\s+over|looped\s+in\s+(?:the\s+)?(?:region\s+of\s+)?(?:the\s+)?azygou?s|looped\s+in\s+the\s+neck|folded\s+back\s+on\s+itself|looped\s+within\s+(?:the\s+)?ivc)
+        )\b
+
+        |
+
+        # O. Sideport extrathoracic / enteric sideport at wrong level
+        \b(?:
+            side\s*ports?\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            (?:
+                (?:appear(?:s|ed)?\s+to\s+be\s+|were\s+|is\s+|are\s+|again\s+)?(?:extra\s*thoracic|extrathoracic)|
+                (?:at|in)\s+(?:the\s+)?(?:approximate\s+)?(?:gastroesophageal|ge)\s+junction|
+                (?:at|in)\s+(?:the\s+)?(?:distal|proximal)\s+esophag\w*|
+                in\s+the\s+plane\s+of\s+the\s+intercostal
+            )
+        )\b
+
+        |
+
+        # P. Device tip directed into azygos (not bare azygos vein widening)
+        \b(?:
+            (?:tip|catheter|picc|line|cvc)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:directed\s+towards?\s+(?:the\s+)?azygou?s|towards?\s+(?:the\s+)?azygou?s|
+             into\s+(?:the\s+)?azygou?s|entering\s+(?:the\s+)?azygou?s|
+             in\s+(?:the\s+)?(?:region\s+of\s+)?(?:the\s+)?azygou?s|
+             terminating\s+in\s+(?:azygou?s))
+            |
+            directed\s+towards?\s+(?:the\s+)?azygou?s
+        )\b
+
+        |
+
+        # Q. Sternotomy sutures broken (residual)
+        \b(?:
+            (?:median\s+)?sternotomy\s+sutures?\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            broken
+        )\b
+
+        |
+
+        # R. Near-carina / low-cm ETT with nearby retract recommendation
+        \b(?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+        (?:(?![.!?])\W+\w+){0,14}\W+
+        (?:
+            (?:tip|distal\s+tip)\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            (?:
+                \d+(?:\.\d+)?\s*cm\s+(?:above|from)\s+(?:the\s+)?carina|
+                near\s+(?:the\s+)?carina|
+                less\s+than\s+(?:a\s+)?cm\s+above|
+                \d+\s*mm\s+above\s+(?:the\s+)?(?:base\s+of\s+)?(?:the\s+)?carina
+            )
+            |
+            (?:tip\s+)?near\s+the\s+carina
+        )\b
+        (?:(?![.!?])\W+\w+){0,18}\W+
+        \b(?:retract|retraction|withdraw|pulled\s+back|pull\s+back)\w*\b
+
+        |
+
+        # S. Severed shunt/tube; broken IVC strut; trach abutting; high-riding UVC tip
+        \b(?:
+            (?:vp\s+)?shunt\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            severed|
+            (?:tube|catheter|shunt)\w*\s+(?:that\s+has\s+been\s+|has\s+been\s+|is\s+)?severed|
+            broken\s+strut\s+from\s+an?\s+ivc|
+            tracheostomy\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            abuts?\s+the|
+            (?:uvc|uac|umbilical\s+(?:venous|arterial)\s+catheters?)\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            (?:tip\s+)?(?:is\s+)?high[\s-]riding|
+            high[\s-]riding\s*,?\s*(?:it\s+)?projects
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # T. Wave-21 residual paraphrases (folded enteric / short PICC /
+        #    IABP below arch / sheath fold / tip pull-back hedges / etc.)
+        # ------------------------------------------------------------------
+        \b(?:
+            # Enteric/NG folded in esophagus or tip too high (mid/upper)
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,12}\W+
+            (?:
+                fold(?:ed|ing)\s+(?:in|within|into)\s+(?:the\s+)?
+                    (?:lower\s+|upper\s+|mid(?:dle)?\s+|proximal\s+|distal\s+)?esophag\w*
+                |
+                (?:terminates?|terminating|ends?|ending)\s+(?:in|within)\s+(?:the\s+)?
+                    (?:mid(?:dle)?|upper|proximal)[\s-]*esophag\w*
+                |
+                tip\s+(?:ending|ends?|terminat\w*|is|lies)\s+(?:in|within)\s+(?:the\s+)?
+                    (?:mid(?:dle)?|upper|proximal)[\s-]*esophag\w*
+            )
+            |
+            # Swan / catheter loop subluxing into IVC
+            (?:swan[- ]ganz|pulmonary\s+artery\s+catheters?|catheter\s+loop|loop)\b
+            (?:(?![.!?])\W+\w+){0,14}\W+
+            sublux(?:ing|ed|ation)
+            |
+            sublux(?:ing|ed)\s+into\s+(?:the\s+)?(?:ivc|inferior\s+vena)
+            |
+            # PICC/CVC short of SVC / central veins
+            (?:picc(?:\s+lines?)?|(?:left|right)\s+chest\s+picc|
+               central\s+(?:venous\s+)?(?:lines?|catheters?)|
+               (?:ij|internal\s+jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?))\b
+            (?:(?![.!?])\W+\w+){0,14}\W+
+            (?:does\s+not|has\s+not|have\s+not|did\s+not)\s+reach(?:ed)?\s+(?:the\s+)?
+                (?:svc|superior\s+vena\s+cava|central\s+venous\s+vasculature|central\s+(?:venous\s+)?veins?)
+            |
+            # Tracheostomy impinging (reposition cue)
+            tracheostom(?:y|ies)(?:\s+tubes?)?\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            imping(?:e|es|ing)\b
+            |
+            # Sternal wires fragmented / disorganized
+            (?:sternal|sternotomy)\s+wires?\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            (?:fragmented|disorganized|fragmentation)
+            |
+            # Port / catheter tip pressed against wall or ending very low in atrium
+            (?:port-?a-?cath|infusion\s+ports?|catheter|picc|line|tip)\b
+            (?:(?![.!?])\W+\w+){0,14}\W+
+            (?:
+                pressed\s+against\s+(?:the\s+)?wall|
+                ending\s+very\s+low\s+in\s+(?:the\s+)?(?:right\s+|left\s+)?atrium
+            )
+            |
+            pressed\s+against\s+(?:the\s+)?wall
+            |
+            # Pull-back hedges (may/might/could)
+            (?:may|might|could)\s+be\s+pulled\s+back\b
+            |
+            # IABP tip / position below aortic arch or knob
+            (?:(?:intra[- ]?aortic\s+)?balloon\s+pumps?|iabps?)\b
+            (?:(?![.!?])\W+\w+){0,12}\W+
+            (?:
+                (?:tip|position)\s+(?:is\s+)?(?:low|below)|
+                (?:tip\s+)?(?:is\s+)?below\s+(?:the\s+)?(?:aortic\s+)?(?:arch|knob)|
+                \d+(?:\.\d+)?\s*cm\s+below\s+(?:the\s+)?(?:aortic\s+)?(?:arch|knob)
+            )
+            |
+            # Sheath / drain / catheter sharply folded
+            (?:(?:(?:jugular|cordis)\s+)?sheaths?|drains?|catheters?|tubes?|lines?)\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            (?:sharply\s+)?fold(?:ed|ing)\b
+            |
+            # Infusion port / Port-A-Cath aberrant into jugular (+ kink hedge)
+            (?:port-?a-?cath|infusion\s+ports?|(?:subclavian|jugular)\s+(?:infusion\s+)?ports?)\b
+            (?:(?![.!?])\W+\w+){0,14}\W+
+            (?:
+                (?:courses?|coursing|course)\s+into\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:internal\s+)?jugular|
+                (?:may|might|could)\s+be\s+kinked|
+                kink(?:ed|ing)
+            )
+            |
+            # Tip / line does not cross midline (short left IJ)
+            (?:tip|line|catheter|picc|cvc)\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            (?:does|do)\s+not\s+cross\s+(?:the\s+)?midline
+        )\b
+
+)

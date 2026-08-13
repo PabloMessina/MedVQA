@@ -1,28 +1,28 @@
-"""Canonical 55-class registry with prompt hashes and regex name aliases."""
+"""Canonical CXR class registry with ontology metadata and prompt hashes."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
+
+import yaml
 
 from medvqa.settings import LLM_PROMPTS_DIR
 from medvqa.utils.constants import (
-    UNIFIED_CXRLT2024_VINDRCXR_CLASSES,
-    UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES,
-    UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI,
-    _cxr_class_name_to_phrase_stem,
+    CANONICAL_CLASS_TO_NLI_HYPOTHESIS,
+    CANONICAL_CLASS_TO_REGEX_CLASSES,
 )
 
-# Prompt-facing name -> name in _CLASS_NAME_TO_REGEX_PATTERNS
-REGEX_NAME_ALIASES: Dict[str, str] = {
-    "Enlarged Pulmonary Artery": "Enlarged PA",
-}
-
-ONTOLOGY_VERSION = "v1"
+ONTOLOGY_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "ontology",
+    "canonical_cxr_ontology.yaml",
+)
 
 
 def _sha256_text(text: str) -> str:
@@ -42,11 +42,11 @@ class ClassEntry:
     stem: str
     prompt_text: str
     prompt_hash: str
-    regex_names: Optional[List[str]]  # None for Normal
-    replaces: Optional[str] = None
-    replaced_by: Optional[str] = None
-    split_from: Optional[str] = None
-    merged_into: Optional[str] = None
+    regex_names: list[str] | None
+    replaces: str | None = None
+    replaced_by: str | None = None
+    split_from: str | None = None
+    merged_into: str | None = None
 
     @property
     def has_regex(self) -> bool:
@@ -59,18 +59,18 @@ class ClassRegistry:
     created_at: str
     system_prompt_hash: str
     system_prompt_path: str
-    classes: List[ClassEntry] = field(default_factory=list)
+    classes: list[ClassEntry] = field(default_factory=list)
 
-    def by_id(self) -> Dict[str, ClassEntry]:
+    def by_id(self) -> dict[str, ClassEntry]:
         return {c.class_id: c for c in self.classes}
 
-    def class_ids(self) -> List[str]:
+    def class_ids(self) -> list[str]:
         return [c.class_id for c in self.classes]
 
-    def regex_backed_class_ids(self) -> List[str]:
+    def regex_backed_class_ids(self) -> list[str]:
         return [c.class_id for c in self.classes if c.has_regex]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ontology_version": self.ontology_version,
             "created_at": self.created_at,
@@ -85,7 +85,7 @@ class ClassRegistry:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ClassRegistry":
+    def from_dict(cls, data: dict[str, Any]) -> ClassRegistry:
         classes = [ClassEntry(**c) for c in data["classes"]]
         return cls(
             ontology_version=data["ontology_version"],
@@ -96,48 +96,87 @@ class ClassRegistry:
         )
 
     @classmethod
-    def load(cls, path: str) -> "ClassRegistry":
+    def load(cls, path: str) -> ClassRegistry:
         with open(path, "r", encoding="utf-8") as f:
             return cls.from_dict(json.load(f))
 
 
-def resolve_regex_pattern_name(class_name: str) -> Optional[str]:
-    """Map a prompt class to the primary regex pattern dict key (or None)."""
-    regs = UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES.get(class_name)
+def load_canonical_ontology() -> dict[str, Any]:
+    with open(ONTOLOGY_PATH, "r", encoding="utf-8") as f:
+        ontology = yaml.safe_load(f)
+    classes = ontology.get("classes")
+    if not isinstance(classes, list) or not classes:
+        raise ValueError(f"No classes found in canonical ontology: {ONTOLOGY_PATH}")
+    return ontology
+
+
+def resolve_regex_pattern_name(class_id: str) -> str | None:
+    """Return the primary regex dict key for a canonical class, or None."""
+    regs = CANONICAL_CLASS_TO_REGEX_CLASSES.get(class_id)
     if regs is None:
         return None
     assert isinstance(regs, list) and len(regs) >= 1
-    name = regs[0]
-    return REGEX_NAME_ALIASES.get(name, name)
+    return regs[0]
 
 
 def build_class_registry(
-    ontology_version: str = ONTOLOGY_VERSION,
-    class_names: Optional[Sequence[str]] = None,
+    ontology_version: str | None = None,
+    class_names: Sequence[str] | None = None,
 ) -> ClassRegistry:
+    ontology = load_canonical_ontology()
+    ontology_metadata = ontology["ontology"]
+    ontology_classes = ontology["classes"]
+    classes_by_id = {item["id"]: item for item in ontology_classes}
+    if len(classes_by_id) != len(ontology_classes):
+        raise ValueError(f"Duplicate class IDs in canonical ontology: {ONTOLOGY_PATH}")
+
+    hypothesis_ids = set(CANONICAL_CLASS_TO_NLI_HYPOTHESIS)
+    ontology_ids = set(classes_by_id)
+    if hypothesis_ids != ontology_ids:
+        raise ValueError(
+            "Canonical ontology and NLI hypotheses disagree: "
+            f"missing hypotheses={sorted(ontology_ids - hypothesis_ids)}, "
+            f"unknown hypotheses={sorted(hypothesis_ids - ontology_ids)}"
+        )
+
+    if class_names is None:
+        selected_classes = ontology_classes
+    else:
+        classes_by_name = {item["name"]: item for item in ontology_classes}
+        selected_classes = []
+        for value in class_names:
+            item = classes_by_id.get(value) or classes_by_name.get(value)
+            if item is None:
+                raise KeyError(f"Unknown canonical CXR class: {value}")
+            selected_classes.append(item)
+
+    regex_ids = set(CANONICAL_CLASS_TO_REGEX_CLASSES)
+    if regex_ids != ontology_ids:
+        raise ValueError(
+            "Canonical ontology and regex map disagree: "
+            f"missing regex={sorted(ontology_ids - regex_ids)}, "
+            f"unknown regex={sorted(regex_ids - ontology_ids)}"
+        )
+
     system_prompt = load_system_prompt_text()
-    names = list(class_names) if class_names is not None else list(UNIFIED_CXRLT2024_VINDRCXR_CLASSES)
-    entries: List[ClassEntry] = []
-    for name in names:
-        stem = _cxr_class_name_to_phrase_stem(name)
-        prompt_text = UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI[name]
-        regs = UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_REGEX_CLASSES[name]
-        if regs is None:
-            regex_names = None
-        else:
-            regex_names = [REGEX_NAME_ALIASES.get(r, r) for r in regs]
+    entries: list[ClassEntry] = []
+    for item in selected_classes:
+        class_id = item["id"]
+        prompt_text = CANONICAL_CLASS_TO_NLI_HYPOTHESIS[class_id]
+        regs = CANONICAL_CLASS_TO_REGEX_CLASSES[class_id]
+        regex_names = None if regs is None else list(regs)
         entries.append(
             ClassEntry(
-                class_id=name,
-                display_name=name,
-                stem=stem,
+                class_id=class_id,
+                display_name=item["name"],
+                stem=class_id,
                 prompt_text=prompt_text,
                 prompt_hash=_sha256_text(prompt_text),
                 regex_names=regex_names,
             )
         )
     return ClassRegistry(
-        ontology_version=ontology_version,
+        ontology_version=ontology_version or str(ontology_metadata["version"]),
         created_at=datetime.now(timezone.utc).isoformat(),
         system_prompt_hash=_sha256_text(system_prompt),
         system_prompt_path=os.path.join(LLM_PROMPTS_DIR, "report_nli.txt"),

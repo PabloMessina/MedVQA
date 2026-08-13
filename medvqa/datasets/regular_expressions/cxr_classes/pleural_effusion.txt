@@ -1,17 +1,246 @@
+# ==============================================================================
+# pleural_effusion — residual mid-node polish (stamp 20260811_030248)
+# Prompt: pleural effusion/fluid/hydrothorax/hemothorax/empyema/chylothorax +
+# fluid of hydro; meniscus/CPA only when attributed to fluid.
+# Do NOT infer from thickening/plaques/scarring, elevated hemidiaphragm,
+# consolidation, atelectasis, edema, pericardial effusion, or ascites alone.
+# Pneumothorax is not an effusion. History/indication-only does not count.
+#
+# Children (readonly): hydropneumothorax, loculated_or_fissural_pleural_effusion.
+# Residual parent: questionable/suspect hedges, compatible-with/change-in
+# effusion, slash-list lookbehind bug, presumed (not "not appreciable").
+# FN-fit (fn_mine_fit_shared): fluid collection in/within pleural space or
+# hemithorax; parapneumonic/adjacent/exudative/transudative/hemorrhagic as
+# bare-effusion cues; malignant only on compatible/consistent-with (bare
+# malignant FP'd post-thora "control this malignant effusion"); scan-through
+# clause-initial suspect + concerning-for pneumonia so hedged pleural fluid
+# / parapneumonic / adjacent effusion hit.
+# FN-fit wave29 (fn_mine_fit_shared): no (interval) increase|decrease in PE;
+# pleural space filled with / fluid-filled pleural space; bare layering /
+# subpulmonic / basilar fluid; degree of effusion; suspect…possibly effusion;
+# not entirely clear … due to PE; findings-level and/or effusion.
+# FP trim: excluding; removal of; header ": No"; contralateral "none";
+# "not well seen"; "? recurrent" indication; non-pleural layering fluid.
+# Negation: clause-local tempered scan from .!;:\n / although|however|but.
+# "?" is a starter only when not "? recurrent" (indication r/o).
+# ==============================================================================
 
-    # 1. Direct "Effusion" Terms
-    # Matches: "Pleural effusion", "Bilateral effusions"
-    \b(?:pleural\s+)?effusion\w*
-    |
-    # 2. "Fluid" in the Pleural Space
-    # Matches: "Pleural fluid", "Small amount of fluid in the pleural space"
-    \bpleural\s+fluid
-    |
-    \bfluid\s+(?:is\s+)?(?:in|within)\s+(?:the\s+)?pleural\s+(?:space|cavity)
-    |
-    # 3. Hydrothorax (Specific type of effusion)
-    \bhydrothorax
-    |
-    # 4. "Meniscus Sign" (Pathognomonic visual sign) 
-    # This curved line at the lung base indicates fluid.
-    \bmeniscus\s+(?:sign|surrounding|of)
+(?:
+    (?:^|[.!;:\n]|\b(?:although|however|but)\s+|\?(?!\s*recurrent\b))
+    (?:
+        # persistence exceptions: "no … change|increase|decrease", "not resolved",
+        # "not well seen, suggestive of … effusion", "not entirely clear … due to"
+        (?:
+            (?=\b(?:no|not|without)\s+(?:(?:an?|any|other|overall|further|major|real)\s+)?(?:(?:significant|definite|gross|apparent|appreciable|substantial)\s+)?(?:interval\s+)?(?:changes?|increases?|decreases?)\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?=\bnot\s+entirely\s+clear)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?=\bnot\s+(?:yet\s+)?(?:been\s+)?(?:fully\s+)?resolv)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?<=\bnot\s)(?=resolv)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?=\b(?:is|are|was|were)\s+not\s+well\s+seen)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?=\bnot\s+well\s+seen)
+            [^.!?;:\n]
+        )
+        |
+        # scan-through: clause-initial "suspect … (possibly) (pleural) fluid/effusion"
+        # Use \bsuspect\b only (not suspected) so HISTORY "Suspected PE" stays blocked.
+        (?:
+            (?=\bsuspect\b[^\n.!?;]{0,160}\b(?:(?:possibly|possible|probable|likely)\s+)?(?:(?:a|an|the|bilateral|left|right|tiny|small|minimal|moderate|large|trace|new)\s+)*(?:pleural\s+)?(?:fluid|effusion))
+            [^.!?;:\n]
+        )
+        |
+        # scan-through: "concerning for pneumonia/…" so a later parapneumonic
+        # or adjacent effusion in the same clause can match
+        (?:
+            (?=\bconcerning\s+for\s+(?:pneumonia|consolidat|atelecta|opacit|infiltrat|infect))
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear(?:ing)?\s+of|negative\s+for|lack\s+of|
+                absent|absence\s+of|denies|denied|
+                ruled?\s+out|rule\s+out|
+                resolution\s+of|resolved|resolving|resorption\s+of|
+                removal\s+of|removed|
+                exclud(?:e|es|ed|ing)|
+                history\s+of|h/?o|hx\b|
+                clinical\s+history|indication|
+                eval(?:uate|uation)?(?:\s+for)?|assess(?:ment)?\s+for|
+                r/?o\b|question(?:able)?|suspected|suspect\b|
+                concern(?:s)?\s+(?:for|of)|
+                doubt|doubtful|
+                rather\s+than|
+                years?[\s\-]?old
+            )\b)
+            [^.!?;:\n]
+        )
+    ){0,240}
+    (?<!\?)(?<!\?\s)(?<!history:\s)(?<!hx:\s)(?<!insertion\sfor\s)(?<!tube\sfor\s)
+    (?:
+        # 1a. Explicit pleural effusion (typos: plrural, pleaural)
+        (?<!\bpericardial\s)(?<!\bpericarical\s)
+        \b(?:pl(?:e)?ural|plrural|pleaural)\s+effusion\w*
+        |
+        # 1b. Pleural fluid / fluid in pleural space / hemithorax
+        \b(?:pl(?:e)?ural|plrural|pleaural)\s+fluid\b
+        |
+        \bfluid\s+(?:collections?\s+)?(?:is\s+|was\s+)?(?:in|within|layering\s+(?:in|within))\s+(?:the\s+)?
+          (?:(?:right|left|bilateral)\s+)?
+          (?:pleural\s+(?:space|cavity|cavit(?:y|ies))|hemithora\w*)
+        |
+        # 1b2. Hemithorax / pneumonectomy space occupied by / full of fluid
+        \b(?:(?:right|left|bilateral)\s+)?hemithora\w*\s+(?:is\s+|are\s+)?occupied\s+by\s+fluid
+        |
+        \bpneumonectomy\s+space\b[^\n.!?;]{0,50}full\s+of\s+fluid
+        |
+        # 1b3. Inverted: pleural space … filled with fluid; fluid-filled pleural space
+        \b(?:(?:right|left|bilateral)\s+)?(?:the\s+)?(?:rest\s+of\s+(?:the\s+)?)?pleural\s+space\b
+          [^\n.!?;]{0,80}
+          (?:(?:is|are|was|were|now|subtotally|partially|completely|totally)\s+)*
+          (?:filled|full)\s+(?:with\s+)?fluid
+        |
+        \bfluid[\s\-]?filled\s+pleural\s+(?:space|cavity|cavit(?:y|ies))
+        |
+        # 1b4. Residual free fluid shorthand (parent; not loculated child).
+        # Require attribution / site cues — bare "Stomach layering fluid" must miss.
+        \bassociated\s+layering\s+fluid\b
+        |
+        \bcomponent\s+of\s+layering\s+fluid\b
+        |
+        (?:consistent\s+with|representing|likely\s+representing|suggestive\s+of|suggesting)\s+
+          (?:a\s+)?(?:component\s+of\s+)?layering\s+fluid\b
+        |
+        \bhemithora\w*\b[^\n.!?;]{0,80}\blayering\s+fluid\b
+        |
+        \b(?:some\s+|persistent\s+|residual\s+|small\s+|trace\s+|minimal\s+)?
+          (?:subpulmonic|basilar|basal)\s+fluid\b
+          (?!\s+(?:in|within)\s+(?:the\s+)?(?:stomach|hern|cavit|bowel|abdomen|fundus))
+        |
+        # 1c. Named fluid types (B7: keep bare empyema|pyothorax; DISCARD empyema\w*)
+        \b(?:hydrothorax|hem(?:o|a)?thorax|haemothorax|empyema|pyothorax|chylothorax)\b
+        |
+        # 1c2. Framed pleural collection (size/laterality cue; residual mid-node)
+        \b(?:(?:tiny|small|minimal|moderate|large|massive|enlarged|new|residual|persistent|stable|
+              loculat\w+|right|left|bilateral|right[\s\-]?sided|left[\s\-]?sided)\s+){1,4}
+          (?:(?:right|left|bilateral|right[\s\-]?sided|left[\s\-]?sided)\s+)?
+          pleural\s+collections?\b
+        |
+        # 1d. Bare effusion with size / laterality / article / site cue
+        (?<!\bpericardial\s)(?<!\bpericarical\s)(?<!\bjoint\s)
+        (?<!\bknee\s)(?<!\bshoulder\s)(?<!\bhip\s)(?<!\belbow\s)(?<!\bankle\s)
+        (?<!\bsinus\s)(?<!\bmastoid\s)(?<!\bgallbladder\s)
+        \b(?:
+            (?:
+                (?:trace|tiny|small|minimal|moderate|large|massive|huge|
+                   layering|loculat\w+|free[\s\-]?flowing|bibasilar|bibasal|
+                   residual|persistent|stable|new|unchanged|improving|similar|volume|
+                   possible|possibly|probable|likely|presumed|questionable|question|
+                   suspected|suspect|associated|degree|
+                   parapneumonic|adjacent|exudative|transudative|hemorrhagic|
+                   pulmonary|subpulmonic|basilar|basal|
+                   bilateral|right[\s\-]?sided|left[\s\-]?sided|
+                   right|left|xxxx|
+                   (?:lower|upper|mid)\s+lobe|
+                   (?:mid\s+and\s+)?(?:lower|upper)\s+lung\s+zone)\s+
+            ){1,6}
+            (?:(?:right|left|bilateral|bibasilar|right[\s\-]?sided|left[\s\-]?sided)\s+)?
+            (?:(?:lower|upper|mid)\s+lobe\s+)?
+            (?:pleural\s+)?
+            effusion\w*
+            |
+            # "degree of effusion" (of between cue and effusion)
+            degree\s+of\s+(?:(?:a|an|the|small|trace|tiny|minimal|moderate|large|left|right|bilateral|pleural)\s+)*
+              effusion\w*
+            |
+            # L/R abbreviation: "L effusion", "R-sided effusion"
+            [LR][\s\-]+(?:sided\s+)?effusion\w*
+            |
+            (?:the|an|a)\s+(?:(?:small|trace|tiny|minimal|moderate|large|left|right|bilateral|possible|possibly|probable|likely|questionable|parapneumonic|adjacent|exudative|transudative|hemorrhagic)\s+)*
+            effusion\w*
+            |
+            # slash-list residual: infiltrate/ effusion  (do not lookbehind-block / )
+            (?:infiltrate|opacity|consolidation|atelectasis|edema|pneumonia)\s*/\s*effusion\w*
+            |
+            # "no (interval) increase/decrease in (the size of) (a) … effusion"
+            (?:change(?:s)?|decrease|increase)\s+in\s+(?:the\s+)?(?:size\s+of\s+(?:the\s+)?)?
+              (?:(?:a|an|the|left|right|bilateral|small|moderate|large|residual)\s+)*
+              (?:pleural\s+)?effusion\w*
+            |
+            (?:consisting\s+of|due\s+to|(?:compatible|consistent)\s+with)\s+
+              (?:(?:a|an|the)\s+)?
+              (?:(?:small|trace|tiny|minimal|moderate|large|left|right|bilateral|pleural|parapneumonic|adjacent|malignant|exudative|transudative|hemorrhagic)\s+)*
+              effusion\w*
+            |
+            # or-list / infiltrate and effusion / and/or effusion
+            (?:infiltrate|opacity|consolidation|atelectasis|edema|pneumonia|contusion|collapse)\s*,\s+(?:or\s+)?effusion\w*
+            |
+            (?:infiltrate|opacity|consolidation|atelectasis|edema|pneumonia|contusion|collapse)\s+(?:and(?:\s*/\s*or)?|with)\s+
+              (?:(?:left|right|bilateral|small|associated|adjacent|parapneumonic|possibly|possible)\s+)*
+              effusion\w*
+        )
+        |
+        # 1e. Meniscus / CPA only when attributed to fluid/effusion
+        #     Gap forbids "rather than" (positional vs effusion).
+        (?:
+            \bmeniscus\s+sign\b
+            (?:(?!rather\s+than)[^\n.!?;]){0,60}
+            (?:(?:due\s+to|from|secondary\s+to|compatible\s+with|consistent\s+with|
+                suggesting|suggestive\s+of|representing|represents?|reflecting|likely\s+represents?)\s+
+              (?:(?:a\s+|an\s+)?(?:small\s+|moderate\s+|large\s+|trace\s+)?)?
+              (?:pleural\s+)?(?:fluid|effusion))
+            |
+            (?:blunt\w*|obscur\w*|obliterat\w*)\s+
+            (?:of\s+)?(?:the\s+)?
+            (?:(?:right|left|bilateral|bilaterally)\s+)?
+            (?:costophrenic|costovertebral|cpa|cp)\s*(?:angle|sulcus|recess|sinus|xxxx)\w*
+            (?:(?!rather\s+than)[^\n.!?;]){0,80}
+            (?:(?:due\s+to|from|secondary\s+to|compatible\s+with|consistent\s+with|
+                suggesting|suggestive\s+of|representing|represents?|indicat(?:e|es|ing)|
+                reflecting|likely\s+represents?)\s+
+              (?:(?:a\s+|an\s+)?(?:small\s+|moderate\s+|large\s+|trace\s+|xxxx\s+)?)?
+              (?:(?:small|trace|tiny|minimal|moderate|large|bilateral|xxxx|residual|postsurgical)\s+)*
+              (?:pleural\s+)?(?:fluid|effusion\w*))
+            |
+            \b(?:fluid|effusion\w*)\s+
+            (?:in|within|at|layering\s+(?:in|at))\s+(?:the\s+)?
+            (?:(?:right|left|bilateral|posterior|lateral)\s+)*
+            (?:costophrenic|cpa|cp)\s*(?:angle|sulcus|recess|sinus)\w*
+        )
+    )
+    (?!\s*\?)
+    # post-hit: resolved / absent / structured ": None" / presumed-but-not-appreciable
+    # Keep window short so contralateral "has resolved" / "none on the left" do not
+    # kill an ipsilateral current effusion.
+    (?![^.!?;\n]{0,56}\b(?:
+        (?:has\s+|have\s+|has\s+been\s+|have\s+been\s+|been\s+)?
+          (?:resolv\w*|cleared|clearing|disappeared|absorbed|drained|removed|resorb\w*|removal)|
+        (?:are|is|were|was)\s+absent|
+        (?:are|is)\s+not\s+(?:well\s+)?(?:seen|present|evident|appreciated|visualized|identified|appreciable)|
+        presumed,?\s+but\s+not\s+(?:appreciable|seen|evident|visualized)|
+        no\s+longer\s+(?:seen|present|evident|visualized|appreciated)|
+        (?:small\s+|minimal\s+|tiny\s+)?if\s+any|
+        if\s+any|
+        (?:are|is)\s+none\b
+    )\b)
+    (?![^\n.!?;]{0,8}:\s*(?:no|none|not)\b)
+)

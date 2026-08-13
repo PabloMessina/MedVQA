@@ -1,0 +1,102 @@
+# ==============================================================================
+# emphysema
+# Pulmonary emphysema / emphysematous change on the current CXR.
+#
+# Match: emphysema / emphysematous / emphysematic (OCR: enphysema*, emphyesema,
+#        truncated emphysem); bullous/paraseptal/centrilobular emphysema;
+#        emphysematous lungs/changes; radiographic COPD/emphysema(tous) slash-joins.
+#
+# Do NOT match (prompt): bare COPD/COAD/chronic bronchitis; hyperinflation /
+# hyperexpansion / bullae / blebs / bullous disease alone; subcutaneous /
+# soft-tissue / surgical / chest-wall / mediastinal / interstitial emphysema;
+# emphysematous cholecystitis; history/indication/baseline-only; MIMIC
+# indication tails ending in "//"; PMH comorbidity slash-lists.
+# ==============================================================================
+
+\b(?:
+    (?:
+        # --- Path A: bare emphysema* stem (not COPD/-prefixed) ---
+        # Negation / non-assertion (fixed-width lookbehinds)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bno\ssign\sof\s)
+        (?<!\bno\ssigns\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bwithout\s)
+        (?<!\bno\s)
+        (?<!\bnot\s)
+        (?<!\brule\sout\s)
+        (?<!\beval\sfor\s)
+        (?<!\bevaluate\sfor\s)
+        # Non-pulmonary / excluded emphysema sites (word immediately before)
+        (?<!\bsubcutaneous\s)
+        (?<!\bsubcutis\s)
+        (?<!\bsubcut\s)
+        (?<!\bsubcu\s)
+        (?<!\bsubqu\s)
+        (?<!\bsubq\s)
+        (?<!\bsub-q\s)
+        (?<!\bsq\s)
+        (?<!\bsoft\stissue\s)
+        (?<!\bsoft-tissue\s)
+        (?<!\bsurgical\s)
+        (?<!\bchest\swall\s)
+        (?<!\bwall\s)
+        (?<!\bmediastinal\s)
+        (?<!\binterstitial\s)
+        (?<!\bcervical\s)
+        (?<!\borbital\s)
+        # Post-op SQ screen / prior-exam attribution; COPD/ handled in path B
+        (?<!\bpost\sop\s)
+        (?<!\bpost-op\s)
+        (?<!\bcopd/)
+        (?<!\bnoted\sto\shave\s)
+        # History / indication / PMH (not a current CXR call)
+        (?<!\bhistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bh/o\s)
+        (?<!\bbaseline\s)
+        (?<!\bwoman\swith\s)
+        (?<!\bman\swith\s)
+        (?<!\bfemale\swith\s)
+        (?<!\bmale\swith\s)
+        # Stem: emphysema(s) / emphysematous / emphysematic (+ OCR enphysema*,
+        # emphyesema transposed, truncated emphysem). Longer forms first.
+        # Bound the stem so \w* cannot backtrack past a failed lookahead
+        # (e.g. emphysematous cholecystitis → emphysematou).
+        (?:e[mn]physema(?:s|tous|tic)?|emphyesema|emphysem)\b
+        (?!\s+(?:cholecyst\w*|colitis|gastritis|cystitis|pyelonephritis|pancreatitis))
+        # Soft-tissue site after the stem: "emphysema of the right neck …"
+        (?!\s+(?:of|in)\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?(?:neck|face|orbit\w*|soft\s+tissues?)\b)
+        # MIMIC indication / PMH tails: "emphysema // …", "emphysema, w/ …",
+        # "emphysema hx …"
+        (?!\s*[.,;:]?\s*//)
+        (?!\s*,\s*w/)
+        (?!\s+hx\b)
+    )
+    |
+    (?:
+        # --- Path B: radiographic COPD/emphysema(tous|tic) slash-join ---
+        # Prompt forbids bare COPD alone, not slash-joined emphysema on the film.
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bh/o\s)
+        (?<!\bpmhx\sof\s)
+        (?<!\bpmh\sof\s)
+        (?<!\bbaseline\s)
+        (?<!\bnoted\sto\shave\s)
+        (?<!\bwoman\swith\s)
+        (?<!\bman\swith\s)
+        (?<!\bfemale\swith\s)
+        (?<!\bmale\swith\s)
+        COPD/e[mn]physema(?:s|tous|tic)?\b
+        # Block PMH comorbidity lists: "COPD/emphysema, HTN, pHTN"
+        (?!\s*,\s)
+        (?!\s*[.,;:]?\s*//)
+        (?!\s*,\s*w/)
+        (?!\s+hx\b)
+    )
+)

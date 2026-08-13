@@ -1,0 +1,187 @@
+\b(?:
+        # -----------------------------------------------------------------
+        # Shared: loculated must not be the loculated-pneumothorax / air
+        # construction (tiny loculated apical PTX, prior loculated PTX).
+        # hydropneumothorax remains allowed via the fluid/effusion arms.
+        # -----------------------------------------------------------------
+        # A. Loculated / multilocalated / loculate (forward)
+        # Require pleural before fluid/collection; effusion may omit pleural.
+        # Optional site/size adjectives: apical, right, left, etc.
+        # Also: "loculatedleft" (missing space), "loculate portion/component".
+        # "loculated fluid" allowed except "loculated fluid vs ..." (mediastinal
+        # differential FP) and "much less likely".
+        # FN-fit: size before loculated; appearing / mild / moderate-sized /
+        # chest wall / posterolateral / and / greater-than-left gaps.
+        # FN-mine fit: size ranges with "to", unhyphenated "moderate size",
+        # peripheral/residual, area of, empyema/hemothorax, encapsulated,
+        # loculation(s) of|within, pseudo-tumor, non-free-flowing.
+        # -----------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)(?<!\brather\sthan\s)
+        (?:(?:moderate|small|large|tiny|mild)(?:[-\s]?sized)?\s+)?
+        (?:partially\s+)?(?:multi[-\s]?)?loculat(?:ed|e)
+        (?:
+            # loculated air and fluid (before PTX/air lookahead)
+            \s+air\s+and\s+fluid
+            |
+            \s+fluid\s+and\s+air
+            |
+            (?!\s+(?:(?:right|left|bilateral|tiny|small|moderate|large|apical|basal|basilar|prior|right-sided|left-sided)\s+)*(?:pleural\s+)?(?:pneumotho|air\b))
+            # allow "loculated, right-sided ..." / "loculated and right ..."
+            [,\s]*(?:and\s+)?
+            (?:
+                (?:
+                    (?:(?:right|left|bilateral)(?:[-\s]?sided)?|apical|basal|basilar|anterior(?:ly)?|posterior(?:ly)?|lateral(?:ly)?|posterolateral|anterolateral|subpulmonic|peripheral|residual|appearing|chest\s+wall|greater\s+than\s+(?:right|left)|and)
+                    |
+                    # size / size-range / sized / "moderate size"
+                    (?:moderate|small|large|tiny|mild)
+                    (?:\s+to\s+(?:moderate|small|large|tiny|mild))?
+                    (?:[-\s]?sized|\s+size)?
+                )
+                \s+
+            )*
+            (?:
+                # "loculated area of pleural effusion"
+                (?:area\s+of\s+)?
+                (?:(?:right|left|bilateral)(?:[-\s]?sided)?\s+)?(?:pleural\s+)?(?:effusions?|hydrothorax|hydropneumotho?rax|empyemas?|h[ae]motho?rax)
+                \b(?!\s*s/p\b)
+                |
+                (?:(?:right|left|bilateral)(?:[-\s]?sided)?\s+)?pleural\s+(?:fluid|collections?|pockets?)
+                |
+                # bare loculated fluid / fluid collection (block "fluid vs", "less likely")
+                fluid(?!\s+vs)(?:\s+collections?)?
+                (?!(?:[^\n.!?]{0,50})(?:much\s+)?less\s+likely)
+            )
+        )
+        |
+        # Immediate portion/component (not "loculated basilar component" of PTX)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)
+        (?:partially\s+)?(?:multi[-\s]?)?loculat(?:ed|e)
+        [,\s]+
+        (?:portions?|components?)
+        |
+        # Loculated ... portion of the fissure effusion
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)
+        (?:partially\s+)?(?:multi[-\s]?)?loculat(?:ed|e)
+        [,\s]+
+        (?:(?:right|left|bilateral|superior|inferior|apical|basal|basilar|upper|lower)\s+)*
+        portion\s+of\s+(?:the\s+)?fissures?\s+(?:pleural\s+)?effusions?
+        |
+        # Typo: locualted
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:partially\s+)?locualt(?:ed|e)
+        \s*
+        (?:(?:right|left|bilateral)\s+)*
+        (?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        # -----------------------------------------------------------------
+        # A2. Noun: loculation(s) of|within ... (pleural) fluid|effusion
+        # -----------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)
+        (?:(?:evolving|new|stable|moderate|small|large|tiny|mild|apical|basal|basilar|anterior|posterior|lateral|peripheral|residual)\s+)*
+        loculations?
+        \s+(?:of|within)\s+
+        (?:(?:a|the|an)\s+)?
+        (?:(?:(?:right|left|bilateral)(?:[-\s]?sided)?|apical|basal|basilar|anterior|posterior|lateral|peripheral|residual|small|moderate|large|tiny|mild|chronic|new)\s+)*
+        (?:
+            (?:pleural\s+)?(?:effusions?|fluid|collections?|empyemas?|h[ae]motho?rax)
+            |
+            pleural\s+(?:fluid|collections?|pockets?)
+        )
+        |
+        # -----------------------------------------------------------------
+        # B. Inverted: (pleural) effusion/fluid/pleural collection ... loculated
+        # Same-clause only (do not cross ".!") so "effusion. Tiny loculated PTX"
+        # and "air collection. Loculated pneumothorax" do not match.
+        # Bare "collection" omitted (foot MRI / mediastinal air FPs).
+        # -----------------------------------------------------------------
+        (?:pleural\s+(?:effusions?|fluid|collections?)|(?<!\bair\s)(?<!\bfluid\s)(?:effusions?|fluid))
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,12})
+        (?:(?:is|are|was|were|may\s+have|has|have)\s+(?:a\s+)?)?
+        (?:(?:small|moderate|large|partial(?:ly)?|probable|probably|possible|possibly|multi[-\s]?)\s+)*
+        (?<!\bno\s)(?<!\bwithout\s)
+        loculat(?:ed|e|ions?)
+        (?!\s+(?:(?:right|left|bilateral|tiny|small|moderate|large|apical|basal|basilar|prior)\s+)*(?:pleural\s+)?pneumotho)
+        |
+        # -----------------------------------------------------------------
+        # C. Lobulated contour of pleural fluid (loculation proxy)
+        # -----------------------------------------------------------------
+        pleural\s+fluid\s+with\s+a\s+lobulated\s+contour
+        |
+        # -----------------------------------------------------------------
+        # D. Encysted / encapsulated / walled-off / local(ized) pleural collection
+        # -----------------------------------------------------------------
+        encysted\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        encapsulat(?:ed|e)\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        walled[-\s]?off\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        local(?:ized)?\s+pleural\s+collections?
+        |
+        localized\s+(?:pleural\s+)?fluid
+        |
+        # -----------------------------------------------------------------
+        # E. Fissural / interlobar / intrafissural fluid (not thickening)
+        # -----------------------------------------------------------------
+        # not "resolution of ... pleural effusions and fissural fluid"
+        (?<!\beffusions\sand\s)
+        (?:fissural|interlobar|intrafissural|perifissural)\s+(?:(?:right|left)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        entrapped\s+(?:(?:ellipsoid|lenticular|biconvex)\s+)?(?:peri)?fissural\s+fluid
+        |
+        # fluid/effusion in|within|along|tracking|reaching|into ... fissure
+        # Same clause; do not match thickening/scarring in the fissure.
+        (?:fluid|effusions?)
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,8})
+        (?:
+            (?:in|within|along|reaching|into)\s+
+            |
+            tracking\s+(?:along|within|in|into)\s+
+        )
+        (?<!thickening\s)(?<!scarring\s)(?<!displacement\s)(?<!prominence\s)(?<!visibility\s)
+        (?:(?:one|both)\s+of\s+)?
+        (?:the\s+)?
+        (?:(?:right|left)\s+)?
+        (?:(?:major|minor|oblique|horizontal|lateral|interlobar)\s+){0,2}
+        fissures?
+        |
+        # inverted: (right/left) (major/minor/...) fissure fluid
+        (?:(?:right|left)\s+)?
+        (?:(?:major|minor|oblique|horizontal|interlobar)\s+)?
+        fissures?\s+fluid
+        |
+        # fluid/effusion along lateral chest wall (loculated morphology cue)
+        (?:fluid|effusions?)
+        \s+(?:in|within|along)\s+(?:the\s+)?lateral\s+chest\s+wall
+        |
+        # Postposed: pleural effusion(s), minimally/partially fissural
+        (?:pleural\s+)?effusions?
+        [\s,;:]+
+        (?:(?:minimally|partially|mildly|largely)\s+)?(?:fissural|intrafissural)\b
+        (?!\s+(?:thickening|scarring|displacement|prominence|visibility|nodules?|opacit(?:y|ies)))
+        |
+        # Effusion with fissural/intrafissural component(s)|extension
+        (?:pleural\s+)?effusions?
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,10})
+        (?:fissural|intrafissural)\s+(?:components?|extensions?)
+        |
+        # -----------------------------------------------------------------
+        # E2. Non-free-flowing / non-layering pleural fluid (loculation cue)
+        # -----------------------------------------------------------------
+        (?:pleural\s+)?(?:fluid|effusions?)
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,10})
+        does\s+not\s+(?:flow|layer)\s+freely
+        |
+        non[-\s]?(?:free[-\s]?flowing|layering)\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:fluid|effusions?)
+        |
+        (?:pleural\s+)?(?:fluid|effusions?)
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,8})
+        non[-\s]?(?:free[-\s]?flowing|layering)
+        |
+        # -----------------------------------------------------------------
+        # F. Pseudotumor / phantom / vanishing tumor (incl. hyphen/space)
+        # -----------------------------------------------------------------
+        (?:pleural\s+)?pseudo[-\s]?tumou?rs?
+        |
+        (?:phantom|vanishing)\s+tumou?rs?
+    )

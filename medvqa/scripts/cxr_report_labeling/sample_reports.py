@@ -7,7 +7,7 @@ import csv
 import json
 import logging
 import os
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
 from medvqa.datasets.cxr_report_labeling.class_registry import build_class_registry
 from medvqa.datasets.cxr_report_labeling.complexity import score_reports
@@ -25,15 +25,54 @@ from medvqa.datasets.cxr_report_labeling.report_loaders import (
     load_all_datasets,
 )
 from medvqa.datasets.cxr_report_labeling.schemas import dumps_jsonl_row
-from medvqa.datasets.cxr_report_labeling.stratified_sampling import DEFAULT_K, sample_dataset
-from medvqa.utils.files_utils import save_json
+from medvqa.datasets.cxr_report_labeling.stratified_sampling import (
+    DEFAULT_K,
+    sample_dataset,
+)
+from medvqa.utils.files_utils import load_jsonl, save_json
 from medvqa.utils.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
 
+def _load_regex_positives_from_cache(
+    reports: list[dict],
+    dataset: str,
+    cache_dir: str,
+) -> dict[str, set[int]] | None:
+    """
+    Load ``full_regex_matches/<dataset>.jsonl`` → class_id → report indices.
+
+    Returns None if the cache file is missing.
+    """
+    path = os.path.join(cache_dir, "full_regex_matches", f"{dataset}.jsonl")
+    if not os.path.exists(path):
+        return None
+    uid_to_idx = {r["uid"]: i for i, r in enumerate(reports)}
+    class_to_idxs: dict[str, set[int]] = {}
+    n_rows = 0
+    n_missing_uid = 0
+    for row in load_jsonl(path):
+        n_rows += 1
+        uid = row.get("uid")
+        idx = uid_to_idx.get(uid)
+        if idx is None:
+            n_missing_uid += 1
+            continue
+        for class_id in row.get("positive_classes") or []:
+            class_to_idxs.setdefault(class_id, set()).add(idx)
+    logger.info(
+        "Loaded regex match cache %s (%d rows, %d classes, %d uids not in loaded reports)",
+        path,
+        n_rows,
+        len(class_to_idxs),
+        n_missing_uid,
+    )
+    return class_to_idxs
+
+
 def _load_srr_vectors_if_available(
-    reports: List[dict],
+    reports: list[dict],
     cache_dir: str,
 ):
     """Load report-hash → labels from SRR cache if present; else return None."""
@@ -68,7 +107,10 @@ def _load_srr_vectors_if_available(
         # Replace None with zero vector without No Finding? Better skip SRR for those indices
         # by using empty positives only for present ones — handled in sample via None filter
         import numpy as np
-        from medvqa.datasets.cxr_report_labeling.srr_bert_leaves import NUM_LABELS, NO_FINDING_IDX
+
+        from medvqa.datasets.cxr_report_labeling.srr_bert_leaves import (
+            NUM_LABELS,
+        )
 
         filled = []
         for v in vectors:
@@ -84,15 +126,23 @@ def _load_srr_vectors_if_available(
 
 def run_sampling(
     run_id: str = DEFAULT_RUN_ID,
-    datasets: Optional[Sequence[str]] = None,
+    datasets: Sequence[str] | None = None,
     seed: int = 0,
     num_regex_processes: int = 1,
-    limits: Optional[Dict[str, Optional[int]]] = None,
+    limits: dict[str, int | None] | None = None,
     require_srr: bool = False,
+    require_regex_cache: bool = False,
+    k_by_dataset: dict[str, tuple[int, int, int]] | None = None,
 ) -> str:
     """
     Sample reports and write results/<run_id>/samples.jsonl.
     Returns path to samples.jsonl.
+
+    Prefers precomputed ``cache/.../full_regex_matches/<dataset>.jsonl`` for K2
+    strata when present. Set ``require_regex_cache=True`` to fail if missing.
+
+    ``k_by_dataset`` optionally overrides ``DEFAULT_K`` per dataset with
+    ``(k1, k2, k3)``. Unspecified datasets keep the defaults.
     """
     setup_logging()
     registry = build_class_registry()
@@ -101,6 +151,8 @@ def run_sampling(
     registry_path = os.path.join(results_dir, "class_registry.json")
     registry.save(registry_path)
     logger.info("Saved class registry to %s", registry_path)
+
+    k_cfg = {**DEFAULT_K, **(k_by_dataset or {})}
 
     limits = limits or {}
     loaded = load_all_datasets(
@@ -112,9 +164,15 @@ def run_sampling(
     )
 
     srr_cache = get_srr_bert_cache_dir()  # shared class-agnostic cache
-    all_samples: List[dict] = []
+    all_samples: list[dict] = []
+    seen_report_text_hashes: set[str] = set()
     for dataset, reports in loaded.items():
-        k1, k2, k3 = DEFAULT_K[dataset]
+        if dataset not in k_cfg:
+            raise KeyError(
+                f"No (k1, k2, k3) for dataset={dataset!r}. "
+                f"Pass k_by_dataset or add it to DEFAULT_K. Known: {sorted(k_cfg)}"
+            )
+        k1, k2, k3 = k_cfg[dataset]
         scores = score_reports(reports)
         # persist complexity for reuse
         score_path = os.path.join(cache_dir, f"complexity_scores_{dataset}.json")
@@ -129,6 +187,15 @@ def run_sampling(
                 f"require_srr=True but no SRR cache at {srr_cache}. "
                 "Run the SRR-BERT notebook section first."
             )
+        regex_positives = _load_regex_positives_from_cache(reports, dataset, cache_dir)
+        if regex_positives is None:
+            msg = (
+                f"No full_regex_matches cache for {dataset} under {cache_dir}. "
+                "Run launch_cxr_precompute_regex_matches.sh (or apply_regex_to_dataset)."
+            )
+            if require_regex_cache:
+                raise FileNotFoundError(msg)
+            logger.warning("%s Falling back to live regex matching.", msg)
         samples = sample_dataset(
             reports,
             dataset=dataset,
@@ -137,17 +204,24 @@ def run_sampling(
             k2=k2,
             k3=k3,
             complexity_scores=scores,
+            regex_positives=regex_positives,
             srr_label_vectors=srr_vectors,
             srr_class_names=srr_names,
             seed=seed,
             num_regex_processes=num_regex_processes,
+            seen_report_text_hashes=seen_report_text_hashes,
         )
         all_samples.extend(samples)
 
+    logger.info(
+        "Global content-unique samples: %d rows, %d unique report_text_hashes",
+        len(all_samples),
+        len(seen_report_text_hashes),
+    )
+
     samples_path = os.path.join(results_dir, "samples.jsonl")
     with open(samples_path, "w", encoding="utf-8") as f:
-        for rec in all_samples:
-            f.write(dumps_jsonl_row(rec) + "\n")
+        f.writelines(dumps_jsonl_row(rec) + "\n" for rec in all_samples)
 
     summary_path = os.path.join(results_dir, "samples_summary.csv")
     with open(summary_path, "w", newline="", encoding="utf-8") as f:
@@ -173,6 +247,7 @@ def run_sampling(
         "by_dataset": {
             ds: sum(1 for s in all_samples if s["dataset"] == ds) for ds in loaded
         },
+        "k_by_dataset": {ds: list(k_cfg[ds]) for ds in loaded},
         "samples_path": samples_path,
         "summary_path": summary_path,
         "registry_path": registry_path,
@@ -194,6 +269,11 @@ def main():
         choices=[DATASET_MIMICCXR, DATASET_CHEXPERT_PLUS, DATASET_REXGRADIENT, DATASET_IUXRAY],
     )
     parser.add_argument("--require_srr", action="store_true")
+    parser.add_argument(
+        "--require_regex_cache",
+        action="store_true",
+        help="Fail if full_regex_matches/<dataset>.jsonl is missing (no live regex fallback)",
+    )
     parser.add_argument("--iu_limit", type=int, default=None, help="Debug limit for IU")
     parser.add_argument("--mimic_limit", type=int, default=None)
     parser.add_argument("--chexpert_limit", type=int, default=None)
@@ -212,6 +292,7 @@ def main():
         num_regex_processes=args.num_regex_processes,
         limits=limits,
         require_srr=args.require_srr,
+        require_regex_cache=args.require_regex_cache,
     )
 
 

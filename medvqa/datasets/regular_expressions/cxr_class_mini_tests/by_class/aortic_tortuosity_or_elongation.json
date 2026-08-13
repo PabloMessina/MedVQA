@@ -1,0 +1,52 @@
+{
+  "class_id": "aortic_tortuosity_or_elongation",
+  "positives": [
+    "Tortuous aorta.",
+    "Unfolded elongated aortic arch.",
+    "Aorta is tortuous and unfolded.",
+    "Serpentine course of the thoracic aorta.",
+    "Aortic elongation.",
+    "The aorta is mildly tortuous.",
+    "Unfolding of the thoracic aorta.",
+    "Elongation of the descending aorta.",
+    "Calcifications of the tortuous but not dilated ascending aorta.",
+    "Aorta is remarkable for moderate atherosclerotic calcification and mild tortuosity.",
+    "Mild unfolding of both the ascending and descending thoracic aorta.",
+    "The thoracic aorta is noted to be diffusely calcified and tortuous.",
+    "Tortuosity and mild ectasia of the atherosclerotic thoracic aorta.",
+    "Tortuosity, ectasia, and calcific atherosclerotic change of the aorta.",
+    "Moderate elongation and mild dilatation of the mid to distal descending thoracic aorta.",
+    "Prominence of the ascending aortic contour may be on the basis of tortuosity.",
+    "There is tortuosity of and mural calcification in the thoracic aorta.",
+    "The thoracic aorta shows calcified plaque at the level of the arch and mild tortuosity.",
+    "There is tortuosity and/or ectasia of the thoracic and upper abdominal aorta.",
+    "Kinked descending aorta.",
+    "The aorta is again noted to be calcified and somewhat tortuous.",
+    "Abnormal aortic course.",
+    "Stable tortuosity, calcification and mild ectasia of the thoracic aorta.",
+    "Tortuous arch.",
+    "Tortuous arch with atherosclerosis.",
+    "Calcified tortuous transverse arch.",
+    "Tortuous transverse arch.",
+    "Ectatic-appearing unfolded arch.",
+    "Unfolded arch.",
+    "Unfolding of the arch.",
+    "Tortuous or generally widened though not focally aneurysmal aorta.",
+    "Arch is very tortuous.",
+    "Knob calcification and tortuosity.",
+    "Dolichoectasia of the thoracic aorta.",
+    "Dolichoectatic aorta.",
+    "Tortuosity of the arch.",
+    "Elongation of the arch.",
+    "The arch is unfolded."
+  ],
+  "negatives": [
+    "Aortic ectasia with increased caliber.",
+    "Atherosclerotic aortic calcification.",
+    "Enlarged aortic knob.",
+    "Aortic ectasia without tortuosity."
+  ],
+  "negation_soft": [
+    "Aorta is normal in course."
+  ]
+}

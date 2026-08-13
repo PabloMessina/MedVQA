@@ -1,0 +1,213 @@
+# ==============================================================================
+# pulmonary_edema
+# Prompt-faithful: abnormal extravascular lung fluid on the current CXR.
+# Match explicit pulmonary / cardiopulmonary / interstitial / alveolar / lung /
+# cardiogenic / hydrostatic / perivascular / peribronchovascular / dependent
+# edema (oedema, pulm edema), severity-qualified edema, attribution cues
+# (incl. secondary to, likely represent, could reflect), intervening
+# pneumonia/infection/aspiration or|/versus|/and/or hedges before edema/CHF,
+# congestion+edema, lung "edematous" / edematous changes, "edema is mild/…",
+# radiographic fluid/volume-overload attribution, severity+interstitial/
+# alveolar/pulmonary fluid|volume overload, wet lung / bat-wing, radiographic
+# CHF / heart-failure attribution, differential-included edema, edema pattern,
+# location-after edema, re-expansion (hyphen OK).
+#
+# Precision-first vs list-negation FPs: clause-local tempered scan
+# (pneumothorax style) so "no/without X, Y, pulmonary edema, or Z" cannot
+# skip the negation. Do NOT put or/vs/versus/differential in the scan block
+# list — those are prompt-OK hedges ("infection versus pulmonary edema").
+# Trailing has-resolved/cleared (not "resolving" = residual still present).
+# Indication headers / // order fragments / eval-for blocked.
+# Exclude peripheral/cerebral/soft-tissue edema (incl. dependent edema of
+# subcutaneous/soft tissue via trailing lookahead). Bare unqualified edema omitted
+# except location-after / pattern / deposition / CHF attribution.
+# Bare fluid/volume overload WITHOUT attribution cues is NOT matched
+# (mini-test negative "Fluid overload."); severity+interstitial overload OK.
+# Bare right heart failure omitted ((?<!right\s)heart failure).
+# Fixed-width lookbehinds only (stdlib re). Eval lowercases + squashes space.
+# ==============================================================================
+
+(?:
+    (?:
+        ^
+        |
+        [.!;\n]
+        |
+        (?<!history)(?<!indication)(?<!clinical)(?<!data)(?<!info):
+        |
+        \b(?:although|though|however)\b
+    )
+    (?:
+        (?:
+            # Persistent finding: "no/not/without … change … edema"
+            (?=\b(?:no|not|without)\b(?=[^.!?;:\n]{0,55}\bchange\b))
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            # Contrastive: "no pneumonia, but/although ... pulmonary edema"
+            (?=\bno\b(?![^.!?;:\n]{0,50}(?:o?edema|o?edma|chf|congestive))[^.!?;:\n]{0,90},\s*(?:but|however|although|though)\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                doubt|doubts|doubtful|
+                ruled\s+out|rule\s+out|rule|
+                resolved|resolution|
+                evaluate|eval|assess|assessment|
+                prevent|please|
+                presented|
+                indication
+            )\b)
+            (?!\bw/o\b)
+            (?!//)
+            (?!\bno\s+(?:evidence|sign|findings?|definite|overt|gross|obvious|radiographic|demonstrable|evident|typical|substantial)\b)
+            (?!\bwithout\s+(?:evidence|sign|findings?|demonstrable|typical)\b)
+            (?!\bno\s+evidence\s+(?:of|for)\b)
+            (?!\bwithout\s+evidence\s+(?:of|for)\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bassess(?:ment)?\s+for\b)
+            (?!\bquestion\s+(?:of|for)\b)
+            (?!\br/?o\b)
+            (?!\brule\s+out\b)
+            (?!\bclinical\s+history\b)
+            (?!\bhistory\s+of\s+(?:(?:mild|moderate|severe|chronic|early|borderline)\s+)?(?:pulmonary\s+)?(?:o?edema|chf|congestive)\b)
+            (?!\bhx\s+of\b)
+            (?!\bh/?o\s+of\b)
+            (?!\bh/?o\b)
+            (?!\bresolution\s+of\b)
+            (?!\binterval\s+resolution\b)
+            (?!\brather\s+than\b)
+            (?!\?)
+            [^.!?;:\n]
+        )
+    ){0,280}
+    (?:not\s+(?:yet\s+)?(?:resolved|cleared)\s+)?
+    (?<!\bsubcutaneous\s)(?<!\bperipheral\s)(?<!\bcerebral\s)
+    (?<!\bmacular\s)(?<!\bpedal\s)(?<!\bextremity\s)(?<!\bextremities\s)
+    (?<!\bsoft[\s\-]tissue\s)
+    (?<!\bto\sprevent\s)(?<!\bprevent\s)
+    (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\sof\s)
+    (?<!\bconcern\sfor\s)(?<!\bconcerned\sfor\s)
+    (?<!\?)
+    (?:
+        # ------------------------------------------------------------------
+        # A. Severity (+ optional anatomic qualifier) + edema
+        # ------------------------------------------------------------------
+        \b(?:mild|moderate|severe|marked|overt|frank|new|acute|persistent|worsening|increasing|asymmetric|asymmetrical|symmetric|bilateral|diffuse|residual|improved|improving|minimal|stable|atypical|decreasing|decreased|resolving|progressive|recurrent|intercurrent|borderline|early)
+        (?:-to-moderate|-to-severe)?\s+
+        (?:(?:pulmonary|cardiopulmonary|interstitial|alveolar|lung|cardiogenic|non(?:\s|-)?cardi(?:ogenic|ac)|re[\s\-]?expansion|flash|hydrostatic|perivascular|peribronchovascular|perihilar|pulm|dependent)\s+)?
+        (?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # B. Bare qualified edema (incl. hyphenated re-expansion / dependent)
+        # ------------------------------------------------------------------
+        \b(?:pulmonary|cardiopulmonary|interstitial|alveolar|lung|cardiogenic|non(?:\s|-)?cardi(?:ogenic|ac)|re[\s\-]?expansion|flash|hydrostatic|perivascular|peribronchovascular|perihilar|pulm|dependent)\s+
+        (?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # C. Attribution / hedging cue -> (optional disease hedge) (qual) edema
+        # ------------------------------------------------------------------
+        \b(?:consistent\swith|compatible\swith|suggest(?:ive|ing)\sof|suggesting|representing|reflecting|representative\sof|due\sto|indicative\sof|likely|probably|possibly|presumabl\w*|could\s+be|may\s+be|may\s+represent|could\s+represent|likely\s+represent(?:s)?|may\s+reflect|could\s+reflect|component\sof|largely|was|secondary\s+to)\s+
+        (?:(?:a\s+)?(?:combination\s+of\s+)?(?:mild|moderate|severe|marked|hydrostatic|largely|coexisting|concurrent|superimposed|residual|early|borderline|dependent|improving|diffuse|multifocal)\s+)*
+        (?:(?:(?:aspiration(?:\s+pneumonitis)?|pneumonitis|pneumonia|infection|infiltrates?|opacit(?:y|ies))\s*(?:,\s*|/|\s+and(?:\s*/\s*or)?\s+|\s+or\s+|\s+versus\s+)){0,4})?
+        (?:(?:pulmonary|cardiopulmonary|interstitial|alveolar|lung|hydrostatic|pulm|dependent)\s+)?
+        (?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # C2. Deposition of edema
+        # ------------------------------------------------------------------
+        \b(?:(?:mild|moderate|severe|marked|minimal|borderline)\s+)?deposition\s+of\s+(?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # C3. Location-after edema: "edema in the left lung / RUL"
+        # ------------------------------------------------------------------
+        \b(?:o?edema\w*|o?edma)\s+in\s+(?:the\s+)?(?:(?:right|left|bilateral|both)\s+)?(?:(?:upper|middle|lower|mid)\s+)?(?:lung|lungs|lobe|lobes|base|bases|juxtahilar\s+regions?|hilar\s+regions?|perihilar\s+regions?)\b
+        |
+        # ------------------------------------------------------------------
+        # C4. Edema pattern
+        # ------------------------------------------------------------------
+        \b(?:o?edema\w*|o?edma)\s+pattern\b
+        |
+        # ------------------------------------------------------------------
+        # C5. Differential included/includes edema
+        # ------------------------------------------------------------------
+        \bdifferential\b[^.!?;:\n]{0,100}\b(?:included|includes|include)\s+(?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # D. Lung / lobe described as edematous; edematous changes
+        # ------------------------------------------------------------------
+        \b(?:(?:right|left|bilateral|both)\s+)?(?:lung|lungs|lobe|lobes)\s+(?:is|are)\s+(?:mildly\s+)?edematous\b
+        |
+        \b(?:(?:right|left|bilateral|both)\s+)?(?:lung|lungs|lobe)\s+(?:is\s+)?mildly\s+edematous\b
+        |
+        \b(?:the\s+)?edematous\s+(?:right|left|bilateral)?\s*(?:lung|lobe|lower\s+lobe|upper\s+lobe)
+        |
+        \bedematous\s+changes\b
+        |
+        # ------------------------------------------------------------------
+        # E. congestion and/or slash edema; "probable with edema"
+        # ------------------------------------------------------------------
+        \b(?:pulmonary\s+)?(?:(?:vascular|venous)\s+)?congestion\s*(?:and|/)\s*(?:o?edema\w*|o?edma)\b
+        |
+        \b(?:probable|possible)\s+with\s+(?:o?edema\w*|o?edma)\b
+        |
+        # ------------------------------------------------------------------
+        # F. Fluid/volume overload with radiographic attribution only
+        #    (evidence/signs/suggesting/indicate; NOT bare overload)
+        # ------------------------------------------------------------------
+        \b(?:consistent\swith|compatible\swith|reflecting|representing|due\sto|indicative\sof|suggest(?:ive|ing)\sof|suggesting|indicating(?:\ssome)?|combination\sof|evidence\sof|signs?\sof|indicate)\s+
+        (?:(?:mild|moderate|severe|some|minimal|borderline)\s+)?
+        (?:(?:interstitial|alveolar|pulmonary)\s+)?
+        (?:fluid|volume)\s+overload\b
+        |
+        # ------------------------------------------------------------------
+        # F2. Severity + interstitial/alveolar/pulmonary fluid|volume overload
+        #     (keeps mini-test negative "Fluid overload." / mild fluid overload)
+        # ------------------------------------------------------------------
+        \b(?:mild|moderate|severe|marked|minimal|borderline|early|improving)\s+
+        (?:interstitial|alveolar|pulmonary)\s+
+        (?:fluid|volume)\s+overload\b
+        |
+        # ------------------------------------------------------------------
+        # G. "edema is mild/present/persistent"
+        # ------------------------------------------------------------------
+        \b(?:o?edema\w*|o?edma)\s+is\s+(?:mild|moderate|severe|present|persistent|stable|improved|improving)\b
+        |
+        # ------------------------------------------------------------------
+        # H. Classic radiographic metaphors
+        # ------------------------------------------------------------------
+        \b(?:wet\s+lungs?|bat\s*wings?)\b
+        |
+        # ------------------------------------------------------------------
+        # I. Radiographic CHF / congestive (heart) failure / heart failure
+        #    Prompt allows current appearance attributed to CHF.
+        #    Omit improved/improving here (interval-only / residual phrasing).
+        #    Bare right heart failure excluded via lookbehind.
+        # ------------------------------------------------------------------
+        \b(?:mild|moderate|severe|marked|overt|frank|new|acute|persistent|worsening|increasing|residual|minimal|stable|decreasing|decreased|resolving|progressive|recurrent|early|borderline|low[\s\-]?grade)
+        (?:-to-moderate|-to-severe)?\s+
+        (?:congestive\s+(?:heart\s+)?failure|chf|(?<!right\s)heart\s+failure)\b
+        |
+        \b(?:consistent\swith|compatible\swith|suggest(?:ive|ing)\sof|suggesting|representing|reflecting|representative\sof|due\sto|indicative\sof|likely|probably|possibly|presumabl\w*|could\s+be|may\s+be|may\s+represent|could\s+represent|likely\s+represent(?:s)?|may\s+reflect|could\s+reflect|likely\s+representing|secondary\s+to)\s+
+        (?:(?:a\s+)?(?:(?:left|right)[\s\-]?sided\s+)?(?:mild|moderate|severe|marked|early|low[\s\-]?grade|borderline|minimal|diffuse|multifocal)\s+)*
+        (?:(?:(?:aspiration(?:\s+pneumonitis)?|pneumonitis|pneumonia|infection|infiltrates?|opacit(?:y|ies))\s*(?:,\s*|/|\s+and(?:\s*/\s*or)?\s+|\s+or\s+|\s+versus\s+)){0,4})?
+        (?:(?:(?:left|right)[\s\-]?sided\s+)?(?:congestive\s+(?:heart\s+)?failure|chf)|(?<!right\s)heart\s+failure)\b
+    )
+    (?!\?)
+    # Soft-tissue / peripheral dependent edema (prompt exclude)
+    (?!\s+of\s+(?:the\s+)?(?:subcutaneous|soft[\s\-]?tissue|extremit\w*|pedal|legs?\b|ankles?|feet\b|arms?\b|hands?\b|chest\s+wall))
+    (?![^.!?;:\n]{0,90}\b(?:
+        (?:has\s+|have\s+|is\s+|are\s+)(?:resolved|cleared|clearing)\b
+        |
+        (?:has\s+|have\s+)?resolved\b
+        |
+        resolution\b
+    ))
+    # Same-clause denial of edema after a cue hit (e.g. overload then "no frank edema")
+    (?![^.!?;:\n]{0,110}\b(?:but\s+)?(?:no|without)\s+(?:frank\s+|overt\s+|definite\s+|gross\s+)?(?:evidence\s+(?:of|for)\s+)?(?:pulmonary\s+|lung\s+|interstitial\s+|alveolar\s+)?(?:o?edema\w*|o?edma)\b)
+)

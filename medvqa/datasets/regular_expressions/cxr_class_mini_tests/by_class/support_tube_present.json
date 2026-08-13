@@ -1,0 +1,52 @@
+{
+  "class_id": "support_tube_present",
+  "positives": [
+    "Endotracheal and enteric tubes in place.",
+    "Indwelling medical tube present.",
+    "Thoracostomy tube visible.",
+    "Support tubes including ETT and NG tube.",
+    "Pleural drainage tube present.",
+    "ETT tip above the carina.",
+    "Dobhoff tube terminates in the stomach.",
+    "Tracheostomy is in place.",
+    "Tracheostomy projects at the thoracic inlet.",
+    "The patient has a tracheostomy.",
+    "Right mainstem bronchus intubation.",
+    "Mediastinal drain is in place.",
+    "Jackson-Pratt drain projects over the lower chest.",
+    "A pericardial drain has been placed.",
+    "The pericardial drain is in stable position.",
+    "Pericardial drain projects over the left side of the cardiopericardial silhouette.",
+    "Following insertion of pericardial drainage catheter.",
+    "Mediastinal drainage catheter in stable position.",
+    "Interval placement of a mediastinal drain.",
+    "Unchanged position of the mediastinal drain.",
+    "Mediastinal drain is partially imaged.",
+    "JP drain in the left upper quadrant.",
+    "Pigtail intra-abdominal drainage tube is seen within the left upper quadrant.",
+    "There is a surgical drain in the right upper quadrant.",
+    "Surgical drain is identified.",
+    "Biliary drains in place.",
+    "Left pleural and midline drains are in place.",
+    "Drainage catheter seen overlying the right upper quadrant.",
+    "Line and tube placement is unchanged.",
+    "Unchanged line and tube.",
+    "No interval change in line and tube placement.",
+    "Demonstrates unchanged line and tube.",
+    "Line and tube unchanged.",
+    "Unchanged central line and tube.",
+    "No change in T-tube.",
+    "T-tube is unchanged."
+  ],
+  "negatives": [
+    "Central venous catheter.",
+    "PICC line to the cavoatrial junction.",
+    "Pacemaker generator and leads.",
+    "Sternotomy wires.",
+    "ECG leads.",
+    "Status post removal of the chest tube."
+  ],
+  "negation_soft": [
+    "No support tubes."
+  ]
+}

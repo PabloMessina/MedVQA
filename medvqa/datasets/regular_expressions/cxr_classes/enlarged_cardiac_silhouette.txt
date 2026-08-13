@@ -1,0 +1,307 @@
+\b(?:
+        # Named cardiomegaly / megacardia (incl. common misspellings). Guard simple
+        # negation and "no evidence/sign of …". "(?<!\bor\s)" not "(?<!or\s)" so
+        # "MINOR CARDIOMEGALY" is not blocked by the "OR " in MINOR.
+        (?<!no\sevidence\sof\s)(?<!no\ssign\sof\s)(?<!no\ssigns\sof\s)
+        (?<!without\sfrank\s)(?<!without\sovert\s)(?<!without\s)
+        (?<!no\sgross\s)(?<!no\scurrent\s)(?<!negative\sfor\s)
+        (?<!rather\sthan\strue\s)(?<!than\strue\s)
+        (?<!no\s)(?<!not\s)(?<!\bor\s)
+        (?:cardiomegaly|megacardia|cardionegaly|cadiomegaly|cardiomegally)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+cannot\s+be\s+(?:assessed|evaluated|determined|excluded))
+
+        |
+
+
+        # Path → cardiac/heart/cardiopericardial silhouette/contour (e.g. "enlarged
+        # cardiac silhouette", "markedly enlarged postop cardiac silhouette",
+        # "globular cardiac silhouette", "large postoperative cardiac silhouette",
+        # "minimal enlargement cardiac silhouette"). large\b avoids "largely".
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!unlikely\s)
+        (?:enlarg\w*|dilated|hypertrophied|globular|massive|large\b)
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+
+        (?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Cardiac/heart silhouette/contour → size language (clause-local). Avoid
+        # cardiomediastinal (out of scope / sister class). Do not treat
+        # silhouette→…→hypertrophy as enlargement (LVH with normal size).
+        # Includes large/larger/widened (hunt: "silhouette is large/larger").
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)(?:\s+size)?
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal)\b)\w+){0,8}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|globular|massive|borderline|increased(?!\s+from\s+prior)|large|larger|widened)\b
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # "size of the cardiac silhouette remains large" (size-of … silhouette word order)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        size\s+of\s+(?:the\s+)?(?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal)\b)\w+){0,6}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|globular|massive|borderline|large|larger|widened|increased)\b
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # "… silhouette … not well delineated … slightly/mildly enlarged"
+        # (allow a longer gap that may contain "not well …").
+        (?<!no\s)(?<!without\s)
+        (?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)
+        (?:[^\w.!?;:]+\w+){0,12}[^\w.!?;:]+
+        (?:slightly|mildly|moderately|severely|markedly)\s+enlarg\w*
+
+        |
+
+
+        # Enlargement / dilatation / increased prominence OF (the) cardiac/heart
+        # silhouette/contour. Bare "prominence of" is too weak per prompt.
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)(?<!reduced\s)
+        (?:enlarg\w*|dilat\w*|increased\s+prominence)\b
+        (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:the[^\w.!?;:]+)?
+        (?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Abbreviation: "enl of cardiac silhouette"
+        \benl\s+of\s+(?:the\s+)?(?:cardiac|heart)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)\b
+
+        |
+
+
+        # Heart / cardiac size → enlarged / increased / larger / borderline
+        # Skip gap tokens: technique (FN-fit: "generous heart size technique …").
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:heart|cardiac)\s+size
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|technique)\b)\w+){0,10}[^\w.!?;:]+
+        (?:enlarg\w*|enalrged|dilat\w*|increased|larger|borderline)\b
+        (?!\s+is\s+unlikely)
+        (?!\s+than\s+it\s+is\s+now)
+
+        |
+
+
+        # Heart size … not well assessed/evaluated … but appears enlarged
+        # (intervening "not" would block the heart-size arm above).
+        (?<!no\s)(?<!without\s)
+        (?:heart|cardiac)\s+size\s+is\s+not\s+well\s+(?:assessed|evaluated|seen|visualized|delineated)
+        (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
+        (?:appears?\s+|seems?\s+)?(?:enlarg\w*|enalrged|dilat\w*|increased|larger|borderline)\b
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Heart → enlarg/dilat/larger with short, safe gap (avoid "heart shadow …
+        # cardiac enlargement" and heart-failure language).
+        # FN-fit: intervening "again"; hyphenated mild-to-moderately; "slightly larger".
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        heart\s+
+        (?:
+            (?:size\s+)?(?:is\s+|remains?\s+|appears?\s+|being\s+|continues\s+to\s+be\s+)?
+            (?:again\s+)?
+            (?:(?:mildly|moderately|markedly|severely|slightly|persistently|persistenly|still|quite|borderline|somewhat|diffusely|grossly|frankly|stably|stable|mild[\s-]to[\s-]moderately)\s+|(?:to\s+))*
+            (?:enlarg\w*|enalrged|dilat\w*|hypertroph\w*|larger)\b
+            (?!\s+than\s+(?:before|prior|previously|on\s+(?:the\s+)?prior))
+            |
+            (?:is\s+|remains?\s+|appears?\s+)?borderline(?:\s+enlarg\w*)?\b
+        )
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Heart … increased in size (word order ≠ "increased heart size" /
+        # "heart size … increased").
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        heart
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|failure|border)\b)\w+){0,6}[^\w.!?;:]+
+        increased\s+in\s+size\b
+
+        |
+
+
+        # LARGE HEART / Heart is/remains/appears large (not heart border/failure).
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!\bor\s)
+        (?:
+            large\s+heart\b(?!\s+(?:border|failure|borders?))
+            |
+            heart\s+(?:size\s+)?(?:is\s+|remains?\s+|appears?\s+|being\s+)?(?:still\s+|quite\s+|very\s+)?large\b
+        )
+
+        |
+
+
+        # Generous heart/cardiac size (euphemistic enlargement). Exclude
+        # technique-attributed / explicitly-not-enlarged walk-backs.
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        generous\s+(?:heart|cardiac)\s+size\b
+        (?!\s+technique)
+        (?!\s*,?\s*not\s+enlarg)
+        (?!\s+without\s+(?:overt\s+)?(?:cardiomegaly|enlarg))
+
+        |
+
+
+        # Boot-shaped heart (classic abnormal cardiac silhouette morphology).
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        boot[\s-]?shaped\s+heart\b
+
+        |
+
+
+        # Globular configuration of/to (the) heart / cardiac shadow/silhouette/size.
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        globular\s+configuration\s+(?:of|to)\s+(?:the\s+)?
+        (?:
+            (?:cardiac|heart)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|shadow|contour|size)
+            |
+            heart(?:\s+size)?
+        )\b
+
+        |
+
+
+        # Cardiac enlargement / dilatation; also
+        # "cardiac and pulmonary arterial enlargement".
+        # Chamber hypertrophy without enlargement is out of scope (see chamber arm).
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!unlikely\s)(?<!negative\sfor\s)(?<!\bor\s)
+        cardiac(?:\s+and\s+pulmonary\s+arterial)?\s+(?:enlarg\w*|dilat\w*|hypertroph\w*)\b
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Borderline size of (the) heart / cardiac silhouette; "borderline heart size"
+        borderline\s+(?:size\s+of\s+(?:the\s+)?(?:heart|cardiac\s+(?:silhouette|contour))|(?:heart|cardiac)\s+size)\b
+
+        |
+
+
+        # Upper-limits / top-normal TO/OR slightly/mildly/borderline enlarged
+        # (enlargement hedge). Isolated "upper limits of/for normal" is NOT enlargement.
+        # Hunt: "upper limits for normal … or mildly enlarged".
+        (?:upper\s+limits?\s+(?:of|for)\s+normal|top[\s-]?normal)
+        (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
+        (?:to|or)\s+(?:slightly|mildly|borderline)\s+(?:enlarg\w*|elevated)
+
+        |
+
+
+        # Increased / increasing heart size / cardiac diameter / transverse diameter
+        # FN-fit: also "increase in size of the cardiac silhouette/shadow",
+        # "increased cardiac shadow size", heart/cardiac shadow … increased in size.
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:
+            (?:increased|increasing)\s+heart\s+size
+            |
+            (?:increased|increasing|increase\s+in)\s+(?:cardiac|heart)\s+(?:size|diameter)
+            |
+            (?:interval\s+)?increase\s+in\s+(?:heart|cardiac)\s+size
+            |
+            (?:(?:mild|moderate|marked|slight|interval)\s+)?(?:increase|increased)\s+in\s+size\s+of\s+(?:the\s+)?
+            (?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?|shadow)
+            |
+            (?:increased|increasing)\s+(?:cardiac|heart)\s+shadow\s+size\b
+            |
+            (?:cardiac|heart)\s+shadow
+            (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|unlikely|failure)\b)\w+){0,8}[^\w.!?;:]+
+            (?:
+                increased\s+(?:\w+\s+){0,3}in\s+size
+                |
+                (?:(?:slight|mild|moderate|marked|interval)\s+)*increase\s+in\s+size
+            )\b
+            |
+            transverse\s+cardiac\s+diameter\s+has\s+increased
+            |
+            transverse\s+cardiac\s+diameter
+            (?:[^\w.!?;:]+(?!(?:without|no|not|normal)\b)\w+){0,5}[^\w.!?;:]+
+            (?:enlarg\w*|increased|elevated)
+        )
+
+        |
+
+
+        # Named chamber enlargement / dilatation (not isolated hypertrophy / LVH).
+        # Also biatrial / biventricular / (right-/left-sided) (cardiac) chamber
+        # enlargement (hunt lexicon). Hedged "possible/apparent" allowed (prompt).
+        # FN-fit: enlargement of (the) left/right atrial contour.
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:
+            (?:left|right)\s+(?:ventricular|atrial)\s+(?:enlarg\w*|dilat\w*)
+            |
+            (?:enlarged|dilated)\s+(?:left|right)\s+(?:ventricle|atrium|ventricular\s+chamber|atrial\s+chamber)
+            |
+            (?:left|right)\s+(?:ventricle|atrium)\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:enlarg\w*|dilat\w*)
+            |
+            (?:biatrial|biventricular)\s+(?:enlarg\w*|dilat\w*)
+            |
+            (?:(?:left|right)[\s-]?sided\s+|(?:left|right)\s+cardiac\s+|cardiac\s+)?chamber\s+(?:enlarg\w*|dilat\w*)
+            |
+            (?:enlarg\w*|dilat\w*)\s+of\s+(?:the\s+)?(?:left|right)\s+atrial\s+contour\b
+        )
+
+        |
+
+
+        # Elevated / increased / borderline cardiothoracic ratio (CTR) / index
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!normal\s)
+        (?:
+            (?:elevated|increased|high|enlarged|borderline)\s+(?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)
+            |
+            (?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)\s+(?:is\s+|appears?\s+|measuring\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|enlarged|borderline)
+            |
+            \bctr\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|>|greater)
+        )
+
+        |
+
+
+        # Globular / massive heart (without requiring "enlarged" adjacent)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:globular|massive)\s+(?:appearing\s+)?(?:enlarged\s+)?heart\b
+
+        |
+
+
+        # Tight "enlarged heart"
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!\bor\s)
+        enlarged\s+heart\b
+
+        |
+
+
+        # Cardiac / heart shadow enlarged (synonym of silhouette)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:
+            (?:enlarg\w*|dilated|globular|massive|large\b)
+            (?:[^\w.!?;:]+\w+){0,2}[^\w.!?;:]+
+            (?:cardiac|heart)\s+shadow
+            |
+            (?:cardiac|heart)\s+shadow
+            (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|unlikely)\b)\w+){0,6}[^\w.!?;:]+
+            (?:enlarg\w*|dilat\w*|globular|massive|borderline|large|larger|widened)\b
+        )
+        (?!\s+is\s+unlikely)
+
+        |
+
+
+        # Widened / widening of the cardiac (not cardiomediastinal) silhouette/contour
+        # Also adjective form: "Widened cardiac silhouette" (hunt).
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:
+            widen(?:ed|ing)\s+of\s+(?:the\s+)?(?:cardiac|heart)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)\b
+            |
+            widened\s+(?:(?:cardiac|heart)|cardio[\s-]?pericardial)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|contours?)\b
+        )
+    )

@@ -7,7 +7,7 @@ import logging
 import os
 import pickle
 import re
-from typing import Dict, List, Optional, Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -25,7 +25,7 @@ _RESOURCES_DIR = os.path.join(os.path.dirname(__file__), "resources")
 _MAPPING_PATH = os.path.join(_RESOURCES_DIR, "leaves_mapping.json")
 
 
-def _load_label_map(mapping_path: str = _MAPPING_PATH) -> Dict[str, int]:
+def _load_label_map(mapping_path: str = _MAPPING_PATH) -> dict[str, int]:
     with open(mapping_path, "r", encoding="utf-8") as f:
         label_map = json.load(f)
     if len(label_map) != NUM_LABELS:
@@ -34,7 +34,7 @@ def _load_label_map(mapping_path: str = _MAPPING_PATH) -> Dict[str, int]:
 
 
 LABEL_MAP = _load_label_map()
-SRR_BERT_LEAVES_CLASS_NAMES: List[str] = [
+SRR_BERT_LEAVES_CLASS_NAMES: list[str] = [
     name for name, _ in sorted(LABEL_MAP.items(), key=lambda kv: kv[1])
 ]
 IDX2LABEL = {i: name for i, name in enumerate(SRR_BERT_LEAVES_CLASS_NAMES)}
@@ -52,7 +52,7 @@ def ensure_nltk_punkt() -> None:
             nltk.download(resource, quiet=True)
 
 
-def clean_text(text: Union[str, object]) -> str:
+def clean_text(text: str | object) -> str:
     if not isinstance(text, str):
         text = str(text)
     text = text.strip().replace("\n", " ")
@@ -79,7 +79,7 @@ def merge_labels(labels_list: Sequence[np.ndarray]) -> np.ndarray:
     return merged
 
 
-def labels_to_names(labels: Sequence[int]) -> List[str]:
+def labels_to_names(labels: Sequence[int]) -> list[str]:
     return [IDX2LABEL[i] for i, flag in enumerate(labels) if flag]
 
 
@@ -88,9 +88,9 @@ class SRRBertLeavesLabeler:
 
     def __init__(
         self,
-        device: Optional[Union[str, torch.device]] = None,
+        device: str | torch.device | None = None,
         default_batch_size: int = 32,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
         threshold: float = 0.5,
         verbose: bool = True,
         model_path: str = DEFAULT_MODEL_PATH,
@@ -120,8 +120,8 @@ class SRRBertLeavesLabeler:
         )
         self.model.to(self.device).eval()
 
-        self.sentence_to_labels: Dict[str, np.ndarray] = {}
-        self.report_hash_to_labels: Dict[str, np.ndarray] = {}
+        self.sentence_to_labels: dict[str, np.ndarray] = {}
+        self.report_hash_to_labels: dict[str, np.ndarray] = {}
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
             self._load_caches()
@@ -162,16 +162,16 @@ class SRRBertLeavesLabeler:
             if self.verbose:
                 logger.info("Saved %s (%d entries)", path, len(data))
 
-    def _predict_sentences(self, sentences: List[str], batch_size: int) -> List[np.ndarray]:
+    def _predict_sentences(self, sentences: list[str], batch_size: int) -> list[np.ndarray]:
         if not sentences:
             return []
-        cached: List[Optional[np.ndarray]] = [self.sentence_to_labels.get(s) for s in sentences]
+        cached: list[np.ndarray | None] = [self.sentence_to_labels.get(s) for s in sentences]
         missing = [i for i, v in enumerate(cached) if v is None]
         if not missing:
             return [np.asarray(v, dtype=np.int8) for v in cached]  # type: ignore
 
         to_process = [sentences[i] for i in missing]
-        new_labels: List[np.ndarray] = []
+        new_labels: list[np.ndarray] = []
         iterator = range(0, len(to_process), batch_size)
         if self.verbose:
             iterator = tqdm(iterator, desc="SRR-BERT sentence batches")
@@ -197,11 +197,11 @@ class SRRBertLeavesLabeler:
 
     def get_labels_for_reports(
         self,
-        reports: List[str],
-        report_hashes: Optional[List[str]] = None,
-        batch_size: Optional[int] = None,
+        reports: list[str],
+        report_hashes: list[str] | None = None,
+        batch_size: int | None = None,
         save_every: int = 2000,
-    ) -> List[np.ndarray]:
+    ) -> list[np.ndarray]:
         """Label reports via sentence tokenize + OR-merge; cache by report hash when provided."""
         from nltk.tokenize import sent_tokenize
 
@@ -212,8 +212,8 @@ class SRRBertLeavesLabeler:
         if report_hashes is None:
             report_hashes = [report_text_hash(r) for r in reports]
 
-        results: List[Optional[np.ndarray]] = [None] * len(reports)
-        todo_indices: List[int] = []
+        results: list[np.ndarray | None] = [None] * len(reports)
+        todo_indices: list[int] = []
         for i, h in enumerate(report_hashes):
             cached = self.report_hash_to_labels.get(h)
             if cached is not None:
@@ -232,10 +232,9 @@ class SRRBertLeavesLabeler:
         for chunk_start in range(0, len(todo_indices), save_every):
             chunk = todo_indices[chunk_start : chunk_start + save_every]
             chunk_reports = [reports[i] for i in chunk]
-            all_sentences: List[str] = []
-            per_report_sents: List[List[str]] = []
+            per_report_sents: list[list[str]] = []
             seen = set()
-            unique_sents: List[str] = []
+            unique_sents: list[str] = []
             for report in chunk_reports:
                 sents = sent_tokenize(clean_text(report))
                 per_report_sents.append(sents)

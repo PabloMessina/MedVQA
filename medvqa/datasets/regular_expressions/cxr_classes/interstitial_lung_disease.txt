@@ -1,17 +1,136 @@
+# ==============================================================================
+# interstitial_lung_disease
+# Diagnostic ILD attribution on the current CXR (ILD / named interstitial
+# pneumonia family), NOT interstitial morphology alone.
+#
+# Match: interstitial lung disease; UIP/NSIP/IPF (full names + framed
+# acronyms / UIP pattern / known UIP/ILD); affirmative + hedged interstitial
+# pneumonia(itis); named cystic ILD (LAM, PLCH); hypersensitivity pneumonitis;
+# fibrosing/fibrotic (chronic) lung disease; "chronic interstitial disease"
+# as ILD-equivalent disease label.
+#
+# Do NOT match: bare reticular/septal/honeycomb/fibrosis/scarring/GGO;
+# "interstitial process/abnormalities/markings"; edema/CHF interstitial
+# findings; emphysema/COPD; sarcoidosis; indication/history-only mentions;
+# "no evidence of"; "causes of ILD" (further-test DDx); transplant-for-IPF
+# history. Bare acronyms (ILD/NSIP/UIP/IPF) omitted — they fire almost only
+# in INDICATION/HISTORY on this freeze set.
+# ==============================================================================
 
-    # 1. Direct "Interstitial" Mentions
-    # Matches: "Interstitial opacities", "Interstitial markings", "Interstitial disease"
-    \binterstit\w*
+\b(?:
+        # Core phrase — block history / eval-indication / negation left-context
+        (?<!\bno\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bno\sevidence\sof\sunderlying\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhistory\sof\schronic\s)
+        (?<!\bhistory\schronic\s)
+        (?<!\breported\shistory\schronic\s)
+        (?<!\bknown\shistory\sof\s)
+        (?<!\bdiagnosis\sof\s)
+        (?<!\bcauses\sof\s)
+        (?<!\beval\sfor\s)
+        (?<!\bevaluate\sfor\s)
+        (?<!\beval\sfor\ssigns\sof\s)
+        (?<!\bevaluate\sfor\ssigns\sof\s)
+        (?<!\band/or\s)
+        (?<!\bmr:\s)
+        (?<!\bchemotherapy-induced\s)
+        (?<!\btold\she\shas\s)
+        (?<!\btold\sshe\shas\s)
+        interstitial\s+lung\s+disease
     |
-    # 2. "Infiltrates" (Strictly constrained)
-    # In English, "Infiltrate" alone usually means Pneumonia (Alveolar). 
-    # We only count it as ILD if it explicitly says "Interstitial infiltrate" 
-    # or "Chronic infiltrate".
-    \binterstit\w*\s+(?:infiltrat\w*|opac\w*|process|disease|abnormal\w*)
+        # "Chronic interstitial disease" used as ILD-equivalent diagnosis
+        # (not "interstitial process/markings/abnormalities")
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        chronic\s+interstitial\s+disease
     |
-    # 3. Clinical Acronyms
-    \bild\b             # Interstitial Lung Disease
+        # Named idiopathic / fibrotic interstitial pneumonia family
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?<!\btransplantation\sfor\s)
+        (?<!\btransplant\sfor\s)
+        (?:
+            usual\s+interstitial\s+pneumon(?:ias?|itis)|
+            nonspecific\s+interstitial\s+pneumon(?:ias?|itis)|
+            idiopathic\s+(?:pulmonary\s+fibrosis|interstitial\s+pneumon(?:ias?|itis))|
+            fibrotic\s+(?:interstitial\s+pneumon(?:ias?|itis)|ild)|
+            desquamative\s+interstitial\s+pneumon(?:ias?|itis)|
+            lymphocytic\s+interstitial\s+pneumon(?:ias?|itis)|
+            acute\s+interstitial\s+pneumon(?:ias?|itis)
+        )
     |
-    \buip\b             # Usual Interstitial Pneumonia (Fibrosis pattern)
+        # Framed named-ILD acronyms (not bare INDICATION/HISTORY tokens)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?:
+            UIP\s+pattern|
+            pattern\s+of\s+(?:a\s+)?UIP\b|
+            # compatible/consistent with (+ optional patient's / known / reported diagnosis of)
+            (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|the\s+)?(?:patient(?:'s)?\s+)?)?(?:known\s+)?(?:reported\s+)?(?:diagnosis\s+of\s+)?(?:an?\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            (?:patient\s+(?:with|is)\s+)?known\s+(?:for\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            progression\s+of\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
+            # likely/probable/possible + acronym (e.g. "likely NSIP")
+            (?:likely|probable|possible)\s+(?:UIP|NSIP|IPF|ILD)\b|
+            # from ILD / secondary to NSIP (attribution framing)
+            (?:likely\s+|possibly\s+)?from\s+(?:(?:an?\s+|known\s+)?)?ILD\b|
+            secondary\s+to\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
+            NSIP\s+pattern|
+            IPF\s+pattern|
+            # framed bare ILD (findings-of / chronic / such-as) — not INDICATION-only token
+            findings\s+of\s+(?:(?:an?\s+|early\s+|chronic\s+)?)?ILD\b|
+            (?:chronic|early)\s+ILD\b|
+            such\s+as\s+ILD\b|
+            # HP only when framed (avoid bare DDx-list tokens)
+            such\s+as\s+hypersensitivity\s+pneumonitis|
+            (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|known\s+)?)?hypersensitivity\s+pneumonitis|
+            (?:diagnosis\s+of|known)\s+hypersensitivity\s+pneumonitis
+        )
     |
-    \bnsip\b            # Nonspecific Interstitial Pneumonia
+        # Affirmative / hedged unnamed interstitial pneumonia (typo: Interstial)
+        # Diagnostic verbs / DDx hedges; prompt keeps hedges
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?:
+            # verb/hedge BEFORE disease (optional intervening modifiers / short DDx glue)
+            (?:
+                (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?|
+                (?:may\s+|might\s+|could\s+)?(?:suggest|reflect|represent|indicate)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?|
+                (?:consider|concerning\s+for|worrisome\s+for|suspicious\s+for)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+|slowly\s+progressing\s+)*)?|
+                (?:probable|possible|likely)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+|superimposed\s+)?(?:(?:\w+\s+){0,4}(?:or|versus|vs\.?)\s+)?)?|
+                # versus/vs — allow bare IP (hunt: edema versus interstitial pneumonia)
+                (?:versus|vs\.?)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?
+            )
+            intersti(?:ti)?al\s+pneumon(?:ias?|itis)
+          |
+            # bare affirmative with laterality / extent (not bare unmarked IP alone)
+            (?:bilateral|diffuse|chronic|patchy)\s+intersti(?:ti)?al\s+pneumon(?:ias?|itis)
+          |
+            # findings-of interstitial pneumonia
+            findings\s+of\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+|chronic\s+)*)?intersti(?:ti)?al\s+pneumon(?:ias?|itis)
+          |
+            # disease-first hedges
+            intersti(?:ti)?al\s+pneumon(?:ias?|itis)\s+(?:is\s+)?not\s+excluded|
+            intersti(?:ti)?al\s+pneumon(?:ias?|itis)\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?excluded|
+            cannot\s+exclude\s+(?:an?\s+)?intersti(?:ti)?al\s+pneumon(?:ias?|itis)|
+            intersti(?:ti)?al\s+pneumon(?:ias?|itis)\s+could\s+also\s+have\s+this\s+appearance|
+            intersti(?:ti)?al\s+pneumon(?:ias?|itis)\s+would\s+be\s+the\s+first\s+consideration
+        )
+    |
+        # Fibrosing / fibrotic CLD as ILD-equivalent diagnostic attribution
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?:fibrosing|fibrotic)\s+(?:chronic\s+)?(?:interstitial\s+)?lung\s+disease
+    |
+        # Named cystic ILD (LAM / pulmonary Langerhans cell histiocytosis)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?:lymphangioleiomyomatosis|Langerhans\s+cell\s+histiocytosis)
+    )

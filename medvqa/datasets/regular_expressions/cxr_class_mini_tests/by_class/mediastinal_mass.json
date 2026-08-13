@@ -1,0 +1,50 @@
+{
+  "class_id": "mediastinal_mass",
+  "positives": [
+    "Anterior mediastinal mass.",
+    "Mass-like mediastinal opacity.",
+    "Nodal mass in the mediastinum.",
+    "Right paratracheal mediastinal mass.",
+    "Soft tissue mass extending into the mediastinum.",
+    "Right paratracheal mass.",
+    "Mass lesion arising from the middle mediastinum.",
+    "Mass within the AP window.",
+    "Mass in the AP window.",
+    "Soft tissue mass within the aortopulmonary window.",
+    "Soft tissue mass in the aortopulmonary window.",
+    "Rounded density in the AP window worrisome for a new mass.",
+    "Large left mediastinal/hilar mass.",
+    "Right upper mediastinal tumor.",
+    "Bulky mediastinal tumor.",
+    "Infiltrative mediastinal tumor.",
+    "Mediastinal tumor.",
+    "Right paratracheal soft tissue mass.",
+    "Mass in the anterior mediastinum.",
+    "Mediastinal soft tissue mass.",
+    "Anterior mediastinal soft tissue mass.",
+    "Upper mediastinal soft tissue mass.",
+    "Posterior mediastinal soft tissue mass.",
+    "Right paratracheal soft-tissue mass.",
+    "Soft tissue mass in the mid to lower mediastinum.",
+    "AP window mass.",
+    "Aortopulmonary window mass.",
+    "Rounded soft tissue mass in the region of the AP window.",
+    "A large mass is seen within the AP window.",
+    "Mass-like opacity in the mediastinum.",
+    "Mass-like density in the anterior mediastinum.",
+    "Marked mediastinal adenopathy/mass.",
+    "Right paratracheal adenopathy/mass.",
+    "Mediastinal and hilar mass."
+  ],
+  "negatives": [
+    "Mediastinal widening.",
+    "Hilar lymphadenopathy without mass.",
+    "Thyroid goiter enlargement.",
+    "Aortic unfolding.",
+    "Pulmonary mass projected over the mediastinum.",
+    "No pneumomediastinum or mediastinal mass."
+  ],
+  "negation_soft": [
+    "No mediastinal mass."
+  ]
+}

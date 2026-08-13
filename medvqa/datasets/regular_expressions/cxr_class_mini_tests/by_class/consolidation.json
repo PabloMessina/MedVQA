@@ -1,0 +1,45 @@
+{
+  "class_id": "consolidation",
+  "positives": [
+    "Right lower lobe consolidation is present.",
+    "Airspace consolidation in the left lung.",
+    "Consolidative change with air bronchograms.",
+    "Alveolar opacification in the right middle lobe.",
+    "Dense airspace opacity obscuring vessel margins.",
+    "Airspace opacities in the left lung.",
+    "No significant interval change in consolidation.",
+    "Alveolar and interstitial opacity is present.",
+    "Airspace density in the left lower lobe.",
+    "No radiographic interval change in the bilateral airspace consolidation.",
+    "No gross interval change in the multifocal alveolar opacification and dense retrocardiac consolidation.",
+    "No appreciable interval change with redemonstration of extensive left retrocardiac consolidation with air bronchograms.",
+    "No definite interval change of consolidation in the left mid to lower lung.",
+    "Left lower lobe airspace process has not resolved.",
+    "The left lower lobe consolidative opacity has improved but not resolved.",
+    "Retrocardiac opacity with air bronchograms is not significantly changed.",
+    "Right base opacity probably with air bronchograms.",
+    "Mild bibasilar opacities may reflect early airspace opacity.",
+    "Fluffy alveolar opacities throughout both lungs.",
+    "The opacities are alveolar in appearance.",
+    "More confluent alveolar areas are again seen.",
+    "Combined alveolar polar and interstitial opacities involving the right lung.",
+    "Left lower lobe airspace infiltrate incompletely resolved.",
+    "Superimposed lower lobe airspace abnormalities are possible.",
+    "Left lower lobe opacification consistent with consolidation versus atelectasis versus resolving lung contusion.",
+    "Persistent left basilar opacification, question consolidation versus atelectasis.",
+    "The opacity is not very well defined and shows subtle air bronchograms.",
+    "Cardiomegaly without congestive failure, with air bronchograms and persistent consolidation of the left lung base."
+  ],
+  "negatives": [
+    "Ground-glass opacity preserving vessels.",
+    "Linear atelectasis at the bases.",
+    "Interstitial edema with Kerley lines.",
+    "Evaluate for consolidation.",
+    "No focal consolidation.",
+    "Right lower lobe consolidation is likely atelectasis."
+  ],
+  "negation_soft": [
+    "No consolidation is identified.",
+    "No focal airspace consolidation is seen."
+  ]
+}

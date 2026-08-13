@@ -1,0 +1,35 @@
+{
+  "class_id": "tuberculosis",
+  "positives": [
+    "Findings are compatible with active pulmonary tuberculosis.",
+    "Apical fibrocalcific scarring consistent with prior TB.",
+    "Miliary tuberculosis pattern is present.",
+    "Tuberculous pleural effusion is seen on the right.",
+    "Calcified Ghon focus from healed tuberculosis.",
+    "Stable Ghon lesion and Ranke complex.",
+    "Findings are concerning for tuberculosis.",
+    "Persistent upper-lung pleural-parenchymal disease compatible with history of TB.",
+    "Stable right apical parenchymal changes related to known history of TB.",
+    "Elevation of the right hilus related to known history of TB.",
+    "Chronic superior retraction of the hila related to the known history of tuberculosis.",
+    "Right upper lobe scarring consistent with the history of TB.",
+    "Dense calcified upper-lobe opacities consistent with prior history of tuberculosis.",
+    "Left-sided fibrothorax due to history of tuberculous pleuritis.",
+    "Dense hemithorax calcifications with volume loss consistent with prior treatment for tuberculosis.",
+    "Opacification of the right hemithorax consistent with pneumonectomy for tuberculosis.",
+    "Pleural-based mass previously biopsied and positive for tuberculosis."
+  ],
+  "negatives": [
+    "Apical fibronodular scarring of unclear cause.",
+    "Nonspecific calcified granuloma.",
+    "Thick-walled cavity favored to represent abscess.",
+    "Tree-in-bud pattern of unclear infection.",
+    "Exacerbation of known mycobacterial infection.",
+    "Evidence of previous granulomatous disease again noted."
+  ],
+  "negation_soft": [
+    "No evidence of active tuberculosis.",
+    "History of treated TB without residual radiographic abnormality.",
+    "Concerning for atypical infection, including TB or fungal."
+  ]
+}

@@ -1,23 +1,411 @@
+# ==============================================================================
+# pneumothorax (precision-first)
+# Pleural-space air/gas on the CURRENT CXR.
+#
+# Match: pneumothorax / PTX / aerothorax / tension PTX (+ common typos /
+# truncations: pneumo, pnthx, pneumthorax); deep sulcus; (visceral) pleural
+# line when PTX-framed; pleural air/gas (incl. air-filled / filled-with-air
+# word-order, free air in the pleura, apical/fissural sliver, loculated /
+# costophrenic pocket). Hydro/hemo/pyo lexical forms included (child leaf
+# still owns air-fluid coexistence for composed recall).
+#
+# FN-fit (fn_mine_fit_shared): residual parent only — do not re-lexicon
+# hydropneumothorax child.
+#
+# Do NOT match: negated / no-evidence / OR-list negatives; rule-out / evaluate-
+# for / indication-only / history headers; resolved / no-longer-seen; ?PTX
+# uncertainty prompts; skin-fold / pseudo-PTX / artifact mimics; subcut
+# emphysema / pneumomediastinum / chest tube alone; bullae/blebs alone.
+#
+# Clause-local tempered scan (pneumoperitoneum style). Fixed-width lookbehinds
+# only (stdlib re). Compiled with IGNORECASE|VERBOSE.
+# ==============================================================================
 
-    # 1. Direct Diagnosis & Typos (Robust matching)
-    # Matches: Pneumothorax, Pnuemothorax, Pnemothorax, Pneumothoraces
-    # Does NOT match: "No pneumothorax", "no ptx", etc.
-    (?<!\bno\s)
-    \bp(?:neu|nue|ne|nu)mothora(?:x|ces)\w*
-    |
-    # 2. Abbreviation (Extremely common in MIMIC notes)
-    # Does NOT match: "No PTX", etc.
-    (?<!\bno\s)
-    \bptx\b
-    |
-    # 3. The "Deep Sulcus Sign"
-    # 
-    # In supine patients (ICU), air collects at the bottom front, making the
-    # costophrenic angle look "deep" and dark.
-    \bdeep\s+sulcus\s+(?:sign|appearance)
-    |
-    # 4. The "Visceral Pleural Line"
-    # 
-    # This is the visible edge of the lung pulling away from the chest wall.
-    # Radiologists often write: "A fine visceral pleural line is visualized."
-    \bvisceral\s+pleural\s+(?:line|edge|surface)
+(?:
+        # ------------------------------------------------------------------
+        # Clause boundary: avoid treating "HISTORY:" / "INDICATION:" colons
+        # as fresh starts (indication-only FPs).
+        # ------------------------------------------------------------------
+
+        # ------------------------------------------------------------------
+        # 1. Direct lexical: pneumothorax / PTX / aerothorax (+ typos / hydro*)
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                # Persistent finding: "no/without (significant) (interval) change"
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # Contrastive: "no effusion, but ... pneumothorax"
+                # Do NOT allow when "no" already scopes pneumothorax/ptx
+                # (e.g. "no gross pneumothorax, but supine limited").
+                (?=\bno\b(?![^.!?;:\n]{0,45}(?:pneumotho|\bptx\b))[^.!?;:\n]{0,70},\s*(?:but|however)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|rule|
+                    history|hx|pmh|
+                    resolved|resolution|resolving|resoluation|
+                    evaluate|eval|assess|assessment|
+                    concern|concerned|
+                    exclude|excluding|
+                    please|
+                    presented|
+                    simulat(?:e|es|ed|ing)|
+                    mimic(?:s|king)?|mimick(?:s|ing)?|
+                    skin[\s\-]?fold|skinfold|
+                    pseudo|artifact|artifactual
+                )\b)
+                (?!\bw/o\b)
+                (?!\bno\s+(?:evidence|sign|findings?|definite|overt|gross|obvious|radiographic|demonstrable|evident)\b)
+                (?!\bwithout\s+(?:evidence|sign|findings?|demonstrable)\b)
+                (?!\bno\s+evidence\s+(?:of|for)\b)
+                (?!\bwithout\s+evidence\s+(?:of|for)\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess(?:ment)?\s+for\b)
+                (?!\bconcern(?:ed)?\s+for\b)
+                (?!\bquestion\s+(?:of|for)\b)
+                (?!\br/?o\b)
+                (?!\brule\s+out\b)
+                (?!\bplease\s+rule\s+out\b)
+                (?!\bto\s+exclude\b)
+                (?!\bcannot\s+exclude\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bh/?o\s+of\b)
+                (?!\bh/?o\b)
+                # Block s/p / status-post only when the object is PTX
+                # (allow "s/p chest tube/VATS with residual PTX").
+                (?!\bs/?p\s+(?:(?:a|an|the|left|right|bilateral|small|large|tiny|apical|residual|moderate|left[\s\-]+sided|right[\s\-]+sided)\s+){0,6}(?:(?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?othora|\bptx\b|aerothora))
+                (?!\bstatus\s+post\s+(?:(?:a|an|the|left|right|bilateral|small|large|tiny|apical|residual|moderate|left[\s\-]+sided|right[\s\-]+sided)\s+){0,6}(?:(?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?othora|\bptx\b|aerothora))
+                (?!\bresolution\s+of\b)
+                (?!\binterval\s+resolution\b)
+                (?!\bfollow\s+up\b)
+                (?!\brather\s+than\b)
+                (?!\bvs\.?\b)
+                (?!\bversus\b)
+                (?!\?)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?<!\bpseudo)
+        (?<!\bvs\s)
+        (?<!\bversus\s)
+        (?<!\bro\s)
+        (?<!\br/o\s)
+        (?<!\bfor\s)
+        (?<!\?)
+        (?<!\?\s)
+        \b(?:
+            # o? covers missing-o typo pneumthorax; stem still needs thora*
+            (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora(?:x|ces)\w*
+            |
+            aerothora(?:x|ces)\w*
+            |
+            # common truncations / typos in notes
+            pneumothx
+            |
+            pnthx
+            |
+            # bare "pneumo" truncation (not pneumonia / pneumo mediastinum / …)
+            pneumo(?!\s+(?:mediastin\w*|peritone\w*|pericardi\w*|mediastinum))
+            |
+            ptx
+        )\b
+        (?!\?)
+        (?![^.!?;:\n]{0,110}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing|resoluation)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated|redemonstrated|well\s+seen|well\s+visualized)|
+            (?:is|are)\s+not\s+(?:well\s+)?(?:seen|visualized)|
+            # bare post-noun negation (negation_soft: "Pneumothorax not identified.")
+            # Do NOT include bare "not present" — kills "PTX … not present on prior".
+            not\s+(?:seen|identified|detected|evident|visualized|appreciated|redemonstrated)\b|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible|apparent)|
+            not\s+(?:anymore\s+)?(?:visible|apparent|detectable)|
+            not\s+anymore\s+(?:detectable|seen|visible|apparent)|
+            anymore\s+(?:detectable|seen|visible|apparent)|
+            not\s+redemonstrated|
+            not\s+(?:readily\s+)?apparent|
+            not\s+well\s+(?:seen|visualized)|
+            occult\s+on\s+(?:conventional|this|chest)|
+            not\s+seen\s+on\s+(?:chest|this|the)\b|
+            (?:has\s+|have\s+)?resolved\b|
+            resolution\b|
+            resoluation\b
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1a. Impression "concerning for pneumothorax" (positive framing).
+        #     Main stem blocks via soft-concern + (?<!for ) lookbehind.
+        #     Use gerund "concerning" only — bare "clinical concern for" is
+        #     often indication / unresolved clinical question language.
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        [^.!?;:\n]{0,120}
+        (?<!\bclinical\s)
+        \bconcerning\s+for\s+
+        (?:(?:a|an|the|left|right|bilateral|small|large|tiny|apical|residual|possible)\s+){0,6}
+        (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora(?:x|ces)?\w*
+        (?!\?)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1b. Contrastive residual: no (large|definite|appreciable) PTX
+        #     but/however/except small/trace/sliver/apical PTX or pleural air.
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        [^.!?;:\n]{0,220}
+        \bno\s+
+        (?:(?:evidence|sign|findings?)\s+(?:of\s+)?)?
+        (?:a\s+)?
+        (?:large|gross|overt|definite|obvious|radiographic|appreciable)\s+
+        (?:(?:left|right|bilateral)[\s\-]+(?:sided\s+)?)?
+        (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora\w*
+        [^.!?;:\n]{0,55}
+        (?:,\s*)?(?:but|however|except(?:\s+for)?)\b
+        [^.!?;:\n]{0,90}
+        (?:
+            (?:small|tiny|trace|minimal|residual|apical|persistent|loculated)\b
+            [^.!?;:\n]{0,50}
+            (?:
+                (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora\w*
+                |
+                \bptx\b
+                |
+                \bpneumo\b
+                |
+                pleural\s+(?:air|gas)
+                |
+                ex\s+vacuo
+                |
+                sliver\s+of\s+(?:air|gas)
+            )
+            |
+            sliver\s+of\s+(?:air|gas)
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1c. Although-no … may represent/reflect a pneumothorax
+        #     (early NO must not kill trailing PTX attribution).
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        [^.!?;:\n]{0,40}
+        \balthough\s+(?:there\s+is\s+)?no\b
+        [^.!?;:\n]{0,140}
+        (?:,\s*)?
+        (?:relative\s+lucency\s+)?may\s+(?:represent|reflect|indicate|be)\s+
+        (?:a\s+)?
+        (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora(?:x|ces)?\w*
+        (?!\?)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Deep sulcus sign (supine PTX proxy)
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|
+                    ruled\s+out|rule\s+out|
+                    simulat(?:e|es|ed|ing)|mimic|artifact|question
+                )\b)
+                [^.!?;:\n]
+            )
+        ){0,180}
+        (?:
+            (?:appearance|presence|suggestion)\s+of\s+(?:a\s+)?deep\s+sulcus
+            |
+            \bdeep\s+sulcus(?:\s+(?:sign|appearance|present|on|at|in))?
+        )\b
+        (?!\?)
+        (?!\s+(?:from\s+)?(?:bowel|colon|gas|stomac\w*|chilaiditi))
+        (?![^.!?;:\n]{0,70}\b(?:
+            no\s+(?:definite\s+|frank\s+|gross\s+|overt\s+)?(?:pneumotho|\bptx\b)|
+            not\s+(?:a\s+)?(?:pneumotho|\bptx\b)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Visceral / bare pleural line — require PTX / markings framing
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|
+                    ruled\s+out|rule\s+out|
+                    skin[\s\-]?fold|skinfold|pseudo|artifact|mimic|question
+                )\b)
+                [^.!?;:\n]
+            )
+        ){0,160}
+        \b(?:visceral\s+)?pleural\s+(?:line|edge|surface)\b
+        [^.!?;:\n]{0,90}
+        (?:pneumotho\w*|\bptx\b|pleural\s+(?:air|gas)|absent\s+(?:peripheral\s+)?(?:lung\s+)?markings)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3b. Absent markings BEFORE (visceral) pleural line (word-order)
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    ruled\s+out|rule\s+out|
+                    skin[\s\-]?fold|skinfold|pseudo|artifact|mimic|question
+                )\b)
+                [^.!?;:\n]
+            )
+        ){0,160}
+        \babsent\s+(?:peripheral\s+)?(?:lung\s+)?markings\b
+        [^.!?;:\n]{0,90}
+        \b(?:visceral\s+)?pleural\s+(?:line|edge|surface)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Explicit air/gas in the pleural space (+ word-order / sliver /
+        #    loculated or costophrenic pocket residuals)
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|
+                    ruled\s+out|rule\s+out|
+                    question|
+                    subcutane\w*|mediastin\w*|pericardi\w*|peritone\w*|
+                    bulla|bullae|bleb
+                )\b)
+                (?!\bquestion\s+of\b)
+                (?!\braises\s+the\s+question\b)
+                [^.!?;:\n]
+            )
+        ){0,180}
+        (?:
+            (?:air|gas)\s+(?:in|within)\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?pleural\s+(?:space|cavity)
+            |
+            \bpleural\s+(?:air|gas)\b
+            |
+            (?:pocket|locule|collection)\s+of\s+(?:air|gas)\s+(?:in|within)\s+(?:the\s+)?pleural
+            |
+            # word-order: pleural space filled with air / air-filled pleural space
+            (?:(?:right|left|bilateral)\s+)?pleural\s+space\s+(?:is\s+)?(?:largely\s+|completely\s+|partially\s+)?filled\s+with\s+(?:air|gas)
+            |
+            (?:air|gas)[\s\-]?filled\s+(?:(?:right|left|bilateral)\s+)?pleural\s+(?:space|cavity)
+            |
+            # free air in the pleura (not only pleural space/cavity token)
+            free\s+air\s+in\s+(?:the\s+)?pleura\b
+            |
+            # apical / fissural sliver of air (PTX residual without pneumo* token)
+            sliver\s+of\s+(?:air|gas)\s+in\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?(?:apical\s+)?(?:pleural\s+(?:space|cavity)|(?:minor|major)\s+fissure|fissure|apex)
+            |
+            # loculated mid-lung pocket of air (over … mid lung; not intraparenchymal "within lung")
+            loculated\s+(?:pocket|collection)\s+of\s+(?:air|gas)\s+over\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:(?:mid|upper|lower|apical)\s+)?(?:lung|hemithorax)
+            |
+            # iatrogenic / costophrenic pocket of gas (thoracentesis-framed optional)
+            (?:(?:residual|iatrogenic|post[\s\-]?procedural)\s+)?(?:pocket|collection)\s+of\s+(?:air|gas)\s+in\s+(?:the\s+)?(?:(?:right|left)\s+)?costophrenic\s+(?:sulcus|angle|recess)
+        )
+        (?!\?)
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared)|
+            no\s+longer\s+(?:seen|present)|
+            not\s+(?:seen|identified|present)|
+            rather\s+than|
+            favored\s+to\s+reflect|
+            overlapping
+        )\b)
+)

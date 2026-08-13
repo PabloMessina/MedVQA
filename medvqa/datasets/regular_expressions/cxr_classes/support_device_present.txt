@@ -1,0 +1,284 @@
+# ==============================================================================
+# support_device_present (mid-node residual)
+# Umbrella: currently visible therapeutic support devices / medical hardware.
+# Ontology children (readonly here) cover CVC, tubes, pacers, valves, grafts,
+# breast implants, sternotomy wires, device_abnormality, support_line/tube.
+# Production OR-helpers (metal / prosthesis / humeral_prosthesis / trach) are
+# invisible in hierarchy-aware eval — recover that residual on this parent leaf.
+# Phase B4 helper-merge policy:
+#   metal → DISCARD bare metal|screw|plate|fixation; KEEP framed ortho residual
+#   prosthesis → DISCARD bare prosthe*|implant|graft (FP: intraocular lenses, etc.)
+#   humeral_prosthesis → DISCARD (already covered by joint/limb prosthesis arm)
+#
+# Prefer residual phrasing children miss: generic support devices / hardware /
+# lines+tubes, surgical clips/staples/coils/sutures/markers, ortho fixation,
+# vertebroplasty, LVAD/IABP/ECMO/loop recorder, tracheostomy, joint prostheses.
+# Residual polish: presence-framed unnamed hardware; skip-through "in comparison
+# with"; do not recover indication-only / fracture / piercing / interval-removal.
+# FN-fit residual (children miss): fixation device/rod, support/stabilization
+# hardware, hardware in/within, radiopaque drain/bar, framed unnamed drain,
+# surgical-drain "overlies", SVC / vena-cava filter. Wave-28 residual: VNS /
+# LINQ abbrev, implanted|implantable … device, postoperative/base drains,
+# bare shunt catheter. Not child tube/line/pacer lexicons.
+#
+# Do NOT re-implement child lexicons. Do NOT match ECG electrodes/stickers,
+# O2 tubing, clothing artifacts, calcification, bare fracture, soft-tissue gas,
+# bullets/shrapnel/nontherapeutic FB, history/prior-only, or fully removed devices.
+# NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+# NOTE: do not use bare \bplates?\b — it matches end-plate / plate-like opacity.
+# NOTE: do not use bare \bscrews?\b / \bfixation\b / \bprosthe / \bimplant / \bgraft.
+# ==============================================================================
+
+(?:
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:in\s+)?compar(?:e|ison)\s+(?:with|to|against)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\b(?:interval\s+)?(?:removal|withdrawal)\s+of\b)
+                (?!\bstatus\s+post\s+removal\b)
+                (?!\bs/?p\s+removal\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bindication\b)
+                (?!\bclinical\s+history\b)
+                (?!\bcompare\b)
+                (?!\bcomparison\b)
+                (?!\bconcern\s+for\b)
+                (?!\battempt(?:ed|ing)?\b)
+                (?!\bunsuccessful\b)
+                (?!\br/?o\b)
+                (?!\byear[-\s]old\b)
+                (?!\by/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,320}
+
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sall\s)
+        (?<!removal\sof\sall\smonitoring\sand\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!interval\sremoval\sof\sthe\s)
+        (?<!after\sremoval\sof\s)
+        (?<!following\sremoval\sof\s)
+        (?<!status\spost\sremoval\sof\s)
+        (?<!s/p\sremoval\sof\s)
+
+        (?:
+            \b(?:
+                # ----- generic umbrella -----
+                support(?:ing)?(?:\s+and\s+monitoring)?\s+devices?
+                | monitoring\s+and\s+support\s+devices?
+                | medical\s+(?:hardware|devices?)
+                | (?:life\s+)?support\s+(?:equipment|apparatus)
+                | (?:trauma|fixation|fusion|spinal|orthopedic|orthopaedic|surgical|overlying|humerus|humeral|shoulder|support|stabilization)\s+hardware
+                | hardware\s+(?:is|are|appears?|intact|stable|visualized|identified|noted|present|again|components?|malfunction|in|within)
+                | lines?\s+and\s+(?:tubes?|surgical\s+materials?)
+                | tubes?\s+and\s+lines?
+                | remaining\s+lines(?:\s+and\s+surgical\s+materials?)?
+                | lines?\s+(?:are\s+)?(?:unchanged|stable)
+                | surgical\s+materials?
+                | post[-\s]?surgical\s+material
+
+                # ----- clips / staples / coils / sutures / markers -----
+                | (?:surgical|cholecystectomy|post(?:-|\s)?cholecystectomy|mediastinal|axillary|hilar|
+                    post[-\s]?operative|postoperative)\s+clips?
+                | clips?\s+(?:are|is|again|noted|seen|present|visualized|in|from|project|overlie)
+                | tiny\s+clips?
+                | surgical\s+staples?
+                | (?:skin|subcutaneous)\s+staples?
+                | staple\s+lines?
+                | embolization\s+coils?
+                | (?:chain\s+)?sutures?(?:\s+(?:material|chain))?
+                | suture\s+(?:material|chain)
+                | surgical\s+chain
+                | metallic\s+suture
+                | (?:surgical\s+)?fiducial\s+(?:markers?|seeds?|coils?)
+                | (?:graft|surgical)\s+markers?
+
+                # ----- sternotomy (wires optional; child covers explicit wires) -----
+                | sternotom\w*
+                | sternotomy\s+wires?
+
+                # ----- ortho / fixation (qualified; no bare plate/screw/fixation) -----
+                # B4 metal helper residual: framed only (bone anchors, spinal rods,
+                # internal fixation, fixation bars / NUSS). Never bare plate|screw|fixation.
+                | (?:plates?|screws?|rods?)(?:\s+and\s+(?:plates?|screws?|rods?))+
+                | plates?\s+and\s+screws?
+                | plates?\s+with\s+(?:[^.!?;:\n]{0,60}?\s+)?screws?
+                | longitudinal\s+plates?
+                | screws?\s+and\s+(?:fixation\s+)?(?:plates?|hardware|rods?)
+                | (?:pedicle|transpedicular)\s+screws?
+                | (?:plate|screw)\s+(?:and\s+screw\s+)?fixation
+                | (?:spinal|cervical|thoracic|lumbar|thoracolumbar|vertebral|clavicular|orthopedic|orthopaedic|surgical|humeral)\s+(?:spine\s+)?fixation
+                | internal\s+fixation
+                | fixation\s+(?:bars?|devices?|rods?)
+                | spinal\s+rods?
+                | bone\s+anchors?
+                | anchors?\s+lateral
+                | NUSS\b
+                | (?:fusion|ACDF)\s+hardware
+                | (?:thoracolumbar|posterior|spinal)\s+fusion
+                | ACDF\b
+                | ORIF\b
+                | cerclage\s+wires?
+                | osteosynthesis
+                | (?:lateral|orthopedic|orthopaedic)\s+plating
+                | anterior\s+cervical\s+(?:spine\s+)?fusion
+
+                # ----- joint / limb prosthesis -----
+                # B4 humeral_prosthesis helper: already covered here (DISCARD helper).
+                # B4 prosthesis helper bare prosthe*|implant|graft: DISCARD (FP-prone).
+                | (?:humeral|shoulder|hip|knee)\s+(?:prosthes\w*|arthroplast\w*|hemiarthroplast\w*|replacements?)
+                | (?:total|right|left|uncemented|cemented)\s+(?:hip|knee|shoulder)\s+(?:arthroplast\w*|replacements?|prosthes\w*|hemiarthroplast\w*)
+                | (?:uncemented|cemented)\s+hemiarthroplast\w*
+                | prosthe(?:sis|tic)\s+(?:left|right)?\s*(?:humeral|shoulder|hip|knee|cardiac|valvular|heart)
+                | (?:humeral|shoulder)\s+head\s+(?:prosthes\w*|replacements?)
+                | prosthetic\s+(?:left|right)\s+humeral\s+head
+                | (?:right|left)\s+humeral\s+prosthes\w*
+                | (?:partially\s+(?:imaged|visualized)\s+)?(?:left|right)\s+shoulder\s+prosthes\w*
+                | (?:mitral\s+)?valvuloplasty(?:\s+rings?)?
+                | (?:atrial\s+septal|ASD|PFO)\s+occluders?
+
+                # ----- cement / vertebroplasty -----
+                | vertebroplast\w*
+                | verterbroplast\w*
+                | kyphoplast\w*
+
+                # ----- mechanical circulatory / loop recorder / ECMO -----
+                | (?:LVAD|IABP|ECMO|Impella)(?:\s+cannulas?)?
+                | intra[-\s]?aortic\s+balloon\s+(?:pumps?|catheters?)
+                | left\s+ventricular\s+assist\s+devices?
+                | (?:implantable\s+)?loop\s+recorders?
+                | (?:vagus|vagal)(?:\s+nerve)?\s+stimulators?
+                | (?:neural|spinal|nerve|epicardial)\s+stimulators?
+                | stimulator\s+leads?
+                | (?:temporary\s+)?pacing\s+leads?
+                | neurostimulators?
+                # Wave-28 residual: brand / abbrev ILR & VNS (children miss)
+                | VNS\s+(?:devices?|units?|generators?)
+                | LINQ(?:\s+cardiac\s+monitoring)?\s+devices?
+                # Generic implanted/implantable device (not named ICD/pacer child)
+                | implantable\s+(?:\w+\s+){0,4}devices?
+                | implanted\s+(?:\w+\s+){0,4}devices?
+
+                # ----- tracheostomy (production trach helper residual) -----
+                | tracheostom\w*
+                | trach\s+(?:tubes?|cannulas?)
+
+                # ----- other therapeutic residual -----
+                | endobronchial\s+valves?
+                | endobrachial\s+valves?
+                | Jackson[-\s]?Pratt(?:\s+drains?)?
+                | JP\s+drains?
+                # Unnamed therapeutic drain / pectus-style bar (not child JP/chest-tube)
+                | radiopaque\s+(?:drains?|bars?)\b
+                | drains?\s+(?:is|are)\s+(?:present|seen|noted|visualized|identified|projecting|unchanged|stable)
+                | drains?\s+(?:at|in|over|overlying)\s+[^.!?;:\n]{0,40}?\s+(?:is|are)\s+(?:unchanged|stable|present|seen|noted|visualized|identified|projecting)
+                | drains?\s+overlie[sd]?
+                | presence\s+of\s+(?:post[-\s]?operative\s+)?drains?
+                | post[-\s]?operative\s+drains?
+                | (?:IVC|SVC|(?:(?:inferior|superior)\s+)?vena\s+cava|caval)\s+filters?
+                | VP\s+shunts?
+                | ventriculoperitoneal\s+shunts?
+                | shunt\s+catheters?
+                | TIPS\b
+                | metallic\s+anchors?
+                | soft\s+tissue\s+[Aa]nchors?
+                | figure\s+of\s+eight\s+wires?
+                | core\s+valve\s+devices?
+                | post[-\s]?CABG(?:\s+chest)?
+                | (?:status\s+post|s/?p|prior)\s+CABG(?:\s+chest)?
+                | (?:evidence\s+of\s+)?CABG\s+surgery
+                | (?:consistent\s+with|evidence\s+of)\s+CABG\b
+                | sequelae\s+of\s+CABG\b
+                | coronary\s+(?:artery\s+)?bypass(?:\s+grafts?)?
+                | (?:biliary|bronchial|metal)\s+stents?
+                | stents?\s+(?:in|are|is|again|noted|seen|visualized|projecting)
+                | surgical\s+XXXX
+            )
+            |
+            # "anintramedullary" glued typo — match substring, not \b-prefixed.
+            # Block "(intramedullary nail)" Surg/indication shorthand (colon-delimited).
+            (?<!\()intramedullary\s+(?:rods?|nails?|nailing)
+        )
+
+        (?!
+            (?:
+                [^.!?;:\n]{0,60}
+                (?:
+                    (?:has|have|had|was|were)\s+(?:also\s+)?(?:been\s+)?removed
+                    | (?:is|are)\s+(?:not\s+)?(?:no\s+longer\s+)?(?:fully\s+)?removed
+                    | (?:is|are)\s+not\s+(?:seen|visualized|identified|appreciated)
+                    | (?:not|no\s+longer)\s+(?:seen|visualized|identified|appreciated)
+                    | removed
+                )
+            )
+        )
+)
+|
+# Presence-framed residual in a clause that also mentions interval removal of
+# a *different* device (walk-level removal block would otherwise stop the clause).
+# Lexicon is presence-framed only — do not include bare staples/clips/tubes.
+(?:
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bindication\b)
+                (?!\bclinical\s+history\b)
+                (?!\bconcern\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,320}
+
+        (?<!removal\sof\s)
+        (?<!interval\sremoval\sof\s)
+
+        \b(?:
+            unchanged\s+(?:metallic\s+)?sutures?
+            | (?:persistent|remaining|residual|redemonstrated)\s+(?:metallic\s+)?sutures?
+            | metallic\s+suture\s+overlying
+        )
+
+        (?!
+            (?:
+                [^.!?;:\n]{0,60}
+                (?:
+                    (?:has|have|had|was|were)\s+(?:also\s+)?(?:been\s+)?removed
+                    | (?:is|are)\s+(?:not\s+)?(?:no\s+longer\s+)?(?:fully\s+)?removed
+                    | removed
+                )
+            )
+        )
+)

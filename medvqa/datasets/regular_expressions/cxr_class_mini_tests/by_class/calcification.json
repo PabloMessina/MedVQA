@@ -1,0 +1,30 @@
+{
+  "class_id": "calcification",
+  "positives": [
+    "Scattered calcific densities are present in both lungs.",
+    "There is calcification along the aortic arch.",
+    "A calcified granuloma is seen in the right upper lobe.",
+    "Pleural calcification is noted along the lateral chest wall.",
+    "Coronary artery calcification is visible.",
+    "Fibrocalcific densities in the right apex.",
+    "Soft-tissue phleboliths are noted.",
+    "There is mineralization of the costochondral cartilage.",
+    "The nodule may contain calcium.",
+    "Both nodules appear to have some calcium within them.",
+    "There is a large aggregate of calcium in the mitral annulus.",
+    "Right basal atelectasis could be due to a broncholith.",
+    "A density with some calcium is seen overlying the right upper zone.",
+    "The density has the appearance of region calcium."
+  ],
+  "negatives": [
+    "A dense osseous rib lesion is present.",
+    "A pleural-based soft-tissue mass is seen.",
+    "Unfolded aorta without mineral density.",
+    "A non-calcified pulmonary nodule is present.",
+    "No pathologic calcification is identified."
+  ],
+  "negation_soft": [
+    "No calcification is identified.",
+    "Prior calcified granuloma was seen on CT but is not visible on this film."
+  ]
+}

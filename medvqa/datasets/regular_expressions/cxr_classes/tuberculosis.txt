@@ -1,40 +1,119 @@
+# ==============================================================================
+# tuberculosis
+# Prompt-faithful: explicit TB / tuberculous / MTB / Koch attribution, or named
+# sequelae (Ghon focus/complex/lesion, Ranke complex). Do NOT match bare
+# granuloma / granulomatous disease, NTM/MAC / bare "mycobacterial", history-
+# only / screening / rule-out, or clear negation. Precision-first trim of
+# differential lists ("including TB"), parenthetical (TB, ...), fungus-or-TB,
+# and "TB cannot/should be excluded". Keep "miliary tuberculosis" (prompt-positive).
+#
+# Intervening tokens use fixed-width lookbehinds (stdlib re). Text is
+# whitespace-normalized + lowercased by eval before matching.
+#
+# FN-fit (fn_mine_fit_shared): history-attribution bridges (related-to /
+# intervening the|prior|known; due-to history) + carve treatment|surgery|
+# biopsy "for tuberculosis" out of the bare (?<!\bfor\s) guard.
+# ==============================================================================
 
-    # ==============================================================================
-    # 1. Direct Terminology & Acronyms
-    # ==============================================================================
-    \btubercul\w*
-    |
-    \btb\b
-    |
-    \bmtb\b                                  # Added: MTB acronym
-    |
-    # ==============================================================================
-    # 2. The Organism & Synonyms
-    # ==============================================================================
-    \bacid[- ]?fast\s+bacill\w*
-    |
-    \bafb\b
-    |
-    \bkoch'?s\s+(?:infection|disease|bacillus)
-    |
-    # ==============================================================================
-    # 3. Pathological Eponyms & States (Highly TB Specific)
-    # ==============================================================================
-    \b(?:ghon|ranke)'?s?\s+(?:complex|focus)\b # Added: Ghon / Ranke complex
-    |
-    \bcaseat\w* # Added: Caseation / Caseating
-    |
-    \bmiliary\b                              # Added: Miliary spread pattern
-    |
-    # ==============================================================================
-    # 4. Radiological Euphemisms & Footprints
-    # ==============================================================================
-    \bgranuloma(?:ta|s)?\b
-    |
-    \bgranulomat\w*
-    |
-    \bcavit(?:y|ies|ary|ating|ation)\b
-    |
-    # Added 'fibronodular' to the apical footprint block
-    \b(?:apical|biapical|apices|upper\s+lobe|upper\s+lobes)\s+(?:.*?)\b(?:fibrocalcific|fibronodular|calcific\w*|scarring|scars?)\b
-    
+(?:
+  # --------------------------------------------------------------------------
+  # A. Named TB sequelae (prompt-positive even without the word TB)
+  # --------------------------------------------------------------------------
+  \b(?:ghon\s+(?:focus|complex|lesion)|ranke\s+complex)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # B. Finding-level hedge → explicit TB (not indication r/o / eval / screen)
+  # --------------------------------------------------------------------------
+  \b(?:concerning|suspicious|worrisome)\s+for\s+(?:active\s+)?(?:pulmonary\s+)?(?:tb|tuberculo\w*)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # C. Visible sequelae attributed via history-of TB (not bare history-only)
+  #    Allow intervening the|a / prior|reported|known before "history of".
+  # --------------------------------------------------------------------------
+  \b(?:compatible|consistent)\s+with\s+(?:(?:the|a)\s+)?(?:(?:prior|reported|known)\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+
+  |
+
+  \brelated\s+to\s+(?:the\s+)?(?:known\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+
+  |
+
+  \bdue\s+to\s+(?:(?:a|the)\s+)?(?:(?:known|prior|reported)\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # C2. Current finding attributed via treatment / resection / biopsy "for TB"
+  #     (bare lexicon still blocks generic "… for TB" via lookbehind)
+  # --------------------------------------------------------------------------
+  \b(?:(?:prior\s+)?treatment|pneumonectomy|lobectomy)\s+for\s+(?:tb|tuberculo\w*)\b
+
+  |
+
+  \b(?:biopsied\s+and\s+)?positive\s+for\s+(?:tb|tuberculo\w*)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # D. Explicit TB lexicon with negation / history / screen / list guards
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+      (?<!\bno\sactive\s)
+      (?<!\bno\sevidence\sof\s)
+      (?<!\bno\sevidence\sof\sactive\s)
+      (?<!\bwithout\sevidence\sof\s)
+      (?<!\bno\sevidence\sto\ssuggest\s)
+      (?<!\bno\sgood\sevidence\sof\s)
+      (?<!\bno\sfindings\sto\ssuggest\s)
+      (?<!\bthere\sis\sno\sevidence\sof\s)
+      (?<!\bthere\sare\sno\sfindings\sto\ssuggest\s)
+      (?<!\bno\sevidence\sof\sacute\sor\schronic\s)
+      (?<!\bno\sevidence\sof\sacute\sor\sold\s)
+      (?<!\bno\sevidence\sto\ssuggest\sactive\sor\slatent\s)
+      (?<!\bno\sevidence\sof\spast\sor\spresent\s)
+      (?<!\bno\sradiographic\sevidence\sof\s)
+      (?<!\bno\sevidence\sfor\sactive\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)
+      (?<!\brule\sout\sevidence\sof\s)
+      (?<!\brule\sout\sany\sevidence\sof\s)
+      (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\bevaluation\sfor\s)
+      (?<!\bscreen\sfor\s)(?<!\bscreening\sfor\s)
+      (?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\bh/o\s)
+      (?<!\bhistory\sof\streated\s)
+      (?<!\bprior\shistory\sof\s)
+      (?<!\breported\sprior\shistory\sof\s)
+      (?<!\bprior\shistory\sof\spulmonary\s)
+      (?<!\bcorrelation\sfor\shistory\sof\s)
+      (?<!\bclose\scorrelation\shistory\sof\s)
+      (?<!\bless\slikely\s)
+      (?<!\bnegative\s)
+      (?<!\bnon-adherence\sto\s)
+      (?<!\batypical\s)
+      (?<!\bfor\s)
+      (?<!\bc/w\s)
+      (?<!\()
+      (?<!\bincluding\s)
+      (?<!\bfungus\sor\s)
+      (?<!\bunlikely\sto\sbe\sisolated\sadenopathy\sdue\sto\s)
+
+      \b(?:
+          tuberculo\w*|
+          tb|
+          mycobacterium\s+tuberculosis|
+          koch(?:['’]s)?\s+disease
+      )\b
+
+      (?!\s+screening)
+      (?!\s+cultures)
+      (?!\s+naat)
+      (?!\s+medications)
+      (?!\s+cannot\s+be\s+excluded)
+      (?!\s+should\s+be\s+excluded)
+      (?!\s+is\s+present)
+  )
+)

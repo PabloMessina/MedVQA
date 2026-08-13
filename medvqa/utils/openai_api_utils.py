@@ -11,14 +11,17 @@ import re  # for matching endpoint from request URL
 import sys
 import time  # for sleeping after rate limit is hit
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import tiktoken  # for counting tokens
 from openai import AsyncOpenAI, OpenAI  # for OpenAI API calls
+
 from medvqa.utils.files_utils import (
     get_timestamp,
+    load_json,
     load_jsonl,
     load_pickle,
+    save_json,
     save_jsonl,
     save_pickle,
 )
@@ -30,10 +33,18 @@ __all__ = [
     "process_api_requests_from_file",
     "GPT_IS_ACTING_WEIRD_REGEX",
     "orchestrate_api_calls",
+    "prepare_batch_requests",
+    "submit_gemini_batch",
+    "collect_gemini_batch",
+    "resolve_gemini_reasoning_effort",
 ]
 
+_GEMINI_BATCH_TERMINAL_STATUSES = frozenset(
+    {"completed", "failed", "cancelled", "expired", "canceled"}
+)
+
 ALLOWED_MODELS = {
-    "openai": set([
+    "openai": {
         "gpt-3.5-turbo",
         "gpt-3.5-turbo-0301",
         "gpt-3.5-turbo-0613",
@@ -44,8 +55,8 @@ ALLOWED_MODELS = {
         "gpt-4o",
         "gpt-4o-mini",
         # ...add more as released
-    ]),
-    "gemini": set([
+    },
+    "gemini": {
         "gemini-2.0-pro",
         "gemini-2.0-flash",
         "gemini-2.5-pro-exp-03-25",
@@ -55,23 +66,31 @@ ALLOWED_MODELS = {
         "gemini-2.5-pro-preview-05-06",
         "gemini-2.5-flash-lite-preview-06-17",
         "gemini-2.5-flash-lite-preview-09-2025",
+        "gemini-2.5-flash-lite",
+        "gemini-3.5-flash-lite",
         # ...add more as released
-    ]),
+    },
+}
+
+# OpenAI-compat `reasoning_effort` maps to Gemini 3 `thinking_level`.
+# Gemini 3.5 Flash Lite defaults to minimal; thinking cannot be set to "none".
+GEMINI_DEFAULT_REASONING_EFFORT = {
+    "gemini-3.5-flash-lite": "minimal",
 }
 
 REASONING_MODELS = {
-    "gemini": set([
+    "gemini": {
         "gemini-2.5-pro-exp-03-25",
         "gemini-2.5-pro-preview-03-25",
         "gemini-2.5-flash-preview-04-17",
         "gemini-2.5-flash-preview-04-17-thinking",
         "gemini-2.5-pro-preview-05-06",
         "gemini-2.5-flash-lite-preview-09-2025",
-    ]),
-    "openai": set([
+    },
+    "openai": {
         "gpt-4o",
         "gpt-4o-mini",
-    ]),
+    },
 }
 
 GPT_IS_ACTING_WEIRD_REGEX = re.compile(r"\b(I'm sorry|Sorry|Could you|Can you|I apologize|Sure|I'd be happy|do you need)\b")
@@ -133,6 +152,24 @@ def is_model_supported(model_name, api_type):
         raise ValueError(f"Unknown API type: {api_type}. Must be 'openai' or 'gemini'.")
 
 
+def resolve_gemini_reasoning_effort(
+    model_name: str, reasoning_effort: Optional[str] = None
+) -> Optional[str]:
+    """Return OpenAI-compat reasoning_effort for Gemini, or None to omit.
+
+    Explicit ``reasoning_effort`` always wins. Else use a model default
+    (Gemini 3.5 Flash Lite → ``minimal``), else ``none`` for listed 2.5
+    reasoning models. Omitted for non-reasoning Gemini models.
+    """
+    if reasoning_effort is not None and str(reasoning_effort).strip():
+        return str(reasoning_effort).strip()
+    if model_name in GEMINI_DEFAULT_REASONING_EFFORT:
+        return GEMINI_DEFAULT_REASONING_EFFORT[model_name]
+    if model_name in REASONING_MODELS.get("gemini", ()):
+        return "none"
+    return None
+
+
 def _generate_request(
     system_instructions: str,
     query: str,
@@ -142,6 +179,7 @@ def _generate_request(
     frequency_penalty: float = 0,
     presence_penalty: float = 0,
     api_type: str = "openai",  # 'openai' or 'gemini'
+    reasoning_effort: Optional[str] = None,
 ):
     assert len(system_instructions) > 0
     assert len(query) > 0
@@ -161,11 +199,17 @@ def _generate_request(
         request["frequency_penalty"] = frequency_penalty # 0.0 = no penalty, 2.0 = max penalty
         request["presence_penalty"] = presence_penalty # 0.0 = no penalty, 2.0 = max penalty
         request["max_tokens"] = max_tokens
+        if reasoning_effort:
+            request["reasoning_effort"] = reasoning_effort
     elif api_type == "gemini":
         # Gemini supports temperature and max_tokens, but not frequency_penalty or presence_penalty
         request["temperature"] = temperature
         if max_tokens is not None:
             request["max_tokens"] = max_tokens
+        effort = resolve_gemini_reasoning_effort(model_name, reasoning_effort)
+        if effort is not None:
+            # Maps to Gemini 3 thinking_level on the OpenAI-compat API.
+            request["reasoning_effort"] = effort
         # Do NOT include frequency_penalty or presence_penalty
     else:
         raise ValueError(f"Unknown API type: {api_type}. Must be 'openai' or 'gemini'.")
@@ -174,32 +218,466 @@ def _generate_request(
 
 
 # Based on https://platform.openai.com/docs/guides/batch/getting-started
-def _generate_batch_request(custom_id, model_name, system_instructions, query, max_tokens,
-                            temperature=0.0, frequency_penalty=0.0, presence_penalty=0.0):
+# Gemini OpenAI-compat Batch uses the same JSONL shape:
+# https://ai.google.dev/gemini-api/docs/openai#batch-api
+def _generate_batch_request(
+    custom_id,
+    model_name,
+    system_instructions,
+    query,
+    max_tokens,
+    temperature=0.0,
+    frequency_penalty=0.0,
+    presence_penalty=0.0,
+    api_type: str = "openai",
+    reasoning_effort: Optional[str] = None,
+):
     assert len(system_instructions) > 0
     assert len(query) > 0
-    assert is_model_supported(model_name, "openai"), f"Unknown model name: {model_name} for API openai"
+    assert is_model_supported(model_name, api_type), (
+        f"Unknown model name: {model_name} for API {api_type}"
+    )
+    body = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_instructions},
+            {"role": "user", "content": query},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if api_type == "openai":
+        body["frequency_penalty"] = frequency_penalty
+        body["presence_penalty"] = presence_penalty
+        if reasoning_effort:
+            body["reasoning_effort"] = reasoning_effort
+    elif api_type == "gemini":
+        effort = resolve_gemini_reasoning_effort(model_name, reasoning_effort)
+        if effort is not None:
+            body["reasoning_effort"] = effort
     return {
         "custom_id": custom_id,
         "method": "POST",
         "url": "/v1/chat/completions",
-        "body": {
-            "model": model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_instructions,
-                },
-                {
-                    "role": "user",
-                    "content": query,
-                },
-            ],
-            "temperature": temperature,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
-            "max_tokens": max_tokens,
-        },
+        "body": body,
+    }
+
+
+def _gemini_batch_dir(tmp_dir: str) -> str:
+    path = os.path.join(tmp_dir, "gemini", "batch_api")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def prepare_batch_requests(
+    *,
+    texts: List[str],
+    system_instructions: str,
+    model_name: str,
+    tmp_dir: str,
+    api_type: str = "gemini",
+    max_tokens_per_request: Optional[int] = 512,
+    temperature: float = 0.0,
+    frequency_penalty: float = 0.0,
+    presence_penalty: float = 0.0,
+    batch_description: Optional[str] = None,
+    batch_job_record_path: Optional[str] = None,
+    custom_ids: Optional[List[str]] = None,
+    pending_metadata_path: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+) -> Dict:
+    """Write OpenAI-format batch JSONL locally (no API calls). Keep the file for inspection."""
+    assert texts is not None and len(texts) > 0, "texts must be a non-empty list"
+    assert system_instructions, "system_instructions must be provided"
+    assert model_name, "model_name must be provided"
+    assert api_type in ("openai", "gemini"), f"Unknown api_type: {api_type}"
+    if custom_ids is not None:
+        assert len(custom_ids) == len(texts), (
+            f"custom_ids length {len(custom_ids)} != texts length {len(texts)}"
+        )
+
+    requests = []
+    for i, text in enumerate(texts):
+        cid = custom_ids[i] if custom_ids is not None else str(i)
+        requests.append(
+            _generate_batch_request(
+                custom_id=cid,
+                model_name=model_name,
+                system_instructions=system_instructions,
+                query=text,
+                max_tokens=max_tokens_per_request,
+                temperature=temperature,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+                api_type=api_type,
+                reasoning_effort=reasoning_effort,
+            )
+        )
+
+    timestamp = get_timestamp()
+    if api_type == "gemini":
+        batch_dir = _gemini_batch_dir(tmp_dir)
+        batch_api_requests_filepath = os.path.join(
+            batch_dir, f"batch_requests_{timestamp}.jsonl"
+        )
+    else:
+        batch_dir = os.path.join(tmp_dir, "openai", "batch_api")
+        os.makedirs(batch_dir, exist_ok=True)
+        batch_api_requests_filepath = os.path.join(
+            tmp_dir, "openai", f"batch_api_requests_{timestamp}.jsonl"
+        )
+
+    logger.info(f"Saving batch API requests to {batch_api_requests_filepath}")
+    save_jsonl(requests, batch_api_requests_filepath)
+
+    if batch_job_record_path is None:
+        batch_job_record_path = os.path.join(
+            batch_dir if api_type == "gemini" else batch_dir,
+            f"batch_job_prepare_{timestamp}.json",
+        )
+
+    job_record = {
+        "api_type": api_type,
+        "model_name": model_name,
+        "batch_description": batch_description,
+        "batch_requests_filepath": batch_api_requests_filepath,
+        "n_requests": len(requests),
+        "created_at": timestamp,
+        "uploaded_file_id": None,
+        "batch_id": None,
+        "batch_status": "prepared",
+        "output_file_id": None,
+        "pending_metadata_path": pending_metadata_path,
+    }
+    save_json(job_record, batch_job_record_path)
+    logger.info(f"Saved batch job record to {batch_job_record_path}")
+    return {
+        "stage": "prepare",
+        "batch_requests_filepath": batch_api_requests_filepath,
+        "batch_job_record_path": batch_job_record_path,
+        "n_requests": len(requests),
+        "job_record": job_record,
+    }
+
+
+def submit_gemini_batch(
+    *,
+    batch_job_record_path: str,
+    api_key_name: str = "GOOGLE_API_KEY",
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
+    batch_description: Optional[str] = None,
+) -> Dict:
+    """Upload local JSONL via google-genai; create batch via OpenAI-compat client."""
+    from google import genai
+    from google.genai import types as genai_types
+
+    assert os.path.exists(batch_job_record_path), (
+        f"Batch job record not found: {batch_job_record_path}"
+    )
+    job_record = load_json(batch_job_record_path)
+    assert job_record.get("api_type") == "gemini", (
+        f"submit_gemini_batch expects api_type=gemini, got {job_record.get('api_type')}"
+    )
+    requests_path = job_record["batch_requests_filepath"]
+    assert os.path.exists(requests_path), f"Batch requests file not found: {requests_path}"
+
+    api_key = os.getenv(api_key_name)
+    assert api_key, f"Environment variable {api_key_name} is not set"
+
+    if job_record.get("batch_id"):
+        logger.warning(
+            "Job record already has batch_id=%s; returning without re-submitting",
+            job_record["batch_id"],
+        )
+        return {
+            "stage": "submit",
+            "batch_job_record_path": batch_job_record_path,
+            "batch_id": job_record["batch_id"],
+            "uploaded_file_id": job_record.get("uploaded_file_id"),
+            "batch_status": job_record.get("batch_status"),
+            "job_record": job_record,
+            "already_submitted": True,
+        }
+
+    description = batch_description or job_record.get("batch_description") or "gemini-batch"
+    display_name = os.path.basename(requests_path)
+
+    genai_client = genai.Client(api_key=api_key)
+    uploaded_file_id = job_record.get("uploaded_file_id")
+    if uploaded_file_id:
+        logger.info(
+            "Reusing previously uploaded batch file %s (skip re-upload)",
+            uploaded_file_id,
+        )
+    else:
+        # Prefer application/json: mime_type='jsonl' is flaky in the Files API.
+        uploaded_file = genai_client.files.upload(
+            file=requests_path,
+            config=genai_types.UploadFileConfig(
+                display_name=display_name,
+                mime_type="application/json",
+            ),
+        )
+        uploaded_file_id = uploaded_file.name
+        logger.info(f"Uploaded batch requests file as {uploaded_file_id}")
+        # Persist before create so a later 429 does not force another upload.
+        job_record["uploaded_file_id"] = uploaded_file_id
+        job_record["batch_status"] = "uploaded"
+        job_record["batch_description"] = description
+        save_json(job_record, batch_job_record_path)
+
+    openai_client = OpenAI(api_key=api_key, base_url=gemini_api_base_url)
+    try:
+        batch_object = openai_client.batches.create(
+            input_file_id=uploaded_file_id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata={"description": description},
+        )
+    except Exception as e:
+        # Keep uploaded_file_id on disk for retry; surface quota errors clearly.
+        logger.error(
+            "batches.create failed for uploaded_file_id=%s n_requests=%s: %s",
+            uploaded_file_id,
+            job_record.get("n_requests"),
+            e,
+        )
+        raise
+    batch_id = batch_object.id
+    logger.info(f"Created Gemini batch job: {batch_id} status={batch_object.status}")
+
+    job_record["uploaded_file_id"] = uploaded_file_id
+    job_record["batch_id"] = batch_id
+    job_record["batch_status"] = getattr(batch_object, "status", None)
+    job_record["output_file_id"] = getattr(batch_object, "output_file_id", None)
+    job_record["batch_description"] = description
+    save_json(job_record, batch_job_record_path)
+
+    # Also keep a pickle of the OpenAI Batch object for parity with OpenAI path.
+    batch_dir = os.path.dirname(batch_job_record_path)
+    pickle_path = os.path.join(batch_dir, f"{batch_id.replace('/', '_')}.pkl")
+    save_pickle(batch_object, pickle_path)
+    job_record["batch_object_pickle"] = pickle_path
+    save_json(job_record, batch_job_record_path)
+
+    return {
+        "stage": "submit",
+        "batch_job_record_path": batch_job_record_path,
+        "batch_requests_filepath": requests_path,
+        "batch_id": batch_id,
+        "uploaded_file_id": uploaded_file_id,
+        "batch_status": job_record["batch_status"],
+        "job_record": job_record,
+        "already_submitted": False,
+    }
+
+
+def collect_gemini_batch(
+    *,
+    batch_job_record_path: str,
+    parse_output: Callable,
+    save_filepath: str,
+    api_key_name: str = "GOOGLE_API_KEY",
+    gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
+    batch_wait: bool = False,
+    batch_poll_interval_s: float = 30.0,
+    max_polls: int = 2880,
+) -> Dict:
+    """Poll Gemini OpenAI-compat batch; download output via google-genai; parse into save_filepath."""
+    from google import genai
+
+    assert parse_output is not None
+    assert save_filepath is not None
+    assert os.path.exists(batch_job_record_path), (
+        f"Batch job record not found: {batch_job_record_path}"
+    )
+    job_record = load_json(batch_job_record_path)
+    batch_id = job_record.get("batch_id")
+    assert batch_id, (
+        f"No batch_id in job record {batch_job_record_path}; run submit first"
+    )
+    requests_path = job_record["batch_requests_filepath"]
+    assert os.path.exists(requests_path), f"Batch requests file not found: {requests_path}"
+
+    api_key = os.getenv(api_key_name)
+    assert api_key, f"Environment variable {api_key_name} is not set"
+
+    openai_client = OpenAI(api_key=api_key, base_url=gemini_api_base_url)
+    genai_client = genai.Client(api_key=api_key)
+
+    polls = 0
+    while True:
+        batch = openai_client.batches.retrieve(batch_id)
+        status = getattr(batch, "status", None)
+        job_record["batch_status"] = status
+        job_record["output_file_id"] = getattr(batch, "output_file_id", None)
+        job_record["error_file_id"] = getattr(batch, "error_file_id", None)
+        save_json(job_record, batch_job_record_path)
+        logger.info(f"Batch {batch_id} status={status}")
+
+        if status in _GEMINI_BATCH_TERMINAL_STATUSES:
+            break
+        if not batch_wait:
+            return {
+                "stage": "collect",
+                "batch_job_record_path": batch_job_record_path,
+                "batch_id": batch_id,
+                "batch_status": status,
+                "done": False,
+                "job_record": job_record,
+                "n_saved": 0,
+            }
+        polls += 1
+        if polls >= max_polls:
+            raise TimeoutError(
+                f"Batch {batch_id} still {status} after {polls} polls "
+                f"({polls * batch_poll_interval_s:.0f}s)"
+            )
+        time.sleep(batch_poll_interval_s)
+
+    if status != "completed":
+        logger.error(f"Batch {batch_id} ended with status={status}")
+        return {
+            "stage": "collect",
+            "batch_job_record_path": batch_job_record_path,
+            "batch_id": batch_id,
+            "batch_status": status,
+            "done": True,
+            "job_record": job_record,
+            "n_saved": 0,
+            "error": f"Batch ended with status={status}",
+        }
+
+    output_file_id = getattr(batch, "output_file_id", None) or job_record.get("output_file_id")
+    if not output_file_id:
+        raise RuntimeError(f"Batch {batch_id} completed but output_file_id is missing")
+
+    # Prefer pending metadata sidecar (custom_id → full job metadata); fall back to
+    # local requests JSONL for custom_id → query only.
+    custom_id_to_metadata = {}
+    pending_path = job_record.get("pending_metadata_path")
+    if pending_path and os.path.exists(pending_path):
+        for job in load_jsonl(pending_path):
+            cid = job.get("custom_id")
+            if not cid:
+                continue
+            meta = dict(job.get("metadata") or {})
+            meta.setdefault("query", job.get("query"))
+            meta.setdefault("custom_id", cid)
+            custom_id_to_metadata[cid] = meta
+        logger.info(
+            "Loaded pending metadata for %d custom_ids from %s",
+            len(custom_id_to_metadata),
+            pending_path,
+        )
+    else:
+        for api_request in load_jsonl(requests_path):
+            custom_id = api_request["custom_id"]
+            query = api_request["body"]["messages"][1]["content"]
+            custom_id_to_metadata[custom_id] = {"query": query, "custom_id": custom_id}
+        if pending_path:
+            logger.warning(
+                "pending_metadata_path set but missing (%s); using query-only metadata",
+                pending_path,
+            )
+
+    logger.info(f"Downloading batch output file {output_file_id}")
+    raw = genai_client.files.download(file=output_file_id)
+    if isinstance(raw, bytes):
+        file_content = raw.decode("utf-8")
+    else:
+        file_content = str(raw)
+
+    output_save_path = os.path.join(
+        os.path.dirname(batch_job_record_path),
+        f"batch_output_{batch_id.replace('/', '_')}.jsonl",
+    )
+    with open(output_save_path, "w", encoding="utf-8") as f:
+        f.write(file_content)
+    job_record["batch_output_filepath"] = output_save_path
+    save_json(job_record, batch_job_record_path)
+
+    postprocessed_responses = []
+    api_responses = []
+    error_messages = []
+    for line in file_content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        api_response = json.loads(line)
+        api_responses.append(api_response)
+        metadata = {"query": None}
+        try:
+            custom_id = api_response["custom_id"]
+            metadata = dict(custom_id_to_metadata[custom_id])
+            # OpenAI-compat batch output shape
+            text = api_response["response"]["body"]["choices"][0]["message"]["content"]
+            parsed_output = parse_output(text)
+            fanout = metadata.get("fanout") or []
+            if fanout:
+                for item in fanout:
+                    row_meta = {
+                        k: v
+                        for k, v in metadata.items()
+                        if k not in ("fanout", "fanout_uids")
+                    }
+                    row_meta["uid"] = item["uid"]
+                    if "dataset" in item:
+                        row_meta["dataset"] = item["dataset"]
+                    postprocessed_responses.append(
+                        {
+                            "metadata": row_meta,
+                            "parsed_response": parsed_output,
+                        }
+                    )
+            else:
+                postprocessed_responses.append(
+                    {
+                        "metadata": metadata,
+                        "parsed_response": parsed_output,
+                    }
+                )
+        except Exception as e:
+            api_response_string = json.dumps(api_response)
+            q = metadata.get("query")
+            error_messages.append(
+                f"Error parsing response {api_response_string} for query \"{q}\": {e}"
+            )
+
+    if error_messages:
+        logger.error(f"{len(error_messages)} error messages occurred while parsing responses")
+        for i in random.sample(range(len(error_messages)), min(5, len(error_messages))):
+            logger.error(error_messages[i])
+
+    if not postprocessed_responses:
+        logger.warning(
+            f"None of the {len(api_responses)} API responses could be parsed."
+        )
+        n_saved = 0
+    else:
+        n_processed = len(postprocessed_responses)
+        n_total = len(api_responses)
+        logger.info(
+            f"Succesfully processed {n_processed} of {n_total} API responses. "
+            f"Saving processed texts to {ANSI_MAGENTA_BOLD}{save_filepath}{ANSI_RESET}"
+        )
+        save_jsonl(postprocessed_responses, save_filepath, append=True)
+        n_saved = n_processed
+
+    job_record["collected_at"] = get_timestamp()
+    job_record["n_saved"] = n_saved
+    save_json(job_record, batch_job_record_path)
+
+    return {
+        "stage": "collect",
+        "batch_job_record_path": batch_job_record_path,
+        "batch_id": batch_id,
+        "batch_status": status,
+        "done": True,
+        "job_record": job_record,
+        "n_saved": n_saved,
+        "batch_output_filepath": output_save_path,
+        "save_filepath": save_filepath,
     }
 
 def orchestrate_api_calls(
@@ -218,23 +696,79 @@ def orchestrate_api_calls(
     tmp_dir: str = "tmp",
     save_filepath: Optional[str] = None,
     delete_api_requests_and_responses: bool = True,
-    use_batch_api: bool = False, # OpenAI-specific batch API flag
+    use_batch_api: bool = False, # Batch API flag (OpenAI-native or Gemini hybrid)
     batch_description: Optional[str] = None,
     batch_input_file_id: Optional[str] = None,
+    batch_stage: Optional[str] = None,  # gemini: "prepare" | "submit" | "collect"
+    batch_job_record_path: Optional[str] = None,
+    batch_wait: bool = False,
+    batch_poll_interval_s: float = 30.0,
     api_type: str = "openai", # New parameter: 'openai' or 'gemini'
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/", # Default for Gemini compatibility
     log_info_every_n_requests: int = 50, # Add log_info_every_n_requests back
+    custom_ids: Optional[List[str]] = None,
+    pending_metadata_path: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
 ):
     """Runs the common boilerplate for orchestrating API calls.
 
-    Handles both direct API calls (throttled) and OpenAI Batch API.
-    Supports targeting OpenAI or Gemini compatibility API based on base_url.
+    Handles direct API calls (throttled), OpenAI Batch API, and Gemini hybrid Batch
+    (OpenAI-compat create/retrieve + google-genai file upload/download).
     """
 
     if api_responses_filepath is None:
 
         if use_batch_api:
-            
+            # ----- Gemini hybrid batch (prepare / submit / collect) -----
+            if api_type == "gemini":
+                stage = batch_stage or ("collect" if batch_job_record_path and not texts else "prepare")
+                if stage == "prepare":
+                    return prepare_batch_requests(
+                        texts=texts,
+                        system_instructions=system_instructions,
+                        model_name=model_name,
+                        tmp_dir=tmp_dir,
+                        api_type="gemini",
+                        max_tokens_per_request=max_tokens_per_request,
+                        temperature=temperature,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty,
+                        batch_description=batch_description,
+                        batch_job_record_path=batch_job_record_path,
+                        custom_ids=custom_ids,
+                        pending_metadata_path=pending_metadata_path,
+                        reasoning_effort=reasoning_effort,
+                    )
+                if stage == "submit":
+                    assert batch_job_record_path, (
+                        "batch_job_record_path is required for batch_stage='submit'"
+                    )
+                    return submit_gemini_batch(
+                        batch_job_record_path=batch_job_record_path,
+                        api_key_name=api_key_name,
+                        gemini_api_base_url=gemini_api_base_url,
+                        batch_description=batch_description,
+                    )
+                if stage == "collect":
+                    assert batch_job_record_path, (
+                        "batch_job_record_path is required for batch_stage='collect'"
+                    )
+                    assert parse_output is not None
+                    assert save_filepath is not None
+                    return collect_gemini_batch(
+                        batch_job_record_path=batch_job_record_path,
+                        parse_output=parse_output,
+                        save_filepath=save_filepath,
+                        api_key_name=api_key_name,
+                        gemini_api_base_url=gemini_api_base_url,
+                        batch_wait=batch_wait,
+                        batch_poll_interval_s=batch_poll_interval_s,
+                    )
+                raise ValueError(
+                    f"Unknown batch_stage={stage!r}; expected prepare|submit|collect"
+                )
+
+            # ----- OpenAI-native batch (existing path) -----
             if batch_input_file_id is not None:
 
                 assert parse_output is not None, "parse_output must be provided when batch_input_file_id is provided"
@@ -326,6 +860,8 @@ def orchestrate_api_calls(
                         temperature=temperature,
                         frequency_penalty=frequency_penalty,
                         presence_penalty=presence_penalty,
+                        api_type="openai",
+                        reasoning_effort=reasoning_effort,
                     ))
                 timestamp = get_timestamp()
                 batch_api_requests_filepath = os.path.join(tmp_dir, "openai", f"batch_api_requests_{timestamp}.jsonl")
@@ -389,6 +925,7 @@ def orchestrate_api_calls(
                     temperature=temperature,
                     frequency_penalty=frequency_penalty,
                     presence_penalty=presence_penalty,
+                    reasoning_effort=reasoning_effort,
                 ))
                 assert 'metadata' in requests[-1] # Ensure metadata is included
 
@@ -688,8 +1225,11 @@ class APIRequest:
                 kwargs["max_tokens"] = self.request_json.get("max_tokens")
             elif self.api_type == "gemini":
                 kwargs["temperature"] = self.request_json.get("temperature", 0)
-                if self.request_json["model"] in REASONING_MODELS[self.api_type]:
-                    kwargs["reasoning_effort"] = self.request_json.get("reasoning_effort", "none")
+                effort = self.request_json.get("reasoning_effort")
+                if effort is None:
+                    effort = resolve_gemini_reasoning_effort(self.request_json["model"])
+                if effort is not None:
+                    kwargs["reasoning_effort"] = effort
                 if self.request_json.get("max_tokens") is not None:
                     kwargs["max_tokens"] = self.request_json.get("max_tokens")
                 # Do NOT include frequency_penalty or presence_penalty

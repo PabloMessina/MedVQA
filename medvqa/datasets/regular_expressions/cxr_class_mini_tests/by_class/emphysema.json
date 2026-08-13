@@ -1,0 +1,42 @@
+{
+  "class_id": "emphysema",
+  "positives": [
+    "Pulmonary emphysema is present.",
+    "Emphysematous change with bullous destruction is seen.",
+    "Lungs appear emphysematous.",
+    "Bullous emphysema in the upper lobes.",
+    "Emphysematous lung destruction is noted bilaterally.",
+    "Emphysematic translucency of the lung bases with flattened diaphragms.",
+    "Flat diaphragms and increased AP dimension, consistent with COPD/emphysema.",
+    "Lungs are hyperinflated with coarse interstitial markings consistent with background COPD/emphysema.",
+    "Redemonstration of COPD/emphysematous changes in the right lung.",
+    "Hyperinflation consistent with COPD/emphysema.",
+    "Hyperinflation of the lungs suggesting underlying COPD/emphysema.",
+    "Mild hyperinflation and interstitial prominence, suspect COPD/emphysema.",
+    "COPD/emphysema changes and right upper lobe scarring again noted.",
+    "Moderate-to-severe COPD/emphysema again noted.",
+    "Advanced COPD/emphysema.",
+    "Mild cardiomegaly and COPD/emphysema noted.",
+    "Background COPD/emphysema noted.",
+    "Chronic interstitial changes consistent with COPD/emphysema.",
+    "Pulmonary hyperaeration raises the question of COPD/emphysema.",
+    "COPD/emphysema.",
+    "Decreased vasculature suggests either air trapping or emphysem.",
+    "Emphyesema/blebs in the apex."
+  ],
+  "negatives": [
+    "Hyperinflation with flattened diaphragms.",
+    "Isolated giant bulla.",
+    "Clinical obstructive disease listed in indication only.",
+    "Diaphragm eventration.",
+    "Subcutaneous emphysema along the right chest wall.",
+    "COPD.",
+    "Bullous lung disease without emphysema wording.",
+    "CLINICAL HISTORY: 79-year-old female with history of emphysema.",
+    "Evidence of wall emphysema as before."
+  ],
+  "negation_soft": [
+    "No emphysema is identified.",
+    "History of emphysema; current film is limited."
+  ]
+}

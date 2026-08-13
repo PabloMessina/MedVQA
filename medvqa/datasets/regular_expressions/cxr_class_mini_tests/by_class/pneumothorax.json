@@ -1,0 +1,53 @@
+{
+  "class_id": "pneumothorax",
+  "positives": [
+    "Small right apical pneumothorax.",
+    "Left-sided pneumothorax with visceral pleural line.",
+    "Tension pneumothorax on the right.",
+    "Loculated pneumothorax in the left apex.",
+    "Bilateral pneumothoraces.",
+    "Small apical pneumothorax on the right.",
+    "Status post left chest tube removal with a small left apical pneumothorax.",
+    "Status post chest tube with residual apical pneumothorax.",
+    "S/P VATS with residual right apical pneumothorax.",
+    "S/P right chest tube with small residual PTX.",
+    "Left chest tube with no large pneumothorax but a small apical pneumothorax cannot be excluded.",
+    "There is no evidence of a large pneumothorax but a small persistent left-sided pneumothorax cannot be excluded.",
+    "There is no definite pneumothorax seen, but minimal amount of apical pleural air cannot be excluded.",
+    "No definite pneumothorax is identified, however trace residual ex vacuo pneumothorax in the right lung base is not excluded.",
+    "Appearance of a deep sulcus on the left in supine position.",
+    "Deep sulcus present on the left.",
+    "There is a deep sulcus.",
+    "Deep sulcus on the left side.",
+    "Absent peripheral lung markings with a visceral pleural line.",
+    "Absent lung markings peripheral to a visceral pleural line.",
+    "Small right sided pneumo.",
+    "Persistent small apical pneumo.",
+    "Tiny apical pnthx.",
+    "Small right pneumthorax.",
+    "Right pleural space is largely filled with air outlining the airless lung.",
+    "Collapsed right lung with air-filled pleural space.",
+    "The extent of the free air in the pleura has minimally increased.",
+    "Sliver of air in the right apical pleural space.",
+    "No appreciable pneumothorax, but there may be a sliver of air in the right apical pleural space.",
+    "No appreciable pneumothorax except for a sliver of air in the minor fissure.",
+    "Although no clear visceral pleural line is seen in the left apex, relative lucency may represent a pneumothorax.",
+    "Findings are concerning for pneumothorax.",
+    "Pleural line at the apex with absent lung markings, consistent with pneumothorax.",
+    "Residual pocket of gas in the right costophrenic sulcus from thoracentesis.",
+    "Possibly a loculated pocket of air over the left mid lung."
+  ],
+  "negatives": [
+    "Subcutaneous emphysema in the chest wall.",
+    "Pneumomediastinum with mediastinal air.",
+    "Large bulla in the right upper lobe.",
+    "Skin fold over the lateral chest wall.",
+    "Chest tube in the right pleural space.",
+    "Rule out pneumothorax.",
+    "No pneumothorax is seen."
+  ],
+  "negation_soft": [
+    "No pneumothorax.",
+    "Pneumothorax not identified."
+  ]
+}

@@ -1,0 +1,44 @@
+\b(?:
+        # Vascular / aortic / coronary / arterial / thoracic / endoluminal /
+        # aortoiliac stent, graft, endoprosthesis, endograft, or stent-graft.
+        # Optional anatomic connector (arch/thoracic/abdominal/…) recovers
+        # "aortic arch stent"; "aorta" recovers "abdominal aorta stent graft".
+        (?<!\bno\s)(?<!\bwithout\s)(?:vascular|aortic|aorta|coronary|arterial|thoracic|endoluminal|aorto(?:bi)?(?:iliac|femoral))\s+(?:(?:arch|root|aneurysm|descending|ascending|thoracic|abdominal)\s+)?(?:(?:arter(?:y|ies)|arterial)\s+)?(?:stents?|grafts?|endoprosthes\w*|endografts?|stent[-\s]?grafts?)\b|
+        # Cardiac / coronary-acronym stents: require a current-visibility verb so
+        # indication-only "s/p LAD stent" / "10 cardiac stents" do not fire.
+        # "placement of cardiac stents" is also current-presence phrasing.
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bs/p\s)(?<!\bh/o\s)(?:cardiac|(?:\blad\b|\brca\b|\blcx\b))\s+stents?\s+(?:(?:is|are|has|have|been|again|also|still|seen|noted|visualized|redemonstrat\w*|project\w*|present|remain\w*|stable|unchanged)\b|in\s+place)|
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bs/p\s)(?<!\bh/o\s)(?:interval\s+)?placement\s+of\s+(?:cardiac|(?:\blad\b|\brca\b|\blcx\b))\s+stents?\b|
+        # Named artery + stent (trailing \b avoids matching "stenting" history gerunds)
+        # Laterality / common|internal|external recover "left subclavian stent",
+        # "right common carotid stent".
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:left|right)\s+)?(?:(?:common|internal|external)\s+)?(?:coronary|carotid|subclavian|iliac|renal|femoral|pulmonary|popliteal|mesenteric|celiac|innominate|brachiocephalic|axillary)(?:\s+arter(?:y|ies))?\s+stents?\b|
+        # Named / bare / portal-hepatic venous stent (not IVC filter / unspecified stent).
+        # Optional metallic/endoluminal recovers "Metallic venous stent".
+        # Optional vein after cava recovers "vena cava vein stent".
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:metallic|endoluminal)\s+)?(?:(?:left|right)\s+)?(?:innominate|brachiocephalic|jugular|subclavian|femoral|iliac|axillary|central|portal|hepatic)\s+(?:vein(?:s)?|venous)\s+stents?\b|
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:metallic|endoluminal)\s+)?(?:vein(?:s)?|venous)\s+stents?\b|
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:superior|inferior)\s+vena\s+cava|\bivc\b|\bsvc\b)(?:\s+vein)?\s+stents?\b|
+        # Device-first: stent / stent-graft / endograft in/within/along/over/from/into the aorta
+        # (not "stent in the axilla", not TAVR "in the aortic position").
+        # Fillers recover "stent graft material seen in", "stent-graft placement in",
+        # "stent graft repair of", "has been placed into".
+        # "aspect of" recovers "distal aspect of the aortic arch".
+        # Laterality recovers "left aortic arch"; "to" recovers "proximal to mid … aorta".
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:endoluminal|metallic)\s+)?(?:stent[-\s]?grafts?|stents?|endografts?)\s+(?:(?:is|are|has|have|been|again|also|still|seen|noted|visualized|redemonstrat\w*|project\w*|position(?:ed|ing)?|stable|unchanged|material|placement|appears?|remains?|repair(?:ed)?|placed)\s+)*(?:in|within|of|along|over|overlying|overlies|from|into)\s+(?:the\s+)?(?:(?:proximal|distal|descending|ascending|thoracic|abdominal|arch|upper|lower|mid(?:dle)?|left|right|to)\s+)*(?:aspect\s+of\s+(?:the\s+)?)?(?:(?:proximal|distal|descending|ascending|thoracic|abdominal|arch|upper|lower|mid(?:dle)?|left|right)\s+)*(?:aorta|aortic\s+arch)\b|
+        # Device-first: stent / stent-graft in a named artery (incl. LAD/RCA/LCX;
+        # "origin of the" recovers ostial/innominate phrasing)
+        (?<!\bno\s)(?<!\bwithout\s)(?:stent[-\s]?grafts?|stents?)\s+(?:(?:is|are|has|have|been|again|also|seen|noted)\s+)*(?:in|within|of)\s+(?:the\s+)?(?:(?:origin|ostium|proximal|distal)\s+of\s+(?:the\s+)?)?(?:(?:left|right)\s+)?(?:(?:common|internal|external)\s+)?(?:\blad\b|\brca\b|\blcx\b|coronary|carotid|subclavian|iliac|renal|femoral|pulmonary|popliteal|mesenteric|celiac|innominate|brachiocephalic|axillary)(?:\s+arter(?:y|ies))?\b|
+        # TIPS (portal venous stent / stent-graft); not bare "tips"
+        (?<!\bno\s)(?<!\bwithout\s)\btips\s+(?:grafts?|stents?)\b|
+        # TEVAR / EVAR acronyms
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bs/p\s)(?:\btevar\b|\bevar\b)|
+        # Endovascular stent / graft / repair
+        (?<!\bno\s)(?<!\bwithout\s)endovascular\s+(?:(?:aortic|vascular)\s+)?(?:stents?|grafts?|repairs?|stent[-\s]?grafts?)\b|
+        # Graft / ostial markers identified as vascular-prosthesis hardware
+        (?<!\bno\s)(?<!\bwithout\s)(?:(?:vascular|aortic|bypass|cabg|vein|coronary|ostial)\s+)?graft\s+markers?\b|
+        (?<!\bno\s)(?<!\bwithout\s)(?:bypass|cabg|ostial)\s+markers?\b|
+        # LIMA/RIMA / saphenous / bypass grafts currently visible (not history-only CABG)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bs/p\s)(?<!\bh/o\s)(?:\blima\b|\brima\b)\s+grafts?\s+(?:(?:is|are|has|have|been|again|also|still|seen|noted|visualized|redemonstrat\w*|project\w*|present|remain\w*|stable|unchanged)\b|in\s+place)|
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bs/p\s)(?<!\bh/o\s)(?:saphenous\s+)?bypass\s+grafts?\s+(?:(?:is|are|has|have|been|again|also|still|seen|noted|visualized|redemonstrat\w*|project\w*|present|remain\w*|stable|unchanged)\b|have\s+been\s+placed|in\s+place)
+    )

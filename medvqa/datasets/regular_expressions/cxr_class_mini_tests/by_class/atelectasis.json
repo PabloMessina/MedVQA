@@ -1,0 +1,47 @@
+{
+  "class_id": "atelectasis",
+  "positives": [
+    "Bibasilar atelectasis is present.",
+    "Linear atelectasis in the left lower lobe.",
+    "Right lower lobe collapse is seen.",
+    "Plate-like atelectasis at the bases.",
+    "Subsegmental atelectasis bilaterally.",
+    "Volume loss in the right lower lobe.",
+    "Underaeration of the left lung.",
+    "Stable linear band-like opacity in the right lung base.",
+    "Band-like opacity in the right upper lobe.",
+    "Persistent band-like and linear opacities in the left lower lung zone.",
+    "Basilar bandlike opacities with a persistent right pleural effusion.",
+    "Focal bandlike opacity in the right midlung zone.",
+    "Plate-like opacities at the lung bases.",
+    "Discoid opacities in the left lower lung field.",
+    "Marked pulmonary collapse on the left.",
+    "Partial collapse adjacent to the effusion.",
+    "Mild basilar atelctasis.",
+    "Stable right lower lung colapse.",
+    "Suspect underlying effusion and atelecatsis.",
+    "Volume loss at the left base.",
+    "Volume loss of the left base.",
+    "Volume loss/consolidation involving the left lower lobe.",
+    "Volume loss/infiltrate at both bases.",
+    "Retrocardiac volume loss/consolidation.",
+    "Volume loss and infiltrate involving the right middle and right lower lobe.",
+    "Extensive volume loss the left lower lobe.",
+    "Volume loss in the right perihilar region.",
+    "Volume loss in the medial right lung base.",
+    "Right thorax volume loss.",
+    "Volume loss at both bases.",
+    "LLL colapse."
+  ],
+  "negatives": [
+    "Dense lobar consolidation with air bronchograms.",
+    "Layering pleural fluid.",
+    "Poor inspiratory effort with crowding of markings.",
+    "Low lung volumes without atelectasis.",
+    "Linear and reticular opacities in the left lung."
+  ],
+  "negation_soft": [
+    "No atelectasis is identified.",
+    "Lungs are fully expanded without collapse."
+  ]
+}

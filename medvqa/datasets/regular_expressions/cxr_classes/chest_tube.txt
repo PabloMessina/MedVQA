@@ -1,0 +1,318 @@
+
+    # Currently visible chest / thoracostomy / pleural drainage tube or catheter.
+    # Precision-first: drop bare "drain … in place", "chest port", and unlocalized pigtail.
+    # Local removal / pulled / discontinued clauses are excluded (fixed-width lookbehinds +
+    # bounded lookaheads). Do not match mediastinal/surgical/abdominal drains alone.
+    # Allow "mediastinal/pleural drains" and "pleural and mediastinal drains" (pleural stated).
+    # NOTE: never write backslash-tan / tab escapes in lookbehinds — use \san for "an".
+
+    (?:
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sleft\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sthe\sleft\s)
+        (?<!removal\sof\sthe\sright\s)
+        (?<!removal\sof\sa\sleft\s)
+        (?<!removal\sof\sa\sright\s)
+        (?<!removal\sof\sleft-sided\s)
+        (?<!removal\sof\sright-sided\s)
+        (?<!removal\sof\sthe\sleft-sided\s)
+        (?<!removal\sof\sthe\sright-sided\s)
+        (?<!removal\sof\sa\sleft-sided\s)
+        (?<!removal\sof\sa\sright-sided\s)
+        (?<!removal\sof\sbilateral\s)
+        (?<!removal\sof\sthe\sbilateral\s)
+        (?<!removal\sof\sone\sof\sthe\s)
+        (?<!removal\sof\sone\sof\sthe\sleft-sided\s)
+        (?<!removal\sof\sone\sof\sthe\sright-sided\s)
+        (?<!and\sone\sof\sthe\s)
+        (?<!and\sone\sof\sthe\sleft-sided\s)
+        (?<!and\sone\sof\sthe\sright-sided\s)
+        (?<!catheter,\sng\stube,\s)
+        (?<!jugular\scatheter,\sng\stube,\s)
+        (?<!removal\sof\spatient's\s)
+        (?<!removal\sof\sthe\spatient's\s)
+        (?<!removal\sof\spatient's\sleft-sided\s)
+        (?<!removal\sof\spatient's\sright-sided\s)
+        (?<!removal\sof\sthe\spatient's\sleft-sided\s)
+        (?<!removal\sof\sthe\spatient's\sright-sided\s)
+        (?<!removal\sof\spatient's\sleft-sided\sday\s)
+        (?<!removal\sof\spatient's\sright-sided\sday\s)
+        (?<!removal\sof\sthe\spatient's\sleft-sided\sday\s)
+        (?<!removal\sof\sthe\spatient's\sright-sided\sday\s)
+        (?<!removal\sof\spreviously\splaced\s)
+        (?<!removal\sof\sa\spreviously\splaced\s)
+        (?<!removal\sof\sleft\slower\slobe\s)
+        (?<!removal\sof\sright\slower\slobe\s)
+        (?<!removal\sof\sleft\supper\slobe\s)
+        (?<!removal\sof\sright\supper\slobe\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\sleft\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\sright\s)
+        (?<!removal\sof\sfeeding\stube\sand\s)
+        (?<!removal\sof\sfeeding\stube\sand\sleft\s)
+        (?<!removal\sof\sfeeding\stube\sand\sright\s)
+        (?<!removal\sof\sng\stube,\s)
+        (?<!removal\sof\scatheter,\sng\stube,\s)
+        (?<!removal\sof\sendotracheal\stube,\senteric\stube,\sswan-ganz\scatheter\sand\s)
+        (?<!removal\sof\sswan-ganz\scatheter\sand\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!interval\sremoval\sof\sthe\s)
+        (?<!interval\sremoval\sof\sa\s)
+        (?<!interval\sremoval\sof\sleft\s)
+        (?<!interval\sremoval\sof\sright\s)
+        (?<!interval\sremoval\sof\sthe\sleft\s)
+        (?<!interval\sremoval\sof\sthe\sright\s)
+        (?<!interval\sremoval\sof\sleft-sided\s)
+        (?<!interval\sremoval\sof\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\sleft-sided\s)
+        (?<!interval\sremoval\sof\sthe\sright-sided\s)
+        (?<!interval\sremoval\sof\sa\sleft-sided\s)
+        (?<!interval\sremoval\sof\sa\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\sleft\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\sright\s)
+        (?<!interval\sremoval\sof\sng\stube,\s)
+        (?<!interval\sremoval\sof\scatheter,\sng\stube,\s)
+        (?<!interval\sremoval\sof\sendotracheal\stube,\senteric\stube,\sswan-ganz\scatheter\sand\s)
+        (?<!after\sremoval\sof\s)
+        (?<!after\sremoval\sof\sthe\s)
+        (?<!after\sremoval\sof\sleft-sided\s)
+        (?<!after\sremoval\sof\sright-sided\s)
+        (?<!following\sremoval\sof\s)
+        (?<!following\sremoval\sof\sthe\s)
+        (?<!following\sremoval\sof\sleft-sided\s)
+        (?<!following\sremoval\sof\sright-sided\s)
+        (?<!following\sremoval\sof\s2\sleft-sided\s)
+        (?<!following\sremoval\sof\s2\sright-sided\s)
+        (?<!removal\sof\s2\s)
+        (?<!removal\sof\s2\sleft-sided\s)
+        (?<!removal\sof\s2\sright-sided\s)
+        (?<!removal\sof\stwo\s)
+        (?<!removal\sof\stwo\sleft-sided\s)
+        (?<!removal\sof\stwo\sright-sided\s)
+        (?<!removal\sof\s3\s)
+        (?<!removal\sof\sthree\s)
+        (?<!status\spost\sremoval\sof\s)
+        (?<!status\spost\sremoval\sof\sthe\s)
+        (?<!status-post\sremoval\sof\s)
+        (?<!s/p\sremoval\sof\s)
+        (?<!sp\sremoval\sof\s)
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!\bpulled\s)
+        (?<!dc'ed\s)
+        (?<!dced\s)
+        (?<!d/c\s)
+        (?<!d/c'ed\s)
+        (?<!sp\sdc\s)
+        (?<!s/p\sdc\s)
+        (?<!discontinued\s)
+        (?<!discontinued\sthe\s)
+        (?<!candidate\sfor\s)
+        (?<!candidate\sfor\sa\s)
+        # History / hypothetical / not-yet-placed (prompt: indication alone insufficient)
+        (?<!\bs/p\s)
+        (?<!status\spost\s)
+        (?<!status-post\s)
+        (?<!has\sone\s)
+        (?<!had\sa\s)
+        # Keep (?<!with\s) on this main arm; presence-gated "with … in place/placed"
+        # is a separate residual arm below (FN-mine: with chest tube in place).
+        (?<!with\s)
+        # Keep (?<!pigtail\s) so removal of "… pigtail pleural drain" is not matched
+        # at the pleural-drain token; thoracic localizer lives on the pigtail arm.
+        (?<!pigtail\s)
+        # Keep (?<!lobe\s) to block history "… lobe chest tube"; lobe+pleural device
+        # is a dedicated arm below (FN-mine: upper lobe pleural catheter).
+        (?<!lobe\s)
+        (?<!possible\s)
+        (?<!require\s)
+        (?<!requires\s)
+        (?<!requiring\s)
+        (?<!recommend\s)
+        (?<!recommended\s)
+        (?<!in\sthe\sprocess\sof\s)
+        (?<!subsequent\sfilms\sreveal\splacement\sof\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \b(?:
+            # Explicit pleural / chest drainage device names (not "chest port")
+            (?:chest|thoracostom(?:y|ies)|pleural|thoracic)\s+(?:drainage\s+)?(?:tubes?|drains?|catheters?|caths?)
+            |
+            # Lobe-localized pleural device (bypasses (?<!lobe\s) on bare chest/pleural tube)
+            (?:(?:right|left|bilateral)\s+)?(?:upper|lower|middle|lingular)\s+lobe\s+pleural\s+(?:catheters?|caths?|drains?|tubes?)
+            |
+            # Inverted "tube thoracostomy(ies)"
+            tubes?\s+thoracostom(?:y|ies)
+            |
+            # Pleural stated even when coordinated with mediastinal drains
+            pleural\s+and\s+(?:mediastinal\s+)?(?:drains?|tubes?|catheters?)
+            |
+            (?:(?:inferior\s+)?mediastinal\s*/\s*)pleural\s+(?:drains?|tubes?|catheters?)
+            |
+            chest\s+wall\s+drains?
+            |
+            # Intercostal drain/tube (ICC synonym); avoid bare ICC acronym
+            intercostal\s+(?:drains?|tubes?|catheters?)
+            |
+            # Pigtail / pig-tail / pig tail catheter/drain/tube (+ optional thoracic localizer)
+            pig[\s\-]?tail(?:\s+|-)?(?:type\s+)?(?:(?:pleural|chest|thoracostomy|thoracic)\s+)?(?:drainage\s+)?(?:catheters?|drains?|tubes?)
+            |
+            # Noun-elided "pleural/chest pigtail" (catheter/drain/tube omitted)
+            (?:pleural|chest)\s+pig[\s\-]?tails?
+            |
+            # Brand / synonym pleural drains (incl. common misspelling)
+            (?:pleur\-?x|pluerex)(?:\s+catheters?)?
+            |
+            mini\-?drains?
+        )\b
+        (?!\s+removal\b)
+        (?!\s+pulled\b)
+        (?!\s+removed\b)
+        (?!\s+(?:fully\s+|completely\s+|already\s+)?removed\b)
+        (?!\s+rmoval\b)
+        (?!\s+output\b)
+        (?!\s+pull\b)
+        (?!\s+placement\s+is\s+recommended)
+        (?!\s+placement,?\s+was\s+discussed)
+        (?!\s*\([^)]{0,25}\)\s*pull)
+        (?!\s+and\s+(?:\w+[-\s]*){0,5}removal\b)
+        # Coordinated "chest tube, NGT, … removal"
+        (?!\s*,(?:(?![.!?]).){0,80}?\bremoval\b)
+        # Stop absence/removal lookaheads at commas so sibling-device removals do not negate
+        (?!(?:(?![.!?,]).){0,60}?\b(?:has|have|had)\s+been\s+(?:fully\s+|completely\s+|already\s+|now\s+)?removed\b)
+        (?!(?:(?![.!?,]).){0,50}?\b(?:was|were)\s+(?:fully\s+|completely\s+)?removed\b)
+        (?!(?:(?![.!?,]).){0,80}?\bbeen\s+(?:fully\s+|completely\s+|already\s+|now\s+)?removed\b)
+        (?!(?:(?![.!?,]).){0,40}?\b(?:is|are)\s+no\s+longer\b)
+    )
+    |
+    # Residual: findings-style "… with chest/pigtail tube in place|placed"
+    # Require a same-sentence finding/anatomy cue before "with" so indication-only
+    # "patient with chest tube in place" stays out (main arm keeps (?<!with\s)).
+    (?:
+        (?<!removal\sof\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!patient\s)
+        \b(?:
+            pneumotho\w*
+            |(?:pleural\s+)?effusion
+            |postsurgical\s+changes?
+            |(?:main\s+)?pulmonary\s+artery
+            |(?:on\s+the\s+)?(?:left|right)
+            |hemithorax
+            |apical
+        )\b
+        (?:(?![.!?]).){0,50}?
+        \bwith\s+
+        (?:(?:right|left|bilateral|right-sided|left-sided)\s+)?
+        (?:
+            pig[\s\-]?tail(?:\s+|-)?(?:type\s+)?(?:(?:chest|thoracostom(?:y|ies)|pleural|thoracic)\s+)?(?:drainage\s+)?(?:catheters?|drains?|tubes?)
+            |
+            (?:chest|thoracostom(?:y|ies)|pleural|thoracic)\s+(?:drainage\s+)?(?:tubes?|drains?|catheters?|caths?)
+        )\b
+        (?!\s+removal\b)
+        (?!\s+pulled\b)
+        (?!\s+removed\b)
+        (?=\s+(?:in\s+place|placed)\b)
+    )
+    |
+    # Residual: unnamed catheter/drain explicitly in/within the pleural space
+    # (FN-mine: "catheters … in the pleural space", "drains … within the pleural space").
+    # Exclude surgical/mediastinal/abdominal/pericardial drain wording alone.
+    (?:
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\sleft\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sthe\sleft\s)
+        (?<!removal\sof\sthe\sright\s)
+        (?<!removal\sof\sleft-sided\s)
+        (?<!removal\sof\sright-sided\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!after\sremoval\sof\s)
+        (?<!following\sremoval\sof\s)
+        (?<!status\spost\sremoval\sof\s)
+        (?<!\bremoved\s)
+        (?<!\bpulled\s)
+        (?<!surgical\s)
+        (?<!mediastinal\s)
+        (?<!abdominal\s)
+        (?<!pericardial\s)
+        (?<!jackson-pratt\s)
+        (?<!blake\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \b(?:(?:right|left|bilateral|right-sided|left-sided|\d+|two|three|four)\s+)?(?:catheters?|drains?)\b
+        (?!\s+removal\b)
+        (?!\s+pulled\b)
+        (?!\s+removed\b)
+        (?:(?![.!?]).){0,50}?
+        \b(?:located\s+|present\s+)?(?:in|within)\s+(?:the\s+)?pleural\s+space\b
+        (?!(?:(?![.!?,]).){0,40}?\b(?:has|have|had)\s+been\s+removed\b)
+    )
+    |
+    # Residual: small-bore drainage device with same-sentence chest/pleural cue
+    # (FN-mine: "small bore drain … chest", "small bore catheter … pleural").
+    (?:
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!after\sremoval\sof\s)
+        (?<!following\sremoval\sof\s)
+        (?<!\bremoved\s)
+        (?<!\bpulled\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \bsmall[\s\-]?bore\s+(?:drainage\s+)?(?:drains?|catheters?|caths?|tubes?)\b
+        (?!\s+removal\b)
+        (?!\s+pulled\b)
+        (?!\s+removed\b)
+        (?:(?![.!?]).){0,80}?
+        \b(?:chest|pleural)\b
+        (?!(?:(?![.!?,]).){0,40}?\b(?:has|have|had)\s+been\s+removed\b)
+    )
+    |
+    # Residual: bare thoracostomy as the indwelling device (not "thoracostomy tube")
+    (?:
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sleft\s)
+        (?<!tube\s)
+        (?<!tubes\s)
+        (?<!\bs/p\s)
+        (?<!status\spost\s)
+        (?<!status-post\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        \b(?:(?:right|left|bilateral|right-sided|left-sided)\s+)?thoracostom(?:y|ies)\b
+        (?!\s+(?:tubes?|drains?|catheters?|caths?)\b)
+        (?:
+            \s+in\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?(?:\w+\s+){0,4}?(?:rib|interspace|pleural\s+space|hemithorax)
+            |
+            (?=\s+(?:remains?|remaining|is\s+(?:again\s+)?(?:noted|seen|present)|again\s+noted|in\s+place|still\s+(?:in|present))\b)
+        )
+        (?!(?:(?![.!?,]).){0,40}?\b(?:has|have|had)\s+been\s+removed\b)
+    )

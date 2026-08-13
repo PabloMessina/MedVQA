@@ -1,0 +1,353 @@
+# ==============================================================================
+# bone_fracture (umbrella / mid-node)
+# Hierarchy-aware residual: children cover rib / clavicle / vertebral compression.
+# Match visible fractures / fracture sequelae of CXR-FOV bones (incl. scapula,
+# sternum, proximal humerus, and generic osseous phrasing). Include callus /
+# nonunion / malunion / fracture deformity when fracture-framed.
+# Phase B3: framed humeral residual only (head and neck / metadiaphysis gaps).
+# Recall residual: sternum portion / manubrium; fracture-dislocation of
+# shoulder; glenoid/tuberosity/acromion/coracoid; pathologic "seen at T#";
+# IU/MIMIC XXXX|___ redaction between anatomy and fracture; junction/thirds
+# walks. FN-fit: `apparent` is a §1 hedge modifier (keep skip-start so
+# "no apparent …" cannot restart at anatomy); §2 walk includes `thoracic`
+# so "fractures of thoracic … and the sternum" can reach residual sternum.
+# Do NOT merge helper bare deform* / dislocat* or callus_rib.
+# Do NOT infer from wedging/collapse, DJD, hardware, or broken devices.
+# Do NOT match: bare deformity; history/indication-only; negation; degenerative
+# change / osteopenia / scoliosis / lytic lesions; sternotomy / osteotomy /
+# hardware without stated fracture; fractured devices / leads / wires / catheters.
+# Negation / history / indication lookbehinds are fixed-width (stdlib re).
+# ==============================================================================
+
+(?:
+    # Shared guards immediately before match start (no leading \\s* that
+    # would push the lookbehind past "no " / "history of ").
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)(?<!\bno\sobvious\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sdisplaced\s)(?<!\bno\sacute\s)
+    (?<!\bno\svisible\s)(?<!\bno\sgross\s)(?<!\bno\sclear\s)
+    (?<!\bno\sfrank\s)(?<!\bno\sdetectable\s)
+    (?<!\bno\sapparent\s)(?<!\bno\sgrossly\s)
+    (?<!\bno\sdefinite\sdisplaced\s)(?<!\bno\sobvious\sdisplaced\s)
+    (?<!\bno\svisible\sdisplaced\s)(?<!\bno\sacute\sdisplaced\s)
+    (?<!\bno\sgrossly\sdisplaced\s)(?<!\bno\sgross\sdisplaced\s)
+    (?<!\bno\sapparent\sdisplaced\s)(?<!\bno\sapparent\sacute\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sfor\s)
+    (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bno\sevidence\sof\sa\s)(?<!\bno\sevidence\sof\san\s)
+    (?<!\bno\sevidence\sfor\sa\s)(?<!\bno\sevidence\sfor\san\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bno\sevidence\sof\sacute\s)(?<!\bno\sevidence\sof\sdisplaced\s)
+    (?<!\bno\sevidence\sof\sdispalced\s)
+    (?<!\bno\sevidence\sof\sobvious\s)(?<!\bno\sevidence\sof\sa\sdisplaced\s)
+    (?<!\bno\sevidence\sfor\sacute\s)(?<!\bno\sevidence\sfor\sdisplaced\s)
+    (?<!\bno\sevidence\sfor\sa\sdisplaced\s)
+    (?<!\bno\sevidence\sof\spneumothorax,\s)(?<!\bno\sevidence\sfor\spneumothorax,\s)
+    (?<!\bno\sevidence\sof\spneumothorax\sor\s)
+    (?<!\bno\sevidence\sfor\spneumothorax,\s)
+    (?<!\bpneumothorax,\s)(?<!\bpneumothorax\sor\s)
+    (?<!\beffusion\sor\s)(?<!\bcontusion\sor\s)
+    (?<!\bor\sdisplaced\s)(?<!\bor\sacute\s)(?<!\bor\svisible\s)
+    (?<!\bor\sgrossly\sdisplaced\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bnegative\sfor\sacute\s)(?<!\bnegative\sfor\sdisplaced\s)
+    (?<!\bnegative\sfor\sacute\sdisplaced\s)(?<!\bnegative\sfor\sany\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+    (?<!\bevidence\sof\sa\s)(?<!\bevidence\sof\san\s)(?<!\bevidence\sof\sthe\s)
+    (?<!\bevidence\sof\sacute\s)(?<!\bevidence\sof\sdisplaced\s)
+    (?<!\bevidence\sof\sa\sdisplaced\s)(?<!\bevidence\sof\sunderlying\s)
+    (?<!\bno\sdefinite\sevidence\sof\s)(?<!\bno\sdefinite\sevidence\sfor\s)
+    (?<!\bany\sdefinite\s)(?<!\bany\sobvious\s)(?<!\bany\sdisplaced\s)
+    (?<!\bany\sacute\s)
+    (?<!\bno\scompression\s)(?<!\bno\snew\scompression\s)
+    (?<!\bno\sacute\scompression\s)
+    (?<!\bhistory\sof\s)    (?<!\bknown\shistory\sof\s)(?<!\bknown\s)
+    (?<!\bknown\sfirst\s)(?<!\bknown\sleft\s)(?<!\bknown\sright\s)
+    (?<!\bknown\sleft-sided\s)(?<!\bknown\sright-sided\s)
+    (?<!\bknown\sleft\ssided\s)(?<!\bknown\sright\ssided\s)
+    (?<!\bknown\smultiple\s)
+    (?<!\bprevious\s)(?<!\bto\sprevious\s)
+    (?<!\bc/b\s)
+    (?<!\bman\swith\s)(?<!\bwoman\swith\s)(?<!\bpatient\swith\s)
+    (?<!\bmale\swith\s)(?<!\bfemale\swith\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\bevaluate\sfor\spossible\s)
+    (?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\bconcern\sfor\s)(?<!\bsuspicion\sfor\s)(?<!\bclinical\sconcern\sfor\s)
+    (?<!\bpossibility\sof\s)(?<!\braising\sconcern\sfor\s)
+    (?<!\blimits\sevaluation\sfor\s)(?<!\blimits\sevaluation\sfor\spossible\s)
+    (?<!\bevaluation\sfor\s)(?<!\bevaluation\sfor\spossible\s)
+    (?<!\bevaluation\sof\s)(?<!\bvaluation\sof\s)
+    (?<!\blimited\sfor\sevaluation\sof\s)(?<!\blimited\sfor\svaluation\sof\s)
+    (?<!\bdetectable\s)(?<!\bquestioned\s)(?<!\bgross\s)(?<!\bsided\s)
+    (?<!\bdetection\sof\s)(?<!\bdetection\sof\ssubtle\s)
+    (?<!\binsensitive\sfor\s)(?<!\bstill\sclinical\sconcern,\s)
+    (?<!\bstill\sclinical\sconcern\sfor\s)
+    (?<!\bif\ssubtle\sor\snondisplaced\s)(?<!\bor\snondisplaced\s)
+    (?<!\bif\s)
+    (?<!\bno\snew\s)(?<!\bbut\sno\snew\s)
+    (?<!\bindication:\s)(?<!\bindication\s)(?<!\bindications:\s)
+    (?<!\bindication:\smultiple\s)
+    (?<!\bclinical\shistory:\s)(?<!\bclinical\sinformation:\s)
+    (?<!\bdyspnea,\s)
+    (?<!\?\s)(?<!\bfor\s)(?<!\bor\s)
+    (?<!//\s)(?<!/\s)
+    (?<!\brib/)(?<!\bribs/)(?<!\bclavicular\s)(?<!\brib/clavicular\s)
+    (?<!\bfractured\s)(?<!\bbroken\s)
+    (?<!\bpreviously\snoted\s)(?<!\bpreviously\sidentified\s)
+    (?<!\bnot\swell\svisualized\s)(?<!\bnot\svisible\son\s)
+    (?<!\btemporal\s)(?<!\bfacial\s)
+
+    (?:
+        # ------------------------------------------------------------------
+        # 1. Side/acuity modifiers (optional) + anatomy → fracture lexicon
+        # Skip-start guards: if "acute/displaced/..." was skipped because a
+        # longer lookbehind blocked the modifier, do not match from anatomy.
+        # ------------------------------------------------------------------
+        (?<!\bdisplaced\s)(?<!\bacute\s)(?<!\bapparent\s)(?<!\bgrossly\s)
+        (?<!\bgrossly\sdisplaced\s)(?<!\bproximal\s)
+        (?<!\boblique\sr\s)
+        \b(?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle|medial|
+               lateral|anterior|posterior|superior|inferior|multiple|mult|
+               old|remote|acute|healing|healed|chronic|patholog\w*|iatrogen\w*|
+               nondisplaced|non-displaced|displaced|comminuted|impacted|
+               depressed|gross|avulsive|apparent|
+               stable|unchanged|redemonstrated?|compression|
+               first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|
+               \d+(?:st|nd|rd|th)?)\s+){0,6}
+        (?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle|compression|
+               gross|
+               first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|
+               \d+(?:st|nd|rd|th)?)\s+){0,4}
+        (?:(?:left|right|bilateral|bilat\.?)[-\s]+sided\s+)?
+        (?:
+            ribs?|costal|costochondral|
+            clavicles?|clavicular|mid-?clavicular|
+            scapul\w*|
+            stern(?:um|al)|manubri\w*|xiphoid|
+            humer\w*|
+            shoulder(?:\s+girdle)?|glenohumeral|
+            glenoid|acromi\w*|coracoid|tuberosity|tubercle|
+            vertebr\w*|vertebral\s+bod(?:y|ies)|
+            transverse\s+process|spinous\s+process|
+            [ctl]\d{1,2}|pedicle|lamina|facet|
+            osseous|skeletal|bony
+        )\b
+        (?:
+            \s+(?:of|the|a|an|left|right|bilateral|bilat\.?|mid|middle|distal|proximal|
+                 medial|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
+                 neck|head|and|shaft|metadiaphys\w*|metaphys\w*|diaphys\w*|epiphys\w*|
+                 surgical|tubercle|margin|margins|spine|base|
+                 body|bodies|process|processes|compression|portion|junction|region|
+                 is|are|shows|demonstrates|appears|with|has|have|again|still|seen|
+                 similar|old|remote|acute|healing|healed|chronic|patholog\w*|
+                 known|nondisplaced|non-displaced|displaced|comminuted|stable|
+                 suggestive|consistent|compatible|probable|possible|
+                 pedicle|lamina|facet|tuberosity|xxxx|_{2,})
+        ){0,8}
+        \s+
+        (?:fractur\w*|fxr?|break(?:s|ing)?|broken|callus(?:es)?|comminut\w*|
+           non-?union|malunion|fracture\s+deformit\w*)\b
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Pathology → anatomy
+        # ------------------------------------------------------------------
+        \b(?:patholog\w*\s+|jefferson\s+burst\s+|burst\s+|avulsion\s+|avulsive\s+|
+           iatrogen\w*\s+|depressed\s+|transverse\s+)?
+        (?:fractur\w*|fxr?|break(?:s|ing)?|broken|callus(?:es)?|
+           non-?union|malunion)\b
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware|sternotomy))
+        (?:
+            [,\s]+(?:and\s+)?(?:of|the|a|an|left|right|bilateral|bilat\.?|mid|middle|distal|proximal|
+                 medial|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
+                 aspect|sided|patholog\w*|known|old|remote|
+                 healing|healed|chronic|acute|in|at|through|involving|to|are|with|
+                 slight|irregularity|surgical|tubercle|margin|margins|spine|base|
+                 nondisplaced|non-displaced|displaced|comminuted|impacted|depressed|
+                 neck|head|and|shaft|metadiaphys\w*|metaphys\w*|diaphys\w*|epiphys\w*|
+                 body|bodies|process|greater|tuberosity|pedicle|lamina|facet|
+                 portion|junction|region|seen|xxxx|_{2,}|thoracic|vertebral|
+                 first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|
+                 \d+(?:st|nd|rd|th)?)
+        ){0,12}
+        [,\s]+(?:and\s+)?
+        \b(?:
+            ribs?|costal|costochondral|
+            clavicles?|clavicular|mid-?clavicular|
+            scapul\w*|
+            stern(?:um|al)|manubri\w*|xiphoid|
+            humer\w*|
+            shoulder(?:\s+girdle)?|glenohumeral|
+            glenoid|acromi\w*|coracoid|tuberosity|tubercle|
+            vertebr\w*|vertebral\s+bod(?:y|ies)|
+            transverse\s+process|spinous\s+process|
+            [ctl]\d{1,2}|
+            osseous\s+structur\w*|skeletal\s+structur\w*|bony\s+structur\w*
+        )\b
+        (?!\s+wires?\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2b. Named burst / Jefferson fracture (cervical trauma residual)
+        # ------------------------------------------------------------------
+        \bjefferson\s+burst\s+fractur\w*
+        |
+        \bburst\s+fractur\w*
+        (?:
+            \s+(?:of|the|a|an|left|right|involving|through)
+        ){0,6}
+        \s+
+        \b(?:[ctl]\d{1,2}|vertebr\w*|vertebral\s+bod(?:y|ies))\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2c. Humeral head / tuberosity … subchondral|avulsion fracture
+        # ------------------------------------------------------------------
+        \bhumer\w*
+        (?:
+            \W+\w+
+        ){0,12}
+        \s+
+        (?:subchondral|avulsion|avulsive)\s+fractur\w*
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2d. Fracture-dislocation (hyphen breaks the §2 word walk)
+        # ------------------------------------------------------------------
+        \bfracture[- ]dislocation\b
+        (?:
+            \s+(?:of|the|a|an|left|right|bilateral|proximal|distal|mid|middle)
+        ){0,6}
+        \s+
+        \b(?:
+            ribs?|clavicles?|clavicular|scapul\w*|stern(?:um|al)|humer\w*|
+            shoulder(?:\s+girdle)?|glenohumeral|glenoid|acromi\w*|coracoid
+        )\b
+        |
+        \b(?:shoulder|glenohumeral|humer\w*|scapul\w*|glenoid)\s+fracture[- ]dislocation\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2e. Avulsive / avulsion fracture of glenoid / tuberosity / scapula
+        # ------------------------------------------------------------------
+        \b(?:tiny\s+|small\s+)?(?:avulsive|avulsion)\s+fractur\w*
+        (?:
+            \s+(?:of|the|a|an|left|right|posterior|superior|inferior|anterior|
+                 greater|lesser)
+        ){0,8}
+        \s+
+        \b(?:glenoid|tuberosity|scapul\w*|humer\w*|acromi\w*|coracoid)\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2f. FN-fit residual: deformity … suggests/compatible … fracture
+        # ------------------------------------------------------------------
+        \bdeformit\w*
+        (?:
+            \s+(?:of|the|a|an|left|right|proximal|distal|mid|middle|chronic)
+        ){0,6}
+        \s+
+        \b(?:humer\w*|scapul\w*|stern(?:um|al)|acromi\w*|glenoid|shoulder)\b
+        (?:
+            [,\s]+(?:suggests?|suggestive|compatible|consistent|indicative|of|with|for|
+                 the|patient'?s|known|prior|old|remote|a|an|scapul\w*|humer\w*|
+                 sternal?|proximal|distal)
+        ){0,12}
+        [,\s]+fractur\w*
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2g. FN-fit residual: lucency … FOV bone … representing fracture
+        # ------------------------------------------------------------------
+        \blucenc\w*
+        (?:
+            [,\s]+(?:through|in|of|the|a|an|left|right|along|across)
+        ){0,6}
+        [,\s]+
+        \b(?:scapul\w*|stern(?:um|al)|humer\w*|acromi\w*|glenoid)\b
+        (?:
+            [,\s]+(?:spine|body|neck|margin|margins|wing|blade|base|potentially|possibly|
+                 may|be|representing|a|an|nondisplaced|non-displaced|displaced|
+                 suspicious|concerning|for|probable|possible)
+        ){0,12}
+        [,\s]+fractur\w*
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2h. FN-fit residual: cortical irregularity … FOV bone … fracture
+        # ------------------------------------------------------------------
+        \bcortical\s+irregularit\w*
+        (?:
+            [,\s]+(?:of|the|a|an|left|right|mid|middle|lower|upper|about|along|minimal)
+        ){0,8}
+        [,\s]+
+        \b(?:stern(?:um|al)|humer\w*|scapul\w*|acromi\w*|clavicles?|ribs?|osseous|bony)\b
+        (?:
+            [,\s]+(?:body|bodies|concerning|suspicious|for|a|an|nondisplaced|non-displaced|
+                 possible|probable|slight|irregularity)
+        ){0,10}
+        [,\s]+fractur\w*
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2i. FN-fit residual: evidence of callus formation (lookbehind bypass)
+        # ------------------------------------------------------------------
+        \b(?:(?:some|definite|clear|possible)\s+)?evidence\s+of\s+callus\s+formation\b
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Explicit fracture-framed sequelae (no bare deformity)
+        # ------------------------------------------------------------------
+        \bfracture\s+deformit\w*
+        |
+        \b(?:old|remote|healed|healing|chronic|prior)\s+fracture\s+deformit\w*
+        |
+        \bcallus\s+formation\b
+        |
+        \b(?:fracture|healing|healed)\s+callus(?:es)?\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Compact abbreviations tied to CXR-FOV bones
+        # ------------------------------------------------------------------
+        # Compact fx: keep vert-body (prompt-visible + residual T8-style)
+        # and non-child bones. Bare rib/clavicle fx omitted (indication).
+        \b(?:scapul\w*|stern(?:um|al)|
+           vert(?:ebral)?\s+bod(?:y|ies)?)\s+fxr?\b
+        |
+        (?<!\br\s)\bhumer\w*\s+fxr?\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Flail chest
+        # ------------------------------------------------------------------
+        \bflail\s+chest\b
+        |
+        \bflail\s+(?:chest\s+)?segment\b
+    )
+    (?!\s*,?\s+not\sdirectly\simaged)
+    (?!\s+is\s+not\sincluded)
+    (?!\s+not\sincluded\sin)
+    (?![\s\w,.;:'-]{0,80}documented\s+on\s+preceding)
+    (?![\s\w,.;:'-]{0,80}not\s+(?:well\s+)?(?:appreciated|seen)\s+on\s+(?:today|today's|the\s+current|this))
+    (?![\s\w,.;:'-]{0,60}please\s+reassess)
+)

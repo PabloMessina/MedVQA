@@ -1,14 +1,123 @@
+# ==============================================================================
+# hiatal_hernia
+# Hiatal / hiatus / paraesophageal / sliding / rolling hernia; gastric herniation
+# / intrathoracic stomach when hiatal-framed (not Morgagni/Bochdalek).
+# Do NOT match: non-hiatal diaphragmatic hernias, lung herniation, reflux alone,
+# elevated hemidiaphragm/eventration, gastric pull-up, diverticulum, history-only,
+# or negated "no hiatal hernia".
+# Negation/history lookbehinds are fixed-width (stdlib re).
+# ==============================================================================
 
-    # 1. Standard Names
-    # Matches: "Hiatal hernia", "Hiatus hernia", "Paraesophageal hernia"
-    \b(?:hiatal|hiatus|para-?esophageal)\s+hernia
-    |
-    # 2. "Gastric" Herniation synonyms
-    # Matches: "Gastric hernia", "Herniation of the stomach"
-    \bgastric\s+herni\w*
-    |
-    \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:stomach|gastr\w*)
-    |
-    # 3. Visual Definition (Strong Synonym)
-    # Matches: "Intrathoracic stomach" (Radiologists often use this phrase instead of "hernia")
-    \bintra-?thoracic\s+stomach
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sobvious\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\sa\s)(?<!\bno\sevidence\sof\tan\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bno\sdefinite\sevidence\sof\s)(?<!\bno\sdefinite\sevidence\sfor\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)(?<!\ba\shistory\sof\s)
+    (?<!\bhistory\sof\sleft\s)(?<!\bhistory\sof\sright\s)
+    (?<!\bhistory\sof\sa\sleft\s)(?<!\bhistory\sof\sa\sright\s)
+    (?<!\bwith\sa\sleft\s)(?<!\bwith\sa\sright\s)
+    (?<!\bwith\sleft\s)(?<!\bwith\sright\s)
+    (?<!\bh/o\s)(?<!\bhx\sof\s)(?<!\bhx\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\bconcern\sfor\s)(?<!\bsuspicion\sfor\s)
+    (?<!\?\s)(?<!//\s)
+    (?<!\bor\seven\s)(?<!\bsuch\sas\s)
+    (?<!\bmorgagni\s)(?<!\bbochdalek\s)
+    (?<!\bmorgagni\shernia\swith\s)
+    (?<!\bHISTORY:\s)
+
+    (?:
+        # HH name stem: optional inserted "type" ("hiatal type hernia")
+        # Spaced para/peri esophageal allowed (para esophageal).
+        # 1. Standard names — block bare "known … hernia" (indication/history-only);
+        # currently visualized "known" forms live in arms 1b–1f.
+        (?<!\bknown\s)(?<!\bwith\sknown\s)
+        \b(?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        # 1b. Attribution → known HH (current finding framed as known HH);
+        # allow patient's / the patient's / a / the before known.
+        \b(?:compatible|consistent|corresponding|corresponds)\s+(?:with|to)\s+
+          (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        \b(?:due\s+to|in\s+part\s+due\s+to|through)\s+
+          (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        \b(?:reflects?|represents?)\s+
+          (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        # 1c. Known HH currently visualized / stable / better seen
+        # Block "with known" (history/context). present\b avoids "presenting".
+        (?<!\bwith\s)
+        \b(?:the\s+|a\s+)?known\s+
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*\s+
+          (?:is\s+)?(?:seen|unchanged|stable|present\b|noted|constant|redemonstrat\w*|
+            better\s+visible|again\s+seen|again\s+noted|
+            less\s+apparent|
+            (?:can\s+be\s+)?faintly\s+discerned)
+        |
+        # 1d. Explicit current possession (avoids CLINICAL HISTORY "… with known")
+        \bhas\s+a\s+known\s+
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        # 1e. Current finding attributed to "history of" HH
+        \b(?:compatible|consistent)\s+with\s+(?:a\s+)?history\s+of\s+(?:a\s+)?
+          (?:known\s+)?
+          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+          (?:\s+type)?\s+hernia\w*
+        |
+        # 1f. Bare / sized known HH finding line (not "with known" / not mid-indication)
+        # Sized forms anywhere; bare "Known HH." only sentence-initial / after period.
+        (?<!\bwith\s)
+        (?:
+            \b(?:large|huge|big|small|moderate)\s+known\s+
+              (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+              (?:\s+type)?\s+hernia\w*
+            |
+            (?:(?<=^)|(?<=\.\s)|(?<=\n))known\s+
+              (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
+              (?:\s+type)?\s+hernia\w*
+        )
+        |
+        # 2. Gastric herniation synonyms
+        \bgastric\s+herni\w*
+        |
+        \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:stomach|gastr\w*)
+        |
+        # 2b. Stomach … herniated above the diaphragm (word-order paraphrase)
+        \bstomach\b
+          (?:(?![.!?]).){0,50}?
+          herniat\w*\s+above\s+(?:the\s+)?diaphragm
+        |
+        # 2c. Herniation / hernia through the (esophageal) hiatus
+        \bherniat\w*\s+through\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
+        |
+        \bhernia\w*
+          (?:(?![.!?]).){0,50}?
+          through\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
+        |
+        # 3. Intrathoracic stomach (allow "known intrathoracic stomach")
+        \bintra-?thoracic\s+stomach
+        |
+        # 4. Stomach protruding into lung/thorax with hernia cue
+        \bstomach\b
+          (?:(?![.!?]).){0,60}?
+          (?:into|in)\s+(?:the\s+)?(?:left\s+|right\s+)?(?:lower\s+)?
+          (?:lung|thorax|chest|hemithorax)
+          (?:(?![.!?]).){0,40}?\bhernia\w*
+    )
+)

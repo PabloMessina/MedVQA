@@ -1,0 +1,294 @@
+# ==============================================================================
+# pulmonary_cavity
+# Pulmonary cavity / cavitation / cavitary lesion / lung abscess.
+#
+# Precision-first: require pulmonary / cavitary context. Do NOT match bare
+# "cavity" (thoracic/chest/nasal/abdominal/soft-tissue), bare "abscess"
+# (hepatic/epidural/mediastinal/indication-only), bare air-fluid levels
+# (GI, hiatal hernia, hydropneumothorax/hemithorax), or pectus "excavatum".
+# Pseudocavitation / blebs / bullae / cysts alone are out of scope.
+# "Cannot exclude a cavity", indication-only "Cavitary lesion?", and
+# not-demonstrated / occult / CT-only cavitary mentions are out of scope.
+# FN-fit (fn_mine_fit_shared): mid-lung-zone / hilar-perihilar sites;
+# thick-walled / measured / fluid-filled / irregular cavity; cavity at;
+# cavity formation; suggestion of; no (significant|interval|gross) change;
+# better seen/depicted/characterized on CT (not CT-only); bare cavities
+# with raise/suggest framing; thick-walled lesion + central air and fluid.
+# ==============================================================================
+
+\b(?:
+        # ------------------------------------------------------------------
+        # 1. Strong cavitary morphology (cavitation / cavitary / cavitating…)
+        #    Clause-local hop: skip INDICATION:/HISTORY: colons and no-/none-
+        #    led clauses ("No … or cavitary", "none clearly cavitated").
+        #    Exception: "no (significant|interval|gross) change … cavit*" is
+        #    stable positive phrasing, not negation of the finding.
+        #    Post-match CT guard: keep CT-only out, but allow "better
+        #    seen|depicted|characterized|appreciated|visualized on … CT".
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!;\n]
+            |
+            (?<!history)(?<!indication)(?<!data)(?<!info):
+        )
+        (?:
+            (?:
+                (?=\bno\b(?![^.!?;:\n]{0,50}cavit)[^.!?;:\n]{0,80},\s*(?:but|however)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\bno\b(?!\s+(?:(?:significant|interval|gross)\s+)*change\b))
+                (?!\b(?:
+                    not|without|nor|neither|none|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|rule|
+                    history|hx|pmh|
+                    evaluate|eval|assess|assessment|
+                    concern|concerned|questioned|
+                    exclude|excluding|cannot|
+                    please|
+                    presented
+                )\b)
+                (?!\bw/o\b)
+                (?!\bno\s+(?:evidence|sign|findings?|definite|visible|residual|overt)\b)
+                (?!\bwithout\s+(?:evidence|sign|findings?)\b)
+                (?!\bno\s+evidence\s+(?:of|for)\b)
+                (?!\bnone\s+clearly\b)
+                (?!\bcannot\s+exclude\b)
+                (?!\br/?o\b)
+                (?!\b//)
+                (?!\?)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?<!hx\sof\s)(?<!history\sof\s)(?<!h\/o\s)(?<!h\/o\.\s)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?<!none\sclearly\s)(?<!no\svisible\s)(?<!no\sresidual\s)
+        (?<!questioned\s)(?<!questioned\scircular\s)
+        (?<!//\s)(?<!\?)(?<!\?\s)
+        (?<!intra)(?<!pseudo)(?<!non-)(?<!non\s)
+        \bcavit(?:ary|ation|ations|ating|ated)\b
+        (?!\?)
+        (?![^.!?;:]{0,120}?(?:
+            not\s+as\s+well|
+            not\s+demonstrated|
+            not\s+well\s+appreciated|
+            (?:remains|is|are)\s+occult|
+            occult\s+by|
+            (?<!better\sseen\s)(?<!better\sdepicted\s)(?<!better\scharacterized\s)(?<!better\sappreciated\s)(?<!better\svisualized\s)
+            on\s+(?:the\s+)?(?:recent|prior|previous|earlier)\s+(?:chest\s+)?ct
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Qualified cavity / cavities (pulmonary site or morphology)
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!exclude\s)(?<!exclude\sa\s)(?<!exclude\san\s)
+        (?:
+            (?:
+                pulmonary | lung | parenchymal | apical | biapical |
+                (?:peri)?hilar |
+                (?:right|left|bilateral)\s+(?:peri)?hilar |
+                (?:right|left|bilateral)\s+apical |
+                (?:right|left)\s+apex |
+                air[-\s]?filled |
+                fluid[-\s]?filled |
+                thick[-\s]?walled |
+                irregular |
+                (?:right|left|bilateral)\s+(?:upper|middle|lower)\s+lobe |
+                (?:RUL|RML|RLL|LUL|LLL|LML)
+            )
+            \s+cavit(?:y|ies)
+            |
+            # mid/upper/lower lung-zone cavity (site-first)
+            (?:(?:right|left|bilateral)\s+)?
+            (?:mid|middle|upper|lower)\s+lung\s+zones?
+            \s+cavit(?:y|ies)
+            |
+            # "upper lobe cavity" without laterality (do not start inside
+            # "right/left lower lobe cavity" or "cannot exclude a …")
+            (?<!right\s)(?<!left\s)
+            (?:upper|middle|lower)\s+lobe
+            \s+cavit(?:y|ies)
+            |
+            cavit(?:y|ies)\s+(?:in|within|of|at)\s+(?:the\s+)?
+            (?:
+                (?:right|left|bilateral)\s+
+            )?
+            (?:
+                lung\b | lungs\b | lobe\b | pulmonary\b | parenchyma\b |
+                apex\b | apical\b | hil(?:um|ar)\b | perihilar\b |
+                (?:upper|lower|middle|right|left)\s+lobe\b |
+                right\s+lower\s+lobe\b | left\s+lower\s+lobe\b |
+                right\s+upper\s+lobe\b | left\s+upper\s+lobe\b |
+                (?:upper|middle|lower|mid)\s+(?:lung|zone|lobe)\b |
+                (?:mid|middle|upper|lower)\s+lung\s+zones?\b |
+                (?:peri)?hilar\s+region\b
+            )
+            |
+            # grammar: "The cavity and the left upper lobe"
+            cavit(?:y|ies)\s+and\s+(?:the\s+)?
+            (?:right|left|bilateral)\s+(?:upper|middle|lower)\s+lobe
+            |
+            # "mass in a cavity" / "consolidation or mass in a cavity"
+            (?:mass|consolidation|opacity|nodule|lesion)
+            \s+(?:or\s+(?:mass|consolidation|opacity|nodule|lesion)\s+)?
+            in\s+(?:a\s+|the\s+)?cavit(?:y|ies)
+            |
+            # measured cavity: "2-cm cavity", "15 mm wide cavity",
+            # "2.0-cm thick walled cavity"
+            \d+(?:\.\d+)?\s*(?:cm|mm)\s+
+            (?:(?:wide|thick[-\s]?walled|irregular)\s+)?
+            cavit(?:y|ies)
+            |
+            # wall-described cavity / thick-walled cavity (+ measuring)
+            thick[-\s]?walled\s+cavit(?:y|ies)
+            |
+            cavit(?:y|ies)\s+with\s+(?:a\s+)?(?:thick(?:er)?|thin)\w*\s+wall
+            |
+            cavit(?:y|ies)\s+measuring
+            |
+            # cavity formation
+            cavit(?:y|ies)\s+formation
+            |
+            # hedging: could be / suggestion of / suggestive of / representing /
+            # may represent a (small) cavity
+            (?:
+                could\s+be\s+(?:a\s+)?|
+                suggest(?:s|ion\s+of|ive\s+of)\s+(?:a\s+|an\s+)?|
+                representing\s+(?:a\s+)?|
+                may\s+represent\s+(?:a\s+|an\s+)?(?:small\s+|large\s+|tiny\s+)?
+            )
+            (?:
+                (?:\d+(?:\.\d+)?\s*(?:cm|mm)\s+)?
+                (?:(?:wide|thick[-\s]?walled|irregular)\s+)?
+            )?
+            cavit(?:y|ies)(?:\s+formation)?
+            |
+            pre[-\s]?existing\s+cavit(?:y|ies)
+            |
+            cavit(?:y|ies)\s+like\s+area
+            |
+            cavit(?:y|ies)\s+containing
+            |
+            # bare plural cavities with assertive framing (precision-limited)
+            \bcavities\b\s+(?:raise|raises|suggest|suggests|indicate|indicates|concerning\s+for)
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Lung / parenchymal / lobar abscess (not hepatic, epidural, etc.)
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?:
+            (?:
+                lung | pulmonary | parenchymal |
+                (?:right|left|bilateral)\s+(?:upper|lower|middle)\s+lobe |
+                (?:upper|lower|middle)\s+lobe |
+                lingular | infrahilar | suprahilar |
+                (?:RUL|RML|RLL|LUL|LLL|LML)
+            )
+            \s+abscess(?:es)?
+            |
+            # "abscess in … lobe/lung"
+            abscess(?:es)?\s+in\s+(?:the\s+)?
+            (?:
+                (?:right|left|bilateral)\s+(?:upper|lower|middle|mid)\s+(?:lobe|lung)s?\b |
+                (?:upper|lower|middle|mid)\s+(?:lobe|lung)s?\b |
+                (?:right|left)\s+(?:lung|lobe)s?\b |
+                lung\b
+            )
+            |
+            # "masses or abscesses in the right lower lung"
+            (?:masses|mass)\s+or\s+abscess(?:es)?\s+in\s+(?:the\s+)?
+            (?:(?:right|left|bilateral)\s+)?
+            (?:(?:upper|lower|middle|mid)\s+)?
+            (?:lung|lobe)s?\b
+            |
+            # "mass or abscess" / "pneumonia or a … abscess" in lung-lesion hedges
+            (?:mass|pneumonia|consolidation|opacity|nodule)\s+or\s+(?:an?\s+)?abscess(?:es)?
+            |
+            # "mass, abscess or hematoma" / comma-list abscess differential
+            (?:mass|consolidation|opacity|nodule|lesion),?\s+abscess(?:es)?\s+or\b
+            |
+            # "representing abscess" / "either abscess or …"
+            (?:representing|either)\s+(?:an?\s+)?abscess(?:es)?
+            |
+            # "lung mass,, presumably abscess"
+            (?:lung\s+)?mass,,?\s+presumably\s+abscess(?:es)?
+            |
+            underlying\s+abscess(?:es)?
+            |
+            # "developing abscess" / "compatible with a developing abscess"
+            developing\s+(?:lung\s+)?abscess(?:es)?
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Air-/gas-fluid level only with intrapulmonary / cavitary context
+        #    (exclude GI, hiatal hernia, hemithorax/hydropneumothorax alone,
+        #     and air-fluid level in a bleb/bulla/cyst).
+        #    Also: thick-walled lung lesion/mass with central air and fluid
+        #    (no explicit "air-fluid level" token).
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!nor\s)
+        (?:
+            # level within a lesion / cavity / consolidation / mass / nodule
+            # (allow laterality + lobe modifiers: "within a right lower lobe mass")
+            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            \s+(?:in|within)\s+(?:(?:the|a|an)\s+)?
+            (?:(?:right|left|bilateral)\s+)?
+            (?:(?:upper|lower|middle|mid)\s+)?
+            (?:(?:lobe|lung)\s+)?
+            (?:
+                (?:pre[-\s]?existing\s+)?cavit(?:y|ies) |
+                (?:cavitary\s+)?(?:lesion|mass|nodule|consolidation|opacity|pneumonia) |
+                (?:lung|pulmonary|parenchymal)\b
+            )
+            |
+            # cavity / cavitary … air-fluid level (short window)
+            (?:cavit(?:ary|ation|y|ies)|abscess(?:es)?)
+            (?:(?![.!?])(?:.){0,60}?)
+            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            |
+            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            (?:(?![.!?])(?:.){0,60}?)
+            (?:cavit(?:ary|ation|y|ies)|abscess(?:es)?)
+            |
+            # thick-walled (lobar) lesion/mass with central air and fluid
+            (?:
+                (?:(?:right|left|bilateral)\s+)?
+                (?:(?:upper|lower|middle|mid)\s+)?
+                (?:(?:lobe|lung)\s+)?
+            )?
+            thick[-\s]?walled\s+(?:lesion|mass|nodule|consolidation|opacity)
+            \s+with\s+(?:a\s+)?(?:central\s+)?(?:air\s+and\s+fluid|air[-\s]?fluid(?:\s+level)?)
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Excavated / excavation pulmonary lesion (not pectus excavatum)
+        # ------------------------------------------------------------------
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!pectus\s)
+        (?:
+            excavated\s+(?:pulmonary\s+|lung\s+|parenchymal\s+)?
+            (?:lesion|mass|nodule|consolidation|opacity|cavit(?:y|ies))
+            |
+            (?:pulmonary|lung|parenchymal)\s+excavation
+            |
+            excavation\s+(?:of|in|within)\s+(?:the\s+)?
+            (?:(?:right|left|bilateral)\s+)?
+            (?:(?:upper|lower|middle|mid)\s+)?
+            (?:(?:lobe|lung)\s+)?
+            (?:lesion|mass|nodule|consolidation|opacity|parenchyma|lung)\b
+        )
+)

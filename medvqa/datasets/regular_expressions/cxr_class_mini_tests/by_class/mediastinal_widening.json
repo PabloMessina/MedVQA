@@ -1,0 +1,43 @@
+{
+  "class_id": "mediastinal_widening",
+  "positives": [
+    "Mediastinal widening.",
+    "Widened mediastinum.",
+    "Generalized widening of the mediastinal contour.",
+    "Superior mediastinal widening.",
+    "Mediastinum is diffusely widened.",
+    "Increase in mediastinal caliber.",
+    "Significant widening of the vascular pedicle.",
+    "Prominence of the upper mediastinum.",
+    "Widening of the mid and upper mediastinum.",
+    "Widened mediastnium.",
+    "Enlarged contour of the superior mediastinum.",
+    "Prominent mediastinum.",
+    "Prominent, wide-appearing upper mediastinum.",
+    "Wide-appearing upper mediastinum.",
+    "The upper mediastinum is enlarged.",
+    "Fullness of the left superior mediastinum.",
+    "The mediastinal silhouette is enlarged.",
+    "Enlarged mediastinal silhouette.",
+    "Cardiomegaly, mediastinal widening, and mild pulmonary edema.",
+    "Severe widening of the superior mediastinal.",
+    "There is a widened appearance to the mediastinum.",
+    "The superior mediastinum appears broad.",
+    "Broad superior mediastinum.",
+    "The mediastinum appears wider.",
+    "Broad mediastinum."
+  ],
+  "negatives": [
+    "Cardiomegaly with narrow vascular pedicle.",
+    "Anterior mediastinal mass that is focal.",
+    "Aortic ectasia alone.",
+    "Interval increase in pneumomediastinum.",
+    "Evaluate for widened mediastinum.",
+    "No abnormal mediastinal widening.",
+    "No pneumothorax mediastinal widening or pneumothorax."
+  ],
+  "negation_soft": [
+    "Mediastinum is normal in width.",
+    "No mediastinal widening."
+  ]
+}

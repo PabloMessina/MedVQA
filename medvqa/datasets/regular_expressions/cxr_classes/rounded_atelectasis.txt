@@ -1,18 +1,71 @@
+# ==============================================================================
+# rounded_atelectasis (true leaf; precision-first on this freeze)
+# Prompt: explicit current round/rounded atelectasis, folded lung, Blesovsky,
+# rounded lung collapse, or atelectatic pseudotumor. Comet-tail / crow's-foot
+# only when attributed to rounded atelectasis.
+#
+# Do NOT infer from linear/plate-like/discoid/segmental/lobar/dependent/
+# nonspecific atelectasis, or from generic pleural-based mass/nodule/
+# consolidation/pleural thickening/asbestos disease.
+# Do NOT match history/indication/?-DDx only, or negated mentions.
+# History/prior/other-modality-only is not current CXR gold — but a current
+# impression that still names rounded atelectasis (incl. CT-correlated) is.
+# Compiled IGNORECASE|VERBOSE. Fixed-width lookbehinds only.
+# ==============================================================================
 
-    # 1. Direct Terminology 
-    # Matches: "Rounded atelectasis", "round focal atelectasis"
-    \bround(?:ed)?\s+(?:\w+\s+){0,5}atelect\w*
-    |
-    # NEW: Matches "atelectasis, rounded" OR "atelectasis is seen with a rounded [shape]"
-    # Allows either a comma OR up to 5 intervening words.
-    \batelect\w*(?:,\s*|\s+(?:\w+\s+){1,5})round(?:ed)?\b
-    |
-    # 2. Distinct Synonyms
-    \bfolded\s+lung
-    |
-    \bblesovsky\w*
-    |
-    \batelect\w*[-\s]+pseudo[-\s]*tumor\b
-    |
-    # 3. Pathognomonic Visual Sign
-    \bcomet[-\s]+tail(?:\s+(?:sign|appearance|configuration|morphology|shadow))?\b
+(?:
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\ssign\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\bfree\sof\s)
+    (?<!\bhistory\sof\s)
+    (?<!\bhx\sof\s)
+    (?<!\bevaluate\sfor\s)
+    (?<!\beval\sfor\s)
+    (?<!\brule\sout\s)
+    (?<!\br/o\s)
+    (?<!\bquestion\sof\s)
+    (?<!\bquestion\sfor\s)
+    # Indication-style "? rounded atelectasis vs mass" (HISTORY CODE)
+    (?<!\?\s)
+    (?:
+        # 1. Direct terminology: round / rounded atelectasis (small adjective gap)
+        #    e.g. "rounded atelectasis", "round focal atelectasis"
+        #    Optional glued "?" = OCR/hedge marks: "?round? atelectasis"
+        #    (distinct from indication "? rounded …" blocked by (?<!\?\s) above)
+        \bround(?:ed)?[?]*\s+(?:\w+\s+){0,5}atelect\w*
+
+        |
+
+        # Reverse order: "atelectasis, rounded" / "atelectasis that is/appears rounded"
+        \batelect\w*(?:,\s*|\s+(?:that\s+(?:is|appears)\s+|which\s+(?:is|appears)\s+|appearing\s+)?)round(?:ed)?\b
+        |
+        # "atelectasis with rounded morphology|configuration|appearance|contour|shape"
+        \batelect\w*\s+with\s+round(?:ed)?\s+(?:morphology|configuration|appearance|contour|shape)\b
+
+        |
+
+        # 2. Synonyms from labeling prompt
+        # hyphenated "folded-lung" as well as "folded lung"
+        \bfolded[-\s]+lung\b
+        |
+        \bblesovsky(?:\s+syndrome)?\b
+        |
+        \bround(?:ed)?[?]*\s+lung\s+collapse\b
+        |
+        \batelect\w*[-\s]+pseudo[-\s]*tumou?rs?\b
+
+        |
+
+        # 3. Comet-tail / crow's-foot ONLY when attributed to rounded atelectasis
+        \b(?:comet[-\s]?tail|crow['’]?s?[-\s]?foot)(?:\s+(?:sign|appearance|configuration|morphology|shadow))?\s+(?:of|from|due\s+to|secondary\s+to)\s+round(?:ed)?[?]*\s+atelect\w*
+        |
+        \bround(?:ed)?[?]*\s+atelect\w*.{0,60}?\b(?:comet[-\s]?tail|crow['’]?s?[-\s]?foot)\b
+        |
+        \b(?:comet[-\s]?tail|crow['’]?s?[-\s]?foot)\b.{0,60}?\bround(?:ed)?[?]*\s+atelect\w*
+    )
+)

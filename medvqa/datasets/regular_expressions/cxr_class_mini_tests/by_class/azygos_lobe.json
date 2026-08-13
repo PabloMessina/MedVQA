@@ -1,0 +1,21 @@
+{
+  "class_id": "azygos_lobe",
+  "positives": [
+    "Azygos lobe in the right upper lung.",
+    "Azygos fissure present.",
+    "Azygos accessory lobe.",
+    "Right upper lobe azygos lobe variant.",
+    "Azygos fissure creating an accessory lobe.",
+    "Incidental note of an azygos pseudofissure."
+  ],
+  "negatives": [
+    "Prominent azygos vein.",
+    "Right upper lobe scar.",
+    "Atelectasis in the right apex.",
+    "Skin fold in the right apex.",
+    "Right upper lobe nodule."
+  ],
+  "negation_soft": [
+    "No azygos lobe."
+  ]
+}

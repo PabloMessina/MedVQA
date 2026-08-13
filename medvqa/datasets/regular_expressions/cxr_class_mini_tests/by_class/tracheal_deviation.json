@@ -1,0 +1,47 @@
+{
+  "class_id": "tracheal_deviation",
+  "positives": [
+    "The trachea is deviated to the right.",
+    "Tracheal deviation toward the left is present.",
+    "The trachea is shifted leftward by mass effect.",
+    "Trachea bowed to the right by adjacent volume loss.",
+    "Tracheal displacement to the left, attributed to scoliosis.",
+    "Rightward deviation of the trachea.",
+    "Rightward retraction of the trachea.",
+    "The trachea is slightly deviated.",
+    "Shift of the trachea to the right.",
+    "Apparent rightward shift the trachea.",
+    "Increased rightward tracheal and mediastinal shift.",
+    "The mediastinal structures, including the trachea and esophagus are pushed to the left.",
+    "Mass displacing of the cervical trachea to the left.",
+    "Rightward shift the trachea secondary to goiter.",
+    "Displacement of the lower cervical trachea to the left.",
+    "A large cervicothoracic mass displaces the trachea to the left.",
+    "Shift of the mediastinum to the left as well as the trachea.",
+    "Displacing the heart, mediastinum and trachea to the left.",
+    "The trachea is pushed to the left.",
+    "Leftward tracheal and mediastinal shift.",
+    "Tracheal and mediastinal shift to the right.",
+    "Trachea and esophagus are deviated leftward by large right thyroid mass.",
+    "Trachea is chronically deviated far to the right.",
+    "Deviation of the superior tracheal air shadow to the right.",
+    "XXXX deviation towards the left.",
+    "Mild rightward XXXX deviation.",
+    "Slight deviation of the heart and mediastinal structures and trachea to the right.",
+    "Shift of the mediastinum, heart and trachea to the right.",
+    "Further deviations of the mediastinum and the trachea to the right.",
+    "Marked shift of the mediastinum and trachea to the left.",
+    "Deviation of the mediastinum and trachea to the right."
+  ],
+  "negatives": [
+    "Mediastinal shift to the right without tracheal wording.",
+    "Large left pleural effusion with mass effect.",
+    "Right upper lobe collapse with volume loss.",
+    "Patient rotation accounts for apparent mediastinal displacement.",
+    "Goiter suggested; trachea not separately described."
+  ],
+  "negation_soft": [
+    "Trachea is midline.",
+    "No tracheal deviation is identified."
+  ]
+}

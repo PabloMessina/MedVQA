@@ -1,0 +1,124 @@
+# ==============================================================================
+# focal_osseous_lesion
+# Discrete lytic / sclerotic / expansile / destructive bone lesions, osseous
+# metastases, and named entities (bone island, enchondroma, osteochondroma).
+# Deliberately omits uncomplicated fracture/callus, osteopenia, degenerative
+# osteophytes, nonspecific bony irregularity, and bare "osseous abnormality".
+#
+# Negation: stacked fixed-width lookbehinds (stdlib re limitation).
+# Adjective-first branches so "no suspicious osseous lesions" matches starting
+# at "suspicious" (caught by (?<!\bno\s)) rather than at "osseous".
+# Bare osseous/bony/bone lesion uses extra adjective / "or " lookbehinds.
+# Metastasis: adjective-first + bare bone/bony/osseous with adj lookbehinds.
+# ==============================================================================
+
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sapparent\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bwithout\sdefinite\s)(?<!\bwithout\sapparent\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bspecifically,\sno\s)(?<!\bspecifically\sno\s)
+    (?<!\bno\slytic\sor\s)(?<!\bsclerotic\sor\s)
+    (?<!\bno\sworrisome\s)(?<!\bworrisome\s)
+    # Note: do NOT bare-block "evidence of/for" — that kills "Unchanged evidence of …".
+    # "no/without evidence of" already covered above.
+    (?<!\babsence\sof\s)(?<!\babsence\sof\sa\s)
+    (?<!\bvisible\s)
+    (?<!\?\s)
+    \b(?:
+        # Named entities / myeloma (word-boundary so osteochondroma ≠ -tosis)
+        bone\s+islands?|
+        enostos(?:is|es)\b|
+        osteomas?\b|
+        osteochondromas?\b|
+        enchondromas?\b|
+        endochondromas?\b|
+        plasmacytoma|
+        myelomatous\s+(?:involvement|lesions?|deposits?)|
+        ivory\s+vertebral\s+bod(?:y|ies)|
+
+        # Metastasis (adjective-first, then bare with adj lookbehinds)
+        # Bare lytic/sclerotic/… metastases (no intervening bone word)
+        (?:lytic|sclerotic|expansile|dense\s+sclerotic|blastic|osteolytic|osteoblastic)\s+metastas\w*|
+        (?:lytic|sclerotic|expansile|dense\s+sclerotic|blastic|osteolytic|osteoblastic)\s+(?:bone|bony|osseous)\s+metastas\w*|
+        # Word-order: osseous/bone/bony sclerotic metastases
+        (?:osseous|bone|bony)\s+(?:lytic|sclerotic|blastic|osteolytic|osteoblastic)\s+metastas\w*|
+        (?<!\blytic\s)(?<!\bsclerotic\s)(?<!\bexpansile\s)(?<!\bdense\s)
+        (?<!\bblastic\s)(?<!\bosteolytic\s)(?<!\bosteoblastic\s)
+        (?:osseous|bone|bony)\s+metastas\w*|
+        rib\s+metastas\w*|
+        skeletal\s+metastas\w*|
+        (?:lytic|sclerotic|blastic|osteolytic|osteoblastic)\s+skeletal\s+metastat\w*|
+        metastatic\s+(?:bone|bony|osseous|skeletal)\s+(?:disease|lesions?|deposits?|involvement)|
+        osseous\s+metastatic\s+disease|
+        metastatic\s+disease\s+to\s+(?:the\s+)?(?:bony\s+skeleton|bones?\b|skeleton)|
+        metastas\w*\s+to\s+(?:the\s+)?(?:bony\s+skeleton|bones?\b|skeleton)|
+
+        # Lytic / sclerotic / expansile / destructive / lucent / blastic lesions
+        # (adjective-first, including slash compounds and lytic-or-sclerotic)
+        # middle tokens: bone|bony|rib|osseous|cortical|focal|vertebral
+        (?<!\bor\s)(?:lytic|sclerotic|expansile|destructive|blastic|osteolytic|osteoblastic|suspicious|aggressive|focal|visible|sinister|other)\s+(?:bone\s+|bony\s+|rib\s+|osseous\s+|cortical\s+|focal\s+|vertebral\s+)?lesions?|
+        (?<!,\s)(?:lytic|sclerotic|osteolytic|osteoblastic|blastic)\s+or\s+(?:lytic|sclerotic|osteolytic|osteoblastic|blastic)\s+(?:bone\s+|bony\s+|osseous\s+)?lesions?|
+        lucent\s+(?:bone\s+|osseous\s+|cortical\s+|rib\s+|bony\s+)?lesions?|
+        (?:lytic|sclerotic|blastic)(?:\s*/\s*(?:lytic|sclerotic|blastic))?\s+(?:foci|focus)|
+        (?:rib|vertebral|clavicular|humeral|scapular)\s+(?:lytic|sclerotic|lucent|destructive|blastic)\s+lesions?|
+        focal\s+(?:lytic|sclerotic|osseous|bone|bony)\s+lesions?|
+        # Lytic/sclerotic areas (myeloma / multifocal cue)
+        (?:lytic|sclerotic|osteolytic|osteoblastic|blastic)\s+areas?\b|
+
+        # Destructive / expansile / bony destruction (bone-framed process;
+        # drop bare "expansile process" — fires on expansile pneumonia)
+        (?<!\bxxxx\s)(?<!\bor\s)destructive\s+(?:process|lesion)\b|
+        (?<!\bxxxx\s)(?<!\bor\s)destructive\s+(?:\w+\s+){0,3}lesion|
+        expansile\s+(?:bone\s+|osseous\s+|rib\s+|bony\s+)?(?:mass|lesion)s?|
+        expansile\s+(?:bone\s+|osseous\s+|rib\s+|bony\s+)process(?:es)?|
+        # Expansile lytic/sclerotic process (no bare "expansile process")
+        expansile\s+(?:lytic|sclerotic|osteolytic|osteoblastic)\s+process(?:es)?|
+        (?:lytic|sclerotic|osteolytic|osteoblastic)\s+destruction|
+        (?<!\bor\s)(?:focal|associated|definite|obvious)\s+(?:bony|osseous|bone|cortical)\s+destruction|
+        (?<!\bfocal\s)(?<!\bassociated\s)(?<!\bdefinite\s)(?<!\bobvious\s)(?<!\bor\s)
+        (?:bony|osseous|bone|cortical)\s+destruction|
+
+        # Bare osseous / bony / bone lesion (adj/"or " lookbehinds so match
+        # does not start after a negated adjective or "... or osseous")
+        (?<!\blytic\s)(?<!\bsclerotic\s)(?<!\bexpansile\s)(?<!\bdestructive\s)
+        (?<!\bsuspicious\s)(?<!\baggressive\s)(?<!\bfocal\s)(?<!\bvisible\s)
+        (?<!\bosteolytic\s)(?<!\bosteoblastic\s)(?<!\bblastic\s)
+        (?<!\bsinister\s)(?<!\bother\s)
+        (?<!\bor\s)(?<!\bxxxx\s)
+        (?:osseous|bony|bone)\s+lesions?|
+        (?<!\bor\s)
+        rib\s+lesions?|
+        multifocal\s+osseous|
+        chondroid\s+(?:matrix|calcifications?)|
+
+        # Residual prompt-faithful phrasing
+        (?<!\bor\s)blastic\s+(?:changes?|lesions?|foci|focus)|
+        sclerotic\s+(?:densit(?:y|ies)|opacit(?:y|ies))\s+projecting\s+over|
+        sclerotic\s+densit(?:y|ies).{0,40}(?:humerus|humeral|ribs?|clavicle|scapula|intraosseous)|
+        (?:clavicular|humeral|rib|cortical|osseous)\s+lysis|
+        osteolysis|
+        osteosclerotic\s+vertebral|
+        # Lucency in/of/within/involving named bones (incl. lateral aspect / left lateral)
+        lucenc(?:y|ies)\s+(?:involving|in|within|of)\s+(?:the\s+)?(?:(?:distal|proximal|medial|lateral|left|right|anterior|posterior|superior|inferior|aspect\s+of(?:\s+the)?|first|second|third)\s+){1,6}(?:clavicle|humerus|ribs?|scapula|phalanges|phalanx)|
+        lucenc(?:y|ies)\s+(?:are\s+seen\s+)?within\s+(?:the\s+)?ribs|
+
+        # Hunt residuals: rib lytic/sclerotic change; mets-framed osseous sclerosis
+        (?:lytic|sclerotic)\s+changes?\s+involving.{0,50}ribs?|
+        (?:patchy\s+)?(?:areas?\s+of\s+)?sclerosis\s+(?:and\s+lytic\s+changes?\s+)?involving.{0,50}ribs?|
+        sclerotic\s+changes?(?:.{0,50}(?:consistent\s+with|compatible\s+with|from)\s+(?:known\s+)?metastat\w*|
+            \s+within\s+(?:the\s+)?osseous.{0,60}metastat\w*)|
+        (?:diffuse\s+)?(?:patchy\s+)?sclerosis.{0,100}(?:sclerotic\s+)?metastat\w*|
+        (?:loss\s+of\s+)?corticomedullary\s+differentiation.{0,100}metastat\w*|
+        # Discrete sclerotic vertebral body (blastic phenotype); ≤2 intervening tokens
+        # (avoids DJD "sclerotic … changes of the vertebral bodies")
+        sclerotic\s+(?:\w+\s+){0,2}vertebral\s+bod(?:y|ies)|
+        # Multifocal sclerotic abnormalities … metastases
+        sclerotic\s+abnormalit(?:y|ies).{0,100}metastas\w*|
+        increased\s+densit(?:y|ies).{0,80}(?:ribs?|vertebral).{0,60}metastas\w*
+    )
+)

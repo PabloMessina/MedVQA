@@ -11,12 +11,16 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from medvqa.datasets.cxr_report_labeling.class_registry import ClassRegistry, build_class_registry
 from medvqa.datasets.cxr_report_labeling.label_semantics import (
     NORMAL_CLASS,
-    SUPPORT_DEVICES_CLASS,
     UNMENTIONED,
     final_label_for_class,
     is_normal_disqualifying_positive,
 )
-from medvqa.datasets.cxr_report_labeling.paths import DEFAULT_RUN_ID, get_cache_run_dir, get_results_run_dir
+from medvqa.datasets.cxr_report_labeling.paths import (
+    DEFAULT_RUN_ID,
+    get_cache_run_dir,
+    get_results_run_dir,
+    resolve_sample_annotations_path,
+)
 from medvqa.scripts.cxr_report_labeling.eval_regex_vs_llm import load_annotations_flexible
 from medvqa.utils.files_utils import load_jsonl, save_json
 from medvqa.utils.logging_utils import setup_logging
@@ -54,11 +58,16 @@ def materialize_final_labels(
     registry = ClassRegistry.load(registry_path) if os.path.exists(registry_path) else build_class_registry()
     class_ids = registry.class_ids()
 
-    safe_model = model_name.replace("/", "_")
     if llm_annotation_paths is None:
+        primary = resolve_sample_annotations_path(run_id, model_name)
         llm_annotation_paths = [
-            os.path.join(cache_dir, "llm_annotations", safe_model, "sample_annotations.jsonl"),
-            os.path.join(cache_dir, "llm_annotations", safe_model, f"verify_{dataset}.jsonl"),
+            primary,
+            os.path.join(
+                get_cache_run_dir(run_id),
+                "llm_annotations",
+                model_name.replace("/", "_"),
+                f"verify_{dataset}.jsonl",
+            ),
         ]
     llm_labels = _collect_llm_labels(llm_annotation_paths)
 
@@ -96,7 +105,7 @@ def materialize_final_labels(
                 c for c, lab in labels.items()
                 if lab in ("Definitely True", "Likely True")
             ]
-            if is_normal_disqualifying_positive(binary_pos_classes, support_devices_ok=True):
+            if is_normal_disqualifying_positive(binary_pos_classes):
                 labels[NORMAL_CLASS] = "Definitely False"
             else:
                 llm = llm_labels.get((uid, NORMAL_CLASS))

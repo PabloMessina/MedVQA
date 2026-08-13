@@ -1,0 +1,27 @@
+{
+  "class_id": "kyphosis",
+  "positives": [
+    "Increased thoracic kyphosis.",
+    "Hyperkyphosis.",
+    "Kyphotic deformity of the thoracic spine.",
+    "Gibbus deformity.",
+    "Kyphoscoliosis with exaggerated kyphosis.",
+    "Broad round back deformity of the thoracic spine.",
+    "Scheuermann's disease involving the thoracic spine.",
+    "Suspected Scheuermann's disease with slight wedging of mid thoracic vertebrae.",
+    "Wedging of multiple lower thoracic vertebrae, probably related to Scheuermann's disease.",
+    "Findings consistent with Scheuermann disease.",
+    "Thoracic Scheuermann's disease.",
+    "Changes of Scheuermann's disease."
+  ],
+  "negatives": [
+    "Thoracolumbar scoliosis.",
+    "Degenerative osteophytes only.",
+    "Normal sagittal alignment.",
+    "T12 vertebral compression deformity.",
+    "Anterior wedging of several thoracic vertebrae."
+  ],
+  "negation_soft": [
+    "Thoracic kyphosis is within normal limits."
+  ]
+}

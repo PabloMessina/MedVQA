@@ -1,0 +1,31 @@
+{
+  "class_id": "mediastinal_shift",
+  "positives": [
+    "Mediastinal shift to the right.",
+    "Heart and mediastinum shifted toward the left.",
+    "Cardiomediastinal silhouette displaced to the right.",
+    "Mediastinum is deviated leftward.",
+    "Mediastinal structures pushed away from a right mass.",
+    "Heart, shifted leftward.",
+    "Cardiac silhouette is obscured by extensive right pleural and parenchymal disease and shifted ipsilaterally.",
+    "Cardiac silhouette is difficult to evaluate given right lower lung dense consolidation, but appears to be normal in size, shifted to the left.",
+    "Cardiomediastinal silhouette is not visualized given that it is shifted to the left.",
+    "Mediastinum is no longer as severely shifted to the right.",
+    "Heart size is hard to assess because of leftward mediastinal migration.",
+    "Leftward mediastinal migration.",
+    "The mediastinum has migrated slightly to the left.",
+    "Large pleural effusion moving the mediastinum slightly to the left of midline."
+  ],
+  "negatives": [
+    "Trachea midline with large left effusion.",
+    "Tracheal deviation to the right without mediastinal shift.",
+    "Patient rotation on portable film.",
+    "Scoliosis with rotated spinous processes only.",
+    "No pneumothorax or mediastinal shift.",
+    "No significant mediastinal shift."
+  ],
+  "negation_soft": [
+    "Mediastinum is midline.",
+    "No mediastinal shift."
+  ]
+}

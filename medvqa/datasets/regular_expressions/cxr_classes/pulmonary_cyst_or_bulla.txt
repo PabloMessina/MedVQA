@@ -1,0 +1,85 @@
+\b(?:
+        # Anatomical modifier + cyst / bulla / bleb
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?:pulmonary|lung|subpleural|apical|basal|parenchymal|bi[-\s]?apical|peripheral|regional|costophrenic|lobar|mid[-\s]?lung|intrapulmonary|cicatricial)
+        \s+(?:cysts?|bullae|bulla|blebs?)
+        |
+
+        # Air cysts (explicit thin-walled pulmonary cysts)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bair[-\s]?cysts?\b
+        |
+
+        # Bare bulla / bullae (not bullous; not emphysema alone; not thick-walled cavity DDx)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?<!thick-walled\s)(?<!thick\swalled\s)
+        \bbullae?\b
+        |
+
+        # Bare bleb / blebs
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bblebs?\b
+        |
+
+        # Bullous heads (+ light intervening and-X / fibrotic|emphysematous|reticular|cystic)
+        # Heads: change/emphysema/disease/destruction/lung disease/COPD/formation/area/lesion/complex/airspace/transformation
+        # Also: bullous versus/vs X (hedged bullous change)
+        # Exclude dermatologic bullous pemphigoid
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bbullous\b(?!\s+pemphigoid)
+        (?:
+            \s+(?:and\s+\w+\s+)?(?:(?:fibrotic|emphysematous|reticular|cystic)\s+)?
+            (?:chang\w*|emphysema\w*|diseas\w*|destruct\w*|lung\s+diseas\w*|COPD|formation|areas?|lesions?|complex(?:es)?|air\s*spaces?|transformation)
+            |
+            \s+(?:versus|vs\.?)\s+\w+
+            |
+            # Bare / trailing noun uses (apical bullous is…; likely bullous,; zone bullous.; possible bullous at…)
+            (?=\s*[,.]|\s+(?:is|are|was|were|at|in|on|within|again)\b)
+        )
+        |
+
+        # Pneumatocele (US/UK spelling; not pneumothorax)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bpneumatoc[oe]les?\b
+        |
+
+        # Thin-walled cyst / bulla / cystic airspace or spaces (optional wall-thickness paren)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        thin[-\s]?walled(?:\s*\([^)]{0,50}\))?\s+(?:cystic\s+(?:air\s*spaces?|spaces?|areas?)|(?:air\s+)?cysts?\b|bullae?|blebs?)
+        |
+
+        # Cystic airspace / spaces / lucency (not fibrosis / bronchiectasis / honeycombing)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bcystic\s+(?:air\s*spaces?|spaces?|lucenc\w*)
+        |
+
+        # Pulmonary cystic change(s): framed by lung site, or emphysema/lung lookahead (not bone/hepatic)
+        # Avoid cystic fibrosis / cystic bronchiectasis as standalone support
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bcystic\s+changes?\b(?!\s+(?:of\s+)?(?:bronchiectas\w*|fibrosis))
+        (?:
+            \s+(?:in|within|of)\s+(?:the\s+)?(?:[\w\-]+\s+){0,6}(?:lungs?|lobes?|apex|apices|hemithorax|zones?|bases?)
+            (?!.{0,220}(?:(?:cystic\s+)?bronchiectas|abscess))
+            |
+            (?=.{0,60}(?:emphysema|lungs?|lobes?|apex|apices|hemithorax|zones?))
+            (?!.{0,220}(?:(?:cystic\s+)?bronchiectas|abscess))
+        )
+        |
+
+        # Lobe/lung … consistent with cystic changes
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?:lungs?|lobes?|apex|apices|hemithorax|zones?)\b.{0,80}?consistent\s+with\s+cystic\s+changes?\b
+        |
+
+        # Slash-compound cystic/bullous (when head not contiguous after slash)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bcystic[/\s]+bullous\b(?!\s+pemphigoid)
+        |
+
+        # Multi-cystic / septated cystic area in lung
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?:multi[-\s]?cystic|\bseptated\s+cystic)
+        |
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bcystic\s+areas?\s+(?:in|within)\s+(?:the\s+)?(?:right|left|mid).{0,40}(?:lung|lobe|hemithorax)
+    )

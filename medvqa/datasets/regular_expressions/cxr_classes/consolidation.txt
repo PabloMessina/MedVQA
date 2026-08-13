@@ -1,22 +1,222 @@
+# ==============================================================================
+# consolidation
+# Prompt-faithful: consolidat* / air bronchogram / airspace|alveolar + morph.
+# Do NOT match: generic opacity; pneumonia/edema/infection alone; negated,
+# indication-only ("eval for consolidation"), chemo "consolidation with <drug>",
+# or resolved/cleared prior consolidation.
+#
+# Negation: clause-local tempered scan from .!;\n: — blocks no/not/without/nor
+# before the hit, except:
+#   - no/without (adj)? (interval)? change  (radiographic|gross|appreciable|…)
+#   - not (significantly) changed
+#   - not (very)? well seen/visualized/defined (visibility, not absence)
+#   - without (associated) (mediastinal) shift
+#   - without definite correlative (laterality/view caveat, not absence)
+#   - without congestive failure / CHF (not negating consolidat*/air bronchogram)
+#   - question (of)? consolidat* (hedge, not indication)
+# `?` is not a clause starter so MIMIC "? ptx, effusion, consolidation"
+# indication lists do not match; `//` is blocked.
+# Precision: DDx "includes … consolidation", unusual/new-hedge consolidat*,
+# previously-seen residual, and airspace/alveolar hits followed by explicit
+# "no (focal/lobar/…) consolidation" / "without frank consolidation".
+# FN-fit: interval-adj exceptions; not/incompletely resolved kept as current;
+# air-bronchogram "probably with" / "is not significantly changed"; early/fluffy
+# airspace-alveolar morph; postposed alveolar; areas/abnormalities/polar hops.
+# FN-fit w19: DDx "versus resolving …" not over-suppress; hedge "question
+# consolidat*"; "not (very) well defined" before air bronchograms; "without
+# congestive failure/CHF" before consolidat*/air bronchogram in-clause.
+# ==============================================================================
 
-    # 1. Direct terms & common misspellings
-    \b(?:consolidat|consolodat|consildat)\w*
-    |
-    # 2. Classic supportive sign
-    \bair[\s\-]?bronchogram\w*
-    |
-    # 3. Explicit airspace/alveolar morphology
-    \b(?:air[\s\-]?space|alveolar)
-    [\s\.,;:\-\(\)]+
+(?:
+    # ------------------------------------------------------------------
+    # 1. consolidat* (incl. common misspellings) in a non-negated clause
+    # ------------------------------------------------------------------
+    (?:^|[.!;:\n])
     (?:
-        disease
-        | process
-        | consolid\w*
-        | opacit\w*
-        | opacif\w*
-        | infiltrat\w*
-        | fill(?:ing)?(?:[\s\.,;:\-\(\)]+pattern)?
-        | pattern
-        | shadow\w*
+        (?:
+            (?=\b(?:
+                (?:no|without)\s+(?:(?:significant|radiographic|gross|appreciable|definite|relevant|obvious|substantial|marked|clear)\s+)?(?:interval\s+)?change
+                | not\s+(?:significantly\s+)?(?:changed|different)
+                | not\s+(?:very\s+)?well\s+(?:seen|visualized|appreciated|demonstrated|apparent|defined)
+                | without\s+(?:associated\s+)?(?:mediastinal\s+)?shift
+                | without\s+definite\s+correlative
+                | without\s+(?:congestive\s+(?:heart\s+)?failure|chf)\b
+                | question(?=\s+(?:of\s+)?(?:consolidat|consolodat|consildat|conolidat)\w*)
+                | resolution\s+of\b(?![^.!;:\n]{0,60}\b(?:consolidat|air[\s\-]?space|alveolar))
+            )\b)
+            [^.!;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out|
+                doubt|doubtful|
+                clearing
+            )\b)
+            (?!\bresolution\s+of\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bevaluate\b)
+            (?!\bassess\s+for\b)
+            (?!\br/?o\b)
+            (?!\bquestion\b)
+            (?!\bdifferential\s+diagnosis\s+includes\b)
+            (?!\bpreviously\s+seen\b)
+            (?!\?)
+            (?!//)
+            [^.!;:\n]
+        )
+    ){0,300}
+    (?<!without\s)(?<!without\sfocal\s)(?<!without\slobar\s)
+    (?<!without\sfrank\s)(?<!without\tovert\s)(?<!without\sdefinite\s)
+    (?<!without\sappreciable\s)(?<!without\sany\s)(?<!without\snew\s)
+    (?<!without\sacute\s)(?<!without\sevidence\sof\s)
+    (?<!without\sevidence\sof\sfocal\s)
+    (?<!unusual\s)(?<!due\sto\snew\s)
+    (?<!//\s)(?<!\?\s)
+    \b(?:consolidat|consolodat|consildat|conolidat)\w*\b
+    (?!\?)
+    (?!\s+is\s+likely\s+atelectasis)
+    (?!\s+is\s+a\s+consideration)
+    (?!\s+with\s+(?:vorinostat|idarubicin|cytarabine|cytrabaine|chemotherapy|chemo\b))
+    (?![^.!;:\n]{0,100}(?:
+        \b(?:has|have)(?:\s+nearly)?\s+(?:resolv\w*|cleared|clearing)\b|
+        \b(?:is|are)\s+(?:now\s+)?(?:resolved|cleared|clearing)\b|
+        \b(?:is|are)\s+not\s+seen\b|
+        \bno\s+longer\s+(?:seen|present|evident|visualized|appreciated)\b|
+        \bnot\s+(?:seen|present|evident)\s+on\s+this\b|
+        \b(?:completely|fully)\s+(?:resolv\w*|cleared|clearing)\b|
+        (?<!versus\s)(?<!vs\s)(?<!vs\.\s)(?<!not\s)(?<!not\syet\s)(?<!incompletely\s)(?<!partially\s)(?<!incomplete\s)\b(?:resolv\w*|cleared|clearing)\b
+    ))
+
+    |
+
+    # ------------------------------------------------------------------
+    # 2. Air bronchogram(s) — supportive sign (not required by prompt)
+    # ------------------------------------------------------------------
+    (?:^|[.!;:\n])
+    (?:
+        (?:
+            (?=\b(?:
+                (?:no|without)\s+(?:(?:significant|radiographic|gross|appreciable|definite|relevant|obvious|substantial|marked|clear)\s+)?(?:interval\s+)?change
+                | not\s+(?:significantly\s+)?(?:changed|different)
+                | not\s+(?:very\s+)?well\s+(?:seen|visualized|appreciated|demonstrated|apparent|defined)
+                | without\s+(?:associated\s+)?(?:mediastinal\s+)?shift
+                | without\s+definite\s+correlative
+                | without\s+(?:congestive\s+(?:heart\s+)?failure|chf)\b
+                | resolution\s+of\b(?![^.!;:\n]{0,60}\b(?:consolidat|air[\s\-]?space|alveolar))
+            )\b)
+            [^.!;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out
+            )\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bevaluate\b)
+            (?!\bassess\s+for\b)
+            (?!\brevealing\b)
+            (?!\?)
+            (?!//)
+            [^.!;:\n]
+        )
+    ){0,300}
+    (?<!without\s)(?<!without\sfocal\s)(?<!without\sevidence\sof\s)
+    (?<!//\s)(?<!\?\s)(?<!no\s)
+    \bair[\s\-]?bronchogram\w*\b
+    (?!\?)
+    (?!\s+(?:is|are)\s+not\b(?!\s+(?:significantly\s+)?(?:changed|different)\b))
+    (?!\s+not\s+(?:present|seen|identified|visualized|appreciated|evident)\b)
+
+    |
+
+    # ------------------------------------------------------------------
+    # 3. Explicit airspace / alveolar morphology
+    #    densit* is prompt-faithful after airspace/alveolar (not generic density).
+    #    Short interstitial/and hops: "alveolar and interstitial opacity".
+    #    Postposed: "opacities are alveolar (in appearance)".
+    # ------------------------------------------------------------------
+    (?:^|[.!;:\n])
+    (?:
+        (?:
+            (?=\b(?:
+                (?:no|without)\s+(?:(?:significant|radiographic|gross|appreciable|definite|relevant|obvious|substantial|marked|clear)\s+)?(?:interval\s+)?change
+                | not\s+(?:significantly\s+)?(?:changed|different)
+                | not\s+(?:very\s+)?well\s+(?:seen|visualized|appreciated|demonstrated|apparent|defined)
+                | without\s+(?:associated\s+)?(?:mediastinal\s+)?shift
+                | without\s+definite\s+correlative
+                | without\s+(?:congestive\s+(?:heart\s+)?failure|chf)\b
+                | resolution\s+of\b(?![^.!;:\n]{0,60}\b(?:consolidat|air[\s\-]?space|alveolar))
+            )\b)
+            [^.!;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out
+            )\b)
+            (?!\?)
+            (?!//)
+            [^.!;:\n]
+        )
+    ){0,300}
+    (?:
+        # 3a. airspace|alveolar BEFORE morph
+        (?<!without\s)(?<!without\sfocal\s)(?<!without\sevidence\sof\s)
+        (?<!than\s)(?<!than\sacute\s)(?<!than\searly\s)
+        (?<!clear\s)(?<!clearing\sof\s)(?<!clearing\sof\sleft\sbase\s)
+        (?<!granular\s)(?<!granular\spulmonary\s)
+        (?<!//\s)(?<!\?\s)
+        \b(?:air[\s\-]?space|(?<=basilar)air\s+space|(?<!nodular\s)alveolar)
+        (?:
+            [\s\.,;:\-\(\)]+
+            (?:and(?:\s*/\s*or)?|or|with|
+               interstitial|patchy|focal|lobar|basilar|bilateral|
+               diffuse|mild|minimal|residual|dense|hazy|central|
+               pulmonary|lung|polar|confluent)
+        ){0,4}
+        [\s\.,;:\-\(\)]+
+        (?:
+            disease
+            | process
+            | consolid\w*
+            | opacit\w*
+            | opacif\w*
+            | densit\w*
+            | infiltrat\w*
+            | fill(?:ing)?(?:[\s\.,;:\-\(\)]+pattern)?
+            | pattern
+            | shadow\w*
+            | areas?
+            | abnormalit\w*
+        )
+        |
+        # 3b. postposed alveolar morphology ("opacities are alveolar in appearance")
+        (?<!without\s)(?<!//\s)(?<!\?\s)
+        \b(?:opacit\w*|densit\w*|infiltrat\w*|shadow\w*)
+        \s+(?:are|is|appear(?:s|ing)?(?:\s+to\s+be)?)\s+
+        (?<!nodular\s)alveolar
+        (?:\s+in\s+(?:appearance|nature|character|distribution))?
     )
-    
+    (?![^.!;:\n]{0,80}(?:
+        \b(?:has|have)(?:\s+nearly)?\s+(?:resolv\w*|cleared|clearing)\b|
+        \b(?:is|are)\s+(?:now\s+)?(?:resolved|cleared|clearing)\b|
+        \b(?:is|are)\s+not\s+seen\b|
+        \bno\s+longer\s+(?:seen|present|evident)\b|
+        (?<!versus\s)(?<!vs\s)(?<!vs\.\s)(?<!not\s)(?<!not\syet\s)(?<!incompletely\s)(?<!partially\s)(?<!incomplete\s)\b(?:resolv\w*|cleared|clearing)\b
+    ))
+    (?!.{0,160}\bno\s+(?:new\s+)?(?:focal\s+|lobar\s+|confluent\s+|area\s+of\s+|frank\s+)?consolidat)
+    (?!.{0,160}\bno\s+focal\s+parenchymal\s+opacit)
+    (?!.{0,100}without\s+(?:frank\s+consolidat|focal\s+consolidative))
+    (?!.{0,100}not\s+visualized\s+on\s+this)
+    (?!\s+seen\s+on\s+the\s+previous)
+)

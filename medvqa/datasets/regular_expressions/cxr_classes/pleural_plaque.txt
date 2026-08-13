@@ -1,0 +1,151 @@
+(?:
+        \b(?:
+            # 1. Pleural / Diaphragmatic / Subpleural Plaques (with optional intervening modifiers)
+            # Matches: "pleural plaques", "pleural calcified plaques",
+            # "diaphragmatic plaques", "pleural plaquing", "subpleural plaques",
+            # "Apical pleural thickening with presumed calcified plaques"
+            # (?!plaqu) keeps greedy modifiers from swallowing plaquing/plaque
+            (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|subpleur[a-z]*)
+            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,5}
+            [\s,;()/-]+(?<!without\s)(?<!no\s)plaqu(?:ing|e[a-z]*)
+
+            |
+
+            # 2. Plaques followed by anatomy
+            # Matches: "calcified plaques along the diaphragms",
+            # "calcific plaques on the chest wall", "plaques of the pleura",
+            # "plaques along the right hemidiaphragm",
+            # "calcified plaques overlie the diaphragmatic pleura",
+            # "calcified plaques project along ... hemidiaphragms",
+            # "calcified plaques and pleural disease",
+            # "Calcified plaque is seen along the left lateral pleura",
+            # "Calcified plaque at the right diaphragm",
+            # "Calcified plaque projects over the right upper hemithorax",
+            # "A calcified plaque is seen at the left apex",
+            # "Calcified plaque at the left lower thoracic chest wall"
+            (?:calcif[a-z]*[\s,;()/-]+)?plaqu(?:ing|e[a-z]*)
+            (?:[\s,;()/-]+(?:
+                along|on|over|overlie|overlies|overlying|overlain|
+                project|projects|projecting|
+                in|of|the|and|bilateral|calcified|calcific|
+                left|right|both|lateral|lower|upper|mid|basal|base|bases|
+                apical|apex|costal|posterior|anterior|inferior|superior|lung|
+                at|is|are|was|were|seen|noted|a|an|again|
+                thoracic|periphery|peripheral
+            )){0,10}
+            [\s,;()/-]+(?:
+                pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|
+                subpleur[a-z]*|hemithorax|apex|apices|
+                (?:thoracic[\s,;()/-]+)?chest[\s-]+wall
+            )
+
+            |
+
+            # 3. Inverted Anatomy (e.g., "calcific chest wall plaques",
+            # "thoracic chest wall plaques")
+            (?:thoracic[\s,;()/-]+)?chest[\s-]+wall
+            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,3}
+            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+
+            |
+
+            # 4. Pleural-based calcification (asbestos-plaque synonym; not bare "pleural calcification")
+            # Matches: "pleural-based calcification", "pleural based calcifications"
+            pleur[a-z]*[\s-]+based
+            (?:[\s,;()/-]+[a-z-]+){0,2}
+            [\s,;()/-]+calcif[a-z]*
+
+            |
+
+            # 5. Sheetlike / plaque-morphology pleural(-based) calcification
+            # Matches: "sheetlike and rounded apparently pleural based calcifications"
+            (?:sheet[\s-]?like|plaque[\s-]?like)
+            (?:[\s,;()/-]+[a-z-]+){0,6}
+            [\s,;()/-]+pleur[a-z]*
+            (?:[\s-]+based)?
+            (?:[\s,;()/-]+[a-z-]+){0,2}
+            [\s,;()/-]+calcif[a-z]*
+
+            |
+
+            # 6. Asbestos / asbestosis plaques (optional calcified/extent modifiers)
+            # Matches: "asbestos plaques", "calcified asbestos plaques",
+            # "asbestosis plaques", "asbestos related plaque"
+            # Fixed-width indication/history header guards (escape spaces for VERBOSE)
+            (?<!indication:\ )(?<!history:\ )
+            (?:(?:calcif[a-z]*|widespread|extensive|multiple|bilateral|coarse|mild)[\s,;()/-]+){0,3}
+            asbest(?:os|osis)(?:[\s-]+related)?
+            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,2}
+            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+
+            |
+
+            # 7. Plaques attributed to asbestos (same sentence; not vascular plaques)
+            # Matches: "calcified plaques ... asbestos exposure",
+            # "plaquing ... consistent with asbestos",
+            # "plaques at the lung bases ... asbestos"
+            (?<!atherosclerotic\ )(?<!atheroma\ )(?<!aortic\ )(?<!aorta\ )
+            (?:calcif[a-z]*[\s,;()/-]+)?plaqu(?:ing|e[a-z]*)
+            (?![^.!?]{0,120}(?:\baort|\batheroscler|\bcarotid|\bcoronar|\bvascular|\bvessel))
+            [^.!?]{0,100}?
+            asbest(?:os|osis)
+
+            |
+
+            # 8. (Hemi)diaphragm calcification attributed as calcified plaque
+            # Matches: "Calcification along the right hemidiaphragm, consistent with a calcified plaque",
+            # "Right hemidiaphragm calcification likely represents a calcified plaque",
+            # "Focal calcification along the right hemidiaphragm ... represents calcified plaque"
+            (?:
+                (?:(?:focal|right|left|bilateral|mild|coarse)[\s,;()/-]+)?
+                calcif(?:ication|ications|ied|ic)\w*
+                (?:[\s,;()/-]+(?:
+                    along|on|over|of|the|right|left|both|bilateral|
+                    lower|upper|lateral|medial|focal
+                )){0,6}
+                [\s,;()/-]+(?:(?:hemi)?diaphragm[a-z]*)
+                |
+                (?:(?:right|left|bilateral)[\s,;()/-]+)?(?:(?:hemi)?diaphragm[a-z]*)
+                [\s,;()/-]+calcif(?:ication|ications|ied|ic)\w*
+            )
+            [^.!?]{0,90}?
+            (?:consistent\s+with|represents?|likely\s+represents?)
+            (?:[\s,;()/-]+(?:a|an|the|calcif[a-z]*)){0,4}
+            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+
+            |
+
+            # 9. Plaque-like calcifications / calcified density with pleural-site context
+            # Matches: "hemithorax with plaque-like calcifications",
+            # "Plaque-like calcified density projects along the periphery ... hemithorax"
+            # Avoids bare plaque-like atelectasis / non-pleural plaque-like wording
+            (?:
+                plaque[-\s]?like[\s,;()/-]+
+                (?:calcif[a-z]*(?:[\s,;()/-]+(?:density|densities))?|(?:density|densities))
+                [^.!?]{0,100}?
+                (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|
+                   hemithorax|peripher\w*|chest[\s-]+wall|subpleur[a-z]*)
+                |
+                (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|
+                   hemithorax|peripher\w*|chest[\s-]+wall|subpleur[a-z]*)
+                [^.!?]{0,80}?
+                plaque[-\s]?like[\s,;()/-]+
+                (?:calcif[a-z]*(?:[\s,;()/-]+(?:density|densities))?|(?:density|densities))
+            )
+        )\b
+
+        |
+
+        # 10. Plaque-like (pleural) thickening / thickening along diaphragmatic surface
+        # Matches: "plaque-like pleural thickening",
+        # "Plaque-like region of thickening along the diaphragmatic surface"
+        \bplaque[-\s]?like
+        (?:[\s,;()/-]+(?!atelecta)[a-z-]+){0,4}
+        [\s,;()/-]+thicken\w*
+        (?:
+            (?:[\s,;()/-]+[a-z-]+){0,8}
+            [\s,;()/-]+(?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*)
+        )?
+    )
+    # DDx / comparison, not a stated plaque: "... pleural plaque ... can have a similar appearance"
+    (?![^.!?]{0,140}(?:can|could|may|might)\s+(?:have\s+a\s+similar(?:\s+\w+){0,3}\s+appearance|mimic\w*|look\s+similar))

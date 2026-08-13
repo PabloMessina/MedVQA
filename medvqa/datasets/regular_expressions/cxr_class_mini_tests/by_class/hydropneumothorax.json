@@ -1,0 +1,48 @@
+{
+  "class_id": "hydropneumothorax",
+  "positives": [
+    "Right hydropneumothorax with air-fluid level.",
+    "Left pneumohydrothorax.",
+    "Air-fluid level in the right pleural space consistent with hydropneumothorax.",
+    "Hemopneumothorax on the left.",
+    "Pyopneumothorax with pleural air and fluid.",
+    "Small right apical pneumothorax. Residual moderate right pleural effusion.",
+    "There is a left pneumothorax. Bilateral free-flowing pleural effusions are present.",
+    "Right pleural effusion with lucency representing loculated pneumothorax.",
+    "Minimal pleural air at the right lung base. Minimal pleural fluid is also present.",
+    "Tiny pneumothorax and very small right basal pleural fluid collection.",
+    "Small-to-moderate right pleural effusion and probable tiny pneumothorax in the right lung apex.",
+    "The amount of pleural fluid on the right has increased and there is a small amount of pleural air at the right apex.",
+    "Small basal component of pleural air loculated with small left pleural effusion.",
+    "Small residual right pneumothorax with some pleural fluid replacing air at the base.",
+    "At the site of a prior right-sided chest drain, there is now a rounded opacity with discrete air-fluid level.",
+    "Right apical pneumothorax appears increasingly opacified, possibly replacement of pleural air with redistributed pleural fluid.",
+    "Lucent areas within the left pleural thickening probably represent air. There is a small left pleural effusion.",
+    "Meniscus due to fluid and pleural space air on the right.",
+    "Loculated pneumothorax in the right apex with ipsilateral pleural fluid.",
+    "Air-fluid level at the right lung apex.",
+    "Moderate right apical air-fluid level.",
+    "An air-fluid level projects over the left costophrenic sinus.",
+    "Air-fluid level in the right hemi thorax.",
+    "Air-fluid level at the bases of the left hemi thorax.",
+    "Status post left pneumonectomy with air-fluid level in the pneumonectomy cavity.",
+    "Small basal left air-fluid level after lung resection.",
+    "Right apical postsurgical air-fluid collection. Persistent small right basilar pleural effusion.",
+    "Pleural space air and fluid on the right.",
+    "Right pleural cavity contains air and layering fluid.",
+    "Left pleural gas and layering left pleural fluid.",
+    "Small pneumothorax on the right with loculated pleural fluid."
+  ],
+  "negatives": [
+    "Large right pneumothorax.",
+    "Layering pleural effusion.",
+    "Loculated pleural fluid collection.",
+    "Rule out effusion or pneumothorax.",
+    "Left pneumothorax. Moderate right pleural effusion.",
+    "Moderate left pleural effusion. No pneumothorax.",
+    "Does not appear to be a hydropneumothorax."
+  ],
+  "negation_soft": [
+    "No hydropneumothorax."
+  ]
+}

@@ -1,26 +1,378 @@
+# ==============================================================================
+# lung_opacity (mid-node residual — precision-first)
+# Umbrella: increased radiographic density within lung parenchyma.
+# Ontology children (readonly) cover atelectasis/lobar/rounded, consolidation,
+# pneumonia, edema, nodule/mass (+calcified), GGO, reticular interstitial,
+# Kerley, fibrosis, focal scarring. Production OR-helpers (infiltration /
+# alveolar_pattern / air_bronchogram / abscess / miliary_opacities) are
+# invisible in hierarchy-aware eval — recover residual umbrella phrasing here.
+#
+# Prefer residual phrasing children miss: nonspecific opacity/opacification/
+# density/shadowing; airspace/alveolar opacity/disease/process; infiltrate/
+# infiltration; air bronchogram; miliary opacity/pattern; framed lung abscess;
+# interstitial prominence/markings (when not child-covered).
+#
+# Phase B1: merge prompt-faithful helper residual only — discard bare
+# alveolar\w*, bare abscess, bare infiltrat(ed|ing), indication-only, and
+# diffuse-micronodule phrases already covered by nodule child.
+#
+# FN-fit (fn_mine_fit_shared): residual parent holes only — interval-change
+# adjectives + plural; affirmative-only resolution lookahead; density hops
+# (and/to/each/lateral/involving); markings mild/coarse/diffuse; interstitial
+# lung / pulmonary insertions; markings-appear ADJ; increase-in markings;
+# haziness/hazy (lung/RDS-framed); RDS granular density. Do not re-lexicon children.
+#
+# Do NOT re-implement child lexicons. Do NOT match: vascular congestion alone;
+# pleural effusion / PTX / pneumomediastinum / SQ emphysema; support devices;
+# extrapulmonary densities/artifacts (nipple/breast/cardiac shadow, sinus/
+# contrast opacification); hyperlucency/emphysema; thin-walled cysts/bullae
+# without opaque component; clinical/history/indication-only pneumonia.
+#
+# Clause-local tempered scan (pneumothorax / consolidation style).
+# Fixed-width lookbehinds only. Compiled IGNORECASE|VERBOSE.
+# ==============================================================================
 
-    # 1. Generic Opacity Terms
-    # Matches: "Lung opacity", "Patchy opacities", "Hazy opacification"
-    \bopac(?:ity|ities|ifi\w*)
-    |
-    # 2. Generic Density Terms (Restricted to Lung Context)
-    # Matches: "Pulmonary densities", "Density in the right lung"
-    # We enforce lung context to avoid "Bone density" or "Breast density"
-    \b(?:lung|pulmonary|lobe|lobar|hilar|perihilar|alveolar|interstitial)\w*
+(?:
+    # ------------------------------------------------------------------
+    # Shared clause opener (avoid HISTORY:/INDICATION: colon restarts)
+    # ------------------------------------------------------------------
     (?:
-        \s+(?:field|zone|region|base|apex)?
-    ){0,2}
-    \s+
-    \bdensit\w*
-    |
-    # Reverse: Density ... Anatomy
-    \bdensit\w*
+        ^
+        |
+        [.!;\n]
+        |
+        (?<!history)(?<!indication)(?<!data)(?<!info):
+    )
     (?:
-        \s+(?:in|of|at|within|the)?
-    ){0,3}
-    \s+
-    \b(?:lung|pulmonary|lobe|lobar|hilar|perihilar)\w*
-    |
-    # 3. "Shadow" (Old school term, still in MIMIC)
-    # Matches: "Acinar shadow", "Lung shadowing"
-    \bshadow\w*
+        (?:
+            # Persistent: "no/without (gross|significant|…) (interval) change(s)"
+            (?=\b(?:no|without)\s+(?:(?:significant|gross|appreciable|radiographic|definite|relevant|obvious|overt|measurable|detectable)\s+)*(?:interval\s+)?changes?\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            # Persistent: "not (yet/fully) resolved/cleared"
+            (?=\bnot\s+(?:yet\s+|fully\s+|completely\s+|entirely\s+)?(?:resolv\w*|cleared|clearing)\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            # Contrastive: "no effusion, but ... opacity"
+            (?=\bno\b(?![^.!?;:\n]{0,50}(?:\bopac|\binfiltrat|\bdensit|\bshadow|\bair\s*space|\balveolar|\bair\s+bronchogram|\bmiliar|\babscess))[^.!?;:\n]{0,80},\s*(?:but|however)\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out|rule|
+                history|hx|pmh|
+                evaluate|eval|assess|assessment|
+                concern|concerned|
+                exclude|excluding|
+                please|
+                presented|
+                mimic(?:s|king)?|mimick(?:s|ing)?|
+                artifact|artifactual|
+                versus|vs
+            )\b)
+            (?!\bw/o\b)
+            (?!\bno\s+(?:evidence|sign|findings?|definite|overt|gross|obvious|radiographic|demonstrable|evident|focal|pulmonary|parenchymal|lung|airspace|air\s*space)\b)
+            (?!\bwithout\s+(?:evidence|sign|findings?|demonstrable|focal|pulmonary|parenchymal)\b)
+            (?!\bno\s+evidence\s+(?:of|for)\b)
+            (?!\bwithout\s+evidence\s+(?:of|for)\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bassess(?:ment)?\s+for\b)
+            (?!\bconcern(?:ed)?\s+for\b)
+            (?!\bquestion\s+(?:of|for)\b)
+            (?!\bcheck\s+for\b)
+            (?!\br/?o\b)
+            (?!\brule\s+out\b)
+            (?!\bto\s+exclude\b)
+            (?!\bcannot\s+exclude\b)
+            (?!\bhistory\s+of\b)
+            (?!\bhx\s+of\b)
+            (?!\bh/?o\s+of\b)
+            (?!\bh/?o\b)
+            (?!\bs/?p\b)
+            (?!\bstatus\s+post\b)
+            # "resolution of X" / interval resolution — keep out; bare
+            # resolved/clearing allowed so "not resolved … opacity" can walk
+            (?!\bresolution\s+of\b)
+            (?!\binterval\s+resolution\b)
+            (?!\bcleared\s+of\b)
+            (?!\bfollow\s+up\b)
+            (?!\brather\s+than\b)
+            (?!\bvs\.?\b)
+            (?!\bversus\b)
+            (?!\?)
+            [^.!?;:\n]
+        )
+    ){0,240}
+
+    (?:
+        # ==============================================================
+        # 1. Nonspecific opac* (opacity / opacities / opacification)
+        # ==============================================================
+        (?<!contrast\s)
+        (?<!contrast\sonly\s)
+        (?<!rectal\scontrast\s)
+        (?<!oral\scontrast\s)
+        (?<!iv\scontrast\s)
+        (?<!bladder\s)
+        (?<!sinus\s)
+        (?<!sinuses\s)
+        (?<!maxillary\s)
+        (?<!sphenoid\s)
+        (?<!ethmoid\s)
+        (?<!frontal\s)
+        (?<!mastoid\s)
+        (?<!paranasal\s)
+        \bopac(?:ity|ities|ifi\w*)\b
+        # not GI/GU/sinus contrast opacification phrasing after the root
+        (?!\s+(?:the\s+)?(?:stomach|bowel|colon|rectum|bladder|duodenum|small\s+bowel))
+        (?!\s+of\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:maxillary|sphenoid|ethmoid|frontal|paranasal|mastoid|sinus))
+        (?!\?)
+        # attribution to pleural / hernia (not coexistence)
+        (?![^.!?;:\n]{0,70}\b(?:
+            (?:likely\s+)?represents?|
+            correspond(?:s|ing)?\s+to|
+            compatible\s+with|
+            secondary\s+to|
+            related\s+to
+        )\s+(?:
+            pleural\s+thicken\w*|
+            pleural\s+plaque\w*|
+            calcified\s+pleural|
+            (?:known\s+)?hiatal\s+hernia|
+            paraesophageal\s+hiatu\w*|
+            breast\s+shadow|
+            nipple\s+shadow
+        )\b)
+        # pleural-site opacity without parenchymal framing
+        (?!\s+along\s+the\s+(?:lateral\s+)?(?:aspect\s+of\s+)?(?:the\s+)?pleura)
+        # Affirmative resolution only — do not treat "not resolved" / "not cleared"
+        (?![^.!?;:\n]{0,110}\b(?:
+            (?:has|have|is|are|was|were)\s+(?:(?:now|nearly|almost|completely|fully|entirely)\s+){0,2}(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated)|
+            cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)|
+            not\s+(?:seen|present|evident)\s+on\s+this
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 2. Infiltrate / infiltration (OR-helper residual)
+        # Drop procedure verb "infiltrated"; block fatty/soft-tissue/GI uses.
+        # ==============================================================
+        (?<!fatty\s)
+        (?<!hepatic\s)
+        (?<!liver\s)
+        (?<!pericolic\s)
+        (?<!mesenteric\s)
+        (?<!soft\stissue\s)
+        (?<!subcutaneous\s)
+        (?<!stranding/)
+        \binfiltrat(?:e|es|ion|ive)\b
+        (?!\s+of\s+(?:the\s+)?(?:subcutaneous|fat|liver|hepatic|mesentery|soft\s+tissue))
+        (?!\?)
+        (?![^.!?;:\n]{0,100}\b(?:
+            (?:has|have|is|are|was|were)\s+(?:(?:now|nearly|almost|completely|fully|entirely)\s+){0,2}(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|present|evident)|
+            cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
+            no\s+longer\s+(?:seen|present)
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 3. Airspace / alveolar umbrella (OR-helper residual)
+        # Framed only — NOT bare \balveolar\w* (alveolar hypoventilation /
+        # capillary / hemorrhage-without-opacity noise).
+        # ==============================================================
+        \b(?:
+            air\s*space\s+(?:disease|process|opac\w*|infiltrat\w*|chang\w*|abnormalit\w*)
+            |
+            alveolar\s+(?:disease|process|opac\w*|infiltrat\w*|pattern|chang\w*|abnormalit\w*)
+        )\b
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 3b. Air bronchogram (helper air_bronchogram residual)
+        # Sign of airspace opacity / consolidation when asserted.
+        # ==============================================================
+        \bair\s+bronchogram\w*
+        (?!\?)
+        (?![^.!?;:\n]{0,100}\b(?:
+            (?:has|have|is|are|was|were)\s+(?:(?:now|nearly|almost|completely|fully|entirely)\s+){0,2}(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|present|evident)|
+            cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
+            no\s+longer\s+(?:seen|present)
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 3c. Miliary opacity / pattern (helper miliary_opacities residual)
+        # Prompt: reticular / reticulonodular / miliary opacity.
+        # Framed — NOT bare \bmiliar\w*; NOT diffuse-micronodule lexicon
+        # (nodule child). Allow miliary TB as radiographic miliary pattern.
+        # ==============================================================
+        \bmiliar(?:y|ies)?\s+(?:opacit\w*|pattern|nodul\w*|infiltrat\w*|tb|tuberculos\w*)
+        (?!\?)
+        (?![^.!?;:\n]{0,100}\b(?:
+            (?:has|have|is|are|was|were)\s+(?:(?:now|nearly|almost|completely|fully|entirely)\s+){0,2}(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|present|evident)|
+            cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
+            no\s+longer\s+(?:seen|present)
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 3d. Lung abscess with opaque-component framing (helper abscess)
+        # Prompt: abscess only with opaque wall/contents/surrounding opacity
+        # or underlying nodule/mass. NOT bare \babscess\w* (epidural /
+        # mediastinal / soft-tissue / indication abscess FPs).
+        # ==============================================================
+        \b(?:
+            (?:lung|pulmonary|parenchymal)\s+abscess\w*
+            |
+            (?:thick(?:ened)?[-\s]*)?wall(?:ed)?\s+(?:lung\s+|pulmonary\s+)?abscess\w*
+            |
+            abscess\w*\s+with\s+(?:thick(?:ened)?\s+)?(?:wall|walls|contents?)
+            |
+            abscess\w*[^.!?;:\n]{0,40}(?:surround(?:ing)?|adjacent)\s+(?:pulmonary\s+)?(?:opac\w*|consolid\w*|infiltrat\w*)
+        )\b
+        (?!\?)
+        (?![^.!?;:\n]{0,100}\b(?:
+            (?:has|have|is|are|was|were)\s+(?:(?:now|nearly|almost|completely|fully|entirely)\s+){0,2}(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|present|evident)|
+            cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
+            no\s+longer\s+(?:seen|present)
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 4. Lung-scoped density (avoid bone/breast / rotation asymmetry)
+        # ==============================================================
+        (?<!asymmetry\sin\s)
+        (?<!difference\sin\s)
+        (?<!differences\sin\s)
+        \b(?:
+            (?:lung|pulmonary|parenchymal|lobar|lobe|hilar|perihilar|alveolar|interstitial|basilar|bibasilar|apical|retrocardiac)\w*
+            (?:\s+(?:field|zone|region|base|apex|lower|upper|middle|left|right)){0,3}
+            \s+
+            densit\w*
+            |
+            densit\w*
+            (?:\s+(?:in|of|at|within|over|projecting\s+over|involving|the|both|each|left|right|lower|upper|mid(?:dle)?|and|to|or|lateral|medial|posterior|anterior|basal|basilar)){0,8}
+            \s+
+            (?:lung|pulmonary|parenchyma|lobe|lobar|hilar|perihilar|hemithorax|bas\w*|apex|apical|retrocardiac|chest)\w*
+        )\b
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 4b. RDS / granular density (neonatal parenchymal opacity pattern)
+        # ==============================================================
+        \b(?:
+            rds\s+(?:granular\s+)?densit\w*
+            |
+            granular\s+densit\w*(?=[^.!?;:\n]{0,40}\b(?:rds|lung|lungs|pulmonary|diffuse(?:ly)?)\b)
+        )\b
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 5. Pulmonary / parenchymal shadowing (NOT nipple/breast/cardiac/
+        #    mediastinal/gastric/rib/vascular/companion/splenic shadows)
+        # ==============================================================
+        \b(?:
+            (?:lung|pulmonary|parenchymal|acinar|alveolar|airspace|air\s*space|infiltrat\w*|interstitial)\s+shadow\w*
+            |
+            shadow(?:ing)?\s+(?:in|of|within|over)\s+(?:(?:the|a|an|left|right|both|bilateral|each|this|mid(?:dle)?|lower|upper|lateral|basal|basilar|posterior|anterior)\s+){0,6}(?:lung|pulmonary|parenchyma|lobe|bas\w*|apex|hemithorax)\w*
+        )\b
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 6. Interstitial prominence / markings (residual; not Kerley child)
+        # Require a strength cue — bare "interstitial markings" is often COPD/
+        # volume noise when gold is negative. Allow lung/pulmonary insertions,
+        # diffuse cue, increase-in, and markings-appear ADJ word order.
+        # ==============================================================
+        \b(?:
+            (?:increased|prominent|accentuat\w*|abnormal|generalized|mild(?:ly)?|slight(?:ly)?|coarse(?:ned)?|diffuse)\s+(?:(?:increased|prominent|accentuat\w*|abnormal|generalized|mild(?:ly)?|slight(?:ly)?|coarse(?:ned)?|diffuse)\s+)?(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?(?:markings?|prominence|opacit\w*|abnormalit\w*)
+            |
+            (?:pulmonary\s+)?interstitial\s+prominence\b
+            |
+            (?:increased|mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse)\s+(?:pulmonary\s+)?interstitial\s+prominence\b
+            |
+            (?:(?:increased|mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse)\s+)?prominence\s+of\s+(?:the\s+)?(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?markings?
+            |
+            accentuation\s+of\s+(?:the\s+)?(?:bronchovascular|(?:pulmonary\s+)?interstitial)\s+(?:lung\s+)?markings?
+            |
+            (?:(?:mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse)\s+)+(?:increase|increasing)\s+(?:in|of)\s+(?:the\s+)?(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?markings?
+            |
+            (?:(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?|interstitial\s+lung\s+)markings?\s+appear(?:s|ed)?\s+(?:(?:diffusely|mildly|slightly|moderately|markedly)\s+)?(?:prominent|increased|accentuat\w*|coarsened|abnormal|coarse)
+            |
+            interstitial\s+(?:pulmonary\s+)?abnormalit\w*
+        )
+        (?!\?)
+        # emphysema/COPD attribution — hyperlucency, not parenchymal opacity
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:compatible|consistent|associated)\s+with\s+(?:(?:a\s+|the\s+|known\s+|history\s+of\s+|hx\s+of\s+){0,3})(?:emphysema|copd|chronic\s+obstructive)|
+            secondary\s+to\s+(?:emphysema|copd)|
+            (?:from|due\s+to)\s+(?:emphysema|copd)
+        )\b)
+
+        |
+
+        # ==============================================================
+        # 7. Haziness / hazy (umbrella density synonym; lung / RDS framed)
+        # Block effusion / soft-tissue / breast / CPA / scatter attribution.
+        # ==============================================================
+        (?<!costophrenic\s)
+        \b(?:
+            (?:bibasilar|basilar|bilateral|pulmonary|parenchymal|diffuse)\s+haziness\b
+            |
+            (?:mild|slight|minimal|moderate|marked|diffuse|patchy)?\s*haziness\s+(?:
+                (?:in|within|throughout|over|of|at|across)\s+(?:(?:the|a|an|right|left|both|bilateral|mid(?:dle)?|lower|upper|basal|basilar|visualized|and|to|or)\s+){0,10}(?:lung|lungs|pulmonary|parenchyma|hemithorax|fields?|zones?)\w*
+                |
+                throughout\s+(?:the\s+)?lungs?\b
+            )
+            |
+            hazy\s+densit\w*(?=[^.!?;:\n]{0,50}\b(?:lung|lungs|pulmonary|parenchyma|bas\w*|lobe|lobes|hemithorax|lower|upper|mid)\w*)
+            |
+            (?:lungs?|lung\s+fields?|pulmonary\s+parenchyma)\s+(?:are\s+|is\s+|appear(?:s|ed)?\s+)?(?:(?:diffusely|mildly|slightly|moderately|markedly)\s+)?hazy\b
+        )\b
+        (?!\?)
+        (?!\s+(?:at\s+)?(?:the\s+)?(?:costophrenic|cp)\s+angles?)
+        (?![^.!?;:\n]{0,70}\b(?:
+            (?:likely\s+)?represents?|
+            correspond(?:s|ing)?\s+to|
+            secondary\s+to|
+            related\s+to|
+            due\s+to|
+            attributable\s+to|
+            from
+        )\s+(?:
+            (?:a\s+|an\s+|the\s+)?(?:(?:small|large|moderate|trace|layering|loculated)\s+)?(?:pleural\s+)?effusion\w*|
+            breast\s+(?:implant|tissue|shadow|prosthesis)\w*|
+            soft\s+tissue|
+            scatter|
+            overlying\s+(?:soft\s+tissue|breast)|
+            (?:known\s+)?hiatal\s+hernia
+        )\b)
+    )
+)

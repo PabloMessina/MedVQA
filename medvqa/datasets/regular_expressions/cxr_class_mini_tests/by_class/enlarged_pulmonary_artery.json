@@ -1,0 +1,47 @@
+{
+  "class_id": "enlarged_pulmonary_artery",
+  "positives": [
+    "Enlarged main pulmonary artery.",
+    "Dilated central pulmonary arteries.",
+    "Increased caliber of the right pulmonary artery.",
+    "Pulmonary trunk is enlarged.",
+    "Central PA dilatation.",
+    "Prominence of the main pulmonary artery.",
+    "Large central pulmonary arteries.",
+    "Prominence of the right pulmonary arttery.",
+    "Prominent bilateral pulmonary arteries.",
+    "Pulmonary arterial enlargement.",
+    "Large right and left pulmonary arteries.",
+    "Enlargement of especially the right ventricle and pulmonary artery.",
+    "Enlarged appearance of the pulmonary arteries.",
+    "The central pulmonary arteries remain engorged.",
+    "Prominent proximal pulmonary arteries.",
+    "Prominent caliber of central pulmonary arteries.",
+    "Prominent caliber of the main pulmonary arteries.",
+    "Mild prominence of the main pulmonary arterial contour.",
+    "The mediastinal contours demonstrate a prominent pulmonary arterial contour.",
+    "Prominence of the pulmonary arterial segment.",
+    "Prominence of the main pulmonary arterial segment.",
+    "Mild prominence of the pulmonary arterial contour.",
+    "Slight prominence of the left pulmonary arterial contour.",
+    "Subtle prominence of the outline of the main pulmonary artery.",
+    "Enlargement of the main and central pulmonary arteries.",
+    "Enlarged main and central pulmonary arteries.",
+    "Enlargement of the hilar pulmonary arteries is symmetric.",
+    "Central pulmonary arteries, particularly the right main, appear prominent.",
+    "There is prominence of the left/main pulmonary artery.",
+    "The hila are both abnormal, probably due to dilated arteries."
+  ],
+  "negatives": [
+    "Bilateral hilar lymphadenopathy.",
+    "Cephalization of pulmonary vessels.",
+    "Interstitial markings without arterial contour change.",
+    "Pulmonary arterial hypertension.",
+    "Central pulmonary vasculature engorgement.",
+    "Lesser prominence of the pulmonary artery."
+  ],
+  "negation_soft": [
+    "Pulmonary arteries are normal in caliber.",
+    "The pulmonary trunk shows no significant enlargement."
+  ]
+}

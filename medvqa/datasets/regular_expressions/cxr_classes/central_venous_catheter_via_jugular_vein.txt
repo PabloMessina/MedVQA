@@ -1,3 +1,0 @@
-
-    # Matches: "IJ line", "Internal jugular catheter"
-    \b(?:ij|jugular)\b

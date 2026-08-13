@@ -1,0 +1,512 @@
+
+    # Umbrella: currently visible therapeutic support tubes (ETT/trach, enteric/feeding,
+    # chest/pleural drainage). Function > "catheter": avoid PICC/CVC/IV/vascular lines,
+    # pacemaker leads, surgical hardware, ECG leads, O2 tubing, foreign bodies.
+    # History / removal / not-visualized clauses excluded locally.
+    # NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+    # IMPORTANT: do not use bare \btubes?\b — it bypasses "removal of … chest tube"
+    # lookbehinds by matching the trailing "tube" alone.
+    #
+    # Residual mid-node (children miss): nonvascular post-op drains (mediastinal /
+    # pericardial / surgical / JP), Replogle / oral catheter enteric gaps, and
+    # compound "…feeding tube and placement of a tracheostomy" (main-arm lookbehind
+    # collision). Do not chase PICC/CVC/line/device bad gold.
+    # FN-fit (fn_mine_fit_shared): singular "line and tube" (plural-only hole);
+    # findings-state T-tube (Montgomery/tracheal surgical; not ETT/enteric/chest).
+
+    (?:
+      (?:
+        # ======================================================================
+        # Shared local removal / absence guards (fixed-width lookbehinds)
+        # ======================================================================
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sleft\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sthe\sleft\s)
+        (?<!removal\sof\sthe\sright\s)
+        (?<!removal\sof\sleft-sided\s)
+        (?<!removal\sof\sright-sided\s)
+        (?<!removal\sof\sthe\sleft-sided\s)
+        (?<!removal\sof\sthe\sright-sided\s)
+        (?<!removal\sof\sa\sleft-sided\s)
+        (?<!removal\sof\sa\sright-sided\s)
+        (?<!removal\sof\sbilateral\s)
+        (?<!removal\sof\sthe\sbilateral\s)
+        (?<!removal\sof\spatient's\s)
+        (?<!removal\sof\sthe\spatient's\s)
+        (?<!removal\sof\spatient's\sleft\s)
+        (?<!removal\sof\spatient's\sright\s)
+        (?<!removal\sof\spatient's\sleft-sided\s)
+        (?<!removal\sof\spatient's\sright-sided\s)
+        (?<!removal\sof\sthe\spatient's\sleft-sided\s)
+        (?<!removal\sof\sthe\spatient's\sright-sided\s)
+        (?<!removal\sof\spatient's\sright-sided\sday\s)
+        (?<!removal\sof\sthe\spatient's\sleft-sided\sday\s)
+        (?<!removal\sof\sthe\spatient's\sright-sided\sday\s)
+        (?<!removal\sof\spreviously\s)
+        (?<!removal\sof\spreviously\sdemonstrated\s)
+        (?<!removal\sof\spreviously\splaced\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!removal\sof\sthe\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!removal\sof\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\sright\s)
+        (?<!removal\sof\sthe\sfeeding\stube\sand\sleft\s)
+        (?<!removal\sof\sfeeding\stube\sand\s)
+        (?<!removal\sof\sfeeding\stube\sand\sright\s)
+        (?<!removal\sof\sfeeding\stube\sand\sleft\s)
+        (?<!removal\sof\sendotracheal\sand\s)
+        (?<!removal\sof\sthe\sendotracheal\sand\s)
+        (?<!removal\sof\sendotracheal\stube,\s)
+        (?<!removal\sof\sthe\sendotracheal\stube,\s)
+        (?<!removal\sof\scatheter,\sng\stube,\s)
+        (?<!removal\sof\sright\sinternal\sjugular\scatheter\sand\s)
+        (?<!removal\sof\sleft\sinternal\sjugular\scatheter\sand\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!interval\sremoval\sof\sthe\s)
+        (?<!interval\sremoval\sof\sa\s)
+        (?<!interval\sremoval\sof\san\s)
+        (?<!interval\sremoval\sof\sleft\s)
+        (?<!interval\sremoval\sof\sright\s)
+        (?<!interval\sremoval\sof\sthe\sleft\s)
+        (?<!interval\sremoval\sof\sthe\sright\s)
+        (?<!interval\sremoval\sof\sleft-sided\s)
+        (?<!interval\sremoval\sof\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\sleft-sided\s)
+        (?<!interval\sremoval\sof\sthe\sright-sided\s)
+        (?<!interval\sremoval\sof\sa\sleft\s)
+        (?<!interval\sremoval\sof\sa\sright\s)
+        (?<!interval\sremoval\sof\sa\sleft-sided\s)
+        (?<!interval\sremoval\sof\sa\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\sleft-sided\s)
+        (?<!interval\sremoval\sof\sthe\smediastinal\sdrain\sand\sright-sided\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\sright\s)
+        (?<!interval\sremoval\sof\sthe\sfeeding\stube\sand\sleft\s)
+        (?<!interval\sremoval\sof\sendotracheal\sand\s)
+        (?<!interval\sremoval\sof\sendotracheal\stube,\s)
+        (?<!interval\sremoval\sof\sendotracheal\stube,\senteric\stube,\sswan-ganz\scatheter\sand\s)
+        (?<!after\sremoval\sof\s)
+        (?<!after\sremoval\sof\sthe\s)
+        (?<!after\sremoval\sof\sa\s)
+        (?<!following\sremoval\sof\s)
+        (?<!following\sremoval\sof\sthe\s)
+        (?<!status\spost\sremoval\sof\s)
+        (?<!status\spost\sremoval\sof\sthe\s)
+        (?<!status\spost\sremoval\sof\sleft\s)
+        (?<!status\spost\sremoval\sof\sright\s)
+        (?<!s/p\sremoval\sof\s)
+        (?<!sp\sremoval\sof\s)
+        (?<!sp\sdc\s)
+        (?<!s/p\sdc\s)
+        (?<!dc'ed\s)
+        (?<!dced\s)
+        (?<!d/c\s)
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!\bpulled\s)
+        (?<!discontinued\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\baround\sno\s)
+        (?<!\bno\slines\sor\s)
+        (?<!\bno\slines\sand\s)
+        (?<!status\spost\sright\slower\slobe\s)
+        (?<!status\spost\sleft\slower\slobe\s)
+        \b(?:
+            # ---- Airway ----
+            e\.?t\.?t\.?
+            |
+            e\.?\s*t\.?\s*[- ]?\s*tubes?
+            |
+            et\s+and\s+(?:\w+\s+){0,4}tubes?
+            |
+            endotracheal(?:\s+and\s+(?:\w+\s+){0,2})?\s+tubes?
+            |
+            (?:oral|nasal)\s+endotracheal(?:\s+tubes?)?
+            |
+            trach(?:eostomy)?\s+(?:tubes?|cannulas?)
+            |
+            # tracheostomy device present without requiring "tube/cannula"
+            # (avoid defect/scar/site/collar and prior/old/remote mentions)
+            # Phase B5: framed residual from production OR-helper tracheostomy_tube
+            # (DISCARD bare \btrach(?:eostomy)?\s+(?:tube|cannula)? — FP-prone on
+            # defect / not-visualized; parent already covers tube|cannula forms).
+            (?<!prior\s)
+            (?<!old\s)
+            (?<!remote\s)
+            tracheostomy
+            (?!\s+defect\b)
+            (?!\s+scar\b)
+            (?!\s+site\b)
+            (?!\s+collar\b)
+            (?:
+                \s+is\s+in\s+place
+                |
+                \s+is\s+present
+                |
+                \s+in\s+(?:satisfactory\s+)?position
+                |
+                \s+is\s+stable
+                |
+                \s+appears?
+                |
+                \s+projects
+                |
+                \s+and\b
+            )
+            |
+            (?<!prior\s)
+            (?<!old\s)
+            (?<!remote\s)
+            has\s+(?:a\s+)?tracheostomy
+            (?!\s+defect\b)
+            (?!\s+scar\b)
+            (?!\s+site\b)
+            (?!\s+collar\b)
+            |
+            (?:stable|flexible)\s+tracheostomy
+            (?!\s+defect\b)
+            |
+            placement\s+of\s+(?:a\s+)?tracheostomy
+            (?!\s+defect\b)
+            |
+            # common misspelling seen in gold
+            trahceostomy
+            |
+            # mainstem intubation (on-film ETT cue; optional "bronchus")
+            (?:right|left)\s+mainstem\s+(?:bronchus\s+)?intubation
+            |
+            # ---- Enteric / feeding ----
+            (?:ngt|ogt|njt|gjt)(?:\s*[- ]?\s*type)?(?:\s+tubes?)?
+            |
+            (?:n\.?\s*g\.?|o\.?\s*g\.?)(?:\s*[- ]?\s*type)?\s+tubes?
+            |
+            \bng\b(?=\s+(?:in\s+(?:\w+\s+){0,2}(?:place|position)|tubes?|tip|present|unchanged|stable|remains?))
+            |
+            (?:
+                dobb?hoff(?:-?\s*type)?
+                |
+                doboff(?:-?\s*type)?
+                |
+                (?:upper\s+)?enteric
+                |
+                nasogastric
+                |
+                orogastric
+                |
+                esophagogastric
+                |
+                (?:trans)?esophageal(?:\s+drainage)?
+                |
+                nasojejunal
+                |
+                feeding
+                |
+                gastric
+                |
+                weighted\s+feeding
+            )
+            \s+
+            (?:(?:drainage|feeding|enteric)\s+)?
+            tubes?
+            |
+            g[- ]?tubes?
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    tip
+                    |
+                    in\s+(?:\w+\s+){0,2}(?:place|position)
+                    |
+                    present
+                    |
+                    noted
+                    |
+                    seen
+                    |
+                    visualized
+                    |
+                    unchanged
+                    |
+                    stable
+                    |
+                    remains?
+                    |
+                    ends?
+                    |
+                    courses
+                )\b
+            )
+            |
+            gj[- ]?tubes?
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    tip
+                    |
+                    in\s+(?:\w+\s+){0,2}(?:place|position)
+                    |
+                    present
+                    |
+                    noted
+                    |
+                    seen
+                    |
+                    unchanged
+                    |
+                    stable
+                    |
+                    remains?
+                )\b
+            )
+            |
+            (?:gastrostomy|jejunostomy|peg)\s+tubes?
+            |
+            # ---- Chest / pleural drainage ----
+            (?:chest|thoracostomy|pleural|thoracic)\s+(?:drainage\s+)?(?:tubes?|drains?|catheters?|caths?)
+            |
+            # compound "pleural and midline drains" (contiguous pleural drains? misses)
+            pleural\s+and\s+(?:midline|mediastinal)\s+(?:drainage\s+)?(?:drains?|tubes?|catheters?)
+            |
+            chest\s+wall\s+drains?
+            |
+            pigtail\s+(?:(?:pleural|chest|thoracostomy|basilar|right|left|sided|intra-?abdominal|abdominal)\s+)*(?:drainage\s+)?(?:catheters?|drains?|tubes?)
+            |
+            (?:pleur\-?x|pluerex)(?:\s+catheters?)?
+            |
+            mini\-?drains?
+            |
+            # ---- Residual nonvascular post-op drains (not in child leaves) ----
+            # Presence-cued: bare unnamed "drain" is banned (SQ/wound/abdomen FP).
+            # Named mediastinal / pericardial / JP / surgical / biliary only.
+            # Prefix arms: placement / position-of (device last; no post-cue).
+            (?:
+                (?:stable|unchanged)\s+(?:abdominal\s+)?(?:mediastinal|surgical)\s+(?:drainage\s+)?(?:drains?|catheters?)
+                |
+                (?:wires|wire),?\s+mediastinal\s+(?:drainage\s+)?(?:drains?|catheters?)
+                |
+                (?:unchanged|stable)\s+position\s+of\s+(?:the\s+|a\s+)?
+                (?:mediastinal|pericardial|surgical|biliary|(?:jackson[- ]?pratt|jp))
+                \s+(?:drainage\s+)?(?:drains?|catheters?|tubes?)
+                |
+                interval\s+placement\s+of\s+(?:a\s+|the\s+)?
+                (?:mediastinal|pericardial|surgical|biliary)
+                \s+(?:drainage\s+)?(?:drains?|catheters?|tubes?)
+                |
+                following\s+(?:insertion|placement)\s+of\s+(?:a\s+|the\s+)?
+                (?:mediastinal|pericardial|surgical|biliary)
+                \s+(?:drainage\s+)?(?:drains?|catheters?|tubes?)
+            )
+            |
+            (?:mediastinal|pericardial|(?:jackson[- ]?pratt|jp)|surgical|biliary)
+            \s+(?:drainage\s+)?(?:drains?|catheters?|tubes?)
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    remain(?:s|ing)?
+                    |
+                    still\s+in\s+place
+                    |
+                    in\s+place
+                    |
+                    unchanged
+                    |
+                    present
+                    |
+                    noted
+                    |
+                    seen
+                    |
+                    identified
+                    |
+                    visuali[sz]ed
+                    |
+                    project(?:s|ing)?
+                    |
+                    overlying
+                    |
+                    appears?
+                    |
+                    (?:is|are)\s+stable
+                    |
+                    (?:is|are)\s+partially\s+imaged
+                    |
+                    in\s+(?:stable|unchanged|satisfactory)\s+position
+                    |
+                    (?:is|are)\s+in\s+(?:stable|unchanged|satisfactory)\s+position
+                    |
+                    (?:has|have)\s+been\s+(?:placed|inserted)
+                    |
+                    in\s+the\s+(?:left|right|midline|upper|lower|anterior|posterior)
+                    |
+                    within\s+the\s+(?:left|right|midline|upper|lower)
+                )\b
+            )
+            |
+            # framed nonvascular drainage catheter (not unnamed bare drain)
+            (?<!venous\s)
+            (?<!vascular\s)
+            (?<!csf\s)
+            (?<!ventricular\s)
+            (?<!wound\s)
+            (?<!urinary\s)
+            (?<!foley\s)
+            (?<!subcutaneous\s)
+            drainage\s+catheters?
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    seen
+                    |
+                    noted
+                    |
+                    present
+                    |
+                    in\s+place
+                    |
+                    identified
+                    |
+                    visuali[sz]ed
+                    |
+                    project(?:s|ing)?
+                    |
+                    overlying
+                    |
+                    (?:is|are)\s+stable
+                    |
+                    in\s+(?:stable|unchanged)\s+position
+                )\b
+            )
+            |
+            # ---- Residual enteric gaps children miss ----
+            replogle(?:\s+tubes?)?
+            |
+            oral\s+catheters?
+            |
+            # ---- Generic therapeutic tube phrasing ----
+            (?:support|medical|indwelling(?:\s+medical)?|digestive|sup+ort)\s+tubes?
+            |
+            # FN-fit: singular CheXpert "line and tube" (was plural-only)
+            lines?\s+and\s+tubes?
+            |
+            tubes?\s+and\s+(?:lines|wires|catheters?|devices|drains?)
+            |
+            (?:wires|catheters?|devices|drains?)\s+and\s+tubes?
+            |
+            tubes?\s+projecting
+            |
+            # ---- Residual T-tube (children miss; not bare indication/history) ----
+            (?:
+                (?:
+                    no\s+(?:interval\s+)?change\s+in\s+(?:the\s+|a\s+)?
+                    |
+                    (?:unchanged|stable)\s+(?:position\s+of\s+(?:the\s+|a\s+)?)?
+                )
+                t[- ]?tubes?
+                |
+                t[- ]?tubes?
+                (?=
+                    (?:(?![.!?]).){0,50}?\b(?:
+                        unchanged
+                        |
+                        stable
+                        |
+                        present
+                        |
+                        in\s+(?:place|position)
+                        |
+                        noted
+                        |
+                        seen
+                        |
+                        remains?
+                        |
+                        projects?
+                        |
+                        (?:is|are)\s+(?:unchanged|stable|present)
+                    )\b
+                )
+            )
+            |
+            # Guarded bare "tube(s)": exclude compound named-tube tails so
+            # "removal of … chest tube" cannot match via trailing "tube" alone.
+            (?:
+                (?<!chest\s)
+                (?<!et\s)
+                (?<!ng\s)
+                (?<!og\s)
+                (?<!gj\s)
+                (?<!g-)
+                (?<!t-)
+                (?<!chole\s)
+                (?<!feeding\s)
+                (?<!enteric\s)
+                (?<!nasogastric\s)
+                (?<!orogastric\s)
+                (?<!endotracheal\s)
+                (?<!tracheostomy\s)
+                (?<!trach\s)
+                (?<!thoracostomy\s)
+                (?<!pleural\s)
+                (?<!thoracic\s)
+                (?<!dobhoff\s)
+                (?<!dobbhoff\s)
+                (?<!peg\s)
+                (?<!drainage\s)
+                (?<!support\s)
+                (?<!medical\s)
+                (?<!digestive\s)
+                (?<!esophageal\s)
+                (?<!left-sided\s)
+                (?<!right-sided\s)
+                (?<!left\s)
+                (?<!right\s)
+                (?<!sided\s)
+                (?<!lobe\s)
+                (?<!day\s)
+                (?<!check\s)
+                (?<!or\s)
+                (?<!and\s)
+                tubes?
+            )
+        )\b
+        (?!\s+removal\b)
+        (?!\s+pulled\b)
+        (?!\s+removed\b)
+        (?!\s+pull\b)
+        (?!\s+and\s+pacer\s+wire\s+removal\b)
+        (?!\s+placement\s+is\s+recommended\b)
+        (?!\s+placement\b(?=(?:(?![.!?]).){0,40}?\b(?:history|indication|compare)\b))
+        (?!\s+attempted\b)
+        (?!\s+no\s+longer\b)
+        (?!\s+not\s+visuali[sz]ed\b)
+        (?!\s+is\s+not\s+visuali[sz]ed\b)
+        (?!\s+are\s+not\s+visuali[sz]ed\b)
+        # Local absence / removal (tip-not-visualized does NOT negate presence)
+        (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+        (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+        (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:is|are)\s+no\s+longer\b)
+        (?!(?:(?![.!?]).){0,30}?(?<!\btip\s)(?:is|are)\s+not\s+(?:clearly\s+)?visuali[sz]ed\b)
+        (?!(?:(?![.!?]).){0,40}?\bcannot\s+be\s+(?:assessed|ascertained)\b)
+        (?!(?:(?![.!?]).){0,40}?\bcan\s+not\s+be\s+(?:assessed|ascertained)\b)
+      )
+      |
+      # Outside main removal lookbehinds: compound "removal of feeding tube and
+      # placement of a tracheostomy" otherwise blocked by
+      # (?<!removal of the feeding tube and ) on the placement arm.
+      (?:feeding|enteric|nasogastric)\s+tubes?\s+and\s+placement\s+of\s+(?:a\s+)?tracheostomy
+      (?!\s+defect\b)
+      |
+      # Presence-cued trach residual children miss
+      (?<!prior\s)
+      (?<!old\s)
+      (?<!remote\s)
+      (?:change|changes)\s+in\s+(?:the\s+)?tracheostomy
+      (?!\s+defect\b)
+    )

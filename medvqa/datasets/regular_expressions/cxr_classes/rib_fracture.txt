@@ -1,27 +1,486 @@
+# ==============================================================================
+# rib_fracture
+# Match rib / costal / costochondral fracture (acute, healing, healed, old),
+# callus, fracture deformity / step-off tied to rib, and flail chest.
+# Do NOT match: clause-local negation ("no obvious rib fractures", "no evidence
+# of … rib fracture"), rule-out / concern-for / indication-only phrasing, bare
+# rib irregularity or deformity without fracture/trauma framing, postsurgical
+# rib changes / resection without a stated fracture, or history-only
+# "known rib fracture" when not affirmed on the current exam.
+# Negation / history / indication lookbehinds are fixed-width (stdlib re).
+# ==============================================================================
 
-    # 1. Anatomy ... Pathology
-    # Matches: "Ribs: Fractured", "Rib (fracture)", "rib-fracture", "rib irregularity"
-    \b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)(?<!\bno\sobvious\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sdisplaced\s)(?<!\bno\sacute\s)
+    (?<!\bno\svisible\s)(?<!\bno\sgross\s)(?<!\bno\sclear\s)
+    (?<!\bno\sdetectable\s)(?<!\bno\sapparent\s)(?<!\bno\sgrossly\s)
+    (?<!\bno\sunderlying\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bwithout\sdisplaced\s)(?<!\bwithout\sacute\s)(?<!\bwithout\sobvious\s)
+    (?<!\bwithout\sapparent\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sfor\s)
+    (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bno\sevidence\sof\sa\s)(?<!\bno\sevidence\sof\san\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bno\sevidence\sof\sright\s)(?<!\bno\sevidence\sof\sleft\s)
+    (?<!\bno\sevidence\sof\sacute\s)(?<!\bno\sevidence\sof\sdisplaced\s)
+    (?<!\bno\sevidence\sof\sobvious\s)(?<!\bno\sevidence\sfor\sacute\s)
+    (?<!\bno\sevidence\sfor\sdisplaced\s)(?<!\bno\sevidence\sfor\sobvious\s)
+    (?<!\bno\sevidence\sof\sa\sdisplaced\s)
+    (?<!\bno\sevidence\sfor\sa\sdisplaced\s)
+    (?<!\bwithout\sevidence\sfor\sa\sdisplaced\s)
+    (?<!\bno\sevidence\sof\san\sacute\s)
+    (?<!\bno\sevidence\sof\sa\sacute\s)
+    (?<!\bno\sevidence\sof\sacute\sleft\s)(?<!\bno\sevidence\sof\sacute\sright\s)
+    (?<!\bno\sevidence\sof\san\sacute\sleft\s)
+    (?<!\bno\sevidence\sof\san\sacute\sright\s)
+    (?<!\bno\sevidence\sof\sunderlying\s)
+    (?<!\bno\sevidence\sof\sdispalced\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bnegative\sfor\sacute\s)(?<!\bnegative\sfor\sdisplaced\s)
+    (?<!\bnegative\sfor\sacute\sdisplaced\s)
+    (?<!\bnegative\sfor\sany\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
+    (?<!\bevidence\sof\sa\s)(?<!\bevidence\sof\san\s)(?<!\bevidence\sof\sthe\s)
+    (?<!\bevidence\sof\sacute\s)(?<!\bevidence\sof\sdisplaced\s)
+    (?<!\bevidence\sof\sobvious\s)(?<!\bevidence\sfor\sobvious\s)
+    (?<!\bevidence\sof\sright\s)(?<!\bevidence\sof\sleft\s)
+    (?<!\bevidence\sof\sa\sdisplaced\s)
+    (?<!\bevidence\sof\sunderlying\s)
+    (?<!\bdefinite\sevidence\sof\s)(?<!\bdefinite\sevidence\sfor\s)
+    (?<!\bno\sdefinite\sevidence\sof\s)(?<!\bno\sdefinite\sevidence\sfor\s)
+    (?<!\bno\sdefinite\sevidence\sfor\sacute\s)
+    (?<!\bno\sdefinite\sevidence\sof\sacute\s)
+    (?<!\bany\sdefinite\s)(?<!\bany\sobvious\s)(?<!\bany\sdisplaced\s)
+    (?<!\bany\sacute\s)(?<!\bsee\sany\sdefinite\s)(?<!\bsee\sany\sobvious\s)
+    (?<!\bi\sdo\snot\ssee\sany\sdefinite\s)(?<!\bi\sdo\snot\ssee\sany\sobvious\s)
+    (?<!\bdoes\snot\sappear\sto\sbe\sany\s)
+    (?<!\bdoes\snot\sshow\sthe\s)(?<!\bdo\snot\sshow\sthe\s)
+    (?<!\bnot\sshow\sthe\s)(?<!\bnot\swell\s)
+    (?<!\band\sno\s)
+    (?<!\bno\sobvious\sdisplaced\s)(?<!\bno\sdefinite\sdisplaced\s)
+    (?<!\bno\sobvious\sacute\s)(?<!\bno\sdefinite\sacute\s)
+    (?<!\bno\svisible\sdisplaced\s)(?<!\bno\svisible\sacute\s)
+    (?<!\bno\sgrossly\sdisplaced\s)(?<!\bno\sgross\sdisplaced\s)
+    (?<!\bno\sacute\sdisplaced\s)(?<!\bno\sdisplaced\sacute\s)
+    (?<!\bno\sdisplaced,\sacute\s)(?<!\bno\sdisplaced,\s)
+    (?<!\bno\sapparent\sdisplaced\s)(?<!\bno\sapparent\sacute\s)
+    (?<!\bno\sleft\ssided\s)(?<!\bno\sright\ssided\s)
+    (?<!\bno\sleft-sided\s)(?<!\bno\sright-sided\s)
+    (?<!\bobvious\sdisplaced\s)(?<!\bdefinite\sdisplaced\s)
+    (?<!\ban\sacute\s)(?<!\ba\sacute\s)
+    (?<!\bof\sa\sdisplaced\s)(?<!\bof\san\sacute\s)(?<!\bof\sa\sacute\s)
+    (?<!\bor\s)(?<!\bfractures\sor\s)(?<!\bfracture\sor\s)
+    (?<!\bpneumothorax\sor\s)(?<!\beffusion\sor\s)
+    (?<!\bconsolidation\sor\s)(?<!\bcontusion\sor\s)
+    (?<!\bpneumothorax,\s)(?<!\beffusion,\s)
+    (?<!\bor\sdisplaced\s)(?<!\bor\sacute\s)(?<!\bor\svisible\s)
+    (?<!\bor\svisible\sdisplaced\s)(?<!\bor\sgrossly\sdisplaced\s)
+    (?<!\bassociated\sright\s)(?<!\bassociated\sleft\s)
+    (?<!\bor\sassociated\sright\s)(?<!\bor\sassociated\sleft\s)
+    (?<!\bor\sdetectable\s)(?<!\bdetectable\s)
+    (?<!\binsensitive\sfor\s)
+    (?<!\bdetection\sof\s)(?<!\bdetection\sof\ssubtle\s)
+    (?<!\bconcern\sfor\s)(?<!\bsuspicion\sfor\s)
+    (?<!\bhigh\ssuspicion\sfor\s)(?<!\bpersistent\sconcern\sfor\s)
+    (?<!\bif\spersistent\sconcern\sfor\s)
+    (?<!\bstill\sclinical\sconcern\sfor\s)
+    (?<!\bclinically\ssuspected\s)(?<!\bclinical\sconcern\sfor\s)
+    (?<!\bsubtle\sor\snondisplaced\s)(?<!\bor\snondisplaced\s)
+    (?<!\bif\s)(?<!\bif\sclinical\sconcern\sfor\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)(?<!\bknown\s)
+    (?<!\bknown\sfirst\s)(?<!\bknown\sleft\s)(?<!\bknown\sright\s)
+    (?<!\bknown\ssecond\s)(?<!\bknown\sthird\s)(?<!\bknown\smultiple\s)
+    (?<!\bknown\sleft-sided\s)(?<!\bknown\sleft\ssided\s)
+    (?<!\bknown\sright-sided\s)(?<!\bknown\sright\ssided\s)
+    (?<!\bpreviously\sidentified\s)(?<!\bpreviously\snoted\s)
+    (?<!\bpreviously\sidentified\sleft\s)(?<!\bpreviously\sidentified\sright\s)
+    (?<!\bpreviously\sidentified\sleft\slower\schest\s)
+    (?<!\bprevious\s)(?<!\bto\sprevious\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\?\s)(?<!//\s)(?<!/\s)
+    (?<!\bh/o\s)
+    (?<!\bhistory:\s)(?<!\bclinical\shistory:\s)
+    (?<!\bdyspnea,\s)(?<!\bcrepitus\s)
+
     (?:
+        # 1. Anatomy → pathology (rib … fracture/callus/step-off)
+        # Bare "rib fx(s)" is omitted: almost always indication/polytrauma lists.
+        \b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|absent|absence|negative|normal|clear|unremarkable|intact|evidence)\b)
+            (?:left|right|bilateral|bilat\.?|anterior|posterior|lateral|medial|
+               upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
+               seventh|eighth|ninth|tenth|eleventh|twelfth|
+               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|\d+|
+               multiple|mult\.?|few|several|bilaterally|
+               healing|healed|old|remote|acute|chronic|subacute|well-healed|
+               nondisplaced|non-displaced|displaced|patholog\w*|
+               and|the|a|an|of|with|involving|including|as|well|
+               possibly|slightly|probably|perhaps|
+               sided|posterolateral|anterolateral|clavicles?|clavicular|
+               scapul\w*|stern(?:um|al)?|chest|through|xxxx|___+)
+        ){0,12}
+        [\s,/\-():]*
+        \b(?:fractur\w*|break(?:s|ing)?|broken|callus(?:es)?|step-offs?)\b
+        (?![\s\w,.;:'-]{0,80}(?:documented\s+on\s+preceding|
+                           not\s+(?:well\s+)?(?:appreciated|seen)\s+on\s+(?:today|today's|the\s+current|this)|
+                           please\s+reassess|
+                           in\s+this\s+area))
+        |
+
+        # 2. Pathology → anatomy requiring of/involving/in/at/through/with
+        \b(?:fractur\w*|fxs?|fx's|break(?:s|ing)?|broken|callus(?:es)?|step-offs?)\b
+        (?:
+            [\s,/\-():]+
+            (?:is|are|was|were|been|present|seen|noted|visualized|identified|
+               with|callus(?:es)?|formation|relating|related|associated|
+               projecting|to|over|about)
+        ){0,6}
         [\s,/\-():]+
-        # Stop if we hit negation, normalcy, or boundary terms
-        (?!(?:no|not|without|absent|absence|negative|normal|clear|unremarkable|intact)\b)
-        [^\s,\.;:]+
-    ){0,12}
-    [\s,/\-():]+\b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|
-                  deformit(?:y|ies)|step-off|irregularit(?:y|ies))\b
-    |
-    # 2. Pathology ... Anatomy
-    # Matches: "Cortical step-off of the lateral 6th rib"
-    \b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|
-       deformit(?:y|ies)|step-off|irregularit(?:y|ies))\b
-    (?:
+        (?:of|involving|in|at|through|along|with|over|about)
+        (?:
+            [\s,/\-():]+
+            (?:the|a|an|left|right|bilateral|bilat\.?|anterior|posterior|lateral|
+               medial|upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
+               seventh|eighth|ninth|tenth|eleventh|twelfth|
+               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|\d+|
+               multiple|healing|healed|old|remote|acute|chronic|well-healed|
+               previous|possibly|slightly|probably|perhaps|
+               nondisplaced|non-displaced|displaced|patholog\w*|
+               sided|posterolateral|anterolateral|through|chest|and|portion|
+               part|aspect|aspects|arc|arcs|region|level|of|in|at|
+               lytic|lesion|lesions|xxxx|___+)
+        ){0,14}
         [\s,/\-():]+
-        (?!(?:no|not|without|absent|absence|negative|normal|clear|unremarkable|intact)\b)
-        [^\s,\.;:]+
-    ){0,12}
-    [\s,/\-():]+\b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
-    |
-    # 3. Direct Clinical Diagnosis (Implicit Rib Involvement)
-    # Matches: "Flail chest" (which clinically defines >=3 consecutive rib fractures)
-    \bflail\s+chest\b
+        \b(?:ribs?|costal|costochondral(?:[\s-]+junction)?)\b
+        |
+
+        # 2b. Fractured/broken + rib (adjacent modifiers only)
+        \b(?:fractured|broken)\b
+        (?:
+            \s+(?:left|right|bilateral|anterior|posterior|lateral|medial|
+                 upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
+                 seventh|eighth|ninth|tenth|eleventh|twelfth|
+                 \d+(?:st|nd|rd|th)|multiple|displaced|nondisplaced|old|acute)
+        ){0,6}
+        \s+
+        \b(?:ribs?|costal)\b
+        |
+
+        # 2c. Fracture + laterality/ordinal + rib (no preposition, no commas —
+        #     commas leak polytrauma lists: "clavicular fracture, bilateral rib")
+        # "probable fracture lateral RIGHT ninth rib"
+        \b(?:fractur\w*)\b
+        (?:
+            [\s/\-():]+
+            (?:left|right|bilateral|bilat\.?|anterior|posterior|lateral|medial|
+               upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
+               seventh|eighth|ninth|tenth|eleventh|twelfth|
+               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|
+               multiple|displaced|nondisplaced|non-displaced|old|acute|chronic|
+               healing|healed|remote|patholog\w*|posterolateral|anterolateral|
+               sided|seen|noted|identified|visualized|the|a|an|
+               possibly|slightly|probably|aspect|aspects|arc|arcs)
+        ){1,8}
+        [\s/\-():]+
+        \b(?:ribs?|costal)\b
+        |
+
+        # 3. Fracture deformity … rib / rib … fracture deformity
+        \bfracture\s+deformit(?:y|ies|es)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|absent|absence|negative)\b)
+            \w+
+        ){0,12}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        |
+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|absent|absence|negative)\b)
+            \w+
+        ){0,8}
+        [\s,/\-():]+
+        \bfracture\s+deformit(?:y|ies|es)\b
+        |
+
+        # 4. Post-traumatic rib deformities / changes (not postsurgical-only,
+        #    not resection)
+        \b(?:post[\s-]?traumatic|posttraumatic)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|resection)\b)
+            \w+
+        ){0,8}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,4}
+        [\s,/\-():]+
+        (?:deformit(?:y|ies|es)|fractur\w*|changes)
+        (?![\w\s,]{0,30}resection)
+        |
+
+        \b(?:post[\s-]?traumatic|posttraumatic)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|resection)\b)
+            \w+
+        ){0,8}
+        [\s,/\-():]+
+        (?:deformit(?:y|ies|es)|changes|fractur\w*)
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|resection)\b)
+            \w+
+        ){0,10}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        (?![\w\s,]{0,40}resection)
+        |
+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,6}
+        [\s,/\-():]+
+        (?:deformit(?:y|ies|es)|irregularit(?:y|ies))
+        (?:
+            [\s,/\-():]+\w+
+        ){0,8}
+        [\s,/\-():]+
+        (?:fractur\w*|healed|healing|callus|post-?traumatic|
+           posttraumatic|consistent\s+with\s+old\s+trauma|
+           consistent\s+with\s+prior\s+trauma|suggests\s+prior\s+trauma|
+           old\s+injury|prior\s+injury)
+        |
+
+        \b(?:bridging\s+)?deformit(?:y|ies|es)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,10}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,6}
+        [\s,/\-():]+
+        (?:fractur\w*|healed|healing|callus|post-?traumatic|
+           posttraumatic|prior\s+trauma|old\s+trauma|old\s+injury|
+           consistent\s+with|unchanged)
+        |
+
+        # 4b. Old / chronic / healed rib deformities (sequela), not bare contour deformity
+        \b(?:old|chronic|remote|healed|healing)\b
+        (?:
+            [\s,/\-():]+
+            (?:appearing|associated|left|right|bilateral|sided|lateral|posterior|
+               anterior|posterolateral|anterolateral|the|a|an|and)
+        ){0,6}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        [\s,/\-():]+
+        deformit(?:y|ies|es)
+        |
+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+
+            (?:left|right|bilateral|sided|lateral|posterior|anterior|
+               posterolateral|anterolateral|the|a|an|and|\d+(?:st|nd|rd|th)|\d+)
+        ){0,8}
+        [\s,/\-():]+
+        deformit(?:y|ies|es)
+        (?:
+            [\s,/\-():]+\w+
+        ){0,8}
+        [\s,/\-():]+
+        (?:old|chronic|remote|healed|injury|trauma|fractur)
+        |
+
+        \bdeformit(?:y|ies|es)\s+of\s+(?:the\s+)?(?:left\s+|right\s+)?
+        (?:lateral\s+|posterior\s+|anterior\s+|posterolateral\s+)?
+        (?:left\s+|right\s+)?
+        (?:\w+\s+){0,3}
+        ribs?
+        [\s,/\-():]+
+        (?:xxxx\s+)?(?:old\s+injury|prior\s+injury|old\s+trauma|prior\s+trauma|
+           suggests\s+prior\s+trauma)
+        |
+
+        # 4c. Contour deformity of rib … suspect/concerning for fracture
+        \bcontour\s+deformit(?:y|ies|es)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,12}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,16}
+        [\s,/\-():]+
+        (?:suspect(?:ed)?|concerning\s+for|possible|probable)
+        (?:
+            [\s,/\-():]+\w+
+        ){0,4}
+        [\s,/\-():]*
+        (?:acute\s+)?fractur\w*
+        |
+
+        # 4d. Lucency through / in / overlying rib concerning for fracture
+        \blucenc(?:y|ies)\s+(?:through|in|overlying|over)\s+
+        (?:the\s+)?(?:left\s+|right\s+|posterior\s+|anterior\s+|lateral\s+)*
+        (?:\w+\s+){0,4}
+        ribs?
+        (?:
+            [\s,/\-():]+\w+
+        ){0,12}
+        [\s,/\-():]+
+        (?:concerning\s+for|suspect(?:ed)?|possible|probable|compatible\s+with|
+           may\s+represent|may\s+reflect)?
+        [\s,/\-():]*
+        (?:acute\s+|nondisplaced\s+|non-displaced\s+)?fractur\w*
+        |
+
+        # 4e. Angulation of rib … fracture (hedged but explicit)
+        \bangulation\s+of\s+
+        (?:the\s+)?(?:\d+\s+)?(?:left\s+|right\s+|lateral\s+|posterior\s+|anterior\s+)*
+        (?:\w+\s+){0,4}
+        ribs?
+        (?:
+            [\s,/\-():]+\w+
+        ){0,16}
+        [\s,/\-():]+
+        (?:question\s+of|possibility\s+of|possible|probable|concerning\s+for|
+           raises\s+possibility\s+of|not\s+definitive\s+but)?
+        [\s,/\-():]*
+        (?:more\s+recent\s+|nondisplaced\s+|non-displaced\s+|acute\s+)?fractur\w*
+        |
+
+        # 5. Rib … reflecting / compatible with … (old) fracture
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,10}
+        [\s,/\-():]+
+        (?:reflecting|compatible\s+with|consistent\s+with|suggestive\s+of|
+           (?:the\s+)?site\s+of)
+        (?:
+            [\s,/\-():]+\w+
+        ){0,6}
+        [\s,/\-():]+
+        (?:fractur\w*|old\s+fracture|healed\s+fracture)
+        |
+
+        # 6. Cortical buckling / irregularity of … rib
+        \bcortical\s+(?:buckling|irregularit(?:y|ies))\s+of\s+(?:the\s+)?(?:left\s+|right\s+)?(?:anterior\s+|posterior\s+|lateral\s+)?(?:\w+\s+){0,3}ribs?\b
+        |
+
+        # 6b. Irregularity of/at … ribs or costochondral junction → fracture
+        \birregularit(?:y|ies)\s+(?:of|at)\s+(?:the\s+)?
+        (?:left\s+|right\s+|bilateral\s+|lateral\s+|posterior\s+|anterior\s+|
+           posterolateral\s+|anterolateral\s+|posterior-medial\s+|sided\s+|
+           first\s+|second\s+|third\s+|fourth\s+|fifth\s+|sixth\s+|
+           seventh\s+|eighth\s+|ninth\s+|tenth\s+)*
+        (?:\w+\s+){0,6}
+        (?:ribs?|costal|costochondral(?:[\s-]+junction)?)
+        (?:
+            [\s,/\-():]+\w+
+        ){0,8}
+        [\s,/\-():]+
+        (?:suggests?|suggestive\s+of|may\s+represent|may\s+reflect|compatible\s+with|
+           consistent\s+with|concerning\s+for|probable|possible)
+        (?:
+            [\s,/\-():]+\w+
+        ){0,4}
+        [\s,/\-():]*
+        (?:prior\s+|old\s+|healed\s+|acute\s+|minimally\s+displaced\s+|
+           nondisplaced\s+|non-displaced\s+)?fractur\w*
+        |
+
+        # 6c. Unchanged appearance of currently described known rib fractures
+        \bunchanged\s+appearance\s+of\s+(?:the\s+)?known\s+
+        (?:left\s+|right\s+|bilateral\s+|bilat\.?\s+|anterior\s+|posterior\s+|
+           lateral\s+|sided\s+|left-sided\s+|right-sided\s+|multiple\s+)*
+        ribs?\s+fractur\w*
+        |
+
+        # 6d. Rib … in the process of fracturing (pathologic)
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without)\b)
+            \w+
+        ){0,16}
+        [\s,/\-():]+
+        (?:in\s+the\s+)?process\s+of\s+fracturing\b
+        |
+
+        # 6e. Deformities involving … rib … due to (old) fractures
+        \bdeformit(?:y|ies|es)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without|resection)\b)
+            \w+
+        ){0,20}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+\w+
+        ){0,16}
+        [\s,/\-():]+
+        (?:probably\s+|possibly\s+|likely\s+)?(?:due\s+to|from|representing)\s+
+        (?:old\s+|prior\s+|remote\s+|healed\s+)?fractur\w*
+        |
+
+        # 6f. Rib(s) demonstrate / show callus formation … (healing) fractures
+        \b(?:ribs?|costal)\b
+        (?:
+            [\s,/\-():]+
+            (?!(?:no|not|without)\b)
+            \w+
+        ){0,8}
+        [\s,/\-():]+
+        (?:demonstrate|demonstrates|show|shows|showing|with)\s+
+        callus(?:es)?(?:\s+formation)?
+        (?:
+            [\s,/\-():]+\w+
+        ){0,6}
+        [\s,/\-():]+
+        (?:suggesting|suggestive\s+of|compatible\s+with|consistent\s+with|
+           representing)?
+        [\s,/\-():]*
+        (?:healing\s+|healed\s+|old\s+|prior\s+)?fractur\w*
+        |
+
+        # 6g. Callus associated with / projecting over … rib (sequela, no fx token)
+        \bcallus(?:es)?\b
+        (?:
+            [\s,/\-():]+
+            (?:associated|relating|related|projecting|seen|noted|identified|
+               formation|stable|is|are|was|were|with|over|about|along|to|the|
+               a|an|left|right|posterior|anterior|lateral|medial|aspect|of|and|
+               \d+(?:st|nd|rd|th)|\d+)
+        ){1,12}
+        [\s,/\-():]+
+        \b(?:ribs?|costal)\b
+        |
+
+        # 7. Rib discontinuities (chronic / displaced fracture proxy)
+        \b(?:ribs?)\s+discontinuit(?:y|ies)\b
+        |
+
+        # 8. Flail chest
+        \bflail\s+chest\b
+    )
+)

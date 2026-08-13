@@ -1,0 +1,50 @@
+{
+  "class_id": "reticular_interstitial_opacity_pattern",
+  "positives": [
+    "Reticular interstitial opacities bilaterally.",
+    "Fine reticular pattern in the lower lobes.",
+    "Reticulonodular opacity is present.",
+    "Coarse reticular markings throughout both lungs.",
+    "Netlike pulmonary opacity pattern.",
+    "Diffuse retricular opacities.",
+    "RETICULO-NODULATION.",
+    "Persistent diffuse reticulogranular opacification.",
+    "Reticulated opacity in the right mid and upper lung.",
+    "Right lung base laterally is reticulated suggesting pulmonary fibrosis.",
+    "A large reticulated opacity projecting over the right mid lung.",
+    "Slightly reticulated appearance of the right basilar opacity.",
+    "An ill-defined 2.3 cm reticulated opacity in the left upper lobe.",
+    "Diffuse reticulate opacities bilaterally.",
+    "Bilateral reticulolinear opacities.",
+    "Reticulo-linear opacities in both lower lobes.",
+    "Reticulonudar opacities in both lungs.",
+    "Diffuse bilateral coarse reticula patterns.",
+    "Subtle small reticulnodular opacities in the left lower lobe.",
+    "Diffuse noduloreticular pattern consistent with cystic fibrosis.",
+    "New lace-like interstitial abnormality in the right upper lung.",
+    "Lace-like pulmonary opacity pattern at the bases.",
+    "Retic. opacities in the lower lobes.",
+    "RECTICULAR INTERSTIUM IS PRESENT.",
+    "Increased recticular lung markings.",
+    "Network-like pulmonary opacities at the bases.",
+    "Reticulointerstitial opacities bilaterally.",
+    "Diffuse reticuloalveolar opacities.",
+    "Meshwork of pulmonary opacities bilaterally.",
+    "A lacework pattern of pulmonary opacity.",
+    "Reticulo-interstitial pattern in both lower lobes.",
+    "Diffuse network-like pulmonary opacities.",
+    "Reticulo-alveolar opacities at the bases."
+  ],
+  "negatives": [
+    "Kerley B lines from edema.",
+    "Ground-glass opacity without lines.",
+    "Honeycombing from fibrosis.",
+    "Septal thickening.",
+    "Prominent interstitial markings.",
+    "Cortical reticulation on recent CT."
+  ],
+  "negation_soft": [
+    "No reticular interstitial pattern is identified.",
+    "Interstitial markings are within normal limits."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "class_id": "pleural_calcification",
+  "positives": [
+    "Calcified pleural plaques bilaterally.",
+    "Pleural calcification along the right hemidiaphragm.",
+    "Calcific pleural thickening in the apices.",
+    "Calcified costal pleura on the left.",
+    "Pleural scarring with calcification.",
+    "Calcific left fibrothorax.",
+    "Widespread calcified asbestos plaques are unchanged.",
+    "Multiple calcified plaques are due to asbestos exposure.",
+    "Ill-defined calcific densities are consistent with asbestos plaques.",
+    "Diaphragmatic calcification at the right base is again seen.",
+    "Stable right diaphragmatic calcification.",
+    "Bilateral diaphragmatic calcifications are noted.",
+    "Left diaphragmatic calcification is noted.",
+    "Diaphragmatic calcification is present bilaterally.",
+    "There is calcific plaque in the right hemidiaphragm.",
+    "Left hemidiaphragm appears to have a calcified plaque.",
+    "Calcified plaque along the left hemidiaphragm.",
+    "Mild calcified plaque along the right hemidiaphragm appears stable.",
+    "Unchanged calcified plaque along the left lung apex.",
+    "Stable left lung base/diaphragm calcification.",
+    "Calcific densities projecting over the right apex are likely due to apical pleural scarring.",
+    "Calcified right diaphragmatic plaque.",
+    "Possible calcified right diaphragmatic plaque.",
+    "Calcified left diaphragmatic plaque.",
+    "A calcified diaphragmatic plaque is noted.",
+    "Calcific diaphragmatic plaque.",
+    "Calcified hemidiaphragmatic plaque.",
+    "Calcified right hemidiaphragmatic plaque.",
+    "Questionable calcified diaphragmatic plaque.",
+    "Calcification of the hemidiaphragms.",
+    "Plaque-like calcified densities along the periphery of the left hemithorax.",
+    "Vague plaque-like calcified densities on the left.",
+    "Punctate plaque-like calcifications in the right apex.",
+    "Biapical plaque-like calcifications.",
+    "Calcified plaque is again seen in the perihilar regions consistent with prior asbestos exposure.",
+    "Calcified plaques projecting along the hemidiaphragms."
+  ],
+  "negatives": [
+    "Noncalcified pleural thickening.",
+    "Aortic wall calcification.",
+    "Calcified pulmonary granuloma.",
+    "Bilateral pleural plaques noted."
+  ],
+  "negation_soft": [
+    "No pleural calcification.",
+    "No evidence of pleural thickening/calcifications."
+  ]
+}

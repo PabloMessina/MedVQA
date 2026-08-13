@@ -1,0 +1,150 @@
+# ==============================================================================
+# ground_glass_opacity_pattern
+# Explicit ground-glass / GGO / GG+morph wording attributed to the current CXR.
+#
+# Match: ground glass / ground-glass / groundglass (+ optional intervening adj +
+# opacity/density/pattern/change/appearance, incl. airspace + opacification via
+# opaci\w*, typo oapcit*); GGO(s); GG opacities/densities/patterns/changes.
+# Bare "ground-glass"/"groundglass" when not followed by a morph stem (morph
+# branch owns those).
+#
+# CT-compare rescue: allow current-film GGO with "better seen/evaluated/
+# appreciated/assessed/demonstrated/visualized/characterized on CT",
+# "as characterized/demonstrated/noted/on … CT", "similar to … on (prior) CT",
+# "corresponding to … prior CT", or "consistent with … seen on prior CT".
+# FN-fit (fn_mine_fit_shared): hunt residual CT-guard holes only.
+#
+# Do NOT match: grated/OCR junk (mini-test negative; often effusion/not GGO);
+# hazy/granular/RDS/edema inference; bare airspace opacity / consolidation;
+# CT/CTA-only or prior-CT attribution ("on prior chest CT", "described on the
+# most recent CT chest") without a current-finding rescue; clause that already
+# mentions CT/CTA before the hit; negated / not-seen-on-this-exam phrasing.
+# ==============================================================================
+
+(?:
+        # --- GGO abbreviation / GG + morph ---
+        (?:^|[.!?;:\n])
+        (?:
+            (?!\bcta?\b)
+            [^.!?;:\n]
+        ){0,220}
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bfree\sof\s)
+        (?<!\bclear\sof\s)
+        (?:\bggos?\b|\bgg\s+(?:opaci\w*|densit\w*|patterns?|changes?)\b)
+        (?!\s+on\s+(?:(?:a|the|recent|prior|previous|earlier)\s+)?(?:chest\s+)?cta?\b)
+        (?![^.!?;:\n]{0,160}\b(?:
+            (?:are|is|was|were)\s+not\s+(?:well\s+)?(?:seen|appreciated|visualized|evident)|
+            not\s+well\s+(?:appreciated|visualized|seen)|
+            (?:are|is)\s+not\s+seen\s+on\s+this|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        (?!
+            (?![^.!?;:\n]{0,140}(?:
+                better\s+(?:seen|evaluated|appreciated|assessed|demonstrated|visualized|characterized)|
+                as\s+(?:characterized|demonstrated|noted|on)\b|
+                similar\s+to|
+                corresponding\s+to|
+                consistent\s+with
+            ))
+            [^.!?;:\n]{0,140}\b(?:
+                (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+
+                (?:(?:the|a|recent|prior|outside|most)\s+)?
+                (?:[^\s.!?;:\n]{1,20}\s+){0,4}
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+                |
+                on\s+(?:(?:the|a|this|these)\s+)?(?:most\s+recent|recent|prior|previous|earlier|outside)\s+
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+            )
+        )
+
+    |
+
+        # --- ground[- ]glass / groundglass + morphology ---
+        (?:^|[.!?;:\n])
+        (?:
+            (?!\bcta?\b)
+            [^.!?;:\n]
+        ){0,220}
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bfree\sof\s)
+        (?<!\bclear\sof\s)
+        \bground[\s-]*glass\b
+        \s+(?:(?:(?!on\b)\w{1,20})\s+){0,2}(?:airspace\s+)?(?:opaci\w*|oapcit\w*|densit\w*|patterns?|changes?|appearance)\b
+        (?!\s+on\s+(?:(?:a|the|recent|prior|previous|earlier)\s+)?(?:chest\s+)?cta?\b)
+        (?![^.!?;:\n]{0,160}\b(?:
+            (?:are|is|was|were)\s+not\s+(?:well\s+)?(?:seen|appreciated|visualized|evident)|
+            not\s+well\s+(?:appreciated|visualized|seen)|
+            (?:are|is)\s+not\s+seen\s+on\s+this|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        (?!
+            (?![^.!?;:\n]{0,140}(?:
+                better\s+(?:seen|evaluated|appreciated|assessed|demonstrated|visualized|characterized)|
+                as\s+(?:characterized|demonstrated|noted|on)\b|
+                similar\s+to|
+                corresponding\s+to|
+                consistent\s+with
+            ))
+            [^.!?;:\n]{0,140}\b(?:
+                (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+
+                (?:(?:the|a|recent|prior|outside|most)\s+)?
+                (?:[^\s.!?;:\n]{1,20}\s+){0,4}
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+                |
+                on\s+(?:(?:the|a|this|these)\s+)?(?:most\s+recent|recent|prior|previous|earlier|outside)\s+
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+            )
+        )
+
+    |
+
+        # --- bare ground[- ]glass / groundglass (no trailing morph/typo stem) ---
+        (?:^|[.!?;:\n])
+        (?:
+            (?!\bcta?\b)
+            [^.!?;:\n]
+        ){0,220}
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bfree\sof\s)
+        (?<!\bclear\sof\s)
+        \bground[\s-]*glass\b
+        (?!\s+(?:(?:(?!on\b)\w{1,20})\s+){0,2}(?:airspace\s+)?(?:opaci|oapcit|densit|pattern|change|appearance))
+        (?!\s+on\s+(?:(?:a|the|recent|prior|previous|earlier)\s+)?(?:chest\s+)?cta?\b)
+        (?![^.!?;:\n]{0,160}\b(?:
+            (?:are|is|was|were)\s+not\s+(?:well\s+)?(?:seen|appreciated|visualized|evident)|
+            not\s+well\s+(?:appreciated|visualized|seen)|
+            (?:are|is)\s+not\s+seen\s+on\s+this|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        (?!
+            (?![^.!?;:\n]{0,140}(?:
+                better\s+(?:seen|evaluated|appreciated|assessed|demonstrated|visualized|characterized)|
+                as\s+(?:characterized|demonstrated|noted|on)\b|
+                similar\s+to|
+                corresponding\s+to|
+                consistent\s+with
+            ))
+            [^.!?;:\n]{0,140}\b(?:
+                (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+
+                (?:(?:the|a|recent|prior|outside|most)\s+)?
+                (?:[^\s.!?;:\n]{1,20}\s+){0,4}
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+                |
+                on\s+(?:(?:the|a|this|these)\s+)?(?:most\s+recent|recent|prior|previous|earlier|outside)\s+
+                (?:(?:chest\s+)?cta?\b|cta?\s+chest\b)
+            )
+        )
+    )

@@ -1,24 +1,458 @@
+# ==============================================================================
+# pneumoperitoneum
+# Free gas in the peritoneal cavity on the current CXR.
+#
+# Match: pneumoperitoneum / aeroperitoneum; free intraperitoneal /
+# peritoneal / intra-abdominal / abdominal air|gas;
+# free air|gas under/below/beneath/(underneath) the (hemi)diaphragm;
+# subdiaphragmatic / subphrenic / infradiaphragmatic air|gas;
+# Rigler / double-wall / cupola sign (when present / attributed);
+# extraluminal air|gas (abdomen / LUQ / under diaphragm).
+#
+# FN-fit (fn_mine_fit_shared / wave-33 hunt):
+# - contrastive restart at although|though|however|but;
+# - previous radiograph/exam comparison exception in tempered scan;
+# - previously-seen PP / subphrenic|subdiaphragmatic air still present
+#   (decrease / unchanged / less apparent);
+# - extraluminal air|gas arm; diaphragm "aspects of" gap.
+#
+# Do NOT match: negated / resolved / resolution-of / not-seen / simulate;
+# indication / rule-out / history-only "with pneumoperitoneum";
+# pneumothorax / pneumomediastinum / subcutaneous emphysema alone;
+# normal gastric bubble / Chilaiditi; CT-only / cannot-exclude extraluminal.
+# ==============================================================================
 
-    # 1. Direct Diagnosis
-    # Matches: "Pneumoperitoneum"
-    \bpneumoperitoneum\w*
-    |
-    # 2. Descriptive: "Free Air" + Location
-    # Matches: "Free air under the diaphragm", "Free gas beneath the right hemidiaphragm"
-    # This is the most common way it is described in MIMIC.
-    \b(?:free\s+)?(?:air|gas)\b
-    (?:
-        \s+(?:is|seen|present|visualized|noted)?
-    ){0,3}
-    \s+
-    (?:under|below|beneath|inferior\s+to)\s+(?:the\s+)?
-    (?:\w+\s+){0,2} # Gap for "right", "left", "hemidiaphragm"
-    \bdiaphragm\w*
-    |
-    # 3. Location Adjectives + Air
-    # Matches: "Subdiaphragmatic free air", "Subphrenic gas", "Intraperitoneal free air"
-    \b(?:sub-?diaphragmatic|sub-?phrenic|infra-?diaphragmatic|intra-?peritoneal)\s+(?:free\s+)?(?:air|gas)
-    |
-    # 4. Rigler's Sign (Pathognomonic visual sign)
-    # Gas on both sides of the bowel wall 
-    \brigler\w*\s+sign
+(?:
+        # ------------------------------------------------------------------
+        # 1. Direct: pneumo[- ]peritoneum / aeroperitoneum
+        #    Allow consistent/compatible/concordant/suspicious with PP;
+        #    keep bare "with PP" (history) blocked.
+        #    Restart at although|though|however|but (contrastive).
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # Contrastive: "no pneumothorax, but … pneumoperitoneum"
+                (?=\bno\b(?:(?!pneumo[\s-]?peritoneum)(?!aeroperitoneum)(?!(?:although|though|,?\s*(?:but|however))\b)[^.!?;:\n]){0,90}(?:although|though|,?\s*(?:but|however))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\binterval\s+resolution\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bplease\s+rule\s+out\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bpmh\b)
+                (?!\bpresented\s+with\b)
+                (?!\bsimulat(?:e|es|ed|ing)\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        (?:
+            (?:consistent|compatible|concordant|suspicious)\s+with\s+
+            |
+            (?<!\bwith\s)
+            (?<!\bw/\s)
+            (?<!\bw\s)
+            (?<!\babout\s)
+        )
+        \b(?:pneumo[\s-]?peritoneum|aeroperitoneum)\w*\b
+        (?!\?)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated|redemonstrated)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible)|
+            (?:is|are)\s+not\s+redemonstrated|
+            not\s+redemonstrated|
+            not\s+seen\s+on\s+(?:chest|this|the)\b
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1b. Previously seen/noted PP still present on current film
+        #     (unchanged / less apparent / decreased / persistent).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,120}?
+        \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        \b(?:pneumo[\s-]?peritoneum|aeroperitoneum)\w*\b
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        [^.!?;:\n]{0,100}
+        \b(?:
+            again\s+(?:identified|seen|noted|visualized|appreciated|demonstrated|evident)|
+            (?:still|remains?)\s+(?:present|seen|identified|evident|visualized|appreciated)|
+            persist\w*|
+            residual|
+            (?:is|are|was|were)\s+(?:now\s+)?(?:less\s+apparent|stable|unchanged|similar|decreased|improved)|
+            (?:has|have|is|are)\s+(?:further\s+)?(?:decreased|improved|increased|stable|unchanged)|
+            (?:seen|noted|identified|visualized|demonstrated)\s+in\s+(?:an?\s+)?unchanged\s+manner|
+            less\s+apparent|
+            unchanged
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1c. Interval decrease/increase … previously seen PP
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,100}?
+        \b(?:
+            (?:(?:there\s+has\s+been|has\s+been|have\s+been|has|have)\s+)?
+            (?:a\s+)?(?:slight|mild|small|moderate|further)?\s*(?:interval\s+)?
+            (?:decrease|increase|improvement|worsening)
+        )\b
+        [^.!?;:\n]{0,80}?
+        \b(?:the\s+)?(?:in\s+(?:the\s+)?)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        \b(?:pneumo[\s-]?peritoneum|aeroperitoneum)\w*\b
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Intraperitoneal / peritoneal / (intra-)abdominal free air|gas
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bno\b(?:(?!(?:free\s+)?(?:intra[\s-]?peritoneal|peritoneal|intra[\s-]?abdominal|abdominal)\s+(?:free\s+)?(?:air|gas))(?!(?:although|though|,?\s*(?:but|however))\b)[^.!?;:\n]){0,90}(?:although|though|,?\s*(?:but|however))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bconcern\s+for\b)
+                (?!\bsuspect\s+(?:for\s+)?\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            (?:free\s+)?(?:intra[\s-]?peritoneal|peritoneal)\s+(?:free\s+)?(?:air|gas)
+            |
+            free\s+(?:air|gas)\s+(?:in|within)\s+(?:the\s+)?(?:intra[\s-]?peritoneal|peritoneal)\s+(?:cavity|space)?
+            |
+            # require "free" for (intra-)abdominal air|gas (avoid "abdominal gas pattern")
+            free\s+(?:intra[\s-]?abdominal|abdominal)\s+(?:air|gas)
+            |
+            (?:intra[\s-]?abdominal|abdominal)\s+free\s+(?:air|gas)
+            |
+            free\s+(?:air|gas)\s+(?:in|within)\s+(?:the\s+)?(?:abdomen|abdominal\s+cavity)
+        )\b
+        (?!\?)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated|redemonstrated)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible)|
+            not\s+redemonstrated
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2b. Extraluminal air|gas (peritoneal / abdominal / under diaphragm)
+        #     Keep CT-only / cannot-exclude / mediastinal-subcut out.
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously|
+                    cannot|can\s+not|could\s+not
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bon\s+(?:recent\s+)?(?:ct|computed)\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            extraluminal\s+(?:free\s+)?(?:air|gas)
+            |
+            (?:free\s+)?(?:air|gas)\s+that\s+is\s+extraluminal
+        )\b
+        (?!\?)
+        (?![^.!?;:\n]{0,50}\b(?:
+            mediastin\w*|
+            subcutaneous|
+            soft\s+tissue|
+            chest\s+wall|
+            biliary|
+            portal|
+            intraluminal
+        )\b)
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)|
+            on\s+(?:recent\s+)?(?:ct|computed\s+tomography)|
+            ct\s+(?:only|scan|demonstrat)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Subdiaphragmatic / subphrenic / infradiaphragmatic air|gas
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\bno\s+longer\b)
+                (?!\blooking\s+for\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:sub[\s-]?diaphragmatic|sub[\s-]?phrenic|infra[\s-]?diaphragmatic)\s+(?:free\s+)?(?:air|gas)
+        (?!\?)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3b. Previously noted free? subphrenic/subdiaphragmatic air still present
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,120}?
+        \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        (?:free\s+)?
+        (?:sub[\s-]?diaphragmatic|sub[\s-]?phrenic|infra[\s-]?diaphragmatic)\s+(?:free\s+)?(?:air|gas)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+        [^.!?;:\n]{0,100}
+        \b(?:
+            again\s+(?:identified|seen|noted|visualized|appreciated|demonstrated|evident)|
+            (?:still|remains?)\s+(?:present|seen|identified|evident|visualized|appreciated)|
+            persist\w*|
+            residual|
+            (?:is|are|was|were)\s+(?:now\s+)?(?:less\s+apparent|stable|unchanged|similar|decreased|improved)|
+            (?:has|have|is|are)\s+(?:further\s+)?(?:decreased|improved|increased|stable|unchanged)|
+            less\s+apparent|
+            unchanged
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3c. Interval decrease … previously seen subphrenic/subdiaphragmatic air
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        [^.!?;:\n]{0,100}?
+        \b(?:
+            (?:(?:there\s+has\s+been|has\s+been|have\s+been|has|have)\s+)?
+            (?:a\s+)?(?:slight|mild|small|moderate|further)?\s*(?:interval\s+)?
+            (?:decrease|increase|improvement|worsening)
+        )\b
+        [^.!?;:\n]{0,80}?
+        \b(?:the\s+)?(?:of\s+(?:the\s+)?)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
+        (?:free\s+)?
+        (?:sub[\s-]?diaphragmatic|sub[\s-]?phrenic|infra[\s-]?diaphragmatic)\s+(?:free\s+)?(?:air|gas)
+        (?![^.!?;:\n]{0,80}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Free air|gas under / below / beneath / underneath (hemi)diaphragm
+        #    Allows "right and left hemidiaphragm"; verb gap includes demonstrated;
+        #    optional extraluminal; "aspects of the diaphragm".
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\brule\s+out\b)
+                (?!\blooking\s+for\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:(?:large\s+)?(?:volume\s+of\s+)?)?(?:extraluminal\s+)?(?:free\s+)?(?:air|gas)\b
+        (?:
+            \s+(?:is|are|was|were|seen|present|visualized|noted|identified|evident|appreciated|demonstrated)
+        ){0,4}
+        \s+
+        (?:under|below|beneath|underneath|inferior\s+to)\s+(?:the\s+)?
+        (?:
+            (?:right|left|both|bilateral|central|medial|lateral)\s+
+            (?:and\s+(?:the\s+)?(?:right|left|central|medial|lateral)\s+)?
+        )?
+        (?:aspects?\s+of\s+(?:the\s+)?)?
+        (?:hemi)?diaphragm\w*
+        (?!\?)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated|redemonstrated)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible)|
+            not\s+redemonstrated|
+            (?:likely\s+)?within\s+(?:a\s+)?(?:loop\s+of\s+)?(?:bowel|colon|stomach|gastric)|
+            (?:is|are)\s+(?:likely\s+)?(?:within|in)\s+(?:a\s+)?(?:loop\s+of\s+)?(?:bowel|colon|stomach)
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Rigler / double-wall / cupola sign
+        #    Cupola: require attribution toward pneumoperitoneum (prompt).
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:
+            (?:rigler(?:'s|s)?|double[\s-]?wall)\s+sign
+            |
+            cupola\s+sign
+            \s+(?:consistent|compatible|concordant|suspicious)\s+with\s+
+            (?:pneumo[\s-]?peritoneum|aeroperitoneum|free\s+(?:air|gas))\w*
+        )\b
+)

@@ -1,0 +1,53 @@
+{
+  "class_id": "pleural_nodule_or_mass",
+  "positives": [
+    "Pleural-based mass along the right lateral chest wall.",
+    "Left pleural nodule.",
+    "Pleural metastases with nodular pleural thickening.",
+    "Solitary pleural mass in the right hemithorax.",
+    "Malignant pleural disease.",
+    "Soft tissue lesion, 2.3 x 1.7 cm, pleural or extrapleural based.",
+    "Tumor nodules were noted on the chest wall.",
+    "Nodular pleural parenchymal opacity.",
+    "Pleural thickening and nodularity.",
+    "Pleural-based lesion along the left chest wall.",
+    "Nodular thickening of the right pleura due to metastatic pleural disease.",
+    "Ovoid posteriorly pleural-based nodular density is again identified.",
+    "Persistent pleural-based and rounded masslike opacity.",
+    "Nodularity at the right apex suspicious for pleural-based metastatic disease.",
+    "Redemonstration of nodular right apical parietal pleura, likely metastatic disease.",
+    "Pleural-based masslike density laterally in the right lung apex.",
+    "Pleural-based right apical mass with possible chest wall involvement.",
+    "Nodule along the pleural surface in the right hemithorax.",
+    "Mild nodularity at the right lung apex secondary to nodular apical pleural-parenchymal thickening.",
+    "Tiny pleural-based nodular opacity in the left apex.",
+    "There is a pleural-based soft tissue mass laterally on the right.",
+    "Extensive nodular deposits and irregular thickening along the pleura bilaterally.",
+    "Multiple masses along the pleural reflections suspicious for pleural spread of thymic cancer.",
+    "Fibronodular pleural thickening within the left apex.",
+    "Biapical fibronodular pleural thickening/scarring.",
+    "Right apical fibronodular pleural scarring/thickening.",
+    "Biapical nodular pleural and parenchymal scarring is similar.",
+    "Bilateral apical nodular pleural and parenchymal scarring is unchanged.",
+    "Known left nodular pleural structure.",
+    "Partially nodular pleural abnormality still encases the contracted lung.",
+    "Multiple nodular pleural-based opacities in the right lung.",
+    "Nodular pleural-based opacity along the right lateral chest.",
+    "Biapical nodular pleural scarring.",
+    "Focal nodular pleural opacity in the left lung apex measuring approximately 8 mm.",
+    "Stable biapical nodular pleural or parenchymal scarring.",
+    "Chronic upper lobe reticular-nodular pleural-parenchymal opacities.",
+    "Left pleural lipoma is unchanged.",
+    "Left lateral pleural lipoma accounts for the opacity at the left lung base."
+  ],
+  "negatives": [
+    "Pulmonary nodule in the right upper lobe.",
+    "Diffuse pleural thickening.",
+    "Loculated pleural effusion.",
+    "Calcified pleural plaques.",
+    "Mass with associated pleural effusion."
+  ],
+  "negation_soft": [
+    "No pleural mass or nodule."
+  ]
+}

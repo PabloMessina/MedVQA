@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
-def normalize_report_text(text: Optional[str]) -> str:
+def normalize_report_text(text: str | None) -> str:
     if text is None:
         return ""
     if not isinstance(text, str):
@@ -30,7 +30,59 @@ def annotation_resume_key(
     system_prompt_hash: str,
     model_name: str,
 ) -> str:
-    payload = "|".join([uid, class_id, prompt_hash, system_prompt_hash, model_name])
+    """Legacy uid-scoped row id. Prefer content_key / query_hash for API dedupe."""
+    payload = f"{uid}|{class_id}|{prompt_hash}|{system_prompt_hash}|{model_name}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def annotation_content_key(
+    report_text_hash_value: str,
+    prompt_hash: str,
+    system_prompt_hash: str,
+) -> str:
+    """Model-agnostic identity of (report, class hypothesis, system instructions)."""
+    payload = f"{report_text_hash_value}|{prompt_hash}|{system_prompt_hash}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def annotation_config_fingerprint(
+    *,
+    temperature: float = 0.0,
+    max_tokens_per_request: int = 2048,
+    extra: str | None = None,
+) -> str:
+    """Canonical decoding-config string embedded in query_hash / config_slug."""
+    # Normalize temperature so 0 and 0.0 match.
+    temp_s = f"{float(temperature):g}"
+    parts = [f"t{temp_s}", f"mt{int(max_tokens_per_request)}"]
+    if extra:
+        parts.append(str(extra).strip().replace("/", "_").replace(" ", "_"))
+    return "_".join(parts)
+
+
+def annotation_config_slug(
+    system_prompt_hash: str,
+    *,
+    temperature: float = 0.0,
+    max_tokens_per_request: int = 2048,
+    extra: str | None = None,
+) -> str:
+    """Directory name under llm_annotations/<model>/."""
+    fp = annotation_config_fingerprint(
+        temperature=temperature,
+        max_tokens_per_request=max_tokens_per_request,
+        extra=extra,
+    )
+    return f"sys_{system_prompt_hash[:8]}_{fp}"
+
+
+def annotation_query_hash(
+    content_key: str,
+    model_name: str,
+    config_fingerprint: str,
+) -> str:
+    """Inference-cache key: content + model + decoding config."""
+    payload = f"{content_key}|{model_name}|{config_fingerprint}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -40,14 +92,14 @@ def sample_record(
     dataset: str,
     report_id: str,
     report_text: str,
-    source_refs: Dict[str, Any],
+    source_refs: dict[str, Any],
     sampling_method: str,
     complexity_score: float,
-    split: Optional[str] = None,
-    strata_labels: Optional[Dict[str, Any]] = None,
-    extra: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    rec: Dict[str, Any] = {
+    split: str | None = None,
+    strata_labels: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rec: dict[str, Any] = {
         "uid": uid,
         "dataset": dataset,
         "report_id": report_id,
@@ -67,7 +119,7 @@ def sample_record(
     return rec
 
 
-def dumps_jsonl_row(obj: Dict[str, Any]) -> str:
+def dumps_jsonl_row(obj: dict[str, Any]) -> str:
     return json.dumps(obj, ensure_ascii=False, sort_keys=False)
 
 

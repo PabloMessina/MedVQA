@@ -1,0 +1,50 @@
+{
+  "class_id": "bronchial_wall_thickening",
+  "positives": [
+    "Bronchial wall thickening is present.",
+    "Peribronchial cuffing is seen bilaterally.",
+    "Thickening of the bronchial walls in the lower lobes.",
+    "Peribronchial thickening with perihilar haze.",
+    "Bronchial cuffing is noted.",
+    "Thick-walled bronchi in the lower lobes.",
+    "Brochial wall thickening is noted bilaterally.",
+    "Mild airway thickening can reflect inflammatory airways disease.",
+    "Bronchiolar wall thickening in the bases.",
+    "Mild bronchial wall cuffing may reflect a mild degree of pulmonary edema.",
+    "Mild central bronchial wall cuffing is present.",
+    "Bronchial wall cuffing is noted.",
+    "Parabronchial cuffing suggests interstitial pulmonary edema.",
+    "Mild bilateral parabronchial thickening is present.",
+    "Minimal perihilar airway wall thickening.",
+    "Diffuse bronchiectasis with airway wall thickening.",
+    "Bilateral perihilar small airway wall thickening.",
+    "Peribronchial soft tissue thickening may reflect minimal interstitial edema.",
+    "Central peribronchial soft tissue thickening may reflect chronic small airway disease.",
+    "Peribronchovascular cuffing is noted.",
+    "Peribronchovascular thickening is present.",
+    "Mild peribronchiolar cuffing is present.",
+    "Slight prominence of bronchial wall thickness.",
+    "Peribronchiolar thickening is present.",
+    "Mild peribronchiolar thickening.",
+    "Bilateral peribronchiolar cuffing.",
+    "Peribronchiolar cuffing suggestive of pulmonary edema.",
+    "Central peribronchovascular cuffing suggests pulmonary edema.",
+    "Mild peribronchovascular cuffing.",
+    "Thickened bronchi compatible with chronic airway disease.",
+    "Dilated, thickened bronchi centrally and in the upper lobes.",
+    "Slight prominence of bronchial wall thickness in the right lower lung zone.",
+    "Increased bronchial wall thickness bilaterally."
+  ],
+  "negatives": [
+    "Bronchiectasis with dilated airways.",
+    "Tram-track lines of dilated bronchi.",
+    "Increased interstitial markings without bronchial attribution.",
+    "Perihilar haze, favor pulmonary edema.",
+    "Prominent bronchi without wall thickening wording.",
+    "No pleural fluid or peribronchial cuffing is noted."
+  ],
+  "negation_soft": [
+    "No bronchial wall thickening is identified.",
+    "Airways appear normal."
+  ]
+}

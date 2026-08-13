@@ -1,0 +1,133 @@
+# ==============================================================================
+# vertebral_compression_fracture
+# Match compression fracture / compression deformity / wedge compression /
+# wedge fracture of vertebrae / compressed vertebral body / vertebra|vertebral
+# plana / anterior vertebral compression / named-level compression of T#/L# /
+# compressive / compression-wedge deformity / plural "vertebral compressions" /
+# compression fx / spine- or vertebral-scoped wedge deformity /
+# vertebroplasty / kyphoplasty / vertebral or cement augmentation.
+# Do NOT match bare spine/vertebral fractures, nonspecific height loss/wedging/
+# collapse without compression framing, osteopenia, or degenerative endplate
+# change. Negation + history/indication lookbehinds (fixed-width; stdlib re).
+# Optional prefixes are split into separate alts so backtracking cannot skip
+# past "c/b vertebral" / "no evidence of vertebral body ..." guards.
+# Treated-fracture proxies (vertebroplasty/kyphoplasty/augmentation) omit
+# known/s/p/status-post lookbehinds so currently visible residual cement
+# still matches; history-of / r/o / eval-for stay.
+# ==============================================================================
+
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)(?<!\bno\sobvious\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)
+    (?<!\bwithout\ssign\sof\s)(?<!\bwithout\ssigns\sof\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)(?<!\bknown\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\bc/b\s)(?<!\bcomplicated\sby\s)(?<!\bsecondary\sto\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\?\s)
+    \b(?:
+        # Vertebral-qualified compression fracture / deformity
+        # (fracture/deformity optional only after "vertebral body compression")
+        # Also plural noun "vertebral compressions" (+ optional deformities).
+        vertebral\s+body\s+(?:wedge\s+)?compression(?:\s+(?:fractures?|fx|deformit\w*))?|
+        vertebral\s+compressions(?:\s+deformit\w*)?|
+        vertebral\s+(?:wedge\s+)?compression\s+(?:fractures?|fx|deformit\w*)|
+        compression\s+vertebral\s+(?:body\s+)?(?:fractures?|fx)|
+
+        # Bare compression fracture/deformity (not immediately after
+        # vertebral/body/wedge, which are covered above). Full "fracture(s)" /
+        # "deformit*" stay unconstrained; bare "fx" requires level or "of …"
+        # framing so indication-only "new compression fx" does not fire.
+        (?<!\bvertebral\s)(?<!\bbody\s)(?<!\bwedge\s)
+        compression\s+(?:fractures?|deformit\w*)|
+        (?<!\+)[tl]\d{1,2}\s+compression\s+fx\b|
+        compression\s+fx\s+(?:of\s+(?:the\s+)?(?:[tl]\d{1,2}\b|(?:vertebral\s+)?bod(?:y|ies)|vertebrae?|vertebr\w*)|[tl]\d{1,2}\b)|
+
+        # Wedge compression (qualified) and reverse "compression wedge deformity"
+        wedge\s+compression(?:\s+(?:fractures?|fx|deformit\w*))?|
+        compression\s+wedge\s+deformit\w*|
+
+        # Explicit compressive vertebral deformity (not lung/trachea compression)
+        compressive\s+deformit\w*|
+
+        # Wedge fracture(s) of vertebrae (not nonspecific wedging)
+        wedge\s+fractures?|
+
+        # Partially/mildly/minimally/… compressed vertebral body (adverb required
+        # so "do not see any definitely compressed vertebrae" does not fire)
+        (?:partial(?:ly)?|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|severe(?:ly)?|complete(?:ly)?)\s+
+        compressed\s+
+        (?:\w+\s+){0,4}
+        (?:thoracic\s+|lumbar\s+|midthoracic\s+|mid-thoracic\s+)?
+        (?:vertebral\s+bod(?:y|ies)|vertebrae?|vertebr\w*)\b|
+
+        # Compression of a (qualifier) thoracic/lumbar vertebra, named T#/L#,
+        # or "body of T#". Determiners include numerals ("two upper lumbar…").
+        # No lung/trachea/vein: require vertebral/spine/T#/L#/body-of-level.
+        compression\s+of\s+
+        (?:(?:a|an|the|one|two|three|four|five|six|\d+|several|multiple|few|both)\s+)?
+        (?:
+            body\s+of\s+[tl]\d{1,2}\b
+          |
+            [tl]\d{1,2}\b
+            (?:\s+vertebral\s+bod(?:y|ies))?
+          |
+            (?:(?:mid(?:dle)?|lower|upper|mid\s+lower)\s+)*
+            (?:thoracic\s+|lumbar\s+|midthoracic\s+|mid-thoracic\s+)?
+            (?:vertebral\s+bod(?:y|ies)|vertebrae?|spine)\b
+        )|
+
+        # Anterior/superior/posterior compression of a vertebral body
+        (?:anterior|superior|posterior)\s+compression\s+of\s+(?:the\s+)?(?:vertebral\s+body|vertebrae?|vertebr\w*)|
+
+        # Vertebra / vertebral plana (incl. common misspellings in reports)
+        (?:vertebral|vertebra|vertebrae|veterbra|vertabra)\s+plana|
+
+        # Wedge deformity of/at/along a vertebra, named level, or spine; also
+        # "wedge deformity T7" (no preposition) and IU "wedge XXXX deformity".
+        # Require of/at/along or an immediate T#/L# so "wedge deformities
+        # involving ..." in kyphosis is not treated as a compression fracture.
+        wedge(?:\s+xxxx)?\s+deformit\w*
+        (?:
+            \s+[tl]\d{1,2}\b
+          |
+            \s+(?:of|at|along)
+            (?:
+                \W+\w+
+            ){0,8}
+            \s+
+            (?:vertebral|vertebrae?|vertebr\w*|[tl]\d{1,2}|spine)\b
+        )|
+
+        # Adjective-order "thoracic vertebral|spine wedge deformity"
+        (?:(?:mid(?:dle)?|lower|upper|mid\s+lower)\s+)?
+        (?:thoracic\s+|lumbar\s+|midthoracic\s+|mid-thoracic\s+)?
+        (?:vertebral|spine)\s+wedge\s+deformit\w*
+    )
+|
+    # Treated compression-fracture proxies currently visible on radiograph.
+    # Omit known / s/p / status-post so residual cement still matches;
+    # keep history-of, r/o, eval-for, and negation.
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)(?<!\bno\sobvious\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)
+    (?<!\bwithout\ssign\sof\s)(?<!\bwithout\ssigns\sof\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)
+    (?<!\bc/b\s)(?<!\bcomplicated\sby\s)(?<!\bsecondary\sto\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\?\s)
+    \b(?:
+        (?:verterbroplast|vertebroplast)\w*|
+        kyphoplast\w*|
+        (?:vertebral|cement)\s+augmentation
+    )
+)

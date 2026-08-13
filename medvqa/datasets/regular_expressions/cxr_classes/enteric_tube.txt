@@ -1,0 +1,613 @@
+
+    # Currently visible enteric / NG / OG / Dobhoff / NJ / GJ / gastrostomy /
+    # jejunostomy / PEG / Replogle / feeding or decompression tube (incl. malposition).
+    # Avoid: ETT/trach, chest tubes, lines, hardware, history/indication alone,
+    # and local removal / not-assessed / no-longer-present clauses.
+    # Do NOT use generic (?<!tube, ) / (?<!tube and ) / (?<!endotracheal and )
+    # lookbehinds — they drop device lists ("ET tube, NG tube",
+    # "endotracheal and enteric tubes"). Block removal lists with explicit
+    # "removal of …" prefixes instead.
+    # Tip-not-visualized does NOT negate presence when the tube is identified
+    # on the current film (prompt: course or tip). Malposition still counts.
+    # NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+    # FN-fit (fn_mine_fit_shared): Dobhoff/enteric/NG *line*; bare Dobhoff+coiled;
+    # tube-less NG followed/enters/devices; PEG projecting; gastrostomy device;
+    # bare Keofeed; Salem sump / Levin; spaced NJ tube.
+
+    (?:
+        # ------------------------------------------------------------------
+        # A. Named enteric tubes (including device lists)
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!\bremoving\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\ an\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\senteric\s)
+            (?<!removal\sof\senteric\sand\s)
+            (?<!removal\sof\sthe\senteric\sand\s)
+            (?<!removal\sof\sendotracheal\sand\s)
+            (?<!removal\sof\sthe\sendotracheal\sand\s)
+            (?<!removal\sof\sendotracheal\stube\sand\s)
+            (?<!removal\sof\sthe\sendotracheal\stube\sand\s)
+            (?<!removal\sof\snasogastric\stube\sand\s)
+            (?<!removal\sof\sthe\snasogastric\stube\sand\s)
+            (?<!extubation\sremoval\sof\sthe\sendotracheal\sand\s)
+            (?<!status\spost\sremoval\sof\sendotracheal\sand\s)
+            (?<!removal\sof\scentral\sline\sand\s)
+            (?<!removal\sof\sthe\scentral\sline\sand\s)
+            (?<!removal\sof\sright\sinternal\sjugular\scatheter,\s)
+            (?<!removal\sof\sthe\sright\sinternal\sjugular\scatheter,\s)
+            (?<!removal\sof\san\sendotracheal\stube,\sng/)
+            (?<!removal\sof\sendotracheal\stube,\sng/)
+            (?<!removal\sof\sendotracheal\stube,\s)
+            (?<!removal\sof\sthe\sendotracheal\stube,\s)
+            (?<!removal\sof\san\sendotracheal\stube,\s)
+            (?<!removal\sof\sright\sinternal\sjugular\scatheter\sand\s)
+            (?<!removal\sof\sthe\sswan-ganz\scatheter\sand\sthe\s)
+            (?<!removal\sof\sswan-ganz\scatheter\sand\sthe\s)
+            (?<!interval\sremoval\sof\s)
+            (?<!interval\sremoval\sof\sthe\s)
+            (?<!interval\sremoval\sof\ an\s)
+            (?<!interval\sremoval\sof\sa\s)
+            (?<!interval\sremoval\sof\senteric\s)
+            (?<!interval\sremoval\sof\senteric\sand\s)
+            (?<!interval\sremoval\sof\sendotracheal\stube\sand\s)
+            (?<!interval\sremoval\sof\sendotracheal\sand\s)
+            (?<!interval\sremoval\sof\san\sendotracheal\stube,\s)
+            (?<!interval\sremoval\sof\san\sendotracheal\stube,\sng/)
+            (?<!interval\sremoval\sof\sright\sinternal\sjugular\scatheter,\s)
+            (?<!status\spost\sinterval\sremoval\sof\s)
+            (?<!status\spost\sinterval\sremoval\sof\sendotracheal\sand\s)
+            (?<!status-post\sinterval\sremoval\sof\s)
+            (?<!following\sremoval\sof\s)
+            (?<!after\sremoval\sof\s)
+            (?<!extubation\sand\sremoval\sof\scentral\sline\sand\s)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            (?<!\bnot\s)
+            (?<!\bdenies\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            (?<!\bhx\s)
+            (?<!\bhistory\sof\s)
+            (?<!need\sfor\s)
+            (?<!need\sfor\sa\s)
+            (?<!need\sfor\san\s)
+            (?<!for\swhich\sa\s)
+            (?<!\bno\sendotracheal\stube\sor\s)
+            \b
+            (?:
+                dobb?hoff(?:-?\s*type)?
+                |
+                doboff(?:-?\s*type)?
+                |
+                daubhoff
+                |
+                keo-?\s*feed(?:ing)?
+                |
+                salem(?:\s+sump)?
+                |
+                levin
+                |
+                (?:upper\s+)?enteric
+                |
+                nasogastric
+                |
+                orogastric
+                |
+                esophagogastric
+                |
+                nasojejunal
+                |
+                nasointestinal
+                |
+                nasoduodenal
+                |
+                gastrojejunal
+                |
+                gastric\s+jejunostomy
+                |
+                # Keep "esophageal tube" / "transesophageal tube" (gold TPs).
+                # Block "transesophageal drainage tube(s)" — unique FP vs ET
+                # (TEE/surgical drain list); "esophageal drainage tube" still matches.
+                (?:trans-?\s*esophageal(?!\s+drainage)|esophageal)
+                |
+                gastric
+                |
+                feeding
+                |
+                (?:n\.?\s*g\.?|o\.?\s*g\.?)
+            )
+            (?:
+                # "nasogastric and endotracheal tubes" (tube noun after 2nd device)
+                \s+and\s+(?:endotracheal|et|orogastric|nasogastric)\s+tubes?
+                |
+                (?:
+                    \s*[- ]?\s*type
+                )?
+                \s+
+                (?:
+                    (?:drainage|feeding|enteric|suction)\s+
+                )?
+                # FN-fit: enteric/Dobhoff/NG *line* as tube synonym
+                (?:tubes?|catheters?|lines?)
+            )
+            \b
+            (?!\s+removed\b)
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+            (?!(?:(?![.!?]).){0,45}?\bis\s+no\s+longer(?:\s+visuali[sz]ed)?\b)
+            (?!(?:(?![.!?]).){0,45}?\bare\s+no\s+longer(?:\s+visuali[sz]ed)?\b)
+            (?!(?:(?![.!?]).){0,30}?\bno\s+longer\s+present\b)
+            (?!(?:(?![.!?]).){0,40}?\bis\s+not\s+assessed\b)
+            (?!(?:(?![.!?]).){0,40}?\bnot\s+assessed\s+by\b)
+            (?!(?:(?![.!?]).){0,35}?\battempted\b)
+            (?!(?:(?![.!?]).){0,40}?\bcould\s+be\s+considered\b)
+            (?!(?:(?![.!?]).){0,85}?\bmay\s+be\s+(?:useful|considered)\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # A2. enteric arch (report phrasing for looping NG course)
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            \benteric\s+arch(?:es)?\b
+        )
+        |
+        # ------------------------------------------------------------------
+        # A3. "double tube tip … stomach" (dual-lumen / NG+OG shorthand)
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bno\s)
+            \bdouble\s+tubes?\s+tip\b
+            (?=(?:(?![.!?]).){0,40}?\bstomach\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # B. NGT / OGT / NG / OG short forms
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\ an\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\sright\sinternal\sjugular\scatheter,\s)
+            (?<!removal\sof\sright\sinternal\sjugular\scatheter\sand\s)
+            (?<!removal\sof\sendotracheal\stube\sand\s)
+            (?<!interval\sremoval\sof\sendotracheal\stube\sand\s)
+            (?<!removal\sof\sthe\sswan-ganz\scatheter\sand\sthe\s)
+            (?<!removal\sof\sswan-ganz\scatheter\sand\sthe\s)
+            (?<!removal\sof\san\sendotracheal\stube,\sng/)
+            (?<!removal\sof\sendotracheal\stube,\sng/)
+            (?<!interval\sremoval\sof\s)
+            (?<!interval\sremoval\sof\sthe\s)
+            (?<!interval\sremoval\sof\ an\s)
+            (?<!interval\sremoval\sof\san\sendotracheal\stube,\sng/)
+            (?<!interval\sremoval\sof\sright\sinternal\sjugular\scatheter,\s)
+            (?<!status\spost\schest\stube,\s)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            (?<!\bhx\s)
+            (?<!need\sfor\s)
+            \b
+            (?:
+                (?:ngt|ogt|njt|gjt)
+                |
+                # FN-fit: spaced "NJ tube"; NG/OG line synonyms
+                (?:ng|og|nj)
+            )
+            \b
+            (?:
+                \s*[- ]?\s*type\s+tubes?
+                |
+                \s+tubes?
+                |
+                \s+lines?
+                |
+                (?=
+                    \s*(?:
+                        in\s+(?:\w+\s+){0,2}(?:place|position)
+                        |
+                        tip
+                        |
+                        present
+                        |
+                        ends?
+                        |
+                        courses
+                        |
+                        passes
+                        |
+                        extends?
+                        |
+                        reaches
+                        |
+                        terminat(?:es|ing)
+                        |
+                        # "is seen" / "is also seen" / "is high in position"
+                        is\s+(?:(?:also|high)\s+)?(?:present|seen|noted|unchanged|in\s+(?:\w+\s+){0,2}(?:place|position))
+                        |
+                        # "NG seen with side port…"
+                        seen
+                        |
+                        has\s+been\s+(?:replaced|repositioned)
+                        |
+                        with\s+(?:tip|side\s+port)
+                        |
+                        # "NG and right PICC line are unchanged"
+                        and\s+(?:(?![.!?]).){0,80}?\b(?:
+                            unchanged
+                            |
+                            stable
+                            |
+                            present
+                            |
+                            picc
+                            |
+                            cvl
+                            |
+                            central
+                        )
+                    )\b
+                )
+                |
+                # NGT in a device list ("ETT, NGT, and CVL"; "NGT, Swan … in place")
+                (?=
+                    \s*[,;]
+                    (?:(?![.!?]).){0,140}?\b(?:
+                        in\s+(?:\w+\s+){0,2}(?:place|position)
+                        |
+                        present
+                        |
+                        unchanged
+                        |
+                        stable
+                        |
+                        cvl
+                        |
+                        picc
+                    )\b
+                )
+                |
+                # "endotracheal tube, NG, and right chest tube"
+                (?=,\s+and\s)
+            )
+            (?!\s+removed\b)
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+            (?!(?:(?![.!?]).){0,45}?\bis\s+no\s+longer(?:\s+visuali[sz]ed)?\b)
+            (?!(?:(?![.!?]).){0,35}?\battempted\b)
+            (?!(?:(?![.!?]).){0,90}?\bcatheter\s+removal\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # C. PEG / gastrostomy / jejunostomy (presence-gated; avoid history)
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\ an\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            (?<!\bhx\s)
+            (?<!\bhistory\sof\s)
+            (?<!trach/)
+            (?<!tracheostomy/)
+            (?<!esophago-)
+            (?<!esophago\s)
+            (?<!gastro)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            \b
+            (?:
+                peg
+                |
+                gastrostomy
+                |
+                jejunostomy
+            )
+            \b
+            (?!(?:\s*/\s*|\s+and\s+)(?:trach|tracheostomy)\b)
+            (?!\s+tube\s+placement\b)
+            (?=
+                (?:(?![.!?]).){0,45}?\b(?:
+                    tubes?
+                    |
+                    # FN-fit: "gastrostomy device"; PEG projecting
+                    devices?
+                    |
+                    tip
+                    |
+                    in\s+(?:\w+\s+){0,2}(?:place|position)
+                    |
+                    present
+                    |
+                    noted
+                    |
+                    seen
+                    |
+                    visualized
+                    |
+                    ends?
+                    |
+                    courses
+                    |
+                    project(?:s|ing)?
+                    |
+                    with\s+residual
+                    |
+                    digestive\s+tubes?
+                )\b
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+            (?!(?:(?![.!?]).){0,40}?\bis\s+not\s+assessed\b)
+            (?!(?:(?![.!?]).){0,40}?\bnot\s+assessed\s+by\b)
+            (?!(?:(?![.!?]).){0,45}?\bis\s+no\s+longer\b)
+            (?!(?:(?![.!?]).){0,30}?\bno\s+longer\s+present\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # D. Dobhoff / Daub / Replogle / Keofeed without "tube" + tip/stomach
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!\bno\s)
+            \b
+            (?:dobb?hoff|doboff|daubhoff|daub|replogle|keo-?\s*feed(?:ing)?)
+            \b
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    tubes?
+                    |
+                    catheters?
+                    |
+                    lines?
+                    |
+                    tip
+                    |
+                    ends?
+                    |
+                    extends?
+                    |
+                    stomach
+                    |
+                    fundus
+                    |
+                    antrum
+                    |
+                    duodenum
+                    |
+                    pylorus
+                    |
+                    esophagus
+                    |
+                    coiled
+                    |
+                    curled
+                    |
+                    migrated
+                    |
+                    present
+                    |
+                    positioned
+                    |
+                    remains
+                    |
+                    unchanged
+                )\b
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+        )
+        |
+        # D2. esophagogastric (IU may redact "tube") + tip/stomach/coursing
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!\bno\s)
+            \besophagogastric\b
+            (?!
+                \s+tubes?
+            )
+            (?=
+                (?:(?![.!?]).){0,90}?\b(?:
+                    tip
+                    |
+                    stomach
+                    |
+                    coursing
+                    |
+                    fundus
+                    |
+                    antrum
+                )\b
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # E. Drainage tube → stomach / neoesophagus / digestive tube
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            (?<!chest\s)
+            (?<!pleural\s)
+            (?<!pigtail\s)
+            \b
+            (?:
+                drainage\s+tubes?
+                \b
+                (?=
+                    (?:(?![.!?]).){0,55}?\b(?:
+                        stomach
+                        |
+                        gastric
+                        |
+                        fundus
+                        |
+                        antrum
+                        |
+                        esophagus
+                        |
+                        gastroesophageal
+                    )\b
+                )
+                |
+                tubes?
+                \s+in\s+the\s+neoesophagus
+                |
+                digestive\s+tubes?
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # F. G-tube / gtube shorthand (presence-gated; avoid indication-only)
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            (?<!\bhx\s)
+            (?<!\bhistory\sof\s)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            (?<!need\sfor\s)
+            (?<!need\sfor\sa\s)
+            \b
+            g-?\s*tubes?
+            \b
+            (?!\s+placement\b)
+            (?=
+                (?:(?![.!?]).){0,45}?\b(?:
+                    in\s+(?:\w+\s+){0,2}(?:place|position)
+                    |
+                    present
+                    |
+                    noted
+                    |
+                    seen
+                    |
+                    visualized
+                    |
+                    tip
+                    |
+                    courses
+                    |
+                    projects?
+                    |
+                    overl(?:y|ies|ying)
+                    |
+                    unchanged
+                    |
+                    stable
+                )\b
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+            (?!(?:(?![.!?]).){0,45}?\bis\s+no\s+longer(?:\s+visuali[sz]ed)?\b)
+            (?!(?:(?![.!?]).){0,30}?\bno\s+longer\s+present\b)
+        )
+        |
+        # ------------------------------------------------------------------
+        # G. Tube-less nasogastric / orogastric (+ presence / tip / list)
+        #     Covers "nasogastric is seen…", "orogastric tip…", and
+        #     "endotracheal, nasogastric and a venous catheter…"
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\ an\s)
+            (?<!removal\sof\sa\s)
+            (?<!interval\sremoval\sof\s)
+            (?<!interval\sremoval\sof\sthe\s)
+            (?<!\bno\s)
+            (?<!\bwithout\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            (?<!\bhx\s)
+            (?<!\bhistory\sof\s)
+            (?<!need\sfor\s)
+            (?<!need\sfor\sa\s)
+            (?<!need\sfor\san\s)
+            \b
+            (?:nasogastric|orogastric)
+            \b
+            (?!\s+(?:tubes?|catheters?)\b)
+            (?=
+                (?:(?![.!?]).){0,70}?\b(?:
+                    tip
+                    |
+                    catheters?
+                    |
+                    # FN-fit: nasogastric devices; followed / enters abdomen
+                    devices?
+                    |
+                    seen
+                    |
+                    observed
+                    |
+                    noted
+                    |
+                    visualized
+                    |
+                    present
+                    |
+                    stable
+                    |
+                    unchanged
+                    |
+                    appearance
+                    |
+                    entering
+                    |
+                    enters
+                    |
+                    followed
+                    |
+                    coursing
+                    |
+                    courses
+                    |
+                    extends?
+                    |
+                    stomach
+                    |
+                    fundus
+                    |
+                    antrum
+                    |
+                    abdomen
+                    |
+                    and\s+(?:a\s+)?(?:venous|central|picc|endotracheal)
+                )\b
+            )
+            (?!(?:(?![.!?]).){0,60}?\b(?:has|have|had)\s+been\s+removed\b)
+            (?!(?:(?![.!?]).){0,50}?\b(?:was|were)\s+removed\b)
+            (?!(?:(?![.!?]).){0,80}?\bbeen\s+removed\b)
+            (?!(?:(?![.!?]).){0,45}?\bis\s+no\s+longer(?:\s+visuali[sz]ed)?\b)
+            (?!(?:(?![.!?]).){0,30}?\bno\s+longer\s+present\b)
+        )
+    )

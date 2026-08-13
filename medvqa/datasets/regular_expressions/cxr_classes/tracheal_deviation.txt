@@ -1,0 +1,94 @@
+\b(?:
+        # tracheal + displacement noun/verb (skip resolved wet-read "… has improved")
+        # also: tracheal and mediastinal/esophageal shift
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        tracheal(?:\s+and\s+(?:the\s+)?(?:mediastin\w*|esophag\w*))?
+        \s+(?:deviat\w*|displac\w*|shift\w*|bow(?:ed|ing)?|retract\w*|deflect\w*|pull(?:ed|ing))\b
+        (?!\s+has\s+improved)|
+
+        # trachea / tracheal air column|shadow + optional "and esophagus/mediastinum"
+        # + copula/relative + optional degree (incl. chronically) + verb (incl. pushed)
+        (?<!\bno\s)(?<!\bwithout\s)
+        trachea(?:l\s+air\s+(?:column|shadow)|\s+and\s+(?:the\s+)?(?:esophag\w*|mediastin\w*|heart))?
+        (?:\s+(?:is|are|appears?|remain(?:s|ing)?|which\s+is|that\s+is))?
+        (?:\s+(?:still|again|now|also|further|slightly|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|marked(?:ly)?|somewhat|chronic(?:ally)?))*
+        \s+(?:deviated|displaced|shifted|bowed|pulled|retracted|deflected|buckled|pushed)\b|
+
+        # deviation(s) / deflection / shift / … of the trachea
+        # stacked site modifiers; tracheal air column/shadow alias
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)(?<!\bnegative\sfor\s)
+        (?:deviations?|deflection|shift|displacement|retraction|bowing|buckling)
+        \s+of\s+(?:the\s+)?(?:(?:left|right|upper|lower|mid|distal|proximal|cervical|superior|inferior)\s+){0,3}
+        (?:trachea\b|tracheal\s+air\s+(?:column|shadow)\b)|
+
+        # stacked of mediastinum/heart/structures … and trachea (plural deviations OK)
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)(?<!\bnegative\sfor\s)
+        (?:deviations?|deflection|shift|displacement|retraction|bowing|buckling)
+        \s+of\s+(?:the\s+)?
+        (?:heart|cardiac|mediastin\w*|mediastinal\s+structures?)
+        (?:[\s,]+(?:the\s+)?(?:heart|cardiac|mediastin\w*|mediastinal\s+structures?|and)){0,8}
+        [\s,]+(?:the\s+)?trachea\b|
+
+        # direction-first: left/right[-]ward deviation|displacement|shift|retraction of … trachea
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:left|right)[- ]?ward\s+(?:deviat\w*|displac\w*|shift\w*|retract\w*)
+        \s+of(?:\s+\w+){0,6}\s+trachea\b|
+
+        # direction-first missing "of": "rightward shift the trachea"
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:left|right)[- ]?ward\s+(?:deviat\w*|displac\w*|shift\w*|retract\w*)
+        \s+(?:the\s+)?trachea\b|
+
+        # IU XXXX redaction of "tracheal": "XXXX deviation" / "rightward XXXX deviation"
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:(?:mild(?:ly)?|slight(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|marked(?:ly)?)\s+)?
+        (?:(?:left|right)[- ]?ward\s+)?
+        XXXX\s+deviation\b|
+
+        # compact "trachea bowed" / "deviated trachea"
+        trachea\s+bowed\b|
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:deviated|displaced|shifted|bowed)\s+trachea\b|
+
+        # displacing/pulling/retracting/pushing (and compressing) the trachea
+        # 3sg displaces; optional "of"; site modifiers; heart/mediastinum/esophagus … and trachea
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:displac(?:es|ing|ed)|push(?:es|ing|ed)|pull(?:ing|ed)|retract(?:ing|ed)|deviat(?:ing|ed)|shift(?:ing|ed)|bow(?:ing|ed))
+        (?:\s+and\s+(?:compressing|narrowing|displacing|pulling|retracting|pushing))?
+        \s+(?:of\s+)?(?:the\s+)?
+        (?:
+            (?:(?:heart|cardiac(?:\s+\w+)?|mediastin\w*|esophag\w*)[\s,]*){1,6}
+            and\s+(?:the\s+)?
+            |
+            (?:(?:left|right|upper|lower|mid|distal|proximal|cervical|superior|inferior)\s+)*
+        )
+        trachea\b|
+
+        # shift/displacement to the left/right of heart/mediastinum and trachea
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:shift|displacement)\s+to\s+the\s+(?:left|right)\s+of
+        (?:[\s,]+(?:the\s+)?(?:heart|cardiac|mediastin\w*|and)){1,8}
+        [\s,]+(?:the\s+)?trachea\b|
+
+        # shift of mediastinal/cardiac structures including the tracheal air column
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:shift|displacement|deviation)\s+of[^\n.!?;:]{0,100}?
+        including\s+(?:the\s+)?tracheal\s+air\s+column\b|
+
+        # structures including the trachea (and esophagus) are pushed/deviated/shifted
+        (?<!\bno\s)(?<!\bwithout\s)
+        including\s+(?:the\s+)?trachea(?:\s+and\s+(?:the\s+)?(?:esophag\w*|mediastin\w*|heart))?
+        [,\s]+(?:are|is)\s+
+        (?:(?:still|again|now|also|further|slightly|mild(?:ly)?|chronic(?:ally)?)\s+)*
+        (?:pushed|deviated|displaced|shifted|bowed|pulled|retracted|deflected|buckled)\b|
+
+        # shift of the mediastinum … as well as the trachea
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:shift|displacement|deviation)\s+of[^\n.!?;:]{0,80}?
+        as\s+well\s+as\s+(?:the\s+)?trachea\b
+    )

@@ -1,0 +1,45 @@
+{
+  "class_id": "hyperinflation",
+  "positives": [
+    "Hyperinflated lungs are present.",
+    "Hyperexpansion with increased lung volumes.",
+    "Lungs are overexpanded on this film.",
+    "Pulmonary hyperaeration with widened intercostal spaces.",
+    "Flattened diaphragms consistent with hyperinflation.",
+    "Hyperexpanded lungs.",
+    "There is evidence of hyperinflation.",
+    "Lungs demonstrate evidence of hyperinflation.",
+    "There is also evidence of hyperinflation demonstrated.",
+    "Lungs show evidence of hyperinflation.",
+    "There is again evidence of hyperexpansion of the lungs.",
+    "Both lungs demonstrate signs of hyperinflation.",
+    "Views of the chest demonstrate evidence of hyperinflation with mild flattening of the hemidiaphragms.",
+    "Evidence of hyperinflation, similar to prior exam.",
+    "Evidence of hyperinflation with low and somewhat flattened diaphragms.",
+    "Generous lung volumes suggest COPD.",
+    "Prominent lung volumes are again noted.",
+    "Elevated lung volumes.",
+    "These findings are superimposed on elevated lung volumes.",
+    "The lung volumes are somewhat generous.",
+    "Generous lung volumes with borderline flattening of the diaphragm.",
+    "Increased bilateral lung volumes with flattening of the hemidiaphragm.",
+    "Increased bilateral lung volumes, flattening of the hemidiaphragm as well as increased retrosternal space.",
+    "Increased bilateral lung volumes with flattening of the hemidiaphragms.",
+    "Increased overall lung volumes may reflect chronic obstructive pulmonary disease.",
+    "Increased overall lung volumes.",
+    "Lung volumes appear relatively increased, suggesting the possibility of COPD.",
+    "Lung volumes appear relatively increased.",
+    "Lung volumes borderline increased.",
+    "Lung volumes are borderline increased."
+  ],
+  "negatives": [
+    "Emphysematous bullous disease.",
+    "Low lung volumes from poor inspiration.",
+    "Flattened diaphragm from eventration.",
+    "COPD without hyperinflation wording."
+  ],
+  "negation_soft": [
+    "No hyperinflation is identified.",
+    "Good inspiratory effort with normal lung volumes."
+  ]
+}

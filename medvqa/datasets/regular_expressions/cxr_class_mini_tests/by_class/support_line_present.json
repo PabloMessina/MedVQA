@@ -1,0 +1,51 @@
+{
+  "class_id": "support_line_present",
+  "positives": [
+    "Medical line coursing to the SVC.",
+    "Vascular access line visible.",
+    "Swan-Ganz catheter tip in the pulmonary artery.",
+    "Support lines are unchanged.",
+    "Pulmonary catheter tip in the right PA.",
+    "Right heart catheter is present.",
+    "A right internal jugular swans Ganz catheter tip overlies the main pulmonary artery.",
+    "Right Swans Ganz catheter with the tip in the main pulmonary artery.",
+    "Swans-Ganz catheter is unchanged in standard placement.",
+    "Interval insertion of Swan-Gans catheter with tip in right central pulmonary artery.",
+    "Interval placement of right IJ Swan with tip in the right interlobar artery.",
+    "Swan-Ganz catheter has been removed with the introducer left in place.",
+    "Right IJ Swan-Ganz catheter has been removed and the sheath remains in place.",
+    "Removal of Swan-Ganz catheter with a Cordis sheath remaining in place.",
+    "Cordis sheath is still present in the right IJ.",
+    "Cordis tip is in the superior vena cava.",
+    "Right-sided introducer is in place and terminates in mid SVC.",
+    "Stable position and appearance of medical lines and support devices.",
+    "No appreciable change in position of lines and tubes.",
+    "Interval partial withdrawal of pulmonary artery catheter with its tip in the left brachiocephalic vein.",
+    "Partial withdrawal of the Swan-Ganz catheter with tip in the main pulmonary artery.",
+    "Vascular catheter is unchanged in position.",
+    "The left-sided pacemaker and vascular lines are unchanged.",
+    "A vascular line ends in the right axilla.",
+    "Vascular catheters are unchanged in position.",
+    "Left-sided vascular catheter appears appropriately sited in unchanged position.",
+    "Vascular line ends in the left axilla.",
+    "Vascular line ends outside the left chest wall.",
+    "The right IV line is unchanged.",
+    "Vascular catheter remains in standard position.",
+    "There is a vascular catheter seen in the axilla on the right side.",
+    "Vascular line projects over the left upper extremity.",
+    "There is a vascular catheter in the left axilla.",
+    "An apparent right-sided vascular catheter projects over the axilla and upper chest.",
+    "A vascular catheter projects over the left axilla but probably does not enter the left hemithorax.",
+    "Right-sided intravenous line is unchanged in position."
+  ],
+  "negatives": [
+    "Endotracheal tube in standard position.",
+    "Nasogastric tube present.",
+    "Chest tube in the right pleural space.",
+    "Pacemaker leads.",
+    "Sternotomy wires."
+  ],
+  "negation_soft": [
+    "No support lines identified."
+  ]
+}

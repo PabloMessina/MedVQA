@@ -1,0 +1,72 @@
+# ==============================================================================
+# sternotomy_wires
+# Match currently visible sternal / sternotomy closure wires, cables, sutures,
+# or clam-shell incision cerclage. Harden indication ("concern for"), negation
+# ("no … wires"), and removal ("removal of sternal wires").
+# Do NOT match: bare post-sternotomy / CABG history, epicardial pacing wires,
+# mediastinal clips, nonspecific wires without sternal localization,
+# pectus bar / NUSS hardware, or sternal fixation devices/plates without wires.
+# Fixed-width lookbehinds only (stdlib re).
+# FN-fit (fn_mine_fit_shared): sternotomy with/comma wires; sternal fixation
+# wires; sternal wiring; wires…from…sternotomy with gap; poststernotomy +
+# mediastinal wires (reject bare mediastinal wires / pectus-NUSS).
+# ==============================================================================
+
+(?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bdenies\s)(?<!\babsent\s)
+(?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+(?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+(?<!\bconcern\sfor\s)(?<!\bconcerns\sfor\s)(?<!\bconcern\sof\s)
+(?<!\bwith\sconcern\sfor\s)
+(?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+(?<!\bremoval\sof\s)(?<!\bremoval\sof\sthe\s)(?<!\bremoved\s)
+(?<!\bpost\sremoval\sof\s)
+\b(?:
+        # Classic + suture/cable/incision/IU-XXXX variants
+        # "median sternotomy wires", "sternotomy incision wires",
+        # "XXXX sternotomy XXXX", "midline sternotomy XXXX", "sternotomy XXXX fragment"
+        (?:(?:median|midline|XXXX)\s+)?sternotomy\s+(?:(?:incision|closure|surgical|suture|XXXX)\s+)*(?:wires?|wiring|sutures?|cables?|cerclages?(?:\s+wires?)?|XXXX(?:\s+(?:XXXX|fragment))?)|
+        # Word order: "median wire sternotomy sutures"
+        median\s+wire\s+sternotomy\s+(?:wires?|sutures?)|
+        # Sternal / manubrial localization (+ fixation adj; wiring noun)
+        (?:sternal|manubrial)\s+(?:(?:suture|surgical|closure|fixation)\s+)?(?:wires?|wiring|sutures?|cerclages?|cables?)|
+        wire\s+sternal\s+sutures?|
+        # Reverse: wires … from/of … sternotomy (allow short same-sentence gap)
+        # Reject epicardial/pacing wires attributed to sternotomy history.
+        (?<!epicardial\s)(?<!pacing\s)wires?(?:[^\w.?!]+\w+){0,8}?[^\w.?!]+(?:from|of)\s+(?:(?:a|an|the|prior|previous|remote|old)\s+)*(?:median\s+)?sternotomy|
+        # Clam-shell / clamshell incision cerclage (transplant / bilateral access)
+        clam[\s-]*shell(?:\s+incision)?\s+cerclage(?:\s+(?:wires?|cables?))?|
+        # Reverse: cerclage wires … clamshell incision
+        cerclage(?:s)?(?:\s+wires?)?(?:[^\w.?!]+\w+){0,6}?[^\w.?!]+clam[\s-]*shell(?:\s+incision)?|
+        # Cerclage tied to sternal fracture / diastasis (same sentence)
+        cerclage(?:s)?(?:\s+wires?)?(?:[^\w.?!]+\w+){0,6}?[^\w.?!]+sternal\s+(?:fracture|diastasis|dehiscence)|
+        # Sternotomy + with/and + (short same-sentence gap) + cerclage [wires]
+        # "median sternotomy with cerclage wires",
+        # "sternotomy, with intact cerclage wires",
+        # "clamshell sternotomy with discontinuous cerclage wires",
+        # "sternotomy with a vertically oriented cerclage wire",
+        # "Sternotomy and XXXX cerclage XXXX"
+        (?:(?:median|midline|XXXX|clam[\s-]*shell)\s+)?sternotomy(?:\s*,)?\s+(?:with|and)(?:\s+(?:a|an|the|XXXX))?(?:[^\w.?!]+\w+){0,6}?[^\w.?!]+cerclage(?:s)?(?:\s+(?:wires?|cables?|XXXX))?|
+        # Sternotomy + with/and + (gap) + [adj]* (mediastinal|cerclage)? wires/wiring
+        # "sternotomy with wires which appear intact",
+        # "sternotomy with intact appearing wires",
+        # "sternotomy with wires and mediastinal clips",
+        # "sternotomy, with multiple intact mediastinal wires",
+        # "prior … sternotomy with wires in place"
+        (?:(?:median|midline|XXXX|clam[\s-]*shell)\s+)?sternotomy(?:\s*,)?\s+(?:with|and)(?:\s+(?:a|an|the|XXXX|multiple))?(?:[^\w.?!]+\w+){0,8}?[^\w.?!]+(?:(?:multiple|intact|appearing|broken|fractured|displaced|retained|discontinuous|vertically|oriented)\s+)*(?:(?:cerclage|mediastinal)\s+)?(?<!epicardial\s)(?<!pacing\s)(?:wires?|wiring|cables?)|
+        # Sternotomy, wires… (comma without requiring with/and first)
+        # "sternotomy, wires which appear intact"
+        (?:(?:median|midline|XXXX|clam[\s-]*shell)\s+)?sternotomy\s*,\s*(?:(?:multiple|intact|appearing|broken|fractured|displaced|retained|discontinuous)\s+)*(?:(?:cerclage|mediastinal)\s+)?(?<!epicardial\s)(?<!pacing\s)(?:wires?|wiring|cables?)|
+        # Sternotomy … fractured/displaced/retained/intact/discontinuous (cerclage) wires
+        # (+ optional "appearing" between adj and wires)
+        (?:median\s+)?sternotomy(?:\W+\w+){0,10}?\W+(?:multiple\s+)?(?:fractured|displaced|retained|broken|intact|discontinuous)(?:\s+appearing)?\s+(?:cerclage\s+)?wires?|
+        # Reverse: sternotomy … (superior most) wire is fractured
+        (?:median\s+)?sternotomy(?:\W+\w+){0,8}?\W+(?:the\s+)?(?:(?:superior|inferior)\s+)?(?:most\s+)?wires?\s+(?:is|are)\s+(?:fractured|displaced|broken|intact|retained)|
+        # Closed-compound poststernotomy … (mediastinal) wires (not bare poststernotomy)
+        post[\s-]*sternotomy(?:[^\w.?!]+\w+){0,6}?[^\w.?!]+(?:mediastinal\s+)?(?<!epicardial\s)(?<!pacing\s)(?:wires?|wiring)|
+        # Midline circular surgical wires (incl. OCR "c ircular")
+        (?:circular|c\s+ircular)\s+surgical\s+wires?\s+in\s+the\s+midline|
+        surgical\s+wires?\s+in\s+the\s+midline
+    )
+(?!\s+removal\b)
+(?!\s+(?:were|was|have\s+been|has\s+been|been)\s+removed\b)
+(?!\s+removed\b)

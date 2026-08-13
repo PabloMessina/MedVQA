@@ -1,0 +1,109 @@
+# ==============================================================================
+# bronchial_wall_thickening
+# Explicit bronchial / peri|parabronchial / bronchiolar wall thickening or cuffing
+# on current CXR. Also recover "airway (wall) thickening" / "bronchial thickening"
+# (elided "wall"), "bronchial wall cuffing", soft-tissue intervening phrasing,
+# and typo Brochial. Tram-tracks only if attributed to wall thickening
+# (clause-local wall-thicken … bronchi arm).
+# FN-fit (fn_mine_fit_shared): peribronchovascular / peribronchiolar thicken|cuff;
+# bronchial wall thickness (noun); bare thickened bronchi (not only thick-walled /
+# thickened bronchial walls).
+# Do NOT match bronchiectasis, tram-tracks, ring shadows, prominent bronchi /
+# bronchovascular markings, interstitial markings, edema, perihilar haze, or
+# bronchitis / reactive airways alone (prompt).
+# Fixed-width lookbehinds (stdlib re). Eval lowercases + squashes space.
+# ==============================================================================
+
+(?<!\bno\s)
+(?<!\bwithout\s)
+(?<!\bnot\s)
+(?<!\bnor\s)
+(?<!\bno\sdefinite\s)
+(?<!\bno\ssignificant\s)
+(?<!\bno\sappreciable\s)
+(?<!\bno\sovert\s)
+(?<!\bno\sobvious\s)
+(?<!\bno\sgross\s)
+(?<!\bno\sevidence\sof\s)
+(?<!\bno\sevidence\sfor\s)
+(?<!\bwithout\sevidence\sof\s)
+(?<!\bnegative\sfor\s)
+# "No pleural fluid or peribronchial cuffing"
+(?<!\bno\spleural\sfluid\sor\s)
+(?<!\bno\spleural\seffusion\sor\s)
+(?<!\bno\spleural\seffusions\sor\s)
+\b(?:
+        # "bronchial wall thickening", "bronchial thickening",
+        # "bronchiolar wall thickening", typo "Brochial wall thickening";
+        # FN-fit: noun "bronchial wall thickness" / "increased … thickness"
+        (?:bro(?:n)?chial|bronchiolar)\s+(?:walls?\s+)?(?:are\s+|is\s+|appear(?:s|ing)?\s+)?(?:thicken\w*|thickness\b)
+
+        |
+
+        # "thickening/thickened of the bronchial walls"
+        thicken(?:ing|ed)\s+of\s+(?:the\s+)?(?:bro(?:n)?chial|bronchiolar)\s+walls?
+
+        |
+
+        # "thickened bronchial walls"
+        thickened\s+(?:bro(?:n)?chial|bronchiolar)\s+walls?
+
+        |
+
+        # FN-fit: bare "thickened bronchi" / "dilated, thickened bronchi"
+        # (word-boundary after bronchi — not bronchiolitis)
+        thickened\s+bronchi\b
+
+        |
+
+        # "peri/parabronchial (wall|soft tissue) thickening/cuffing";
+        # tolerate peribronchal / cyffing typos; soft-tissue intervening phrasing;
+        # FN-fit: also peribronchovascular / peribronchiolar
+        (?:peri|para)bronch(?:ial|al|ovascular|iolar)\s+(?:(?:walls?|soft\s+tissue)\s+)?(?:thicken\w*|c[yu]ff(?:ing)?)
+
+        |
+
+        # "bronchial cuffing", "bronchial wall cuffing", "cuffing of the bronchi"
+        (?:
+            (?:bro(?:n)?chial|bronchiolar)\s+(?:walls?\s+)?c[yu]ff(?:ing)?
+            |
+            c[yu]ffing\s+of\s+(?:the\s+)?bronchi
+        )
+
+        |
+
+        # "thick-walled bronchi" / "thick walled bronchi"
+        thick[\s-]?walled\s+bronchi\w*
+
+        |
+
+        # "increased thickness of peri/parabronchial tissue"
+        (?:increased\s+)?thick(?:ness|ening|ened)\s+of\s+(?:the\s+)?(?:peri|para)bronchial(?:\s+(?:tissue|walls?|cuffing))?
+
+        |
+
+        # "thickened walls of peribronchiectatic airways"
+        thicken(?:ed|ing)\s+walls?\s+of\s+(?:\w+\s+){0,3}(?:peribronchi\w*\s+)?(?:bronchi\w*|airways?)
+
+        |
+
+        # "airway thickening", "airway wall thickening", "central airways thickening",
+        # "bronchitic airway thickening" (explicit thicken, not bronchitic-alone)
+        airways?\s+(?:walls?\s+)?thicken\w*
+
+        |
+
+        # "thickening of the (central) airways"
+        thicken(?:ing|ed)\s+of\s+(?:the\s+)?(?:central\s+)?airways?
+
+        |
+
+        # Clause-local: "bronchial inflammation responsible for wall thickening"
+        (?:bro(?:n)?chial|bronchiolar)(?:[^\w.!?;:]+(?!without\b|no\b|not\b)\w+){0,5}[^\w.!?;:]+wall\s+thicken\w*
+
+        |
+
+        # Clause-local: "wall thickening of ... saccular bronchiectasis" (wall thickening
+        # of airways; not bare bronchiectasis / tram-tracks)
+        wall\s+thicken\w*(?:[^\w.!?;:]+(?!without\b|no\b|not\b)\w+){0,6}[^\w.!?;:]+(?:saccular\s+)?bronchi(?:ecta\w*|al\b)
+    )

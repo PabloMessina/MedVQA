@@ -1,0 +1,53 @@
+{
+  "class_id": "aortic_enlargement_or_ectasia",
+  "positives": [
+    "Enlarged thoracic aorta.",
+    "Aortic ectasia.",
+    "Dilated ascending aorta.",
+    "Increased caliber of the aortic arch.",
+    "Aortic knob is enlarged.",
+    "The ascending aorta is dilated.",
+    "The aorta is ectatic.",
+    "Ectasia of the thoracic and upper abdominal aorta.",
+    "An enlarged and tortuous aorta is again noted.",
+    "Enlarged calcified thoracic aorta.",
+    "Moderately enlarged and tortuous calcified aorta.",
+    "Diffusely enlarged thoracoabdominal aorta.",
+    "Thoracoabdominal aortic ectasia.",
+    "The aortic arch measures 4 cm in diameter and is consistent with aneurysm.",
+    "The aortic diameter is increased at the level of the aortic arch.",
+    "The saccular aneurysm in the descending thoracic aorta is again visualized.",
+    "Saccular aneurysm of the aortic arch.",
+    "Large aneurysm of the aortic arch.",
+    "Enlarged aortic contour reflects the known aortic aneurysm.",
+    "Large thoracoabdominal aortic aneurysm.",
+    "The aorta is very tortuous and may be generally large.",
+    "The aortic contour is stable with apparent degree of aneurysmal dilatation.",
+    "Tortuous aorta with a focal contour bulge suspicious for a focal saccular aneurysm.",
+    "Lateral bulge in the descending thoracic aorta that is larger today.",
+    "Aortic silhouette is mildly ectatic.",
+    "Aneurysmal silhouette of the thoracic aorta.",
+    "The aorta demonstrates calcifications at the arch and appears ectatic.",
+    "The aorta is calcified and tortuous and could be ectatic.",
+    "The aorta and brachiocephalic vessels are tortuous and mildly ectatic.",
+    "Thoracic aorta is tortuous, if not ectatic.",
+    "Ectatic and mildly tortuous ascending and descending thoracic aorta.",
+    "Pseudoaneurysm of the aortic arch.",
+    "Known pseudoaneurysm of the aortic arch is again seen.",
+    "Pseudoaneurysm along the left aortic arch contour.",
+    "Stable bulge at the aortic arch corresponds to known pseudoaneurysm.",
+    "Bulge in the transverse aorta is suspicious for aortic aneurysm.",
+    "Suspicion for thoracic aortic aneurysm at the transverse aortic arch.",
+    "Descending thoracic aortic aneurysm."
+  ],
+  "negatives": [
+    "Tortuous unfolded aorta.",
+    "Aortic calcification without enlargement.",
+    "Prominent aortic contour.",
+    "Mediastinal mass displacing the aorta.",
+    "Aortic elongation without increased caliber."
+  ],
+  "negation_soft": [
+    "Aorta is normal in caliber."
+  ]
+}

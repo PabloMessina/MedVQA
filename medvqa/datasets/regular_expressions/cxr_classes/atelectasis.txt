@@ -1,48 +1,342 @@
+# ==============================================================================
+# atelectasis (mid-node parent; precision-first)
+# Prompt: explicit atelectasis / pulmonary or lung collapse; volume loss when
+# it is regional (specified lobe/lung/base) or attributed to atelectatic
+# change / collapse / under-expansion. Do NOT match bare low lung volumes,
+# hypoinflation, nonspecific linear/streaky opacity, or effusion/PTX alone.
+#
+# Residual mid-node lexicon (children lobar/rounded stay readonly):
+#   1) word-bounded atelectasis stems (+ typos; FN-fit: atelctasis)
+#   2) anatomy-linked collapse (+ colapse typo); gap bans no/without/rather/vs;
+#      pulmonary collapse; collapse … adjacent|near|next to
+#   3) under-expansion / underaeration of a lung region
+#   4) attributed volume loss
+#   5) regional volume loss — FN-fit (fn_mine_fit_shared): left/right base;
+#      at both bases; optional of/in; slash VL/consolidation|infiltrate;
+#      VL and infiltrate; multi-lobe and-gap; perihilar; medial; thorax;
+#      retrocardiac VL[/consolidation]
+#   6) plate-/band-/discoid opacity|density without an atelect* stem
+#      (prompt morphology; skip scar/artifact attribution)
+#
+# Negation: light tempered scan; digit-colon ignored (times); bare "without"
+# blocks "without X or atelectasis"; "with or without atelectasis" allowed.
+# FN-fit: do not soft-block bare "suspect" (blocks "Suspect … atelecatsis").
+# Post-hit drops "atelectatic (changes) have/has cleared|resolved".
+# Compiled IGNORECASE|VERBOSE. Fixed-width lookbehinds only.
+# ==============================================================================
 
-    # 1. Direct variations and typos
-    telect|atelec|telct|ateclec|ateleect|atelext|aterlect|ateleft|atelechasis|aelectasis|atelexcta|atlect|atelet|
-    atelelct|atalect|atelact|atelecat|ateelct|atelact|acelectsis|atectasis|atelelec|ateletc|atlect|atelecat|ateltec|
-    acetlect|atalechat|altecta|atectatic
-    |
-    # 2. Shape descriptors
-    \b(?:plate|band|disc)[\s-]*like
-    |
-    # 3. Collapse (Bidirectional)
-    # DIRECTION A: "Collapse of the [Anatomy]"
-    \bcollaps\w*
-    (?:(?![.!?])\W+\w+){0,10}
-    \s+
-    (?:lung|lob(?:ar|e)|segment(?:al)?|l[lu]l|r[lmu]l|zone|field|base|basilar)
-    |
-    # DIRECTION B: "[Anatomy] is [Collapsed]"
-    \b(?:lung|lob(?:ar|e)|segment(?:al)?|l[lu]l|r[lmu]l|zone|field|base|basilar)
-    (?:(?![.!?])\W+\w+){0,10}
-    \s+
-    collaps\w*
-    |
-    # 4. Contextual Collapse
-    # Matches: "Underlying collapse", "Associated collapse", "Compressive collapse"
-    # These adjectives imply the lung context strongly enough to ignore distance.
-    \b(?:underlying|associated|adjacent|compressive|passive)\s+collaps\w*
-    |
-    # 5. Volume Loss
-    \bvolum\w*
-    (?:(?![.!?])\W+\w+){0,8}
-    \s+
-    (?:loss|diminished|reduc|decreas)
-    |
-    \b(?:loss|diminished|reduc|decreas)
-    (?:(?![.!?])\W+\w+){0,8}
-    \s+
-    volum\w*
-    |
-    # 6. Linear Opacities
-    \b(?:streaky|linear|lamellar)
-    (?:(?![.!?])\W+\w+){0,4}
-    \s+
-    (?:opaci|dens|markings|atele)
-    |
-    \b(?:opaci|dens)\w*
-    (?:(?![.!?])\W+\w+){0,4}
-    \s+
-    (?:streaky|linear|lamellar)
+(?:
+    (?:
+        ^
+        |
+        [.!;\n]
+        |
+        # Section headers like IMPRESSION: — not clock times (12:59)
+        (?<!history)(?<!indication)(?<!data)(?<!info)(?<!\d):
+    )
+    (?:
+        (?:
+            (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            # allow "with or without atelectasis" through the scan
+            (?=\bwith\s+or\s+without\b)
+            [^.!?;:\n]
+        )
+        |
+        (?:
+            (?!\b(?:
+                no|nor|neither|without|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out|
+                evaluate|eval|assess|
+                exclude|excluding|
+                please
+            )\b)
+            (?!\bw/o\b)
+            (?!\bno\s+(?:evidence|sign|findings?|definite|overt|gross|obvious|radiographic|demonstrable|evident|significant)\b)
+            (?!\bwithout\s+(?:evidence|sign|findings?|demonstrable|significant)\b)
+            (?!\bno\s+evidence\s+(?:of|for)\b)
+            (?!\bwithout\s+evidence\s+(?:of|for)\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bassess(?:ment)?\s+for\b)
+            (?!\bconcern(?:ed)?\s+for\b)
+            (?!\bquestion\s+(?:of|for)\b)
+            (?!\br/?o\b)
+            (?!\brule\s+out\b)
+            (?!\bto\s+exclude\b)
+            (?!\bhistory\s+of\b)
+            (?!\bhx\s+of\b)
+            (?!\bh/?o\s+of\b)
+            (?!\bresolution\s+of\b)
+            (?!\bclearing\s+of\b)
+            (?!\bless\s+likely\b)
+            (?!\brather\s+than\b)
+            # FN-fit: allow "Suspect … atelecatsis" (current hedged finding)
+            (?!\?)
+            [^.!?;:\n]
+        )
+    ){0,220}
+
+    (?:
+        # --------------------------------------------------------------
+        # 1. Explicit atelectasis (+ typos)
+        # --------------------------------------------------------------
+        (?:
+            \bwith\s+or\s+without\s+
+            (?:atelec\w*|latelectasis\w*|acelectsis\w*|atectatic\w*|atelectasis\w*)
+            |
+            (?<!\bno\s)
+            (?<!\bnot\s)
+            (?<!\bwithout\s)
+            \b(?:
+                atelec\w*|
+                latelectasis\w*|
+                atelecatsis\w*|
+                telectasis\w*|
+                atalect\w*|
+                atelact\w*|
+                atelct\w*|
+                atlectas\w*|
+                aelectasis\w*|
+                acelectsis\w*|
+                atectasis\w*|
+                atectatic\w*|
+                ateleft\w*|
+                aterlect\w*|
+                atelext\w*|
+                ateleect\w*|
+                ateclec\w*|
+                atelechasis\w*|
+                atelexcta\w*|
+                atalechat\w*|
+                altecta\w*|
+                acetlect\w*|
+                ateltec\w*|
+                atelelec\w*|
+                ateletc\w*|
+                atelecat\w*|
+                atelelct\w*|
+                ateelct\w*|
+                telctasis\w*
+            )\b
+        )
+        (?!\?)
+        (?!\s+would\s+be\s+less\s+likely\b)
+        (?!\s+(?:\w+\s+){0,4}(?:has|have|is|are)\s+(?:nearly\s+|almost\s+(?:completely\s+)?)?(?:resolv\w*|cleared)\b)
+        (?!\s+no\s+longer\s+(?:seen|present|evident|visualized|appreciated)\b)
+
+        |
+
+        # --------------------------------------------------------------
+        # 2. Anatomy-linked collapse
+        # --------------------------------------------------------------
+        (?:
+            \b(?:collaps|collasp|colaps)\w*
+            (?:
+                \W+
+                (?!(?:no|not|without|rather|vs\.?|versus)\b)
+                (?![.!?])
+                \w+
+            ){0,8}
+            \s+
+            (?:
+                (?:the\s+)?(?:right|left|bilateral|both)\s+
+            )?
+            (?:
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                l[lu]l|r[lmu]l|lingula\w*|
+                (?:bi)?basilar\w*|base\w*|
+                zone\w*|field\w*|hemithorax|
+                lower\s+lung|upper\s+lung
+            )
+            |
+            \b(?:
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                l[lu]l|r[lmu]l|lingula\w*|
+                (?:bi)?basilar\w*|base\w*|
+                zone\w*|field\w*|hemithorax|
+                pulmonary
+            )
+            (?:
+                \W+
+                (?!(?:no|not|without|rather|vs\.?|versus)\b)
+                (?![.!?])
+                \w+
+            ){0,8}
+            \s+
+            (?:collaps|collasp|colaps)\w*
+            |
+            \b(?:underlying|associated|adjacent|compressive|passive|obstructive|resorptive|cicatricial|bibasilar)\s+(?:collaps|collasp|colaps)\w*
+            |
+            # collapse … adjacent|near|next to (effusion / compressive);
+            # keep gap short so vertebral-body collapse does not leak
+            \b(?:collaps|collasp|colaps)\w*
+            (?:
+                \W+
+                (?!(?:no|not|without|rather|vs\.?|versus)\b)
+                (?![.!?])
+                \w+
+            ){0,4}
+            \s+
+            (?:adjacent|near|next)\s+to
+        )
+        (?!\?)
+        (?!\s+(?:\w+\s+){0,4}(?:has|have|is|are)\s+(?:nearly\s+|almost\s+)?(?:resolv\w*|cleared)\b)
+
+        |
+
+        # --------------------------------------------------------------
+        # 3. Under-expansion / underaeration of a lung region
+        # --------------------------------------------------------------
+        (?:
+            \b(?:under[\s\-]?expand\w*|under[\s\-]?aerat\w*|poorly\s+expand\w*)
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            (?:
+                (?:the\s+)?(?:right|left|bilateral|both)\s+
+            )?
+            (?:
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                l[lu]l|r[lmu]l|lingula\w*|
+                (?:bi)?basilar\w*|base\w*|hemithorax
+            )
+            |
+            \b(?:
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                l[lu]l|r[lmu]l|lingula\w*|
+                (?:bi)?basilar\w*|base\w*|hemithorax
+            )
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            (?:under[\s\-]?expand\w*|under[\s\-]?aerat\w*|poorly\s+expand\w*)
+        )
+        (?!\?)
+
+        |
+
+        # --------------------------------------------------------------
+        # 4. Volume loss attributed to atelectasis / collapse / under-exp.
+        # --------------------------------------------------------------
+        (?:
+            \b(?:atelectatic|atelectasis[\s\-]?related|collapse[\s\-]?related|compressive)\s+
+            (?:volume\s+loss|volumetric\s+loss|loss\s+of\s+(?:lung\s+)?volume\w*)
+            |
+            \b(?:volume\s+loss|loss\s+of\s+(?:lung\s+)?volume\w*|volumetric\s+loss)
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            (?:
+                (?:due\s+to|secondary\s+to|from|related\s+to|from\s+underlying)\s+
+                (?:atelecta\w*|collaps\w*|under[\s\-]?expand\w*|under[\s\-]?aerat\w*)
+            )
+            |
+            \b(?:due\s+to|secondary\s+to|from|related\s+to)\s+
+            (?:atelecta\w*|collaps\w*|under[\s\-]?expand\w*)
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            (?:volume\s+loss|loss\s+of\s+(?:lung\s+)?volume\w*)
+        )
+        (?!\?)
+
+        |
+
+        # --------------------------------------------------------------
+        # 5. Regional volume loss (specified lobe / lung / base / side)
+        #    — residual parent phrasing; NOT bare "lung volumes decreased"
+        #    FN-fit (fn_mine_fit_shared): base/bases/thorax/perihilar;
+        #    optional prep; slash VL compounds; multi-lobe and-gap;
+        #    retrocardiac VL[/consolidation]
+        # --------------------------------------------------------------
+        (?:
+            \b(?:volume\s+loss|volumetric\s+loss|loss\s+of\s+(?:lung\s+)?volume\w*)
+            (?:/(?:consolidation|infiltrate)\w*)?
+            (?:\s+and\s+(?:infiltrate|consolidation)\w*)?
+            \s+
+            # prep optional: "volume loss the left lower lobe"
+            (?:(?:of|in|within|involving|at|to)\s+)?
+            (?:the\s+)?
+            (?:
+                (?:(?:medial|lateral|posterior|anterior|superior|inferior)\s+)?
+                (?:right|left|bilateral|both)\s+
+                (?:(?:upper|middle|lower|mid)\s+)?
+                (?:
+                    lung(?:\s+base)?|
+                    lobe|lobes|lobar|
+                    hemithorax|thorax|
+                    base|bases|
+                    perihilar(?:\s+region)?
+                )\w*
+                |
+                # multi-lobe: right middle and right lower lobe
+                (?:right|left)\s+(?:upper|middle|lower|mid)\s+
+                and\s+(?:(?:the\s+)?(?:right|left)\s+)?
+                (?:upper|middle|lower|mid)\s+lobe\w*
+                |
+                (?:upper|middle|lower|mid)\s+(?:lobe|lobes|lung\s+zone)\w*
+                |
+                (?:bi)?basilar\w*
+                |
+                both\s+bases?
+                |
+                bases\b
+                |
+                l[lu]l|r[lmu]l|lingula\w*
+                |
+                perihilar(?:\s+region)?
+            )
+            |
+            # retrocardiac volume loss[/consolidation] (location cue)
+            \bretrocardiac\s+
+            (?:volume\s+loss|volumetric\s+loss)
+            (?:/(?:consolidation|infiltrate)\w*)?
+            |
+            \b(?:
+                (?:right|left|bilateral|both)\s+
+                (?:(?:upper|middle|lower|mid)\s+)?
+                (?:lobe|lung|hemithorax|thorax|base)\s+
+                |
+                (?:upper|middle|lower|mid)\s+lobe\s+
+                |
+                (?:bi)?basilar\s+
+                |
+                lower\s+lobe\s+
+                |
+                retrocardiac\s+
+            )
+            volume\s+loss
+            |
+            \b(?:right|left)\s+lung\s+volume\s+loss
+        )
+        (?!\?)
+
+        |
+
+        # --------------------------------------------------------------
+        # 6. Residual morphology: plate-/band-/discoid opacity|density
+        #    (prompt forms; do not require an atelect* stem)
+        # --------------------------------------------------------------
+        (?:
+            \b
+            (?:
+                (?:stable|persistent|focal|linear|mild|small|few|several|(?:bi)?basilar|dependent)\s+
+            ){0,4}
+            (?:
+                (?:band|plate)[\s\-]?like
+                |platelike
+                |bandlike
+                |discoid(?:\s+type)?
+            )
+            (?:[\s,]+and[\s,]+(?:linear|(?:band|plate)[\s\-]?like|discoid))?
+            (?:\s+(?:horizontal|vertical|(?:bi)?basilar|basal))?
+            \s+
+            (?:opacit\w*|densit\w*)\b
+            # word-boundary so \w* cannot backtrack past "opacities"/"opacity"
+            # to dodge the scar/artifact lookahead
+            (?!\s+(?:\w+\s+){0,10}(?:scar(?:s|ring|red)?\b|fibros[ei]\w*|artifact\b|external\b))
+        )
+        (?!\?)
+    )
+)

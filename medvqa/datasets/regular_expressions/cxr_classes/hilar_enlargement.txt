@@ -1,74 +1,371 @@
+# ==============================================================================
+# hilar_enlargement
+# Abnormal enlargement / prominence of one or both pulmonary hila on the
+# CURRENT CXR (prompt-faithful).
+#
+# Match: hilum/hila/hilar silhouette enlarged, prominent, bulky, full, widened,
+# lobulated, convex, or increased in size; fullness / bulging of the hilum;
+# hilar adenopathy or hilar mass/lesion/tumor/opacity that expands the
+# silhouette; dilated/engorged hilar vessels when tied to the hilum.
+#
+# Do NOT match: normal hilum; isolated hilar calcification; increased hilar
+# density without enlargement; retraction/elevation/displacement from volume
+# loss; pulmonary vascular congestion / cephalization / edema / PAH without
+# hilum-size language; mediastinal widening; non-hilar adenopathy; history /
+# indication / known-prior-only; negated "no … or hilar …" lists.
+#
+# Fixed-width lookbehinds only (stdlib re). Eval lowercases + squashes space.
+# ==============================================================================
 
-    # --------------------------------------------------------
-    # 1. Descriptor ... Anatomy
-    # Added: 'nodular', 'convex', 'dense'
-    # Added: 'juxtahilar'
-    # --------------------------------------------------------
-    \b(?:
-        prominen\w*|enlarg\w*|bulk\w*|
-        full\w*|widen\w*|thick\w*|
-        lobulat\w*|accentuat\w*|
-        hazy|haziness|indistinct\w*|
-        big|large|engorg\w*|increas\w*|exaggerat\w*|
-        nodular|convex|dense
-    )\b
-    (?:\W+\w+){0,8}
-    \W+
-    \b(?:
-        hila|hilum|hili|hilus|hilar|perihilar|suprahilar|infrahilar|juxtahilar|
-        hilar\W+(?:shadows|regions|silhouettes|structures|vasculature|markings|size)
-    )\b
+\b(?:
+        # ------------------------------------------------------------------
+        # A. Direct hilar size / contour adjectives
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)
+        (?<!\bno\sright\s)(?<!\bno\sleft\s)(?<!\bno\sbilateral\s)(?<!\bno\sboth\s)
+        (?<!\bnot\sright\s)(?<!\bnot\sleft\s)
+        (?<!\bno\sdefinite\s)(?<!\bno\ssignificant\s)(?<!\bno\sobvious\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\brule\sout\s)(?<!r/o\s)(?<!\bevaluate\sfor\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)
+        (?<!\bknown\s)
+        (?:(?:right|left|bilateral|both|relative|possible|mild|slight|marked|moderate)\s+)?
+        (?:bihilar|hilar)
+        \s+
+        (?:enlarg\w*|prominen\w*|fullness|widening|lobulat\w*|convexity)
+        (?!\s*\?)
 
-    |
+        |
 
-    # --------------------------------------------------------
-    # 2. Anatomy ... Descriptor
-    # --------------------------------------------------------
-    \b(?:
-        hila|hilum|hili|hilus|hilar|perihilar|suprahilar|infrahilar|juxtahilar|
-        hilar\W+(?:shadows|regions|silhouettes|structures|vasculature|markings|size)
-    )\b
-    (?:\W+\w+){0,8}
-    \W+
-    \b(?:
-        prominen\w*|enlarg\w*|bulk\w*|
-        full\w*|widen\w*|thick\w*|
-        lobulat\w*|accentuat\w*|
-        big|large|
-        hazy|haziness|indistinct\w*|
-        engorg\w*|increas\w*|exaggerat\w*|
-        nodular|convex|dense
-    )\b
-    
-    |
-    
-    # --------------------------------------------------------
-    # 3. Specific Entity: "Hilar Adenopathy"
-    # Added: Inverted syntax "Adenopathy ... Anatomy"
-    # Added: 'juxtahilar'
-    # --------------------------------------------------------
-    # Pattern A: Anatomy -> Adenopathy
-    \b(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar|central)\s+(?:lymph\s*)?(?:adenopathy|nodes|enlargement)\b
-    |
-    # Pattern B: Adenopathy -> [up to 8 words] -> Anatomy
-    \b(?:lymph\s*)?(?:adenopathy|nodes|enlargement)\b(?:\W+\w+){0,8}\W+(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar|central)\b
+        # bulky / prominent / full / large / widened / lobulated / convex + hilum
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sright\s)(?<!\bno\sleft\s)(?<!\bno\sbilateral\s)
+        (?:bulky|prominent|abnormally\s+prominent|full|large|mildly\s+prominent|widened|lobulated|convex|chronically\s+large)
+        \s+(?:left\s+|right\s+|bilateral\s+|both\s+)?
+        (?:bihilar|hil(?:um|a|us))\b
 
-    |
+        |
 
-    # --------------------------------------------------------
-    # 4. Hilar / Perihilar Masses, Lesions, & Opacities
-    # Added: 'consolidation', 'juxtahilar'
-    # --------------------------------------------------------
-    \b(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar)(?:\W+(?:region|zone|area))?(?:\W+\w+){0,5}\W+(?:mass(?:es)?|lesion(?:s)?|tumor(?:s)?|malignancy|opacit\w*|opacification|densit\w*|consolidation)\b
-    |
-    \b(?:mass(?:es)?|lesion(?:s)?|tumor(?:s)?|malignancy|opacit\w*|opacification|densit\w*|consolidation)(?:\W+\w+){0,12}\W+(?:hilar|hilus|perihilar|suprahilar|infrahilar|juxtahilar)(?:\W+(?:region|zone|area))?\b
+        # prominent/bulky hilar + size/node/mass noun (not "prominent hilar vascularity")
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bor\s)
+        (?:bulky|prominent|abnormally\s+prominent)
+        \s+(?:left\s+|right\s+|bilateral\s+)?hilar\s+
+        (?:contour|silhouette|region|enlarg\w*|nodes?|adenopathy|lymphadenopathy|mass(?:es)?|opacit\w*|lesions?|fullness|structures?)
 
-    |
+        |
 
-    # --------------------------------------------------------
-    # 5. Pulmonary Artery / Vascular Enlargement
-    # --------------------------------------------------------
-    \b(?:enlarg\w*|dilat\w*|prominen\w*|large|big|engorg\w*|increas\w*|congest\w*)\b(?:\W+\w+){0,5}\W+(?:central\W+)?pulmonary\W+(?:arter\w*|vascular\w*|vasculature)(?:\W+caliber)?\b
-    |
-    \b(?:central\W+)?pulmonary\W+(?:arter\w*|vascular\w*|vasculature)(?:\W+caliber)?\b(?:\W+\w+){0,5}\W+(?:enlarg\w*|dilat\w*|prominen\w*|large|big|engorg\w*|increas\w*|congest\w*)\b
+        # enlarged / enlargement of [the] [side] hilum
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        enlarg\w*\s+(?:of\s+)?(?:the\s+)?(?:right\s+|left\s+|bilateral\s+|both\s+)?
+        (?:bihilar|hil(?:um|a|us|ar))\b
 
+        |
+
+        # hilum/hila is/are/appear [modifiers] enlarged/prominent/larger/abnormal
+        (?<!\bno\s)(?<!\bnot\s)
+        hil(?:um|a|us|ar)\s+
+        (?:are\s+|is\s+|appear(?:s|ing)?\s+)
+        (?:(?:slightly|mildly|markedly|substantially|moderately|relatively|persistently|increased|also|again|still|unchanged|similarly|bilateral(?:ly)?|both)\s+)*
+        (?:more\s+)?(?:enlarg\w*|prominen\w*|full|bulky|widened|lobulat\w*|convex|larger|abnormal)
+        |
+
+        hil(?:a|um)\s+have\s+enlarg\w*
+        |
+
+        pulmonary\s+hila\s+are\s+(?:substantially\s+|markedly\s+|moderately\s+|mildly\s+)?enlarg\w*
+        |
+
+        # [side] hilum/hilus appears/is larger (comparative size)
+        (?<!\bno\s)(?<!\bnot\s)
+        (?:(?:the\s+)?(?:right\s+|left\s+|bilateral\s+|both\s+)?)?
+        hil(?:um|a|us)\s+(?:appear(?:s|ing)?|is|are)\s+larger\b
+        |
+
+        # increased size of [the] [side] hila/hilum
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        increased\s+size\s+of\s+(?:the\s+)?
+        (?:right\s+|left\s+|bilateral\s+|both\s+)?
+        hil(?:um|a|us|ar)\b
+        |
+
+        # prominence / fullness / bulging of [the] [side] hilum
+        # optional "of" recovers "mild prominence the right hilum"
+        # "at" recovers "increased prominence at the left hilum"
+        # bilateral sides: "prominence of the right and left hilum"
+        # side-before-pole: "fullness of the left inferior hilum"
+        #                   "prominence of the right inferior hilum"
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)
+        (?:increased\s+)?(?:prominence|fullness|bulg(?:e|ing|es)|convexity)
+        \s+(?:(?:of|to|in|at|about|around)\s+)?
+        (?:the\s+)?
+        (?:
+            (?:(?:inferior|lower|superior|upper)\s+aspect,?\s+)?
+            (?:right\s+and\s+left\s+|left\s+and\s+right\s+|right\s+|left\s+|bilateral\s+|both\s+)?
+            |
+            (?:right\s+and\s+left\s+|left\s+and\s+right\s+|right\s+|left\s+|bilateral\s+|both\s+)?
+            (?:inferior|lower|superior|upper)\s+
+        )
+        (?:bihilar|hil(?:um|a|us|ar)|hilar\s+(?:region|area))\b
+        (?!\s+vascular)(?!\s+markings)
+
+        |
+
+        # prominence/fullness of X and [side] hilum (intervening list)
+        # e.g. "prominence of the upper mediastinum and left hilum"
+        # e.g. "fullness in the area of azygos and left hilar area"
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:increased\s+)?(?:prominence|fullness)
+        \s+(?:(?:of|in)\s+)?
+        (?:the\s+)?
+        (?:(?:area\s+of\s+)?)?
+        (?:[\w-]+\s+){1,8}
+        and\s+(?:the\s+)?
+        (?:right\s+|left\s+|bilateral\s+|both\s+)?
+        (?:hil(?:um|a|us|ar)|hilar\s+(?:region|area))\b
+        (?!\s+vascular)(?!\s+markings)
+
+        |
+
+        # noun-noun: "right hilum prominence"
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:right\s+|left\s+|bilateral\s+|both\s+)?
+        hil(?:um|a|us)\s+(?:prominence|fullness|enlarg\w*|bulging|convexity)
+
+        |
+
+        # hilar contour(s) / silhouette [is/are] [more] prominent
+        (?<!\bno\s)(?<!\bnot\s)
+        hilar\s+(?:silhouette|contours?|structures?)\s+(?:is\s+|are\s+|appear(?:s|ing)?\s+)?
+        (?:more\s+)?(?:enlarg\w*|prominen\w*|full|widened|lobulat\w*|convex|increased)
+
+        |
+
+        # lobulated / convex contour of/in the hilum / hilar region
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:lobulated|convex)\s+contour\s+(?:of|in|to)\s+(?:the\s+)?
+        (?:right\s+|left\s+|bilateral\s+)?
+        (?:hil(?:um|a|us)|hilar\s+region)\b
+
+        |
+
+        (?:borderline|increased|enlarged)\s+diameter\s+of\s+(?:the\s+)?hilar\s+structures
+        |
+
+        # "prominent X and right hila" / "abnormally prominent hila" (not hilar*)
+        (?<!\bno\s)(?<!\bnot\s)
+        (?:abnormally\s+|possible\s+|possibility\s+of\s+)?
+        prominent\s+
+        (?:(?:[\w-]+\s+){0,4}and\s+(?:the\s+)?)?
+        (?:right\s+|left\s+|bilateral\s+|both\s+)?hila\b
+
+        |
+
+        prominence\s+of\s+(?:the\s+)?(?:[\w-]+\s+){0,10}as\s+well\s+as\s+(?:both\s+|the\s+)?hila\b
+
+        |
+
+        # prominent caliber of the hila (vascular enlargement at hilum)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        prominent\s+caliber\s+of\s+(?:the\s+)?hila\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # B. Hilar adenopathy / lymphadenopathy (incl. station lists)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bno\sdefinite\s)(?<!\bno\ssignificant\s)(?<!\bno\sobvious\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\ssignificant\s)
+        (?<!\bwithout\sevidence\sof\s)(?<!\bno\sevidence\sof\smediastinal\s)
+        (?<!\brule\sout\s)(?<!r/o\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|both|mediastinal\s+and)\s+)?
+        (?:bihilar|hilar)
+        (?:
+            (?:,\s*(?:and\s+)?|\s+and\s+|\s+or\s+)
+            (?:(?:right|left|bilateral)\s+)?
+            (?:paratracheal|subcarinal|mediastinal|pretracheal|suprahilar|infrahilar|\w+\s+lobe)
+        ){0,4}
+        \s+(?:metastatic\s+)?(?:lymph[\s-]?)?adeno(?:pathy|pathic)
+        (?!\s*\?)
+
+        |
+
+        # hilar … metastases (station lists), expands the hilar silhouette
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\brule\sout\s)(?<!r/o\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|both)\s+)?hilar
+        (?:
+            (?:,\s*(?:and\s+)?|\s+and\s+|\s+or\s+)
+            (?:(?:right|left|bilateral)\s+)?
+            (?:paratracheal|subcarinal|mediastinal|pretracheal|\w+\s+lobe)
+        ){0,4}
+        \s+metastas\w*
+
+        |
+
+        # adenopathy / lymphadenopathy in/at [the] [side] hilum/hilus
+        # e.g. "Adenopathy at least in the left hilus is evident."
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)
+        (?<!\bno\sevidence\sof\s)(?<!\brule\sout\s)(?<!r/o\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\bknown\s)
+        (?:lymph[\s-]?)?adeno(?:pathy|pathic)
+        (?:\s+(?:at\s+least|also|only)){0,2}
+        \s+(?:in|at)\s+(?:the\s+)?
+        (?:right\s+|left\s+|bilateral\s+|both\s+)?
+        hil(?:um|a|us)\b
+
+        |
+
+        # hilar soft-tissue bulk / adenopathy proxy
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:(?:right|left|bilateral)\s+)?hilar\s+soft\s+tissue
+        (?:s\s+that\s+may\s+represent|\s+that\s+may\s+represent|\s+densit\w*|\s+fullness)
+
+        |
+
+        # hilar lymph nodes framed with vascular/adenopathy DDx
+        # (bare "calcified hilar lymph nodes" is NOT enlargement — do not match)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bor\s)
+        (?<!\bcalcified\s)(?<!\bcalcific\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|both)\s+)?hilar\s+lymph\s+nodes?
+        \s+or\s+enlarged\s+(?:central\s+)?pulmonary\s+arter\w*
+
+        |
+
+        # ------------------------------------------------------------------
+        # C. Hilar mass / lesion / tumor / opacity expanding the silhouette
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bor\s)
+        (?<!\bno\sdefinite\s)(?<!\bno\ssignificant\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\smediastinal\s)
+        (?<!\brule\sout\s)(?<!r/o\s)
+        (?<!\bhistory\sof\s)(?<!\bhx\sof\s)
+        (?<!\bknown\s)(?<!\bpatient's\sknown\s)(?<!\bpatient\sknown\s)
+        (?<!\breduction\sin\ssize\sof\s)(?<!\breduction\sof\s)
+        (?<!\ssize\sof\sleft\s)(?<!\ssize\sof\sright\s)(?<!\ssize\sof\sbilateral\s)
+        (?<!\ssize\sof\sthe\sleft\s)(?<!\ssize\sof\sthe\sright\s)
+        (?:(?:right|left|bilateral)\s+)?hilar\s+
+        (?:(?:[\w-]+\s+){0,3})?
+        (?:mass(?:es)?|opacit\w*|lesions?|tumou?rs?|metastas\w*)
+        (?!\s*\?)
+
+        |
+
+        (?:(?:right|left|bilateral)\s+)?hilar\s+and\s+(?:rul|lul|rml|lll|\w+\s+lobe\s+)?(?:opacity|mass|lesion)
+
+        |
+
+        mass[-\s]?like\s+(?:configuration|appearance|opacity|density|structure)
+        \s+of\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us|ar)
+
+        |
+
+        (?:mass|tumou?r|infiltrate)\s+in\s+(?:the\s+)?(?:region\s+of\s+(?:the\s+)?)?(?:right\s+|left\s+)?hil(?:um|a|us)\b
+
+        |
+
+        # mass/lesion at the level of [the] [side] hilum/hilus
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:mass[-\s]?like\s+)?(?:rounded\s+)?(?:mass(?:es)?|lesions?|tumou?rs?)
+        \s+at\s+the\s+level\s+of\s+(?:the\s+)?
+        (?:right\s+|left\s+)?hil(?:um|a|us)\b
+
+        |
+
+        mass[-\s]?like\s+opacit\w*\s+(?:over|at)\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us|ar)
+
+        |
+
+        (?:large\s+|abnormal(?:ly)?\s+|abnormal\s+large\s+)?
+        (?:\d+(?:\.\d+)?\s*cm\s+)?
+        opacit\w*\s+at\s+(?:the\s+)?(?:expected\s+)?location\s+of\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us)
+
+        |
+
+        # framed opacity/density within/in the hilum (requires size/shape cue)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:nodular|rounded|mildly\s+prominent|prominent)\s+
+        (?:opacity|density|opacit\w*)
+        \s+(?:within|in)\s+(?:the\s+)?
+        (?:right\s+|left\s+)?hil(?:um|a|us)\b
+
+        |
+
+        # changes at the hilum consistent with tumor / recurrence / mass
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        changes?\s+at\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us)
+        \s+(?:consistent\s+with|suggest(?:s|ing|ive\s+of)?|due\s+to|from|representing)
+        \s+(?:(?:a\s+|the\s+)?(?:tumou?r\s+)?recurrence|tumou?r|mass|adenopathy|lymphadenopathy)
+
+        |
+
+        # framed suprahilar mass / soft-tissue fullness / prominence
+        # (bare "suprahilar opacity" alone is often scarring/volume loss — require
+        #  soft-tissue/mass/fullness OR opacity tied to adenopathy DDx)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|asymmetric|possible|suspect|mild)\s+){0,3}
+        suprahilar\s+
+        (?:mediastinal\s+)?
+        (?:soft\s+tissue\s+)?
+        (?:mass(?:es)?|mass[-\s]?like|fullness|prominen\w*)
+        |
+
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|asymmetric|possible|suspect|mild)\s+){0,3}
+        suprahilar\s+opacit\w*
+        ,?\s+(?:consider\s+|suggest(?:s|ing|ive\s+of)?\s+|may\s+represent\s+|compatible\s+with\s+|consistent\s+with\s+)?
+        (?:lymph)?adenopathy
+        |
+
+        # opacity to [side] suprahilar … adenopathy (word-order variant)
+        # e.g. "Asymmetric opacity to left suprahilar chest may reflect adenopathy."
+        # allow a short intervening clause (lateral correlate) before the DDx.
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:asymmetric\s+|focal\s+)?opacit\w*\s+to\s+
+        (?:(?:the\s+)?(?:right|left|bilateral)\s+)?
+        suprahilar\b
+        (?:[\w\s,.'-]{0,90}?)
+        (?:may\s+reflect|may\s+represent|consider|suggest(?:s|ing|ive\s+of)?|compatible\s+with|consistent\s+with|reflect)
+        \s+(?:focal\s+airspace\s+disease\s+or\s+)?(?:lymph)?adenopathy
+        |
+
+        prominence\s+of\s+(?:the\s+)?(?:right\s+|left\s+|bilateral\s+)?suprahilar\s+region
+
+        |
+
+        # ------------------------------------------------------------------
+        # D. Vascular enlargement AT the hilum (not bare PAH / congestion)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)
+        (?:engorged|dilated)\s+hilar\s+(?:vasculature|vessels?|vascular)
+        |
+        hilar\s+(?:vasculature|vessels?|vascular)\s+(?:are\s+)?(?:engorged|dilated|prominent)
+        |
+        increased\s+caliber\s+(?:to\s+)?(?:pulmonary\s+vasculature\s+)?(?:in\s+)?(?:the\s+)?hila\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # E. Infrahilar / hilus-pole contour (existing prompt-faithful arms)
+        # ------------------------------------------------------------------
+        rounded\s+(?:left\s+|right\s+)?infrahilar\s+contour
+        |
+        (?:right\s+|left\s+)?infrahilar\s+opacity\s+(?:is\s+)?(?:mild\s+and\s+)?may\s+represent\s+adenopathy
+        |
+        # [side] infrahilar fullness [/lobulation] (mass/adenopathy proxy)
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bknown\s)
+        (?:(?:right|left|bilateral|associated|mild)\s+){0,2}
+        infrahilar\s+fullness
+        (?:\s+and\s+lobulat\w*)?
+        |
+        (?:opacity|density|nodular\s+opacity)\s+(?:projecting\s+over|projects\s+over|over)\s+(?:the\s+)?(?:lower\s+pole|inferior\s+margin)\s+of\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us)
+        |
+        (?:lower\s+pole|inferior\s+margin)\s+of\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us)\s+(?:may\s+be\s+|is\s+)?enlarg\w*
+        |
+
+        # soft-tissue fullness about the hilum
+        (?:soft\s+tissue\s+)?fullness(?:/irregularity)?\s+(?:about|around)\s+(?:the\s+)?(?:right\s+|left\s+)?hil(?:um|a|us)
+)

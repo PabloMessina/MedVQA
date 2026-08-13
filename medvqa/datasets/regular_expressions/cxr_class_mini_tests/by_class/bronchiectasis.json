@@ -1,0 +1,44 @@
+{
+  "class_id": "bronchiectasis",
+  "positives": [
+    "Bronchiectasis is present in the lower lobes.",
+    "Tram-track lines consistent with bronchiectatic airways.",
+    "Cystic bronchiectasis in the right middle lobe.",
+    "Ring shadows of dilated bronchi are seen.",
+    "Traction bronchiectasis in fibrotic lung.",
+    "Tram tracking in the lower lobes.",
+    "Possible dilated bronchus.",
+    "Streaky density with possible dilated bronchi in the right lung.",
+    "Focal tubular lucency may reflect dilated airways.",
+    "Tubular density may represent a dilated bronchus with mucoid impaction.",
+    "Lower lobe reticular opacities with mildly dilated bronchi.",
+    "Opacity is probably inflammation around a dilated bronchus.",
+    "Left lower lobe opacities associated with clustered small dilated airways.",
+    "Right apical consolidation with dilated airways.",
+    "Retrocardiac atelectasis with mildly dilated bronchi.",
+    "There is no pulmonary edema or focal abnormality in the lungs except for possible bronchiectasis in the infrahilar right lower lobe.",
+    "Tubular ectatic bronchi in the left upper lobe.",
+    "Mild dilatation of the bronchi in the lung bases.",
+    "Persistent mild airways dilation.",
+    "Focal opacity may reflect cavitation, dilated airways or spared lung.",
+    "Unusual dilated bronchus connecting to the bronchial tree.",
+    "Dilated pulmonary airways in the lower lobes.",
+    "Varicose bronchi in the lower lobes.",
+    "Signet ring appearance of dilated airways.",
+    "Dilation of bronchi at the bases.",
+    "Ectasia of the bronchi bilaterally.",
+    "The bronchi appear dilated at the bases.",
+    "Mild airway dilatation bilaterally."
+  ],
+  "negatives": [
+    "Peribronchial cuffing without stated airway dilatation.",
+    "Mild bronchial wall thickening only.",
+    "Emphysema with hyperlucent lungs.",
+    "History of bronchiectasis; not well seen on this exam.",
+    "Evaluate for bronchiectasis."
+  ],
+  "negation_soft": [
+    "No bronchiectasis is identified.",
+    "Known bronchiectasis on prior CT not well seen on this film."
+  ]
+}

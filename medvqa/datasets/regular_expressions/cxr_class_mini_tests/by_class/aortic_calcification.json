@@ -1,0 +1,53 @@
+{
+  "class_id": "aortic_calcification",
+  "positives": [
+    "Aortic calcification.",
+    "Calcified aortic arch.",
+    "Atherosclerotic aorta.",
+    "Thin linear calcification of the descending aorta.",
+    "Atheromatous aortic knob.",
+    "Mild aortic calcinosis.",
+    "Thoracic aorta with calcium deposits in the wall.",
+    "Diffuse atherosclerotic calcification of a tortuous thoracic and abdominal aorta.",
+    "Calcified thoracic and abdominal aorta.",
+    "Calcified plaque in the thoracic and abdominal aorta.",
+    "Extensive calcification of the thoracic and abdominal aorta.",
+    "Vascular calcifications in the thoracic and abdominal aorta.",
+    "Atherosclerotic calcification of the thoracic and abdominal aorta.",
+    "Dense atherosclerotic calcifications of the thoracic and abdominal aorta.",
+    "Markedly calcified thoracic and abdominal aorta.",
+    "Calcified atherosclerosis of the thoracic and abdominal aorta.",
+    "There are atherosclerotic calcifications of the thoracic and abdominal aorta.",
+    "Slight thoracic and abdominal aortic calcification.",
+    "Thoracic and abdominal aortic calcification.",
+    "Calcification of the thoracic and abdominal aorta.",
+    "Atherosclerotic calcifications of the thoracic and abdominal aorta.",
+    "Extensive atherosclerotic calcification of the thoracic and abdominal aorta.",
+    "Heavy vascular calcification within the subclavian arteries as well as the aorta.",
+    "Prominent vascular calcifications are noted at the level of the aortic knob.",
+    "The aorta is mildly tortuous and unfolded, probably with faint calcification.",
+    "Calcifications of the tracheobronchial tree as well as the aortic arch.",
+    "The aorta is remarkable for mild tortuosity with moderate-to-severe intimal calcification.",
+    "The aorta shows mild-to-moderate unfolding and patchy calcification.",
+    "Aortic arch measuring 3.4 cm in diameter with intimal calcification.",
+    "Crescentic calcifications displaced from the radiographic margin of the aortic wall.",
+    "Calcifications are present around the mitral valve and aortic arch.",
+    "Calcified atherosclerotic changes are noted in a slightly tortuous aorta.",
+    "Calcification is seen in the region of the aortic arch.",
+    "Dense calcification is seen in the region of the aortic arch.",
+    "There is atheromatous disease and mild uncoiling of a nonicteric aorta.",
+    "Porcelain aorta.",
+    "Aorta with mild-to-moderate unfolding and patchy calcification."
+  ],
+  "negatives": [
+    "Aortic enlargement without mineral density.",
+    "Cardiac valvular calcification.",
+    "Pleural calcification along the diaphragm.",
+    "Calcified aortic valve.",
+    "Atherosclerotic disease is present.",
+    "Abdominal aorta atherosclerotic calcification."
+  ],
+  "negation_soft": [
+    "No aortic calcification."
+  ]
+}

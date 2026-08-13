@@ -1,0 +1,53 @@
+{
+  "class_id": "pleural_plaque",
+  "positives": [
+    "Bilateral calcified pleural plaques.",
+    "Diaphragmatic pleural plaque on the right.",
+    "Plaque-like pleural thickening along the lateral chest wall.",
+    "Noncalcified pleural plaque in the left hemithorax.",
+    "Asbestos-related pleural plaques.",
+    "Extensive pleural-based calcification overlying the mid and lower lung zones.",
+    "Sheetlike and rounded apparently pleural based calcifications are present bilaterally.",
+    "Calcified plaques along the right hemidiaphragm.",
+    "Asbestos plaques are again noted.",
+    "Multiple calcified plaques are due to asbestos exposure.",
+    "Multiple calcified plaques are related to previous asbestos exposure.",
+    "Calcified plaques are likely related to prior asbestos exposure.",
+    "Plaques at the lung bases are visualized and consistent with prior asbestos exposure.",
+    "Widespread calcified asbestos plaques are unchanged.",
+    "Asbestosis plaques appear slightly more prominent.",
+    "Extensive pleural plaquing is again seen, consistent with asbestos related disease.",
+    "Plaquing again is consistent with asbestos exposure.",
+    "Coarse calcified plaques overlie the diaphragmatic pleura.",
+    "Calcified plaque is again seen in the perihilar regions consistent with prior asbestos exposure.",
+    "There are calcified plaques and pleural disease on the left.",
+    "Ill-defined calcific densities are consistent with asbestos plaques.",
+    "Calcified plaques project along the right and left hemidiaphragms.",
+    "Mild costal pleural thickening could be asbestos related plaque.",
+    "Calcification along the right hemidiaphragm, consistent with a calcified plaque.",
+    "Focal calcification along the right hemidiaphragm is grossly unchanged, likely represents calcified plaque.",
+    "Right hemidiaphragm calcification likely represents a calcified plaque.",
+    "Calcified plaque projects over the right upper hemithorax.",
+    "Subpleural plaques.",
+    "Peripheral opacities which may represent subpleural plaques.",
+    "Calcified plaque is seen along the left lateral pleura.",
+    "Calcified plaque at the right diaphragm.",
+    "Calcified plaque noted at the right diaphragm.",
+    "Apical pleural thickening with presumed calcified plaques.",
+    "A calcified plaque is seen at the left apex.",
+    "Calcified plaque at the left lower thoracic chest wall.",
+    "Plaque-like region of thickening along the diaphragmatic surface of the right lung.",
+    "Dense opacification of the left hemithorax with plaque-like calcifications.",
+    "Plaque-like calcified density projects along the periphery of the left hemithorax."
+  ],
+  "negatives": [
+    "Smooth diffuse pleural thickening.",
+    "Isolated diaphragmatic pleural mineral density.",
+    "Apical pleural capping.",
+    "Calcified biapical pleural thickening without plaque morphology.",
+    "Although pleural plaque related to asbestos exposure can have a similar appearance."
+  ],
+  "negation_soft": [
+    "No pleural plaques identified."
+  ]
+}

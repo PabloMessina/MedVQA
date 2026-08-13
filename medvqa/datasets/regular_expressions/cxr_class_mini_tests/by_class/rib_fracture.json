@@ -1,0 +1,53 @@
+{
+  "class_id": "rib_fracture",
+  "positives": [
+    "Acute left posterior rib fractures.",
+    "Healing rib fracture with callus formation.",
+    "Nondisplaced right sixth rib fracture.",
+    "Multiple rib fractures on the left.",
+    "Old healed rib fracture deformity.",
+    "Fracture involving the posterolateral left fourth rib.",
+    "Contour deformity of the right lateral 8th rib, suspect acute fracture.",
+    "Irregularity of the left lateral ribs suggests prior fractures.",
+    "Exuberant callus formation at previous rib fracture sites.",
+    "Unchanged appearance of the known left rib fractures.",
+    "Callus relating to a fracture of the left seventh and possibly eighth ribs.",
+    "Cortical irregularity of the posterior lateral left seventh rib may represent fracture.",
+    "Nondisplaced right-sided rib fractures which are better seen on the CT scan from the same day.",
+    "A displaced fracture of the left sixth rib, compatible with postsurgical changes.",
+    "Several left lateral and posterior rib fractures which are better appreciated on recent CT.",
+    "Lucencies in the right posterior third rib may represent nondisplaced fractures.",
+    "Old fractures seen the left 9th rib.",
+    "The 9th posterior lateral right rib is slightly expanded and this may be the site of an old healed fracture.",
+    "Lytic rib lesion in the left eighth rib laterally, likely in the process of fracturing.",
+    "Linear lucencies overlying the right ribs on the lateral view may represent fractures.",
+    "Deformities involving the left sixth rib posteriorly as well as the seventh rib posterolaterally, probably due to old fractures.",
+    "Mildly displaced fractures of the posterior arcs of the left ninth and tenth ribs.",
+    "Remote fractures of the posterior arcs of the right eighth and ninth ribs.",
+    "Acute minimally displaced fracture of the lateral arc of the right 10th rib.",
+    "Fractures of the anterolateral aspects of the right sixth and seventh ribs.",
+    "Irregularity of the right first costochondral junction may represent a minimally displaced fracture.",
+    "Slight irregularity at the posterior-medial aspect of the right fifth rib may reflect nondisplaced fracture.",
+    "Irregularity of the left 9th rib laterally may reflect prior fracture with callus.",
+    "Right fifth and sixth ribs demonstrate callus formation suggesting healing fractures.",
+    "Callus associated with the posterior left sixth rib is stable.",
+    "Callus projecting over the lateral aspect of the right seventh rib.",
+    "Healing pathologic fracture of a lytic lesion in the posterior right sixth rib.",
+    "Associated healed right rib deformities."
+  ],
+  "negatives": [
+    "Left clavicle fracture.",
+    "Lytic rib metastasis without fracture.",
+    "Costochondral calcification.",
+    "Sternum fracture.",
+    "Degenerative rib changes.",
+    "No evidence of clavicular fractures or rib fractures.",
+    "NO OBVIOUS RIB FRACTURES ARE NOTED.",
+    "Status post resection of first 3 ribs of the right chest.",
+    "Negative for acute displaced rib fracture.",
+    "No displaced, acute rib fractures are identified."
+  ],
+  "negation_soft": [
+    "No rib fracture identified."
+  ]
+}

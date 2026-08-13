@@ -1,24 +1,187 @@
 
+    # Phase B6 helper merge (apical_cap / pleural_scarring):
+    # DISCARD bare helper imports (0 unique gold residual; OR adds FPs —
+    # especially pleural_scarring {0,8} gap walks). Parent already covers
+    # apical-cap / pleural-scar / fibrosis arms from prior refine.
+    # KEEP framed residual: pleural[- ]based thickening (modifier "based").
+    #
+    # 20260811 residual polish: cheap negation/r/o/history lookbehinds;
+    # framed "pleural … compatible/consistent with thickening" (not generic
+    # pleural opacity). Keep pleural-reaction arm (unique gold TPs).
+    #
+    # FN-fit (fn_mine_fit_shared): residual parent holes only —
+    # pleural/extrapleural/soft-tissue thickening; inverted rind→pleura/
+    # hemithorax; pleural irregularity + scar/postinflammatory/thicken;
+    # apical/subpleural soft-tissue thickening; biapical pleural changes.
+    # Readonly children (plaque/calcification) untouched.
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bno\sevidence\sfor\s)
+    (?<!\bwithout\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\br/o\s)
+    (?<!r/o\s)
+    (?<!\brule\sout\s)
+    (?<!\bh/o\s)
+    (?<!\bhistory\sof\s)
+    (?<!\bhx\sof\s)
     \b(?:
-        # 1. Direct pleural thickening
+        # 1. Direct pleural thickening (safe modifiers; avoid
+        # free [a-z-]+ walks across effusion→soft-tissue).
+        # "based" recovers "pleural based/based thickening" (B6 residual)
+        # is/are/appears: copula "pleura is thickened" (FN-mine hunt)
+        # FN-fit: or/extrapleural/soft/tissue/irregularity/and/sided
         pleur[a-z]*
-        (?:[\s,;()/-]+[a-z-]+){0,4}
+        (?:[\s,;()/-]+(?:focal|diffuse|nodular|mild|minimal|moderate|severe|marked|chronic|stable|residual|irregular|irregularit(?:y|ies)|smooth|benign|malignant|bilateral|left|right|apical|basal|basilar|costal|lateral|posterior|anterior|calcified|calcific|wall|parenchymal|visceral|parietal|based|is|are|appears?|or|and|extrapleural|soft|tissue|sided|paraspinous|anterolateral)){0,8}
         [\s,;()/-]+thicken[a-z]*
         |
-        # 2. Inverted phrasing: thickening ... pleura
+        # 1b. Pleural effusion/fluid vs/or thickening (common hedge)
+        # Bounded gap recovers "pleural abnormality … fluid or thickening"
+        pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,10}
+        [\s,;()/-]+(?:effusion[a-z]*|fluid)
+        [\s,;()/-]+(?:versus|vs\.?|or|and[\s/]*or)
+        [\s,;()/-]+thicken[a-z]*
+        |
+        # 2. Inverted: thickening … pleura
         thicken[a-z]*
-        (?:[\s,;()/-]+[a-z-]+){0,4}
+        (?:[\s,;()/-]+(?:of|the|right|left|bilateral|focal|diffuse|nodular|mild|minimal|moderate|chronic|apical|basal|basilar|costal|lateral|posterior|anterior|calcified|calcific|wall|parenchymal|visceral|parietal|based|extrapleural|soft|tissue|or|and)){0,6}
         [\s,;()/-]+pleur[a-z]*
         |
-        # 3. Close equivalents
+        # 3. Apical / biapical / subpleural thickening (apical-cap family)
+        # FN-fit: pleural or extrapleural / soft tissue thickening gaps
+        (?:bi[\s-]?apic[a-z]*|apic[a-z]*|subpleural)
+        (?:[\s,;()/-]+(?:pleur[a-z]*|wall|parenchymal|or|extrapleural|subpleural|soft|tissue|right|left|mild|subtle|small|stable|bilateral|paraspinous|apic[a-z]*)){0,6}
+        [\s,;()/-]+thick[a-z]*
+        |
+        # 4. Close equivalents: rind / peel / fibrothorax
         pleural[\s,;()/-]+(?:rind|peel)
         |
-        # 4. Fibrothorax
         fibrothorax
         |
-        # 5. Narrow Chronic Pleural Changes
+        # 4b. Inverted rind → pleura / hemithorax (tumor rind paraphrase)
+        rind
+        (?:[\s,;()/-]+(?:of|soft|tissue|tumor|the|a|an|thick|involving|in|along|over|left|right|bilateral)){0,8}
+        [\s,;()/-]+(?:pleur[a-z]*|hemithorax)
+        |
+        # 5. Pleural / diaphragmatic plaques
+        (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*)
+        (?:[\s,;()/-]+[a-z-]+){0,3}
+        [\s,;()/-]+plaque[a-z]*
+        |
+        (?:calcif[a-z]*[\s,;()/-]+)?plaque[a-z]*
+        (?:[\s,;()/-]+(?:along|on|over|in|of|the|bilateral|calcified|are|is|noted|again|seen|known|unchanged|visible|demonstrated|redemonstrated)){0,6}
+        [\s,;()/-]+(?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*)
+        |
+        # 6. Pleural calcification (tight inverted window to avoid
+        # "calcification … bilateral pleural effusions")
+        pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,4}
+        [\s,;()/-]+(?:calcif[a-z]*|calcium)
+        |
+        (?:calcif[a-z]*|calcium)
+        (?:[\s,;()/-]+(?:along|on|over|in|of|the|bilateral|left|right|basal|basilar|apical|diaphragmatic|lateral|costal|noted|seen|again|are|is)){0,4}
+        [\s,;()/-]+pleur[a-z]*
+        |
+        # 7. Pleural-based calcification (plaque synonym)
+        pleur[a-z]*[\s-]+based
+        (?:[\s,;()/-]+[a-z-]+){0,2}
+        [\s,;()/-]+calcif[a-z]*
+        |
+        # 8. Apical / biapical / pleural / directional cap(ping)
+        (?:bi[\s-]?apic[a-z]*|apic[a-z]*|pleur[a-z]*|mild|minimal|small|stable|prominent|bilateral|right|left)
+        (?:[\s,;()/-]+(?:scar[a-z]*|fibro[a-z]*|mild|minimal|small|stable|prominent|bilateral|pleural|right|left|apic[a-z]*)){0,3}
+        [\s,;()/-]+cap(?:ping|s)?\b
+        |
+        # 9. Pleural scarring / fibrosis / adhesions
+        # (fibrotic included; fibros[a-z]* alone misses "fibrotic")
+        (?:pleur[a-z]*|pleuro[\s-]*parenchymal|subpleural)
+        (?:[\s,;()/-]+[a-z-]+){0,5}
+        [\s,;()/-]+(?:scar[a-z]*|fibr(?:otic|os[a-z]*)|adhes[a-z]*)
+        |
+        (?:scar[a-z]*|fibr(?:otic|os[a-z]*))
+        (?:[\s,;()/-]+[a-z-]+){0,5}
+        [\s,;()/-]+(?:pleur[a-z]*|pleuro[\s-]*parenchymal|subpleural)
+        |
+        # 9b. Adhesions … pleural (keep separate; shorter window)
+        adhes[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,3}
+        [\s,;()/-]+(?:pleur[a-z]*|pleuro[\s-]*parenchymal|subpleural)
+        |
+        # 10. Apical / biapical scarring or fibrosis
+        (?:bi[\s-]?apic[a-z]*|apic[a-z]*)
+        (?:[\s,;()/-]+pleur[a-z]*)?
+        (?:[\s,;()/-]+parenchymal)?
+        [\s,;()/-]+(?:scar[a-z]*|fibr(?:otic|os[a-z]*))
+        |
+        # 11. Narrow chronic / residual pleural changes
+        # disease / scalloping / optional "and parenchymal" (FN-mine hunt)
+        # Do not accept effusion/blunting as the head noun.
         (?:chronic|stable|residual|post[-\s]?operative|post[-\s]?surgical)
         (?:[\s,;()/-]+[a-z-]+){0,2}
+        [\s,;()/-]+pleur[a-z]*
+        (?:[\s,;()/-]+(?:and|parenchymal))*
+        [\s,;()/-]+(?:change[a-z]*|diseases?|scallop[a-z]*)
+        |
+        # 12. Costophrenic scarring / fibrotic phrasing
+        # (wider window for "CPA … effusions versus fibrotic change")
+        (?:costophrenic|cp)
+        (?:[\s,;()/-]+[a-z-]+){0,10}
+        [\s,;()/-]+(?:scar[a-z]*|fibr(?:otic|os[a-z]*))
+        |
+        (?:scar[a-z]*|fibr(?:otic|os[a-z]*))
+        (?:[\s,;()/-]+[a-z-]+){0,6}
+        [\s,;()/-]+(?:costophrenic|cp[\s,;()/-]+angle|cp[\s,;()/-]+sulcus)
+        |
+        # 13. Pleural reaction (mild chronic-pleural phrasing)
+        pleural[\s,;()/-]+reaction[a-z]*
+        |
+        # 14. Thickening referenced to pleural surfaces
+        pleur[a-z]*
+        [\s,;()/-]+surfaces?
+        (?:[\s,;()/-]+[a-z-]+){0,10}
+        [\s,;()/-]+thicken[a-z]*
+        |
+        # 15. Costophrenic / CP angle thickening (residual parent phrasing)
+        # Wider window: "costophrenic blunting … due to thickening"
+        (?:costophrenic|cp)
+        (?:[\s,;()/-]+[a-z-]+){0,8}
+        [\s,;()/-]+thicken[a-z]*
+        |
+        thicken[a-z]*
+        (?:[\s,;()/-]+(?:of|the|left|right|bilateral|mild|minimal|moderate|small|focal)){0,5}
+        [\s,;()/-]+(?:costophrenic|cp)
+        |
+        # 16. Pleural nodularity (nodular pleural thickening synonym)
+        pleur[a-z]*
+        [\s,;()/-]+nodularit[a-z]*
+        |
+        # 17. Residual: pleural opacity/density characterized as thickening
+        # (prompt-faithful; do not fire on generic pleural opacity alone)
+        pleur[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,8}
+        [\s,;()/-]+(?:compatible|consistent)
+        [\s,;()/-]+with
+        [\s,;()/-]+thicken[a-z]*
+        |
+        # 18. Thickening outlined toward parietal/visceral pleura
+        # ("air reveals thickening, most pronounced in the parietal pleura")
+        thicken[a-z]*
+        (?:[\s,;()/-]+[a-z-]+){0,8}
+        [\s,;()/-]+(?:parietal|visceral)
+        [\s,;()/-]+pleur[a-z]*
+        |
+        # 19. Pleural irregularity + scarring / fibrosis / postinflammatory /
+        # thickening (not bare irregularity — prompt ceiling)
+        pleur[a-z]*
+        (?:[\s,;()/-]+(?:focal|diffuse|nodular|mild|minimal|stable|bilateral|left|right|apical|basilar|sided)){0,4}
+        [\s,;()/-]+irregularit(?:y|ies)
+        (?:[\s,;()/-]+[a-z-]+){0,12}
+        [\s,;()/-]+(?:scar[a-z]*|fibr(?:otic|os[a-z]*)|postinflammatory|post[\s-]?inflammatory|thicken[a-z]*|change[a-z]*)
+        |
+        # 20. Biapical / apical pleural changes (old-TB / apical scarring family)
+        (?:bi[\s-]?apic[a-z]*|apic[a-z]*)
         [\s,;()/-]+pleur[a-z]*
         [\s,;()/-]+change[a-z]*
     )\b

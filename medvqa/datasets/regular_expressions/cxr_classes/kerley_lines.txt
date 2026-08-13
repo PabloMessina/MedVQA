@@ -1,6 +1,191 @@
+# Kerley / septal lines on CXR.
+# Prefer explicit Kerley / septal / interlobular-septal wording.
+# Do not broaden to bare linear opacities, reticular markings, lymphangitic
+# spread, or edema/CHF/congestion alone (prompt fidelity).
+# Block negated "no/without/lack of Kerley|septal …" and CT-attributed
+# septal thickening (CT-before in the same clause, or "on … CT" after).
+# FN-fit: Kerly/Kirley typos, Kerley-B hyphen, Kerley Blines, MIMIC ___ B-lines,
+# fine linear opacities along interlobular septa, fluid in interlobular septate.
+# FN-fit (fn_mine_fit_shared): Kerley "B" quotes; ___/XXXX A and B lines
+# (optional 2nd redaction); bare curly lines; prominent interlobular septa;
+# septal|interstitial (___ B) lines; edema in … interlobular septa.
 
-    # Matches: "Kerley B lines", "Kerley A lines", "Prominent Kerley lines"
-    \bkerley\s*(?:lines?|[abc]\b)
+    # --- Kerley family (kerley|kerly|kirley; hyphen/space/quotes; Blines) ---
+    # Optional ASCII/curly quotes around A/B/C: Kerley "B" lines
+    # Quality-modified: "well-defined Kerley B lines" (negation at adjective)
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?:well[\s-]defined|definite|obvious|clear(?:ly)?|frank)\s+
+    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:[abc][\s"“”'-]*)?lines?
     |
-    # Matches: "Septal lines" (Synonym)
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?:well[\s-]defined|definite|obvious|clear(?:ly)?|frank)\s+
+    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*[abc]\b
+    |
+    # Bare Kerley; block leftover "… well-defined Kerley" after "without"
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\bwell-defined\s)
+    (?<!\bwell\sdefined\s)
+    (?<!\bdefinite\s)
+    (?<!\bobvious\s)
+    (?<!\bfrank\s)
+    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:[abc][\s"“”'-]*)?lines?
+    |
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\bwell-defined\s)
+    (?<!\bwell\sdefined\s)
+    (?<!\bdefinite\s)
+    (?<!\bobvious\s)
+    (?<!\bfrank\s)
+    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*[abc]\b
+    |
+    # OCR garble: "ARKS" ≈ Kerley (seen with edema phrasing)
+    (?<!\bno\s)
+    \barks\b
+    |
+    # "curly B lines" / OCR "CURLY BEELINES" / bare "curly lines" (Kerley-B paraphrase)
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \bcurly\s+(?:(?:bee[\s-]*|b[\s-]*)?lines?)
+    |
+    # IU XXXX / MIMIC ___ redaction of Kerley B-lines (not bare US B-lines)
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?:_{2,}|\bxxxx)\s+[abc][\s-]*lines?
+    |
+    # "___ A and ___ B lines" / "___ A and B lines" / "XXXX A and B lines"
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    (?:_{2,}|\bxxxx)\s+[abc]\s+and\s+(?:(?:_{2,}|\bxxxx)\s+)?[abc][\s-]*lines?
+    |
+    # Parenthetical redaction: septal|interstitial (___ B) lines
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \b(?:(?:thickened|discrete)\s+)?(?:septal|interstitial)\s+\((?:_{2,}|\bxxxx)\s*[abc]\)\s*lines?
+    |
+    # --- Septal lines (split so "No interstitial septal lines" negates) ---
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    \b(?:interstitial|interlobular)\s+septal\s+lines?
+    |
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\bno\sinterstitial\s)
+    (?<!\bno\sinterlobular\s)
+    (?<!\bwithout\sinterstitial\s)
+    (?<!\bwithout\sinterlobular\s)
     \bseptal\s+lines?
+    |
+    # --- Septal thickening: CT-before in the same clause + "on … CT" ---
+    (?:^|[.!?;:\n])
+    (?:
+        (?!\bcta?\b)
+        [^.!?;:\n]
+    ){0,220}
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    \binterlobular\s+septal\s+thicken\w*
+    (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
+    |
+    (?:^|[.!?;:\n])
+    (?:
+        (?!\bcta?\b)
+        [^.!?;:\n]
+    ){0,220}
+    (?<!\bno\s)
+    (?<!\bnot\s)
+    (?<!\bwithout\s)
+    (?<!\babsent\s)
+    (?<!\black\sof\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)
+    (?<!\bno\sinterlobular\s)
+    (?<!\bno\sinterstitial\s)
+    (?<!\bwithout\sinterlobular\s)
+    \bseptal\s+thicken\w*
+    (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
+    |
+    # Reverse order: "thickening of interlobular septae/septa"
+    (?:^|[.!?;:\n])
+    (?:
+        (?!\bcta?\b)
+        [^.!?;:\n]
+    ){0,220}
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \bthicken(?:ed|ing)\s+(?:of\s+)?(?:the\s+)?interlobular\s+septa\w*
+    (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
+    |
+    # Prominent / more prominent interlobular septa (CXR septal lines paraphrase)
+    (?:^|[.!?;:\n])
+    (?:
+        (?!\bcta?\b)
+        [^.!?;:\n]
+    ){0,220}
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \b(?:more\s+)?prominent\s+(?:(?:the\s+)?interlobular\s+)?septa\w*
+    (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
+    |
+    (?:^|[.!?;:\n])
+    (?:
+        (?!\bcta?\b)
+        [^.!?;:\n]
+    ){0,220}
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \binterlobular\s+septa\w*\s+(?:are|is|appear(?:s)?)\s+(?:more\s+)?prominent
+    (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
+    |
+    # Matches: "linear interlobular septal ..."
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \blinear\s+interlobular\s+septal
+    |
+    # Fine linear opacities along interlobular septa (prompt-faithful paraphrase)
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \bfine\s+linear\s+opacit\w*\s+along\s+(?:the\s+)?interlobular\s+septa\w*
+    |
+    # Fluid/edema in the (peripheral) interlobular septa/septate
+    (?<!\bno\s)
+    (?<!\bwithout\s)
+    \b(?:fluid|edema)\s+in\s+(?:the\s+)?(?:(?:peripheral|basilar|lower)\s+)?interlobular\s+septa\w*

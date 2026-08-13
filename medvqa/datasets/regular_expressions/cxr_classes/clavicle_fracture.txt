@@ -1,18 +1,201 @@
+# ==============================================================================
+# clavicle_fracture
+# Match clavicle / clavicular fracture (acute, healing, old), callus, fracture
+# deformity, periosteal new bone + trauma framing, midclavicular fracture.
+# Do NOT match: negated "no evidence of … clavicle fracture", evaluate-for /
+# indication-only phrasing, bare clavicular displacement without fracture
+# framing, acromioclavicular separation alone, or bare "clavicle deformity"
+# without post-traumatic / fracture framing.
+# Negation / history lookbehinds are fixed-width (stdlib re).
+#
+# FN-fit (fn_mine_fit_shared): lateral component / distal tip|end; mid portion;
+# spaced mid clavicular; mid-clavicle; humerus/glenoid list walks; as-well-as
+# without sided; again demonstrated; deformity→healed prior fx; postop
+# fixation…fracture reduction; callus formation…clavicle…healing fracture.
+# ==============================================================================
 
-    # 1. Anatomy ... followed by ... Pathology
-    # Matches: "Clavicle fracture", "Clavicular head fracture", "Clavicle shows a deformity"
-    \w*clavic\w* # Anatomy: clavicle, clavicular, acromioclavicular
-    (?:                             # Non-capturing group for the gap
-    \s+(?:of|the|left|right|mid|distal|proximal|third|is|shows|demonstrates|appears) # Common fillers
-    ){0,5}                          # Allow up to 5 filler words to cover "Clavicle shows signs of healing fracture"
-    \s+
-    (?:fractur\w*|fx|break|deform\w*|callus|comminut\w*|displac\w*|angulat\w*|non-?union|malunion) # Pathology
-    |
-    # 2. Pathology ... followed by ... Anatomy
-    # Matches: "Fracture of the distal clavicle", "Deformity of the right clavicle"
-    \b(?:fractur\w*|fx|break|deform\w*|callus|comminut\w*|displac\w*|angulat\w*|non-?union|malunion) # Pathology
+(?:
+    # Shared fixed-width guards immediately before the match start
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)(?<!\bno\sobvious\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\sevidence\sof\sright\s)(?<!\bno\sevidence\sof\sleft\s)
+    (?<!\bno\sevidence\sof\sa\s)(?<!\bno\sevidence\sof\san\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bwithout\sevidence\sof\sright\s)(?<!\bwithout\sevidence\sof\sleft\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bevidence\sof\s)(?<!\bevidence\sof\sright\s)(?<!\bevidence\sof\sleft\s)
+    (?<!\bno\smade\sof\sthe\s)(?<!\bno\smade\sof\sthe\sleft\s)(?<!\bno\smade\sof\sthe\sright\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\brib/)(?<!\bfor\s)
+    (?<!\?\s)
+    # Projection / question hedges (FP trim)
+    (?<!\bsuggestion\sof\sa\s)(?<!\bsuggestion\sof\san\s)
+    (?<!\bsuggestion\sof\sa\sright\s)(?<!\bsuggestion\sof\sa\sleft\s)
+    (?<!\bsuggestion\sof\sright\s)(?<!\bsuggestion\sof\sleft\s)
+    (?<!\bquestion\sof\sa\s)(?<!\bquestion\sof\san\s)
+    (?<!\bquestion\sof\sright\s)(?<!\bquestion\sof\sleft\s)
+    (?<!\bquestion\sof\sa\sright\s)(?<!\bquestion\sof\sa\sleft\s)
+    (?<!\bcannot\sidentify\sa\s)(?<!\bcannot\sidentify\san\s)
+
     (?:
-    \s+(?:of|the|left|right|mid|distal|proximal|third|in|at)
-    ){0,5}                          # Allow up to 5 filler words
-    \s+
-    \w*clavic\w* # Anatomy
+        # 1. Anatomy → pathology (incl. lists; midclavicular deformity→healed prior fx).
+        #    No fixation/device/hardware fillers here (avoids screw/device "fractured").
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \s*,?\s*(?:and\s+|or\s+)?
+            (?:(?:left|right|bilateral|bilat\.?|multiple)\s+)*
+            (?:ribs?|ribcage|rib\s*cage|scapul\w*|stern(?:um|al)?|humer\w*|shoulder|glenoid)
+        ){0,4}
+        (?:
+            (?:\s*,?\s*|\s+)
+            (?:of|the|a|an|left|right|mid|middle|midshaft|mid-?shaft|shaft|
+                 distal|proximal|medial|lateral|third|thirds|3rd|one-?third|
+                 mid-to-distal|is|are|shows|demonstrates|demonstrat\w*|exhibits|
+                 appears|appear\w*|with|has|have|again|still|similar|
+                 post[\s-]?traumatic|consistent|compatib\w*|nondisplaced|non-?displaced|
+                 displaced|oblique|mildly|minimally|redemonstrat\w*|stable|noted|seen|
+                 through|involving|deformit\w*|likely|probably|possibly|prior|old|
+                 remote|healed|healing|acute|chronic|from)
+        ){0,12}
+        \s+
+        (?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|comminut\w*|non-?union|malunion|
+           foreshorte\w*|periosteal(?:\s+new)?\s+bone)
+        |
+
+        # 1b. Postop: clavicular (internal) fixation … fracture reduction
+        #     (requires "fracture reduction", not bare hardware / device fractured)
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:internal\s+)?fixation(?:\s+device|\s+hardware|\s+plate|\s+plate\s+and\s+screw)?
+        (?:
+            \W+\w+
+        ){0,6}
+        \s+
+        fracture\s+reduction
+        |
+
+        # 2. Pathology → anatomy (longer filler for midshaft / junction / lists /
+        #    distal tip|end / lateral component / humerus intervener / again demonstrated).
+        #    Keep deformit*→clavicle (baseline sample-gold: redacted "remote XXXX",
+        #    "suggests old injury", bare contour deformity of clavicle).
+        \b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|comminut\w*|non-?union|malunion|deformit\w*)\b
+        (?:
+            (?:\s*,?\s*|\s+)
+            (?:of|the|a|an|left|right|mid|middle|midshaft|mid-?shaft|shaft|
+               distal|proximal|medial|lateral|third|thirds|3rd|one-?third|
+               mid-to-distal|aspect|sided|inferior|superior|patholog\w*|known|
+               old|remote|healing|healed|acute|chronic|oblique|mildly|minimally|displaced|
+               non-?displaced|nondisplaced|in|at|through|involving|to|and|
+               junction|is|are|was|were|noted|seen|again|still|also|
+               ribcage|rib\s*cage|ribs?|scapul\w*|multiple|humer\w*|glenoid|
+               component|tip|end|portion|midportion|formation|demonstrat\w*|
+               fractur\w*|fx|break(?:s|ing)?|broken|comminut\w*|transverse|
+               deformit\w*|as|well|bilateral|bilat\.?|contour|appearing)
+        ){0,18}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        |
+
+        # 3. Fracture … as well as … clavicle (optional sided; distal/proximal)
+        \b(?:patholog\w*\s+)?fractur\w*
+        (?:
+            \W+\w+
+        ){0,16}
+        \s+as\s+well\s+as\s+(?:the\s+)?
+        (?:(?:left|right)(?:-|\s)?sided\s+|(?:left|right)\s+)?
+        (?:distal|proximal|medial|lateral|mid(?:[\s-])?|middle\s+)?
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        |
+
+        # 4. Periosteal new bone / foreshortening at clavicle + trauma/fracture framing
+        (?:periosteal(?:\s+new)?\s+bone|foreshorte\w*)
+        (?:
+            \W+\w+
+        ){0,10}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:prior\s+trauma|old\s+trauma|remote\s+trauma|post[\s-]?traumatic|fractur\w*|callus|healed|healing)
+        |
+
+        # 5. Clavicle … post-traumatic / fracture deformity (require trauma/fx framing)
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:post[\s-]?traumatic(?:\s+fracture)?|fracture)\s+deformit\w*
+        |
+
+        # 6. Deformity-first → clavicle ("Post traumatic deformity is again seen in the right clavicle")
+        \b(?:post[\s-]?traumatic|fracture)\s+deformit\w*
+        (?:
+            \s+(?:is|are|was|were|again|still|also|noted|seen|demonstrat\w*|
+                 appear\w*|visuali[sz]ed|of|in|at|the|a|an|left|right|
+                 distal|proximal|medial|lateral|mid|middle|old|remote)
+        ){0,8}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        |
+
+        # 6b. Deformities of … clavicles … compatible/consistent with (healed) prior fractures
+        #     Bridge required so "… without fracture" / bare deformity do not match.
+        \bdeformit\w*\b
+        (?:
+            \s+(?:of|the|a|an|left|right|bilateral|bilat\.?|both|mid|middle|
+                 distal|proximal|medial|lateral)
+        ){0,6}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:(?:consistent|compatib\w*|suggestive)\s+with\s+|(?:probably\s+|likely\s+)?from\s+|due\s+to\s+)
+        (?:healed\s+|healing\s+|old\s+|remote\s+|prior\s+|chronic\s+)*
+        fractur\w*
+        |
+
+        # 7. Irregularity through clavicle consistent with (non)displaced fracture
+        \b(?:cortical\s+)?irregularit\w*\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,6}
+        \s+
+        (?:(?:consistent|compatib\w*)\s+with\s+)?
+        (?:non-?displaced\s+|nondisplaced\s+|displaced\s+|oblique\s+)?
+        fractur\w*
+        |
+
+        # 8. Callus … clavicle … (chronic|healing|healed|prior) fracture
+        \bcallus(?:es)?\b
+        (?:
+            \W+\w+
+        ){0,10}
+        \s+
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        (?:
+            \W+\w+
+        ){0,8}
+        \s+
+        (?:(?:consistent|compatib\w*|suggestive)\s+with\s+(?:a\s+|an\s+)?)?
+        (?:chronic\s+|healing\s+|healed\s+|old\s+|remote\s+|prior\s+|acute\s+)*
+        fractur\w*
+    )
+)

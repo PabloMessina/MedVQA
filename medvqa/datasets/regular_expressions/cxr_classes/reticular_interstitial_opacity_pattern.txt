@@ -1,0 +1,77 @@
+# ==============================================================================
+# reticular_interstitial_opacity_pattern
+# Network-like / reticular pulmonary opacity on the current CXR.
+#
+# Match: reticular / reticulate(d) / reticulation(s) / reticular opacities|markings|pattern;
+# reticulonodular (incl. reticulo-nodular); reticulogranular (RDS-style
+# reticular+granular, same “explicit reticular component” rule as
+# reticulonodular); reticulolinear; reticulointerstitial; reticuloalveolar;
+# noduloreticular; truncated reticula+pattern; IU “retic./retic markings”;
+# common typos (retricular, reitcular, recticular, reticuonodular,
+# reticulonudar, reticulnodular); net/network/mesh/lace-like phrasing;
+# meshwork/lacework + pulmonary opacity/pattern trailer.
+#
+# Do NOT match: bare septal thickening / Kerley lines; interstitial markings
+# or ILD/edema diagnosis alone without reticular wording; CT-only
+# "cortical reticulation on … CT"; negated "no/without reticular…";
+# abdominal "perforated reticula" (no opacity/pattern trailer);
+# bare "network"/"meshwork" without pulmonary opacity framing.
+# Do not conflate with interstitial_lung_disease.
+# ==============================================================================
+
+\b(?:
+        # --- Reticular family (negation-guarded) ---
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\babsent\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?:
+            # Standard morphology + adjective forms (reticulate / reticulated)
+            reticular|
+            reticulat(?:e[ds]?)|
+            # reticulation(s): allow CXR use; block CT jargon /
+            # "reticulation on (recent) CT" / cortical reticulation
+            (?<!cortical\s)reticulations?(?!\s+on\s+(?:(?:a|the|recent)\s+)?ct\b)|
+            # Truncated "reticula patterns/opacities" (not bare abdominal reticula)
+            reticula\s+(?:patterns?|opacit(?:y|ies)|densit(?:y|ies)|markings|appearance|change)\b|
+            # reticulonodular / reticulo-nodular / reticulo-nodulation
+            reticulonodul\w*|
+            reticulo[\s-]*nodul\w*|
+            # Typo: reticulonudar (missing o in nodular)
+            reticulonud\w*|
+            # Typo: reticulnodular (missing o after reticul)
+            reticulnodul\w*|
+            # Reverse compound: noduloreticular / nodulo-reticular
+            nodulo[\s-]*reticul\w*|
+            # reticulogranular / reticulo-granular (neonatal RDS; reticular component)
+            reticulogranul\w*|
+            reticulo[\s-]*granul\w*|
+            # reticulolinear / reticulo-linear (reticular + linear component)
+            reticulolinear\w*|
+            reticulo[\s-]*linear\w*|
+            # reticulointerstitial / reticulo-interstitial
+            reticulo[\s-]*interstit\w*|
+            # reticuloalveolar / reticulo-alveolar (reticular + alveolar component)
+            reticulo[\s-]*alveol\w*|
+            # IU abbreviation of reticular markings (optional period: "Retic. opacities")
+            retic\.?\s+(?:markings|opacit(?:y|ies)|densit(?:y|ies)|pattern|change)\b|
+            # Frequent report typos observed on this freeze set
+            retricular|
+            reitcular|
+            recticular|
+            reitculonodul\w*|
+            reitculo[\s-]*nodul\w*|
+            reticuonodul\w*
+        )
+    |
+        # --- Plain-English network / mesh / lace descriptors ---
+        # network-like before net-like so "network" is not truncated to "net"
+        (?:network|net|mesh|lace)[\s-]*like
+    |
+        # meshwork / lacework needing pulmonary opacity/pattern framing
+        (?:mesh|lace)work(?:\s+of)?\s+(?:(?:a|an|the)\s+)?(?:pulmonary\s+)?(?:opacit(?:y|ies)|patterns?|densit(?:y|ies)|markings|abnormalit(?:y|ies)|appearance|change)\b
+    |
+        (?:mesh|lace)work\s+patterns?\b
+    )

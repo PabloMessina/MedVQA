@@ -1,13 +1,123 @@
+# Residual mid-node calcification (umbrella).
+# Prompt: explicit calcified / calcific / calcification / calcinosis wording
+# (incl. unlocalized, costochondral, lymph-node, soft-tissue). Do NOT infer from
+# bare athero/sclerotic change, nodules/plaques/adenopathy, normal bone,
+# osteopenia, or metal devices. Children cover aorta / calcified nodule /
+# cardiac-valvular / pleural — keep this leaf for residual + broad calcific root.
+# Precision: fixed-width negation / prior-exam lookbehinds (Python re).
 
-    \b(?:
-        # 1. The primary root (Safe)
-        # Matches: "Calcified", "Calcification", "Calcific" (e.g., "Calcific tendinitis")
-        calcif\w*
-        |
-        # 2. Specific variants
-        # "Calcinosis" (e.g., "Tumoral calcinosis" - rare but relevant)
-        calcinosis
-        |
-        # 3. Micro-calcifications (Rare in CXR, but good for completeness)
-        microcalcif\w*
-    )\b
+# ==============================================================================
+# 1. Mid-word / residual forms children miss
+# ==============================================================================
+\b(?:
+        fibrocalcif\w*
+        | chondrocalcinosis
+        | calcinos\w*
+        # OCR / typo of calcification
+        | calicif\w*
+        # explicit mineral deposition (prompt-adjacent calcific wording)
+        | hydroxyapatite
+        # soft-tissue / endobronchial calcific deposits (phleboliths; broncholiths; ossific densities)
+        | phlebolith\w*
+        | broncholith\w*
+        | ossific\s+densit\w*
+)\b
+# pinna chondrocalcinosis is head CT, not current CXR
+(?!\s+of\s+the\s+(?:left|right)\s+pinna)
+
+|
+
+# ==============================================================================
+# 2. Costochondral mineralization (prompt residual; not bare bone mineraliz*)
+# ==============================================================================
+\bmineraliz\w*\s+(?:of\s+)?(?:the\s+)?costochondral\b
+|
+\bcostochondral\b(?:\s+\w+){0,4}\s+mineraliz\w*\b
+
+|
+
+# ==============================================================================
+# 3. Explicit calcium wording (not calcium-channel / serum calcium)
+# Hunt residual: calcium-within / aggregate-of-calcium (not lab / normal-limits)
+# ==============================================================================
+\bcontain(?:s|ing)?\s+calcium\b
+|
+\bcalcium\s+(?:deposit\w*|densit\w*|fleck\w*)\b
+|
+# "calcium within them" / "calcium within the nodule" — not serum-within-limits
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+(?<!\bserum\s)(?<!\bionized\s)
+\bcalcium\s+within\b
+(?!\s+normal)
+(?!\s+(?:the\s+)?(?:reference|expected|normal)\s)
+|
+# "aggregate/foci/collection of calcium in …"
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+\b(?:aggregat\w*|foc(?:us|i)|collections?)\s+of\s+calcium\b
+|
+# "density/nodule with (some) calcium" — not meds (channel / salts)
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+\b(?:densit\w*|nodule\w*|opacit\w*|lesion\w*|mass(?:es)?|foc(?:us|i)|granuloma\w*)
+\s+with\s+(?:some\s+|mild\s+|minimal\s+|focal\s+)?calcium\b
+(?!\s+channel)(?!\s+gluconate)(?!\s+chloride)(?!\s+carbonate)(?!\s+score)
+|
+# "region / regional calcium" (bare radiographic calcium phrasing)
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+(?<!\bserum\s)(?<!\bionized\s)
+\bregion(?:al)?\s+calcium\b
+(?!\s+channel)(?!\s+score)
+
+|
+
+# ==============================================================================
+# 4. Broad calcific root with negation + prior-exam guards
+# ==============================================================================
+(?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\babsent\s)(?<!\bdenies\s)
+(?<!\bnegative\sfor\s)
+(?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+(?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)
+# "No abnormal calcifications" / "... or abnormal calcifications"
+(?<!\bno\sabnormal\s)(?<!\bwithout\sabnormal\s)(?<!\bor\sabnormal\s)
+# "abnormalities or wall calcifications" / "mass effect or calcification"
+(?<!\bor\swall\s)(?<!\beffect\sor\s)
+# "pleural thickening/calcifications"
+(?<!\bthickening/)
+# "non calcified" / "non-calcified"
+(?<!\bnon\s)(?<!\bnon-)
+# "no pathologic / intracardiac calcifications"
+(?<!\bno\spathologic\s)(?<!\bwithout\spathologic\s)
+(?<!\bno\sintracardiac\s)(?<!\bwithout\sintracardiac\s)
+# intracranial (wrong-exam) even without "no"
+(?<!\bintracranial\s)(?<!\bno\sintracranial\s)
+# "no <anatomy> calcification(s)"
+(?<!\bno\spleural\s)(?<!\bwithout\spleural\s)(?<!\bnot\spleural\s)
+(?<!\bno\saortic\s)(?<!\bwithout\saortic\s)
+(?<!\bno\svascular\s)(?<!\bwithout\svascular\s)
+(?<!\bno\scoronary\s)(?<!\bwithout\scoronary\s)
+(?<!\bno\svalvular\s)(?<!\bwithout\svalvular\s)
+(?<!\bno\spericardial\s)(?<!\bwithout\spericardial\s)
+(?<!\bno\shilar\s)(?<!\bwithout\shilar\s)
+(?<!\bno\smediastinal\s)(?<!\bwithout\smediastinal\s)
+(?<!\bno\spulmonary\s)(?<!\bwithout\spulmonary\s)
+(?<!\bno\slung\s)(?<!\bwithout\slung\s)
+(?<!\bno\scostochondral\s)(?<!\bwithout\scostochondral\s)
+(?<!\bno\scardiac\s)(?<!\bwithout\scardiac\s)
+(?<!\bno\smitral\s)(?<!\bwithout\smitral\s)
+(?<!\bno\stracheal\s)(?<!\bwithout\stracheal\s)
+(?<!\bno\sbronchial\s)(?<!\bwithout\sbronchial\s)
+(?<!\bno\sfocal\s)(?<!\bwithout\sfocal\s)
+# prior / history only
+(?<!\bpreoperative\sfilms\sshowed\sa\s)(?<!\bpreoperative\sfilm\sshowed\sa\s)
+(?<!\bpreoperative\sfilms\sshowed\s)(?<!\bpreoperative\sfilm\sshowed\s)
+(?<!\bprior\sfilms\sshowed\sa\s)(?<!\bprior\sfilm\sshowed\sa\s)
+(?<!\bprior\sfilms\sshowed\s)(?<!\bprior\sfilm\sshowed\s)
+(?<!\bprior\sstudies\sshowed\sa\s)(?<!\bprior\sstudy\sshowed\sa\s)
+(?<!\bprior\sstudies\sshowed\s)(?<!\bprior\sstudy\sshowed\s)
+(?<!\bhistory\sof\sa\s)(?<!\bhistory\sof\s)(?<!\bh/o\s)
+\b(?:micro)?calcif\w*\b
+(?!\s*:\s*none)
+(?!\s*:\s*none\s+evident)
+# Non-thoracic / wrong-exam sites (residual FPs on multi-study reports)
+(?!\s+in\s+the\s+(?:right|left)\s+kidney)
+(?!\s+in\s+the\s+(?:left|right)\s+pectineus)
+(?!\s+projecting\s+over\s+the\s+(?:left|right)\s+obturator)

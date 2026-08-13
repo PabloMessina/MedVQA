@@ -1,35 +1,99 @@
-
-    \b(?:
+\b(?:
         # ==============================================================================
-        # 1. Explicit Diagnostic Terms (Suffix Matching)
-        #    Matches: Scoliosis, Levoscoliosis, Dextroscoliosis, Rotoscoliosis, 
-        #    Kyphoscoliosis. \w* handles plurals like 'scolioses'.
+        # FN-fit (fn_mine_fit_shared): dextro/levoconvex(+ity); scolosis typo;
+        #   thoracic curvature with convexity to L/R; apex-left/right angulation.
         # ==============================================================================
-        (?:[a-z]*scoliosis)\w*
+        # 1. Explicit diagnostic terms (incl. levo-/dextro-/roto-/kypho- prefixes)
+        #    sc?ol(?:io)?(sis|tic) catches "scoliosis", typo "scolosis" (missing 'i'),
+        #    and "levosoliosis" (missing 'c'). Prefixed adjectives (dextroscoliotic).
+        #    \w* covers plurals (scolioses).
+        # ==============================================================================
+        (?:[a-z]*sc?ol(?:io)?(?:sis|tic))\w*
         |
         # ==============================================================================
-        # 2. Adjective Form
-        #    Matches: "scoliotic curvature", "scoliotic deformity"
+        # 2. Truncated dictation abbreviation: "scoli" as a standalone token
         # ==============================================================================
-        scoliotic
+        scoli
         |
         # ==============================================================================
-        # 3. Descriptive: Lateral Curvature
-        #    Added optional 's' to capture "lateral curvatures".
+        # 3. Compound or spaced directional curvature words
+        #    e.g. dextrocurvature / "dextro curvature" of the thoracic spine
         # ==============================================================================
-        lateral\s+curvatures?
+        (?:dextro|levo)\s*curvatures?
         |
         # ==============================================================================
-        # 4. Descriptive: Directional Curvature
-        #    Accounts for plurals (curvatures, convexities, deviations).
-        #    Uses [^.]*? to safely match terms within the same sentence, preventing 
-        #    false positives from jumping across periods.
+        # 3b. Directional compound convex adjectives/nouns (FN-fit hunt)
+        #     dextroconvex / levoconvex / dextroconvexity / levoconvexity
         # ==============================================================================
-        (?:curvatures?|convexit(?:y|ies)|deviations?)\s[^.]*?(?:spine|thoracic|lumbar|thoracolumbar)
+        (?:dextro|levo)\s*convex(?:it(?:y|ies))?
         |
         # ==============================================================================
-        # 5. Shape Descriptors
-        #    Accounts for plurals in curvature and deformity.
+        # 4. Descriptive lateral / directional curvature (token-local; no cross-clause jump)
+        #    Optional "convex" between direction and curvature:
+        #    "rightward convex curvature centered along the mid thoracic spine"
         # ==============================================================================
-        s-shaped\s+(?:spine|curvatures?|deformit(?:y|ies))
-    )\b
+        (?:lateral|leftward|rightward)\s+(?:convex\s+)?curvatures?
+        |
+        # ==============================================================================
+        # 5. Shape descriptors — S-shaped spine / curvature / deformity
+        #    Optional reverse(d) prefix; optional regional/level/convex adjectives
+        #    between S-shaped and the noun (thoracic, thoracolumbar, convex, …).
+        # ==============================================================================
+        (?:revers(?:e|ed)\s+)?s-shaped\s+(?:(?:upper|mid(?:dle)?|lower|thoracic|lumbar|thoracolumbar|convex)\s+)*(?:spine|curvatures?|deformit(?:y|ies))
+        |
+        # ==============================================================================
+        # 5b. Predicative S-shaped spine ("The spine is S-shaped")
+        # ==============================================================================
+        spine\s+is\s+(?:revers(?:e|ed)\s+)?s-shaped
+        |
+        # ==============================================================================
+        # 5c. Curvature/angulation of a named spinal region in an S-shaped configuration
+        #     (not bare "S-shaped configuration" — that can be hardware/device shape)
+        # ==============================================================================
+        (?:curvatures?|angulation)\s+of\s+(?:the\s+)?(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+spine\s+in\s+an?\s+(?:revers(?:e|ed)\s+)?s-shaped\s+configuration
+        |
+        # ==============================================================================
+        # 6. Curvature/convexity of the (regional) spine — exclude pure kyphotic/lordotic
+        # ==============================================================================
+        (?<!kyphotic\s)(?<!lordotic\s)(?:curvatures?|convexit(?:y|ies))\s+(?:(?:of|in)\s+(?:the\s+)?)?(?:(?:thoracic|lumbar|thoracolumbar)\s+)?spine
+        |
+        # ==============================================================================
+        # 6b. Regional thoracic/spinal curvature with trailing convexity-to-side clause
+        #     e.g. "mid thoracic curvature with convexity to the right"
+        #     (requires spinal/thoracic region so mediastinal/heart convexity alone fails)
+        # ==============================================================================
+        (?:(?:upper|mid(?:dle)?|lower|mid-to-lower)\s+)*(?:thoracic|lumbar|thoracolumbar|spin(?:e|al))\s+curvatures?\s+with\s+convexity\s+to\s+the\s+(?:left|right)
+        |
+        # ==============================================================================
+        # 7. Reversed order: (regional) spine/spinal curvature (not kyphotic/lordotic)
+        # ==============================================================================
+        (?<!kyphotic\s)(?<!lordotic\s)(?:(?:thoracic|lumbar|thoracolumbar)\s+)?spin(?:e|al)\s+curvatures?
+        |
+        # ==============================================================================
+        # 8. Directional apex curvature of a named spinal region
+        #    Requires "of … spine" so "right apex curvature and upper thoracic spine
+        #    is nonspecific" does not fire.
+        # ==============================================================================
+        (?:right|left)\s+apex\s+curvatures?\s+(?:of\s+(?:the\s+)?)?(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+spine
+        |
+        # ==============================================================================
+        # 8b. Apex-left / apex-right angulation of the spine (FN-fit hunt / sample-gold)
+        #     e.g. "apex-left angulation of the spine" / "apex left angulation"
+        # ==============================================================================
+        apex[-\s]?(?:left|right)\s+angulation(?:\s+of\s+(?:the\s+)?spine)?
+        |
+        # ==============================================================================
+        # 9. Curvature at the thoracolumbar junction (no trailing "spine" token)
+        # ==============================================================================
+        (?<!kyphotic\s)(?<!lordotic\s)curvatures?\s+(?:of\s+(?:the\s+)?)?thoracolumbar(?:\s+junction)?
+        |
+        # ==============================================================================
+        # 10. Explicit directional convex-right/left thoracic (spinal) curvature
+        # ==============================================================================
+        convex[-\s](?:right|left)\s+(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+(?:spin(?:e|al)\s+)?curvatures?
+        |
+        # ==============================================================================
+        # 11. Deviation of the spine only (not trachea / aorta / heart)
+        # ==============================================================================
+        deviations?\s+(?:of\s+(?:the\s+)?)?(?:(?:thoracic|lumbar|thoracolumbar)\s+)?spine
+)\b

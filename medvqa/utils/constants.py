@@ -1737,91 +1737,113 @@ CANONICAL_CXR_CLASSES = [
 _CXR_CLASS_PHRASES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts', 'cxr_classes')
 
 
-def _cxr_class_name_to_phrase_stem(class_name: str) -> str:
-    """Map a unified CXR class name to its phrase filename stem under prompts/cxr_classes/."""
-    return class_name.lower().replace('/', '_').replace(' ', '_').replace('-', '_')
-
-
-def _load_cxr_class_phrase_for_report_nli(class_name: str) -> str:
-    stem = _cxr_class_name_to_phrase_stem(class_name)
-    path = os.path.join(_CXR_CLASS_PHRASES_DIR, f'{stem}.txt')
+def _load_cxr_class_nli_hypothesis(class_id: str) -> str:
+    path = os.path.join(_CXR_CLASS_PHRASES_DIR, f'{class_id}.txt')
     with open(path, 'r', encoding='utf-8') as f:
         return f.read().rstrip('\n')
 
 
-# 'Cardiomyopathy' removed because it's too hard to detect based on chest X-rays only.
-UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI = {
-    'Adenopathy': _load_cxr_class_phrase_for_report_nli('Adenopathy'),
-    'Atelectasis': _load_cxr_class_phrase_for_report_nli('Atelectasis'),
-    'Aortic Calcification': _load_cxr_class_phrase_for_report_nli('Aortic Calcification'),
-    'Aortic Enlargement': _load_cxr_class_phrase_for_report_nli('Aortic Enlargement'),
-    'Aortic Tortuosity': _load_cxr_class_phrase_for_report_nli('Aortic Tortuosity'),
-    'Azygos Lobe': _load_cxr_class_phrase_for_report_nli('Azygos Lobe'),
-    'Bone Fracture': _load_cxr_class_phrase_for_report_nli('Bone Fracture'),
-    'Bulla': _load_cxr_class_phrase_for_report_nli('Bulla'),
-    'Calcification': _load_cxr_class_phrase_for_report_nli('Calcification'),
-    'Cardiomegaly': _load_cxr_class_phrase_for_report_nli('Cardiomegaly'),
-    'Clavicle Fracture': _load_cxr_class_phrase_for_report_nli('Clavicle Fracture'),
-    'Consolidation': _load_cxr_class_phrase_for_report_nli('Consolidation'),
-    'COPD/Emphysema': _load_cxr_class_phrase_for_report_nli('COPD/Emphysema'),
-    'Edema': _load_cxr_class_phrase_for_report_nli('Edema'),
-    'Enlarged Cardiomediastinum': _load_cxr_class_phrase_for_report_nli('Enlarged Cardiomediastinum'),
-    'Enlarged Pulmonary Artery': _load_cxr_class_phrase_for_report_nli('Enlarged Pulmonary Artery'),
-    'Fissural Effusion': _load_cxr_class_phrase_for_report_nli('Fissural Effusion'),
-    'Fissural Thickening': _load_cxr_class_phrase_for_report_nli('Fissural Thickening'),
-    'Granuloma': _load_cxr_class_phrase_for_report_nli('Granuloma'),
-    'Hernia': _load_cxr_class_phrase_for_report_nli('Hernia'),
-    'Hilar Enlargement': _load_cxr_class_phrase_for_report_nli('Hilar Enlargement'),
-    'Hydropneumothorax': _load_cxr_class_phrase_for_report_nli('Hydropneumothorax'),
-    'Infiltration': _load_cxr_class_phrase_for_report_nli('Infiltration'),
-    'Interstitial Lung Disease': _load_cxr_class_phrase_for_report_nli('Interstitial Lung Disease'),
-    'Kyphosis': _load_cxr_class_phrase_for_report_nli('Kyphosis'),
-    'Lobar Atelectasis': _load_cxr_class_phrase_for_report_nli('Lobar Atelectasis'),
-    'Lung Cavity': _load_cxr_class_phrase_for_report_nli('Lung Cavity'),
-    'Lung Cyst': _load_cxr_class_phrase_for_report_nli('Lung Cyst'),
-    'Lung Lesion': _load_cxr_class_phrase_for_report_nli('Lung Lesion'),
-    'Lung Opacity': _load_cxr_class_phrase_for_report_nli('Lung Opacity'),
-    'Lung Tumor': _load_cxr_class_phrase_for_report_nli('Lung Tumor'),
-    'Mass': _load_cxr_class_phrase_for_report_nli('Mass'),
-    'Mediastinal Shift': _load_cxr_class_phrase_for_report_nli('Mediastinal Shift'),
-    'Nodule': _load_cxr_class_phrase_for_report_nli('Nodule'),
-    'Normal': _load_cxr_class_phrase_for_report_nli('Normal'),
-    'Pleural Effusion': _load_cxr_class_phrase_for_report_nli('Pleural Effusion'),
-    'Pleural Calcification': _load_cxr_class_phrase_for_report_nli('Pleural Calcification'),
-    'Pleural Nodule/Mass': _load_cxr_class_phrase_for_report_nli('Pleural Nodule/Mass'),
-    'Pleural Thickening': _load_cxr_class_phrase_for_report_nli('Pleural Thickening'),
-    'Pneumomediastinum': _load_cxr_class_phrase_for_report_nli('Pneumomediastinum'),
-    'Pneumonia': _load_cxr_class_phrase_for_report_nli('Pneumonia'),
-    'Pneumoperitoneum': _load_cxr_class_phrase_for_report_nli('Pneumoperitoneum'),
-    'Pneumothorax': _load_cxr_class_phrase_for_report_nli('Pneumothorax'),
-    'Pulmonary Embolism': _load_cxr_class_phrase_for_report_nli('Pulmonary Embolism'),
-    'Pulmonary Fibrosis': _load_cxr_class_phrase_for_report_nli('Pulmonary Fibrosis'),
-    'Pulmonary Hypertension': _load_cxr_class_phrase_for_report_nli('Pulmonary Hypertension'),
-    'Pulmonary Infarction': _load_cxr_class_phrase_for_report_nli('Pulmonary Infarction'),
-    'Pulmonary Vascular Congestion': _load_cxr_class_phrase_for_report_nli('Pulmonary Vascular Congestion'),
-    'Osteopenia': _load_cxr_class_phrase_for_report_nli('Osteopenia'),
-    'Rib Fracture': _load_cxr_class_phrase_for_report_nli('Rib Fracture'),
-    'Rounded Atelectasis': _load_cxr_class_phrase_for_report_nli('Rounded Atelectasis'),
-    'Scoliosis': _load_cxr_class_phrase_for_report_nli('Scoliosis'),
-    'Subcutaneous Emphysema': _load_cxr_class_phrase_for_report_nli('Subcutaneous Emphysema'),
-    'Support Devices': _load_cxr_class_phrase_for_report_nli('Support Devices'),
-    'Tuberculosis': _load_cxr_class_phrase_for_report_nli('Tuberculosis'),
+# Stable IDs from canonical_cxr_ontology.yaml. Prompt filenames use these IDs.
+_CANONICAL_CXR_CLASS_IDS = (
+    'no_finding',
+    'calcification',
+    'lung_opacity',
+    'ground_glass_opacity_pattern',
+    'consolidation',
+    'pneumonia',
+    'tuberculosis',
+    'interstitial_lung_disease',
+    'atelectasis',
+    'lobar_atelectasis',
+    'rounded_atelectasis',
+    'reticular_interstitial_opacity_pattern',
+    'kerley_lines',
+    'pulmonary_edema',
+    'fibrotic_lung_change',
+    'focal_pulmonary_scarring',
+    'pulmonary_nodule_or_mass',
+    'calcified_pulmonary_nodule_or_granuloma',
+    'pulmonary_cavity',
+    'pulmonary_cyst_or_bulla',
+    'emphysema',
+    'bronchiectasis',
+    'bronchial_wall_thickening',
+    'low_lung_volume',
+    'hyperinflation',
+    'pleural_effusion',
+    'loculated_or_fissural_pleural_effusion',
+    'costophrenic_angle_blunting',
+    'pneumothorax',
+    'hydropneumothorax',
+    'pleural_thickening',
+    'pleural_plaque',
+    'pleural_calcification',
+    'pleural_nodule_or_mass',
+    'enlarged_cardiomediastinal_silhouette',
+    'enlarged_cardiac_silhouette',
+    'pulmonary_vascular_congestion',
+    'enlarged_pulmonary_artery',
+    'aortic_enlargement_or_ectasia',
+    'aortic_tortuosity_or_elongation',
+    'aortic_calcification',
+    'cardiac_or_valvular_calcification',
+    'hilar_enlargement',
+    'hilar_or_mediastinal_nodal_enlargement',
+    'mediastinal_widening',
+    'mediastinal_mass',
+    'mediastinal_shift',
+    'pneumomediastinum',
+    'tracheal_deviation',
+    'elevated_or_eventrated_hemidiaphragm',
+    'flattened_diaphragm',
+    'hernia',
+    'hiatal_hernia',
+    'pneumoperitoneum',
+    'bone_fracture',
+    'clavicle_fracture',
+    'rib_fracture',
+    'vertebral_compression_fracture',
+    'focal_osseous_lesion',
+    'degenerative_osseous_change',
+    'radiographic_osteopenia',
+    'scoliosis',
+    'kyphosis',
+    'support_device_present',
+    'support_line_present',
+    'support_tube_present',
+    'endotracheal_tube',
+    'enteric_tube',
+    'central_venous_catheter',
+    'chest_tube',
+    'pacemaker_or_icd',
+    'prosthetic_cardiac_valve',
+    'vascular_graft_or_stent',
+    'breast_implant',
+    'sternotomy_wires',
+    'device_abnormality',
+    'subcutaneous_emphysema',
+    'nontherapeutic_foreign_body',
+    'azygos_lobe',
+)
+
+CANONICAL_CLASS_TO_NLI_HYPOTHESIS = {
+    class_id: _load_cxr_class_nli_hypothesis(class_id)
+    for class_id in _CANONICAL_CXR_CLASS_IDS
 }
 
-assert len(UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI) == len(UNIFIED_CXRLT2024_VINDRCXR_CLASSES)
-assert all(x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES for x in UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI)
-for x in UNIFIED_CXRLT2024_VINDRCXR_CLASSES:
-    phrase = UNIFIED_CXRLT2024_VINDRCXR_CLASS_TO_VERBOSE_PHRASE_FOR_REPORT_NLI[x]
-    assert phrase is not None
-    assert isinstance(phrase, str)
-    assert len(phrase) > 0
-    if x.startswith('Enlarged'):
-        assert 'larger than normal' in phrase
-        assert ' '.join(x.split()[1:]).lower() in phrase.lower()
-    elif x.startswith('Pleural'):
-        # Pleural* classes: require the second token (e.g. Effusion) in the phrase.
-        assert x.split()[1].lower().rstrip('/') in phrase.lower() or all(
-            y in phrase.lower() for y in x.lower().replace('/', ' ').split()
-        ), f"{x} not reflected in phrase: {phrase[:120]}..."
-    else:
-        assert all(y in phrase.lower() for y in x.lower().replace('/', ' ').split()), f"{x} not in {phrase}"
+assert all(CANONICAL_CLASS_TO_NLI_HYPOTHESIS.values())
+
+# Maps each canonical class to keys in
+# medvqa.datasets.regular_expressions.cxr_patterns._CLASS_NAME_TO_REGEX_PATTERNS.
+# Keys are canonical IDs (same as leaf filenames). no_finding has no regex.
+CANONICAL_CLASS_TO_REGEX_CLASSES = {
+    class_id: None if class_id == 'no_finding' else [class_id]
+    for class_id in _CANONICAL_CXR_CLASS_IDS
+}
+
+assert list(CANONICAL_CLASS_TO_REGEX_CLASSES) == list(_CANONICAL_CXR_CLASS_IDS)
+assert CANONICAL_CLASS_TO_REGEX_CLASSES['no_finding'] is None
+assert all(
+    v is None or (isinstance(v, list) and v == [k])
+    for k, v in CANONICAL_CLASS_TO_REGEX_CLASSES.items()
+)

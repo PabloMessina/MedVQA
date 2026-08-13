@@ -1,0 +1,306 @@
+# ==============================================================================
+# mediastinal_widening
+# Generalized mediastinal contour widening / widened mediastinum / named-region
+# widening (e.g. superior / upper / mid mediastinum) on the current CXR.
+#
+# Match: mediastinal widening (incl. comma-list findings); widened /
+# wide-appearing / broader mediastinum (incl. silhouette/contour);
+# widened appearance to the mediastinum; widening of the (mid and upper)
+# mediastinum or truncated "superior mediastinal"; mediastinum/contour/
+# silhouette is widened/enlarged/broad/wider; increase in mediastinal
+# size/caliber; named-region enlargement/prominence/fullness/broad;
+# mediastinal vascular pedicle widened.
+#
+# Do NOT match: cardiomediastinal silhouette enlargement/prominence alone;
+# aortic enlargement/ectasia/tortuosity alone; focal mediastinal mass;
+# hilar enlargement/adenopathy alone; paratracheal thickening/fullness alone;
+# mediastinal vessels enlarged; indication/history/evaluate-for/rule-out;
+# negated "no/not/or mediastinal widening"; apparent widening attributed
+# solely to AP/portable technique, magnification, rotation, or positioning;
+# pneumomediastinum or mediastinal shift (separate classes).
+# ==============================================================================
+
+# Shared (expanded inline; stdlib re has no defines):
+#   REGION: right|left|upper|mid(dle)?|superior|lower|anterior|posterior
+#           with optional "and"/list coordination (mid and upper).
+#   MEDIAST: mediastin(?:um|ium)|mediastnium
+#   TECH:   clause-local due to / secondary to / technique-related
+#           (AP, positioning, rotation, magnification).
+
+\b(?:
+        # ------------------------------------------------------------------
+        # 1. Noun phrase: mediastinal widening
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bor\s)
+        (?<!,\s)
+        (?<!\bno\sabnormal\s)
+        (?<!\bno\stypical\s)
+        (?<!\bno\sdefinite\s)
+        (?<!\bno\ssignificant\s)
+        (?<!\bno\sobvious\s)
+        (?<!\bno\sovert\s)
+        (?<!\bno\sapparent\s)
+        (?<!\bno\spneumothorax\s)
+        (?<!\bevidence\sof\s)
+        (?<!\bevaluate\sfor\s)
+        (?<!\beval\sfor\s)
+        (?<!\brule\sout\s)
+        (?<!\br/o\s)
+        (?<!\bassess\sfor\s)
+        (?<!\bpresence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\?\s)
+        (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
+        mediastinal\s+widening
+        (?!\s+is\s+anticipated)
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1b. Comma-list finding item: "Cardiomegaly, mediastinal widening, …"
+        #     Keep (?<!,\s) on §1 to block "Evaluate for PE, mediastinal
+        #     widening"; allow only after known finding nouns.
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?:cardiomegaly|edema|effusion|atelectasis|consolidation|pneumonia|opacity|infiltrate|hyperinflation|pneumothorax),\s+
+        (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
+        mediastinal\s+widening
+        (?!\s+is\s+anticipated)
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Widened / wide / broader mediastinum or mediastinal silhouette/
+        #    contour; also "widened appearance to the mediastinum"
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bevaluate\sfor\s)
+        (?<!\beval\sfor\s)
+        (?<!\brule\sout\s)
+        (?<!\br/o\s)
+        (?<!\bassess\sfor\s)
+        (?<!\bapparent\s)
+        (?<!\?\s)
+        (?<!\bfor\s)
+        (?:
+            (?:\bwide(?:r|-appearing)?\b|widen(?:ed|ing)|\bbroad(?:er)?\b)\s+
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
+            (?:
+                (?:mediastin(?:um|ium)|mediastnium)\b
+                |
+                mediastinal\s+(?:silhouette|contour)s?\b
+            )
+            |
+            # "widened appearance to the mediastinum"
+            widen(?:ed|ing)\s+appearance\s+to\s+(?:the\s+)?
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
+            (?:
+                (?:mediastin(?:um|ium)|mediastnium)\b
+                |
+                mediastinal\s+(?:silhouette|contour)s?\b
+            )
+        )
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous|cardiomegaly|aortic|aorta))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Widening … of the (named / coordinated) mediastinum / contour
+        #    "widening of the mid and upper mediastinum"; truncated
+        #    "widening of the superior mediastinal."
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        widen(?:ed|ing)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,6}[^\w.!?;:]+
+        of\s+(?:the\s+)?
+        (?:
+            # truncated noun elision: named-region + mediastinal (no -um)
+            (?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)
+            (?:(?:\s+and\s+|\s*,\s*|\s+)\s*(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior))?
+            \s+mediastinal\b
+            (?!\s+(?:mass|node|nodes|adenopathy|lymph|hematoma|goiter|vessel|vessels|fat|stripe|opacity|opacities)\b)
+            |
+            (?:
+                (?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)
+                (?:(?:\s+and\s+|\s*,\s*|\s+)\s*(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior))?
+                \s+
+            )?
+            (?:
+                (?:mediastin(?:um|ium)|mediastnium)\b
+                |
+                mediastinal\s+(?:contour|silhouette|contents|soft\s+tissue|region)s?\b
+            )
+        )
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Anatomy → widened / wide / broader / enlarged (clause-local;
+        #    no cardio-). Widen/wide/broad keep a short gap. Enlarged/
+        #    broad/wider require a local copula (is/are/appears) so
+        #    "contour … represent enlarged arteries" does not bind.
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!cardio)
+        (?<!cardio-)
+        (?<!\bsegment\sof\sthe\s)
+        (?<!\bartery\ssegment\sof\sthe\s)
+        (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
+        (?:
+            (?:mediastin(?:um|ium)|mediastnium)
+            |
+            mediastinal\s+(?:contour|silhouette|contents)s?
+        )
+            (?:
+            (?:[^\w.!?;:]+(?!(?:without|no|not|nor|denies|absent|normal)\b)\w+){0,5}[^\w.!?;:]+
+            (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bappreciably\s)
+            (?:widen(?:ed|ing)|\bwide(?:r|-appearing)?\b|\bbroad(?:er)?\b)\b
+            |
+            # enlarged/broad/wider: local copula only
+            \s+
+            (?:is|are|appears?|remain(?:s)?)\s+
+            (?:mildly\s+|minimally\s+|markedly\s+|slightly\s+|somewhat\s+|diffusely\s+)?
+            (?:enlarged|\bbroad(?:er)?\b|\bwider\b)\b
+        )
+        (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Increase in mediastinal size / caliber / width (require size word)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\btransient\s)
+        (?:
+            (?:increase(?:d|s)?|enlargement)\s+in\s+(?:the\s+)?
+            (?:size|caliber|width|diameter)\s+of\s+(?:the\s+)?
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower)\s+)?
+            (?:mediastin(?:um|ium)|mediastnium)\b
+            (?![\s\S]{0,160}?has\s+reversed)
+            |
+            (?:increase(?:d|s)?|enlargement)\s+in\s+(?:the\s+)?
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower)\s+)?
+            mediastinal\s+(?:caliber|size|width|diameter)
+            (?![\s\S]{0,160}?has\s+reversed)
+            |
+            increase(?:d|s)?\s+in\s+size\s+of\s+(?:the\s+)?
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower)\s+)?
+            (?:mediastin(?:um|ium)|mediastnium)\b
+            (?![\s\S]{0,160}?has\s+reversed)
+            |
+            (?:(?:right|left|upper|mid(?:dle)?|superior)\s+)?
+            mediastinal\s+(?:caliber|size|width)
+            (?:[^\w.!?;:]+(?!(?:without|no|not)\b)\w+){0,4}[^\w.!?;:]+
+            (?:increase(?:d|s)?|enlarg\w*|widen\w*)
+            (?![\s\S]{0,120}?has\s+reversed)
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. Named-region enlargement / prominence / fullness
+        #    (NOT cardiomediastinal). Bare "prominent mediastinum" allowed;
+        #    "enlarged mediastinal silhouette"; fullness of named region.
+        #    Block nonspecific / adenopathy / mass / technique.
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bnonspecific\s)
+        (?<!\bmild\snonspecific\s)
+        (?:
+            (?:enlarged|prominent|wide(?:r|-appearing)?|broad(?:er)?)\s+(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            |
+            (?:prominence|enlargement)\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            |
+            # fullness: keep mass/paratracheal guard (hunt reject); prominence/enlargement stay open
+            fullness\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|paratracheal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b|hematoma|seroma|goiter|thyroid))
+            |
+            (?:enlarged|prominent|broad(?:er)?)\s+contour\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            |
+            (?<!cardio)(?<!cardio-)
+            (?<!\bparatracheal\s)
+            (?:enlarged|prominent|broad(?:er)?)\s+mediastinal\s+(?:silhouette|contour)s?\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
+            |
+            (?<!cardio)(?<!cardio-)
+            (?<!\bparatracheal\s)
+            (?:enlarged|prominent|broad(?:er)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
+            |
+            (?:prominence|enlargement|fullness)\s+of\s+(?:the\s+)?(?:mediastin(?:um|ium)|mediastnium)\b
+            (?!\s+(?:drain|drains|clip|clips|tube|tubes|catheter|wire|wires|fat|vessel|vessels|vein|veins|lymph|node|adenopathy|mass)\b)
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|paratracheal\s+lymph|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
+            |
+            (?<!cardio)(?<!cardio-)
+            (?<!\bparatracheal\s)
+            mediastinal(?:\s+and\s+hilar)?\s+prominence\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|lymph\s+node))
+            |
+            (?<!cardio)(?<!cardio-)
+            (?<!\bsegment\sof\sthe\s)
+            mediastin(?:um|al\s+(?:contours?|silhouettes?))\s+
+            (?:is\s+|are\s+|appears?\s+|remain(?:s)?\s+)?
+            (?:mildly\s+|minimally\s+|markedly\s+|slightly\s+|somewhat\s+)?
+            (?:prominent|enlarged|broad(?:er)?|wider)\b
+            (?!\s+(?:pericardial|fat|pad)\b)
+            (?![^\n.!?;:]{0,100}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,50}(?:rotation|technique|positioning|tortuous))
+            (?![^\n.!?;:]{0,80}tortuos)
+        )
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 7. Noun-phrase (peri/para)tracheal widening (not "widening of the
+        #    paratracheal area/stripe", which is usually vessels/adenopathy)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?:(?:right|left|upper|lower)\s+)?(?:peri|para)tracheal\s+widen(?:ed|ing)\w*
+        (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 8. Mediastinal vascular pedicle widened / widening of vascular pedicle
+        # ------------------------------------------------------------------
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?:
+            (?:mediastinal\s+)?vascular\s+pedicle
+            (?:[^\w.!?;:]+(?!(?:without|no|not)\b)\w+){0,3}[^\w.!?;:]+
+            (?:widen(?:ed|ing)|\bwide\b)
+            |
+            widen(?:ed|ing)\s+of\s+(?:the\s+)?(?:mediastinal\s+)?vascular\s+pedicle
+        )
+)

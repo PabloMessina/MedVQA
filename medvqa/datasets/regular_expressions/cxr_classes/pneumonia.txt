@@ -1,23 +1,692 @@
+# ==============================================================================
+# pneumonia
+# Prompt-faithful infection of lung parenchyma. Prefer explicit pneumonia /
+# pneumonitis / PNA / named syndromes, or lung abnormalities attributed to
+# infection/aspiration. Do NOT match bare consolidation/opacity/infiltrate
+# without infection attribution. Exclude organizing / radiation /
+# hypersensitivity / idiopathic interstitial pneumonias; block common
+# negation and indication/history-only mentions (precision-critical).
+#
+# Pass-2: recover infection-/aspiration-attribution FNs (longer clause hops,
+# cross-sentence cannot-exclude after lung findings, differential lists,
+# focal-pneumonia with positive cues). Keep negation/indication guards.
+#
+# Pass-3 (20260810_232835): named-subtype residual (COVID-19 / cavitary /
+# necrotizing / lung-site), cue gaps (suggestive/typical/raising-concern for),
+# pneumonia-first consideration/differential, cannot-be-entirely-excluded,
+# residual infection-etiology. Still no bare consolidation/infiltrate/opacity.
+#
+# Pass-4 (20260811_051641): precision-first FP trim. Extra negation /
+# resolution / indication // / prior-CT / less-likely / mediastinal-infiltrating
+# guards. Do not reopen bare-opacity arms. Recall floor = baseline R.
+#
+# Pass-5 (fn_mine fit): absorb hunt mini-test TPs — aspiration/infection
+# cannot-exclude after lung findings (incl. opacificat*), interstitial /
+# atelectatic pneumonia, opacity→worrisome/suggests/suspect pneumonia,
+# infectious-etiology pneumonitis, interstitial infection, ACS-or-pneumonia,
+# plural infections, edema-or-pneumonia difficult-to-exclude. No bare-opacity.
+#
+# Pass-6 (fn_mine fit w19): hunt residuals — infection could-also-have-this-
+# appearance; differential infectious disease; lung abscess; opacity
+# suggests/favors/reflective-of infection; infectious-process possibility /
+# infection-would-also-be-possible; either-list mid pneumonia; standalone
+# superimposed infectious process cannot-exclude; atelectasis+infection
+# combination; left/right base pneumonia (B2); suggests either pneumonia;
+# radiodensity→aspiration changes; potentially superimposed infection.
+# Dropped broad concern-for+PNA (indication FPs). Still no bare opacity.
+#
+# Intervening tokens use word-hops ((?:[^\w.!?;:]+\w+){0,N}[^\w.!?;:]+) so
+# matches stay clause-local after whitespace normalization. Negation uses
+# stacked fixed-width lookbehinds (stdlib re limitation).
+# ==============================================================================
 
-    # 1. Direct Disease Terms
-    # Matches: "Pneumonia", "Pneumonitis", "Bronchopneumonia"
-    \b(?:broncho)?pneumoni\w*
-    |
-    # 2. Abbreviations
-    # Matches: "PNA" (Standard abbreviation: "RLL PNA")
-    \bpna\b
-    |
-    # 3. Clinical "Infection" Context
-    # Radiologists often write: "Findings represent infection", "Infectious process"
-    # (Note: Negation handling is assumed to happen later, e.g., "No infection")
-    \binfect\w*
-    |
-    \bsepsis|\bseptic
-    |
-    # 4. Pathogens (Contextual)
-    # Matches: "Viral opacities", "Bacterial process"
-    \b(?:bacter|viral|fungal|myco)\w*
-    |
-    # 5. Common Typos in MIMIC (High Recall)
-    # Matches: "Pneumomia", "Pnuemonia", "Penumonia"
-    \bp(?:ne?|en)umon\w*|pn(?:eu|ue)mon|penumonia
+(?:
+  # --------------------------------------------------------------------------
+  # A. Named subtypes / syndromes
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\bassess\sfor\s)
+      (?<!\bevaluation\sfor\s)(?<!\bassessment\sfor\s)
+      (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)(?<!\bhistory:\s)
+      (?<!\bconcerns\sof\s)(?<!\bwith\sconcern\sfor\s)
+      (?<!\bquestion\s)(?<!\?\s)(?<!\?)(?<!//\s)
+      (?<!\bclinical\shistory:\s)(?<!\bclinical\sdata:\s)(?<!\bindication:\s)
+      (?<!\bresolution\sof\s)(?<!\bassess\sresolution\sof\s)
+      (?<!\bresolution\sof\sthe\spreviously\sidentified\s)
+      (?<!\bresolution\sof\sbeing\smasslike\s)(?<!\bbeing\smasslike\s)(?<!\bmasslike\s)
+      (?<!\bpreviously\sidentified\s)(?<!\bpreviously\squestioned\s)
+      (?<!\breported\s)(?<!\bdiagnosed\swith\s)(?<!\binitially\sdiagnosed\swith\s)
+      (?<!\badmission\sfor\s)(?<!\bas\swell\sas\s)
+      (?<!\borganizing\s)(?<!\bradiation\s)(?<!\bchemical\s)(?<!\bhypersensitivity\s)
+      (?<!\bidiopathic\sinterstitial\s)(?<!\busual\sinterstitial\s)
+      (?<!\bnonspecific\sinterstitial\s)
+      (?<!\bcontact\swith\s)(?<!\bknown\scontact\swith\s)
+      (?<!\bto\ssuggest\s)(?<!\bsuggest\s)(?<!\bsuch\sas\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\sacute\s)
+      (?<!\bno\sdefinite\s)(?<!\bno\sdefinite\ssuperimposed\s)
+      (?<!\bno\sair\sspace\sopacity\sis\sidentified\sto\ssuggest\s)
+      (?<!\bno\ssign\sof\sold\sor\sactive\s)(?<!\bold\sor\sactive\s)
+      (?<!\bpt\sintubated\swith\s)(?<!\bpossible\sviral\s)
+      \b(?:
+          bronchopneumonia|
+          (?:lobar|segmental|multifocal|m,?ultifocal|multisegmental|atypical|aspiration|infectious|bacterial|viral|fungal)\s+pneumonia|
+          (?:covid[-\s]?19|covid19|sars[-\s]?cov[-\s]?2)\s+pneumonia|
+          (?:cavitary|necrotizing|rounded|neonatal|postobstructive|secondary|diffuse|(?:slowly\s+)?resolving|progressive|mild)\s+pneumonias?|
+          (?:right|left)\s+lung\s+pneumonia|
+          aspiration\s+pneumonitis|
+          infectious\s+pneumonitis|
+          postobstructive\s+pneumonitis|
+          community[-\s]acquired\s+pneumonia|
+          hospital[-\s]acquired\s+pneumonia|
+          ventilator[-\s]associated\s+pneumonia|
+          healthcare[-\s]associated\s+pneumonia|
+          (?:CAP|HAP|VAP|HCAP)\s*(?:PNA|pneumonia)|
+          pneumocystis(?:\s+(?:jirovecii|jiroveci|carinii))?\s+pneumonia|
+          PCP\s+pneumonia|
+          atypical\s+organism\s+pneumonia
+      )\b
+      (?!\s+present\s+previously)
+      (?!\s+on\s+the\s+initial\s+study)
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # B1. Attribution / course cue -> pneumonia (short hop; never cross "no")
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+      (?<!\bno\sfocal\sconsolidations\s)(?<!\bno\sfocal\sconsolidation\s)
+      (?<!\bno\snew\sfocal\sconsolidations\s)(?<!\bno\snew\sfocal\sconsolidation\s)
+      (?<!\bno\snew\sconsolidations\s)
+      (?<!\bno\sdefinite\sconsolidations\s)(?<!\bno\sdefinite\sconsolidatoins\s)
+      (?<!\bno\schf,\sfocal\sconsolidations\s)(?<!\bchf,\sfocal\sconsolidations\s)
+      (?<!\bno\slung\sopacities\s)(?<!\bno\sopacities\s)(?<!\bno\soacities\s)
+      (?<!\bthere\sare\sno\slung\sopacities\s)
+      (?<!\bno\snew\sopacities\s)
+      (?<!\bwithout\sany\sopacities,\s)(?<!\bwithout\sany\sopacities\s)
+      (?<!\bclear\sof\sfocal\sconsolidations\s)
+      (?<!\bwithout\sevidence\sof\sfocal\sconsolidations\s)
+      (?<!\bor\sfocal\sconsolidation\s)
+      (?<!\bfocal\sconsolidations\s)(?<!\bfocal\sconsolidation\s)
+      (?<!\bnew\sconsolidations\s)(?<!\bnew\sfocal\sconsolidations\s)
+      (?<!\bdefinite\sconsolidatoins\s)(?<!\bconsolidatoins\s)
+      (?<!\bopacities,\s)(?<!\boacities\s)
+      (?<!\bto\ssuggest\s)(?<!\bfindings\sto\ssuggest\s)
+      (?<!\brule\sout\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\bassess\sfor\s)
+      (?<!\?\s)(?<!\?)(?<!//\s)
+      (?<!\bhistory:\s)(?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+      (?<!\bclinical\shistory:\s)(?<!\bclinical\sdata:\s)(?<!\bindication:\s)
+      (?<!\bresolution\sof\s)(?<!\bno\scoherent\s)(?<!\bcoherent\s)
+      (?<!\bpatient\swith\sclinical\s)
+      (?<!\bfemale\swith\s)(?<!\bwoman\swith\s)(?<!\bman\swith\s)
+      (?<!\bpatient\swith\s)(?<!\bcough\.\s)(?<!\bfever\.\s)
+      (?<!\breported\s)(?<!\bdiagnosed\swith\s)(?<!\binitially\sdiagnosed\swith\s)
+      (?<!\blung\scancer\sand\s)
+      (?<!\borganizing\s)(?<!\bradiation\s)(?<!\bhypersensitivity\s)
+      (?<!\bpulmonary\shedema\sor\s)(?<!\bhemorrhage\sor\s)
+      (?<!\btreated\sfor\s)(?<!\bbeing\streated\sfor\s)
+      (?<!\bdevelopment\sof\s)(?<!\bfocus\sof\s)
+      (?<!\bno\snew\sconsolidations\s)(?<!\bwithout\sconsolidation\s)
+      (?<!\bno\sfocal\sconsolidation\s)(?<!\bno\sdefinite\s)
+      (?<!\bno\sfindings\sof\s)
+      \b(?:
+          concerning\s+for|
+          worrisome\s+for|
+          suggestive\s+(?:of|for)|
+          (?:most\s+)?typical\s+for|
+          rais(?:es?|ing)\s+concern\s+for|
+          consistent\s+with|
+          compatible\s+with|
+          suspicious\s+for|
+          favor(?:s|ing)?|
+          represent(?:s|ing)?|
+          reflect(?:s|ing)?|
+          related\s+to|
+          may\s+(?:reflect|represent|be)|
+          could\s+(?:reflect|represent|be)|
+          consider(?:ed)?|
+          likely|
+          probable|
+          possible|
+          possibly|
+          suspected|
+          evolving|
+          developing|
+          early|
+          residual|
+          persistent|
+          ongoing|
+          improving|
+          worsening|
+          superimposed|
+          underlying
+      )\b
+      (?:[^\w.!?;:]+\w+){0,4}[^\w.!?;:]+
+      (?<!\bsuspected\s)
+      \b(?:(?:new\s+)?focal\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # B2. Anatomy / laterality immediately before pneumonia (no multi-word hop)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+      (?<!\brule\sout\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\?\s)(?<!\?)(?<!//\s)
+      (?<!\bhistory:\s)(?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+      (?<!\bdiagnosed\swith\s)(?<!\binitially\sdiagnosed\swith\s)
+      (?<!\bdiagnosed\swith\sright\s)(?<!\bdiagnosed\swith\sleft\s)
+      (?<!\breported\s)(?<!\bresolution\sof\s)
+      (?<!\botherwise\sregressed\s)(?<!\bregressed\sbilateral\s)
+      (?<!\bexclude\sa\s)(?<!\bexclude\sa\ssubtle\s)
+      (?<!\bhelpful\sto\sexclude\sa\s)
+      (?<!\borganizing\s)(?<!\bradiation\s)(?<!\bhypersensitivity\s)
+      \b(?:
+          multifocal|
+          bibasilar|
+          basilar|
+          bilateral|
+          (?:right|left)\s+(?:lower|upper|middle)\s+lobe|
+          (?:right|left)\s+lung|
+          (?:right|left)\s+base|
+          (?:right|left|L|R)[-\s]?sided|
+          lower\s+lobe|
+          upper\s+lobe|
+          middle\s+lobe|
+          (?:RLL|LLL|RUL|LUL|RML)
+      )\b
+      (?:[^\w.!?;:]+(?:cavitary|necrotizing|covid[-\s]?19|covid19|mild|diffuse|patchy|focal|rounded))?
+      [^\w.!?;:]+
+      \b(?:pneumonias?|pneumonitis|PNA)\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # C. Pneumonia cannot be excluded / should be considered (either order)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bh/o\s)(?<!\bhistory\sof\s)(?<!\?\s)(?<!\?)(?<!\bno\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\sacute\s)
+      (?<!\bno\sdefinite\s)(?<!\bno\sconvincing\ssigns\sof\s)
+      (?<!\bhypersensitivity\s)(?<!\borganizing\s)(?<!\bradiation\s)
+      (?<!\bsuch\sas\s)
+      \b(?:pneumonias?|pneumonitis|PNA)\b
+      (?!\s+or\s+fibrosis)
+      (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
+      (?:
+          cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|
+          (?:is\s+)?not\s+(?:be\s+)?(?:entirely\s+)?excluded|
+          (?:can|should)\s+(?:also\s+|seriously\s+)?be\s+(?:seriously\s+|also\s+)?considered|
+          must\s+be\s+suspected|
+          (?:has\s+)?to\s+be\s+considered|
+          could\s+be\s+considered|
+          needs\s+to\s+be\s+considered|
+          would\s+be\s+a\s+consideration|
+          is\s+(?:also\s+)?(?:a\s+)?consideration|
+          is\s+considered|
+          is\s+in\s+the\s+differential|
+          among\s+(?:some\s+)?considerations|
+          could\s+also\s+have\s+this\s+appearance|
+          in\s+the\s+appropriate\s+clinical\s+setting|
+          should\s+(?:also\s+)?be\s+seriously\s+considered
+      )
+  )
+  |
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bdo\snot\s)(?<!\bunlikely\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\bcannot\srule\sout\s)
+      (?:
+          cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|
+          cannot\s+(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude)|
+          (?:do\s+)?not\s+(?:entirely\s+)?exclude|
+          should\s+(?:also\s+|seriously\s+)?be\s+(?:seriously\s+|also\s+)?considered|
+          must\s+be\s+suspected|
+          needs\s+to\s+be\s+considered
+      )
+      (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
+      \b(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  # compact: "cannot rule out early pneumonia"
+  (?:
+      (?<!\bno\s)
+      (?:cannot\s+rule\s+out|cannot\s+exclude)
+      (?:[^\w.!?;:]+\w+){0,4}[^\w.!?;:]+
+      \b(?:early\s+)?(?:concurrent\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  (?:
+      (?<!\bno\s)(?<!\bin\sorder\s)(?<!\border\sto\s)(?<!\bfollowed\sto\s)(?<!\bfollowed\s)
+      (?<!\bfollow-up\s)(?<!\bfollowup\s)(?<!\battention\son\sfollow-up\s)
+      (?<!\bhelpful\sto\s)
+      (?:exclude(?:d)?|to\s+exclude)
+      (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+
+      \b(?:early\s+)?(?:concurrent\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  # "impossible to separate pneumonia from ..."
+  (?:
+      (?<!\bno\s)
+      \bimpossible\s+to\s+separate\s+pneumonia\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # D. pneumonia + lung location (tight adjacency; no hopping over "or"/"no")
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\brule\sout\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\?\s)(?<!\?)(?<!\bh/o\s)(?<!\bhistory\sof\s)(?<!\bconcerns\sof\s)
+      (?<!\borganizing\s)(?<!\bradiation\s)(?<!\bhypersensitivity\s)
+      (?<!\bresolution\sof\sthe\spreviously\sidentified\s)
+      (?<!\bpreviously\sidentified\s)(?<!\bmasslike\s)(?<!\bbeing\smasslike\s)
+      \b(?:pneumonias?|pneumonitis|PNA)\b
+      [^\w.!?;:]+
+      (?:in|at|involving|within|throughout)
+      (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
+      \b(?:lung|lobe|lobar|bas\w*|right|left|RLL|LLL|RUL|LUL|RML)\w*
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # E. infectious opacity / infiltrate
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bno\sdefinite\s)(?<!\bno\sevidence\sof\s)
+      (?<!\bno\sevidence\sof\sacute\s)(?<!\bunderlying\ssubtle\s)
+      \binfectious\s+(?:opacit\w*|infiltrat(?:e|es|ed|ion|ive)|airspace|air[\s-]?space)\s*(?:consolidat\w*)?\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # F. Lung abnormality attributed to infection / aspiration
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bno\snew\s)(?<!\bclear\sof\s)
+      (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)
+      (?<!\bto\ssuggest\s)(?<!\bconsolidations\sto\ssuggest\s)
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat(?:e|es|ed|ion|ive)|air[\s-]?space\w*|airspace\w*|opacification|densit\w*)\b
+      (?:(?!previously\s+thought)(?!less\s+likely)[^\w.!?;:]+\w+){0,18}[^\w.!?;:]+
+      (?:
+          (?:concerning\s+for|worrisome\s+for|suggestive\s+(?:of|for)|suspicious\s+for|
+             rais(?:es?|ing)\s+concern\s+for|
+             consistent\s+with|compatible\s+with|
+             represent(?:s|ing)?|reflect(?:s|ing)?|
+             may\s+(?:reflect|represent|be)|could\s+(?:reflect|represent|be)|
+             might\s+(?:reflect|represent|be)|
+             possibly|
+             versus|vs\.?)
+          (?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+
+          \b(?:infections?|infectious(?:\s+(?:process|etiology|in\s+etiology))?|aspiration)\b
+          |
+          (?:
+              (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+              |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+              |cannot\s+(?:(?:be\s+)?(?:ruled\s+out|excluded)|(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude))(?:\s+superimposed)?\s+(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+|recurrent\s+)?infections?
+              |infections?\s+(?:is\s+)?not\s+(?:entirely\s+)?excluded
+              |cannot\s+exclude\s+(?:superimposed\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|recurrent\s+)?infections?
+              |can(?:no)?t\s+exclude\s+(?:superimposed\s+)?(?:an\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+)?infectious
+              |could\s+also\s+be\s+(?:an\s+)?infectious\s+process
+              |infectious\s+process(?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+(?:is\s+a\s+possibility|cannot\s+be\s+excluded)
+          )\b
+      )
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # G. Differential pairs (block negated / indication forms)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+      (?<!\bno\sevidence\sof\spulmonary\s)(?<!\bno\sradiographic\sevidence\sof\s)
+      (?<!\bno\sovert\s)(?<!\bwithout\sconvincing\sevidence\sfor\s)
+      (?<!\bwithout\sconvincing\ssigns\sof\s)(?<!\bno\sconvincing\ssigns\sof\s)
+      (?<!\bwithout\spulmonary\s)(?<!\bwithout\sconvincing\sevidence\sfor\s)
+      (?<!\bevaluate\sfor\ssigns\sof\s)(?<!\bevaluate\sfor\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)(?<!\br/o\spulm\s)
+      (?<!\bsigns\sof\s)(?<!\bpulmonary\s)
+      \b(?:
+          (?:atelectasis|edema|effusion|collapse|hemorrhage|contusion|infarction|ards)
+          \s+or\s+
+          (?:pneumonia|infection|aspiration|hemorrhage|infarction)
+          |
+          (?:pneumonia|infection|aspiration)
+          \s+or\s+
+          (?:atelectasis|edema|effusion|infection|aspiration|pneumonia|hemorrhage|infarction)
+          |
+          aspiration\s+or\s+infection
+          |
+          infection\s+or\s+aspiration
+          |
+          inflammation\s+or\s+infection
+          |
+          (?:atelectasis|consolidation|edema|effusion)\s+and/or\s+(?:pneumonia|infection|aspiration)
+          |
+          infection/pneumonia
+      )\b
+  )
+  |
+  # multi-etiology lists ending in infection/aspiration
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)
+      \b(?:edema|ards|hemorrhage|contusion|atelectasis|congestion|inflammation)\b
+      (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
+      \bor\s+(?:an?\s+)?(?:extensive\s+)?(?:infection|infectious\s+process|aspiration)\b
+  )
+  |
+  # differential includes ... infection
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\?\s)(?<!\?)
+      \bdifferential(?:\s+diagnosis)?\s+includes\b
+      (?:[^\w.!?;:]+\w+){0,14}[^\w.!?;:]+
+      \b(?:infection|infectious\s+process|aspiration|pneumonia)\b
+  )
+  |
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\?\s)(?<!\?)
+      \bdifferential\s+considerations?\s+(?:are|also\s+includes?)\b
+      (?:[^\w.!?;:]+\w+){0,14}[^\w.!?;:]+
+      \b(?:infection|infectious\s+process|pneumonia)\b
+  )
+  |
+  # aspiration etiology hedges / history-of-aspiration attribution
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\bhistory\sof\s)(?<!\bh/o\s)
+      (?<!\bclinical\sconcern\sfor\s)(?<!\bconcern\sfor\s)(?<!\bconcerns\sfor\s)
+      (?<!\bcorrelate\sclinically\sfor\s)(?<!\bfor\ssigns\sof\s)
+      \b(?:
+          could\s+represent\s+aspiration|
+          may\s+represent\s+aspiration|
+          rais(?:es?|ing)\s+concern\s+for\s+aspiration|
+          consistent\s+with\s+(?:patient'?s\s+)?history\s+of\s+aspiration|
+          concerning\s+for\s+infection(?:\s+versus\s+\w+)?|
+          worrisome\s+for\s+infection(?:\s+versus\s+\w+)?|
+          infectious\s+process\s+may\s+be\s+favored|
+          consistent\s+with\s+superimposed\s+infection|
+          (?:presumpti?vely|presumotively)\s+infectious|
+          most\s+likely\s+infectious
+      )\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # H. Infection hedges (prefer lung-anchored; short standalone set)
+  # --------------------------------------------------------------------------
+  (?:
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|atelecta\w*|opacification|densit\w*)\b
+      (?:[^\w.!?;:]+\w+){0,22}[^\w.!?;:]+
+      (?:
+          (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+          |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+          |although\s+(?:an?\s+)?(?:atypical\s+|early\s+|acute\s+|recurrent\s+)?infections?\s+(?:cannot\s+be\s+excluded|is\s+not\s+excluded)
+          |cannot\s+(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude)(?:\s+superimposed)?\s+(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+|recurrent\s+)?(?:infections?|infectious\s+process)
+          |infections?\s+(?:is\s+)?not\s+(?:entirely\s+)?excluded
+          |cannot\s+exclude\s+(?:superimposed\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|recurrent\s+)?infections?
+          |(?:an?\s+)?(?:acute\s+|early\s+|developing\s+|atypical\s+|extensive\s+|superimposed\s+|recurrent\s+)?infectious\s+process\s+(?:cannot\s+(?:be\s+)?(?:entirely\s+)?(?:ruled\s+out|excluded)|is\s+difficult\s+to\s+exclude|is\s+a\s+possibility)
+          |(?:an?\s+)?(?:early\s+|developing\s+|acute\s+|atypical\s+)?infectious\s+process\s+is\s+difficult\s+to\s+exclude
+          |can(?:no)?t\s+exclude\s+(?:superimposed\s+)?(?:an\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+)?infectious(?:\s+process)?
+          |could\s+also\s+be\s+(?:an\s+)?infectious\s+process
+          |possibility\s+of\s+pneumonic\s+infiltrates\s+cannot\s+be\s+excluded
+      )\b
+  )
+  |
+  # H2. Cross-sentence: lung finding. [however,] infection cannot be excluded
+  (?:
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|atelecta\w*|opacification|densit\w*|effusion|findings)\b
+      [^.!?;]{0,220}[.!?;]\s*
+      (?:(?:however|although|nonetheless)[, ]+)?
+      (?:
+          (?:this\s+is\s+)?(?:concerning|worrisome)\s+for\s+infections?
+          |
+          (?:this\s+(?:finding\s+)?)?(?:could|may|might)\s+(?:well\s+)?represent\s+(?:either\s+|an?\s+)?(?:fungal\s+|viral\s+|bacterial\s+|atypical\s+)?infections?
+          |
+          (?:this\s+)?(?:could|may)\s+represent\s+aspiration
+          |
+          (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?
+          (?:aspiration|infections?|infectious\s+process)
+          \s+
+          (?:cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
+          |
+          (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?
+          (?:infections?|infectious\s+process)
+          (?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+
+          (?:cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
+          |
+          cannot\s+(?:(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude))
+          (?:[^\w.!?;:]+\w+){0,5}[^\w.!?;:]+
+          (?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+|superimposed\s+|underlying\s+|recurrent\s+)?
+          (?:aspiration|infections?|infectious\s+process)
+      )\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # I. Multifocal / granulomatous / septic / progressive pneumonia phrasing
+  #    (Avoid bare "focal pneumonia" — usually appears under negation as
+  #    "no ... acute focal pneumonia". Cue+focal covered in B1.)
+  # --------------------------------------------------------------------------
+  (?:
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bno\sevidence\sof\s)
+      (?<!\bno\snew\slocal\sdiscrete\s)(?<!\borganizing\s)
+      \b(?:
+          multifocal\s+infection|
+          granulomatous\s+infection|
+          septic\s+emboli|
+          progressive\s+multi-?focal\s+pneumonia|
+          active\s+pneumonia|
+          concurrent\s+pneumonia|
+          pneumonic\s+infiltrates?|
+          pneumonia\s+is\s+suspected|
+          pneumonia\s+is\s+in\s+the\s+differential|
+          pneumonia\s+would\s+be\s+a\s+consideration
+      )\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # J. Pass-5 hunt residuals (fn_mine fit)
+  # --------------------------------------------------------------------------
+  (?:
+      # J1. Named interstitial / atelectatic pneumonia (ILD lookbehinds)
+      (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)
+      (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+      (?<!\borganizing\s)(?<!\bradiation\s)(?<!\bhypersensitivity\s)
+      (?<!\bidiopathic\s)(?<!\busual\s)(?<!\bnonspecific\s)
+      (?<!\bidiopathic\sinterstitial\s)(?<!\busual\sinterstitial\s)
+      (?<!\bnonspecific\sinterstitial\s)
+      \b(?:
+          (?:patchy\s+|focal\s+|mild\s+)?interstitial\s+pneumonia|
+          atelectatic\s+pneumonia
+      )\b
+  )
+  |
+  (?:
+      # J2. Comma-cue bypass for Pass-4 (?<!opacities,) on B1.
+      # Only "opacities/density, concerning/worrisome for pneumonia" — not long
+      # hops (those reopened "no ... consolidations concerning for pneumonia" FPs).
+      (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+      (?<!\bno\slung\s)(?<!\bno\snew\s)(?<!\bno\sfocal\s)
+      (?<!\bwithout\sany\s)(?<!\bclear\sof\s)
+      (?<!\bno\sareas\sof\s)(?<!\bno\sdefinite\s)
+      (?<!\bno\schf,\sfocal\s)(?<!\bchf,\sfocal\s)
+      (?<!\bthere\sare\sno\s)(?<!\bthere\sare\sno\slung\s)
+      (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sof\sfocal\s)
+      (?<!\bclear\sof\sfocal\s)(?<!\bno\snew\sfocal\s)
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|densit\w*)\b
+      \s*,\s*
+      (?:worrisome|concerning)\s+for\s+
+      \b(?:acute\s+|early\s+|developing\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  (?:
+      # J3. suspect / suggests pneumonia (standalone; non-indication)
+      (?<!\bno\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)
+      (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)(?<!\bindication:\s)
+      (?<!\bto\s)
+      \b(?:suggests|suspect)\s+(?:acute\s+|early\s+|developing\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  (?:
+      # J4. pneumonitis ... infectious etiology
+      (?<!\bno\s)(?<!\borganizing\s)(?<!\bradiation\s)(?<!\bhypersensitivity\s)
+      \b(?:interstitial\s+)?pneumonitis\b
+      (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
+      \binfectious\s+etiology\b
+  )
+  |
+  (?:
+      # J5. interstitial infection (parenchymal differential)
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\bhistory\sof\s)
+      \binterstitial\s+infection\b
+  )
+  |
+  (?:
+      # J6. (pulmonary) edema/atelectasis or pneumonia [difficult to exclude]
+      # Relaxes G's (?<!pulmonary) lookbehind for this prompt-true pair.
+      (?<!\bno\s)(?<!\bno\spulmonary\s)(?<!\bwithout\s)(?<!\bwithout\spulmonary\s)
+      (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\spulmonary\s)
+      (?<!\bno\sovert\s)(?<!\bwithout\sevidence\sof\s)
+      (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)(?<!\br/o\s)
+      (?<!\bevaluate\sfor\ssigns\sof\s)(?<!\br/o\spulm\s)
+      (?<!\bsigns\sof\s)
+      \b(?:pulmonary\s+)?(?:edema|atelectasis)\s+or\s+(?:pneumonia|infection)\b
+      (?:
+          (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
+          (?:would\s+be\s+)?difficult\s+to\s+exclude
+      )?
+  )
+  |
+  (?:
+      # J7. ACS or pneumonia / either ... or pneumonia
+      (?<!\bno\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)
+      (?:
+          \b(?:either\s+)?acute\s+chest\s+syndrome\s+or\s+pneumonia\b
+          |
+          \beither\b
+          (?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+
+          \bor\s+pneumonia\b
+      )
+  )
+  |
+  (?:
+      # J8. Cross-clause suspect pneumonia after lung finding
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|atelecta\w*|densit\w*|findings)\b
+      [^.!?;]{0,220}[.!?;]\s*
+      (?:(?:however|although|nonetheless)[, ]+)?
+      \bsuspect\s+(?:acute\s+|early\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # K. Pass-6 hunt residuals (fn_mine fit w19)
+  # --------------------------------------------------------------------------
+  (?:
+      # K1. Finding; developing infection could also have this appearance
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|densit\w*|radiodensit\w*|abnormalit\w*|findings?|mass(?:es)?|nodul\w*|lesions?|atelecta\w*)\b
+      [^.!?;]{0,220}[.!?;]\s*
+      (?:(?:an?\s+)?(?:early\s+|developing\s+|acute\s+|atypical\s+|superimposed\s+)?)?infections?\s+could\s+also\s+have\s+this\s+appearance
+  )
+  |
+  (?:
+      # K2. differential includes infectious disease
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\?\s)(?<!\?)
+      \bdifferential(?:\s+diagnosis)?\s+includes\b
+      (?:[^\w.!?;:]+\w+){0,14}[^\w.!?;:]+
+      \binfectious\s+disease\b
+  )
+  |
+  (?:
+      # K3. lung abscess / probably lung abscesses (parenchymal infection)
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\bhistory\sof\s)
+      \b(?:
+          (?:small\s+)?lung\s+abscess(?:es)?|
+          (?:probably|likely|possibly)\s+(?:small\s+)?(?:lung\s+)?abscess(?:es)?
+      )\b
+  )
+  |
+  (?:
+      # K4. opacity/density suggests|favors|reflective-of|potentially infection;
+      #     radiodensity could be early aspiration changes
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bno\sfocal\s)(?<!\bno\snew\s)
+      (?<!\bno\slung\s)(?<!\bno\sopacities\s)(?<!\bto\ssuggest\s)
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|densit\w*|radiodensit\w*)\b
+      (?:[^\w.!?;:]+\w+){0,18}[^\w.!?;:]+
+      (?:
+          (?:suggests|favor(?:s|ing)?)\s+(?:an?\s+)?(?:atypical\s+|early\s+|acute\s+|chronic\s+|recurrent\s+|superimposed\s+)?(?:infections?|infectious(?:\s+process)?|aspiration(?:\s+changes?)?)
+          |
+          (?:likely\s+)?reflective\s+of(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+\b(?:chronic\s+(?:or\s+)?|recurrent\s+)?(?:infections?|infectious\s+process)
+          |
+          (?:could|may|might)\s+(?:reflect|represent|be)\s+(?:early\s+)?aspiration\s+(?:changes?|pneumonia|pneumonitis)?
+          |
+          (?:potentially|possibly|likely|probably)\s+(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?
+      )\b
+  )
+  |
+  (?:
+      # K5. Cross-clause: infectious process ... is a possibility /
+      #     infection would also be possible
+      \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|densit\w*|radiodensit\w*|atelecta\w*|abnormalit\w*|findings?)\b
+      [^.!?;]{0,220}[.!?;]\s*
+      (?:
+          (?:an?\s+)?infectious\s+process(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+(?:is\s+a\s+possibility|cannot\s+(?:be\s+)?(?:ruled\s+out|excluded)|is\s+possible)
+          |
+          (?:an?\s+)?(?:atypical\s+|early\s+|superimposed\s+|developing\s+)?infections?\s+(?:would\s+also\s+be|is\s+also|may\s+also\s+be|could\s+also\s+be)\s+possible
+      )
+  )
+  |
+  (?:
+      # K6. either-list with pneumonia mid-list (not only "... or pneumonia")
+      (?<!\bno\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)
+      (?<!\?\s)(?<!\?)(?<!//\s)
+      \beither\b
+      (?:[^\w.!?;:]+\w+){0,14}[^\w.!?;:]+
+      \b(?:acute\s+|early\s+|developing\s+)?(?:pneumonias?|pneumonitis|PNA)\b
+  )
+  |
+  (?:
+      # K7. Standalone superimposed/underlying infectious process cannot-exclude
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bdo\snot\s)
+      \b(?:a\s+)?(?:superimposed\s+|underlying\s+|recurrent\s+)?infectious\s+process\s+cannot\s+(?:be\s+)?(?:entirely\s+|completely\s+)?(?:ruled\s+out|excluded)\b
+  )
+  |
+  (?:
+      # K8. combination of atelectasis and infection
+      (?<!\bno\s)(?<!\bwithout\s)
+      (?:
+          \bcombination\s+of\b(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+\band\s+(?:infection|infectious\s+process|aspiration|pneumonia)\b
+          |
+          \b(?:atelectasis|collapse|edema|effusion)\s+and\s+(?:infection|infectious\s+process)\b
+      )
+  )
+  |
+  (?:
+      # K9. suggests either pneumonia (J3 misses the either token)
+      # (Pass-6 originally had concern-for+location here; dropped after
+      # indication "concern for ... PNA" FPs — left/right base covered in B2.)
+      (?<!\bno\s)(?<!\bto\s)(?<!\bwithout\s)(?<!\bno\sfocal\s)
+      (?<!\bno\sconsolidation\s)(?<!\bno\sconsolidations\s)
+      (?<!\bno\sopacities\s)(?<!\bno\sopacity\s)
+      \bsuggests\s+either\s+(?:(?:an?\s+)?(?:acute\s+|early\s+)?)?(?:pneumonias?|pneumonitis|PNA|infection)\b
+  )
+)

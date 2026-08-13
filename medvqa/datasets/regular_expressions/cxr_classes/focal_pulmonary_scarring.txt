@@ -1,0 +1,113 @@
+# ==============================================================================
+# focal_pulmonary_scarring
+# Localized / limited parenchymal or pleuroparenchymal scar: explicit focal,
+# linear, bandlike, apical, bibasilar, postinflammatory, fibrocalcific, or
+# fibroatelectatic pulmonary scarring, or localized architectural distortion /
+# volume loss explicitly attributed to scarring.
+#
+# Do NOT match: unlocalized unspecified-extent scarring beyond existing
+# "pulmonary/lung scarring" lexicon; diffuse/extensive fibrosis or fibrotic
+# ILD (sibling fibrotic_lung_change); granuloma / prior infection / apical cap
+# / generic linear opacity without scarring attribution; isolated pleural
+# thickening / plaques / fibrothorax / CPA effusion-vs-scarring DDx; history-
+# or prior-exam-only scarring.
+# ==============================================================================
+
+\b(?:
+        (?:focal|limited|localized|postinflammatory|bibasilar|postinfectious|fibrocalcific)\s+(?:pulmonary\s+)?(?:scar(?:ring)?|linear\s+scar)|
+        pulmonary\s+scarring|
+        lung\s+scarring|
+        # Apical (pleural/pleuroparenchymal) scarring. No trailing \b so glued
+        # "scarringand" still matches. Block r/o, b/l indication, prior-only,
+        # and "scarring or thickening" (isolated pleural DDx).
+        (?<!\w/o\s)(?<!\bb/l\s)apical\s+(?:fibronodular\s+)?(?:pleural-?parenchymal\s+|pleural\s+)?scarring(?!\s+seen\s+on\s+(?:the\s+)?prior)(?!\s+or\s+thickening)|
+        scarring\s+with\s+architectural\s+distortion|
+        fibrocalcific\s+scarring|
+        fibrotic\s+scar(?:ring)?\b|
+        scar\s+formations?\b|
+        chronic\s+(?:linear|apical|lingular|parenchymal)\s+(?:opacit\w*|scar(?:ring)?)|
+        # biapical + common typo biaprical
+        bia(?:pical|prical)\s+(?:pleural-?parenchymal\s+|pleural\s+)?(?:parenchymal\s+)?(?:fibronodular\s+)?scar(?:s|ring)?|
+        (?:pleuroparenchymal|pleural-parenchymal|pleural\s+parenchymal)\s+(?:scar(?:ring)?|irregularit\w*)|
+        # "pleuroparenchymal thickening consistent scarring" (missing "with"); not bare pleural
+        (?:pleuroparenchymal|pleural-?parenchymal|pleural\s+parenchymal)\s+thickening\s+consistent\s+(?:with\s+)?scar(?:ring)?\b|
+        parenchymal\s+(?:and\s+pleural\s+)?scar(?:s|ring)?\b|
+        subjacent\s+scarring|
+        # Spatial "scar(s|ring) in/at/…" but not "scarring in this region on old CT"
+        scar(?:s|ring)?\s+(?:at|in|along|of|projecting|within)\b(?!\s+(?:this\s+region\s+)?on\s+(?:old|prior|previous))|
+        # Atelectasis vs scar (slash, or, versus, and, and/or); IU atalectesis typo.
+        # Plain "and" recovers "atelectasis and scarring"; block prior-CT-only phrasing.
+        # Do NOT put bronchiectasis on both sides (would match "atelectasis and bronchiectasis").
+        (?:atelectasis|atalectesis|scar(?:s|ring)?)\s*(?:/|or|versus|vs\.?|and/?or|and)\s*(?:subsegmental\s+|discoid\s+|linear\s+|plate-?like\s+|platelike\s+|persistent\s+)?(?:atelectasis|atalectesis|scar(?:s|ring)?)\b(?!\s+in\s+(?:this\s+region\s+)?on\s+(?:old|prior|previous))|
+        # Bronchiectasis paired with scarring (slash or "and")
+        bronchiectasis\s*(?:/|and)\s*scar(?:ring)?|
+        scar(?:ring)?\s*(?:/|and)\s*bronchiectasis|
+        (?:perihilar\s+)?scarring\s*/\s*atelectasis|
+        scarring\s+and\s+(?:atelectasis|volume\s+loss|consolidation|fibrotic\s+change)|
+        (?:streak|streaks|small\s+streak)\s+of\s+scarring|
+        (?:regions?|areas?)\s+of\s+(?:mild\s+)?(?:chronic\s+)?scarring|
+        long.?standing\s+scarring|
+        scarring\s+changes?|
+        post.?radiation\s+(?:and\s+)?scarring|
+        # represent(s/ing) scarring; block CPA/effusion DDx ("… or pleural effusion")
+        represent(?:ing|s)?\s+(?:minor\s+|small\s+(?:areas\s+of\s+)?|areas\s+of\s+|chronic\s+|focal\s+|linear\s+|XXXX\s+|a\s+(?:disc|discoid|linear)\s+atelectasis\s+or\s+(?:fibrotic\s+)?)?(?:chronic\s+|fibrotic\s+)?scar(?:s|ring)?\b
+            (?!\s+(?:alternatively\s+)?(?:or\s+)?(?:a\s+|small\s+|minimal\s+|tiny\s+|left\s+|right\s+|bilateral\s+|pleural\s+|effusion\s+){0,8}effusion)|
+        due\s+to\s+(?:XXXX\s+)?scarring|
+        (?:related|secondary)\s+to\s+(?:underlying\s+|XXXX\s+)?scarring|
+        # adjective stack: "scarring", "minor scarring", "minor unchanged scarring"
+        (?:most\s+)?(?:XXXX\s+)?(?:compatible|consistent)\s+with\s+(?:a\s+)?(?:(?:chronic|known|minor|minimal|mild|tiny|small|stable|unchanged)\s+)*(?:scar(?:ring)?|scars)\b|
+        # "suggestive of scarring" attribution (localized hunt TPs)
+        (?:most\s+)?suggestive\s+of\s+(?:focal\s+|mild\s+|minor\s+|minimal\s+|chronic\s+)?scar(?:ring)?\b|
+        scar.?like|
+        cicatric(?:es|ial)|
+        bia(?:pical|prical)\s+fibrotic\s+change|
+        # Localized fibrotic change; block extensive/diffuse/severe (sibling class)
+        (?<!\bextensive\s)(?<!\bdiffuse\s)(?<!\bsevere\s)fibrotic\s+changes?\s+in\s+(?:the\s+)?(?:left|right|bilateral|upper|lower|suprahilar|perihilar|basilar|apical|retrocardiac|mid)\b|
+        apical\s+fibrotic\s+changes?|
+        bia(?:pical|prical)\s+fibrocalcific\s+changes?|
+        (?:right|left|bilateral)\s+(?:upper|lower|middle)\s+lobe\s+scar(?:ring)?\b|
+        (?:lingular|perihilar|basilar|retrocardiac|suprahilar|midlung|mid-lung|mid\s+lung(?:\s+zone)?|peribronchial|infrahilar|bia(?:pical|prical))\s+(?:parenchymal\s+)?scar(?:s|ring)?\b|
+        (?:right|left|bilateral)\s+(?:mid\s+)?(?:lung\s+zone\s+)?scarring|
+        (?:right|left|bilateral)\s+apical\s+linear\s+scar\b|
+        linear\s+(?:\w+\s+){0,6}scar(?:ring)?\b|
+        # bare "likely scarring" / "likely denote scarring" (represent/reflect/due-to optional)
+        likely\s+(?:(?:represent(?:ing|s)?|reflect(?:ing|s)?|due\s+to|denote\w*)\s+)?(?:areas\s+of\s+)?(?:mild\s+|minor\s+|minimal\s+)?(?:chronic\s+)?scar(?:s|ring)?\b|
+        either\s+representing\s+scarring|
+        combination\s+of\s+scarring|
+        scarring\s+and/?or\s+calcification|
+        fibrocalcific\s+changes?|
+        usually\s+due\s+to\s+scarring|
+        postoperative\s+changes?\s+with\s+scarring|
+        may\s+be\s+(?:due\s+to\s+|chronic\s+)?scarring|
+        # may reflect scarring; comma DDx "atelectasis, scar, or …"
+        may\s+reflect\s+(?:linear\s+)?(?:atelectasis\s*(?:,\s*|/\s*|and/?or\s+)?)?scar(?:s|ring)?\b|
+        # DDx list "... infiltrate, scarring, ..."
+        infiltrate,\s*scar(?:ring)?\b|
+        potentially\s+due\s+to\s+(?:persistent\s+)?atelectasis,?\s*or\s+scarring|
+        favored\s+to\s+reflect\s+(?:areas\s+of\s+)?(?:mild\s+)?(?:chronic\s+)?scarring|
+        reflect(?:s|ing)?\s+(?:XXXX\s+)?(?:areas\s+of\s+)?(?:mild\s+)?(?:chronic\s+)?scar(?:ring)?\b|
+        probably\s+(?:related\s+to|representing)\s+scarring|
+        # "possibly scarring" / "possibly representing scarring"
+        possibly\s+(?:representing\s+)?(?:minor\s+|minimal\s+|mild\s+)?scar(?:ring)?\b|
+        (?:infectious|inflammatory)\s+\w+\s+with\s+scarring|
+        # "scarring is seen/present/noted at|in|within …" intervening verb
+        (?<!\bpleural\s)(?:mild\s+|minimal\s+|minor\s+|stable\s+|chronic\s+)?scar(?:ring)?\s+is\s+(?:seen|present|noted|identified|demonstrated|evident|unchanged|similar|stable|chronic)(?:\s+(?:at|in|within|along|of)\b)?|
+        scarring\s+(?:at|of)\s+(?:the\s+)?(?:right|left|bilateral)\s+(?:lung\s+)?base|
+        # location without preposition: "scarring left base", "scarring right infrahilar region"
+        scar(?:ring)?\s+(?:left|right|bilateral)\s+(?:lung\s+)?(?:base|bases|apex|apices|infrahilar|perihilar|suprahilar|midlung|mid-lung|mid\s+lung)(?:\s+region)?\b|
+        calcific\s+scar\b|
+        scarring\s+.*\bpostradiation|
+        by\s+scarring|
+        or\s+scar\b|
+        looks?\s+(?:more\s+)?like\s+scar\b|
+        hyperdense\s+scar\b|
+        \bscar\s+in\s+the\b|
+        fibrosis/scar|
+        apical\s+pleural\s+parenchymal\s+opacification|
+        post.?rad(?:ic)?\s+change|
+        chronic\s+fibrotic\s+lesion|
+        post.?inflammatory\s+changes?\s+with\s+associated|
+        perihilar\s+fibrosis|
+        linear\s+fibrotic|
+        streaky\s+opacity(?:\s+\w+){0,8}\s+(?:appears?\s+to\s+be\s+)?fibrosis\b
+    )

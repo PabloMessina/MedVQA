@@ -1,0 +1,104 @@
+(?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\babsent\s)(?<!\bdenies\s)
+(?<!\bnegative\sfor\s)
+(?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+(?<!\bpreoperative\sfilms\sshowed\sa\s)
+(?<!\bpreoperative\sfilm\sshowed\sa\s)
+(?<!\bpreoperative\sfilms\sshowed\s)
+(?<!\bpreoperative\sfilm\sshowed\s)
+(?<!\bprior\sfilms\sshowed\sa\s)(?<!\bprior\sfilm\sshowed\sa\s)
+(?<!\bprior\sfilms\sshowed\s)(?<!\bprior\sfilm\sshowed\s)
+(?<!\bprior\sstudies\sshowed\sa\s)(?<!\bprior\sstudy\sshowed\sa\s)
+(?<!\bprior\sstudies\sshowed\s)(?<!\bprior\sstudy\sshowed\s)
+(?<!\bhistory\sof\sa\s)(?<!\bhistory\sof\s)
+(?<!\bh/o\s)
+\b(?:
+        # Shared: calcif* plus typo calcfication (missing i)
+        # Annulus synonyms (FN-fit fn_mine_fit_shared): anulus / annual typos; ring
+        # Valve/annulus names used below as (?:mitral|aortic|tricuspid|pulmonic|pulmonary)
+
+        # "mitral valve annular calcifications" / "mitral annular calcifications" / typo calcfication
+        # FN-fit: anulus/annual/ring; mitral valvular annulus
+        (?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+valve\s+(?:annular|annulus|anulus|annual)\s+calc(?:i)?f\w*|
+        (?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annular|annulus|anulus|annual|ring)\s+calc(?:i)?f\w*|
+        (?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+valvular\s+(?:annular|annulus|anulus|annual|ring)\s+calc(?:i)?f\w*|
+
+        # Bare annular calcification (MAC shorthand on CXR); FN-fit: annual typo
+        (?:severe\s+|mild\s+|moderate\s+|dense\s+|heavy\s+|bulky\s+|incidental\s+)?(?:annular|annual)\s+calc(?:i)?f\w*|
+
+        # Bare mitral/tricuspid/pulmonic calc* (FN-fit: "mitral calcifications").
+        # Do NOT bare-match "pulmonary calc*" (lung) or "aortic calc*" (sister class).
+        (?:mitral|tricuspid|pulmonic)\s+calc(?:i)?f\w*|
+
+        # Ossification / mineralization of named annulus/valve (no calcif*)
+        (?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve\s+)?(?:annular|annulus|anulus|annual)\s+(?:ossif\w*|minerali[sz]\w*)|
+        (?:ossif\w*|minerali[sz]\w*)\s+of\s+(?:the\s+)+(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+
+        # "calcification of the mitral valve" / doubled "the the" / "calcified mitral annulus"
+        # FN-fit: anulus; mitral valvular annulus; list gap "aorta and mitral valve annulus"
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)+(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)+(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+valvular\s+(?:annulus|annular|anulus|annual)|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)?aorta\s+and\s+(?:the\s+)?(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve\s+)?(?:annulus|annular|anulus|annual)|
+        calcified\s+(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+
+        # Preposition paths: calcif* in/within/over/along/at/on (+ region of) named annulus/valve
+        # Also: "calcification ... resides within the mitral annulus" / "is likely in the mitral annulus"
+        # FN-fit: mitral valvular annulus between name and annulus
+        calc(?:i)?f\w*(?:\s+\w+){0,10}\s+(?:in|within|over|along|at|on|resides\s+within)\s+(?:the\s+)?(?:region\s+of\s+(?:the\s+)?)?(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+        calc(?:i)?f\w*(?:\s+\w+){0,10}\s+(?:in|within|over|along|at|on|resides\s+within)\s+(?:the\s+)?(?:region\s+of\s+(?:the\s+)?)?(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+valvular\s+(?:annulus|annular|anulus|annual)|
+        calc(?:i)?f\w*(?:\s+\w+){0,6}\s+(?:is\s+)?(?:likely\s+)?(?:in|within)\s+(?:the\s+)?(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+
+        # "as well as of the mitral annulus" after earlier calc mention (gap to named annulus)
+        calc(?:i)?f\w*(?:\s+\w+){0,12}\s+(?:as\s+well\s+as\s+(?:of\s+)?)?(?:the\s+)+(?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual)|
+
+        # "mitral annulus is heavily calcified" / list gap: "mitral annular, coronary artery, and aortic arch calcifications"
+        # FN-fit: anulus/annual/ring
+        (?:mitral|aortic|tricuspid|pulmonic|pulmonary)\s+(?:valve|annulus|annular|anulus|annual|ring)
+            (?:\s*,\s*(?:and\s+)?(?:\w+\s+){0,3}\w+){0,5}
+            (?:\s+\w+){0,4}\s+calc(?:i)?f\w*|
+
+        valvular\s+calc(?:i)?f\w*|
+        # FN-fit: valvular ring calcifications
+        valvular\s+ring\s+calc(?:i)?f\w*|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)?valv(?:e|ular)|
+
+        # Coronary (native arteries/vessels; inverted "calcifications … in/involving … coronary")
+        # FN-fit: coronary arterial; article "a"; adj-first Calcified (left) coronary; aorta-and list
+        coronary\s+(?:arter(?:y|ies|ial)|vessels?)?\s*calc(?:i)?f\w*|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)?(?:native\s+)?coronary\s+(?:arter(?:y|ies|ial)|vessels?)|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)?aorta\s+and\s+(?:the\s+)?(?:native\s+)?coronary\s+(?:arter(?:y|ies|ial)|vessels?)|
+        coronary\s+(?:arter(?:y|ies|ial)|vessels?)(?:\s+\w+){0,4}\s+calc(?:i)?f\w*|
+        calc(?:i)?f\w*(?:\s+\w+){0,6}\s+(?:in|involving|involve|involves)\s+(?:(?:the|a)\s+)?(?:(?:\w+\s+){0,5}and\s+)?(?:native\s+)?coronary\s+(?:arter(?:y|ies|ial)|vessels?)|
+        calcified\s+(?:left\s+|right\s+)?(?:native\s+)?coronary\s+(?:arter(?:y|ies|ial)|vessels?)|
+
+        # Pericardial / myocardial contiguous
+        (?:pericardial|myocardial)\s+calc(?:i)?f\w*|
+        calcific\s+pericarditis|
+        calc(?:i)?f\w*\s+of\s+(?:the\s+)?(?:pericardium|myocardium)|
+        calc(?:i)?f\w*(?:\s+\w+){0,5}\s+associated\s+with\s+(?:the\s+)?apex\s+of\s+(?:the\s+)?heart|
+        (?:curvilinear\s+)?calc(?:i)?f\w*(?:\s+\w+){0,4}\s+(?:the\s+)?(?:cardiac|heart)\s+apex|
+
+        # LV / ventricular apex or wall (myocardial calc paraphrases)
+        calc(?:i)?f\w*(?:\s+\w+){0,4}\s+(?:at\s+)?(?:the\s+)?(?:left\s+)?ventricular\s+apex|
+        calc(?:i)?f\w*(?:\s+\w+){0,6}\s+along\s+(?:the\s+)?inferior\s+wall\s+of\s+(?:the\s+)?heart|
+        (?:left\s+)?ventricular\s+(?:wall\s+)?calc(?:i)?f\w*|
+        (?:ventricular|myocardial)\s+wall\s+calc(?:i)?f\w*|
+
+        # FN-fit: dystrophic calc … myocardial infarction (non-contiguous)
+        (?:dystrophic\s+)?calc(?:i)?f\w*(?:\s+\w+){0,8}\s+(?:relating\s+to|secondary\s+to|from|due\s+to)\s+(?:previous\s+|prior\s+|old\s+)?myocardial\s+infarct(?:ion)?|
+
+        # FN-fit: calcifications outlining left atrium / atrial (require outlining|localized, not bare over heart)
+        calc(?:i)?f\w*(?:\s+\w+){0,6}\s+outlining\s+(?:the\s+)?(?:left\s+|right\s+)?atri(?:um|al)|
+        calc(?:i)?f\w*(?:\s+\w+){0,4}\s+(?:in|within)\s+(?:the\s+)?(?:left\s+|right\s+)?atri(?:um|al)|
+
+        # "Pericardium, and thoracic aorta are calcified"
+        pericardium\b(?:\s*,\s*|\s+)(?:and\s+)?(?:the\s+)?(?:\w+\s+){0,4}(?:is|are)\s+calc(?:i)?f\w*|
+        myocardium\b(?:\s*,\s*|\s+)(?:and\s+)?(?:the\s+)?(?:\w+\s+){0,4}(?:is|are)\s+calc(?:i)?f\w*|
+
+        calcific\s+deposits?\s+in\s+(?:the\s+)?(?:myocardium|pericardium|coronary)|
+        cardiac\s+calc(?:i)?f\w*|
+
+        # Calcific shadow localized near valve / perivalvular calcified
+        calcific\s+(?:shadow|density|deposit)s?(?:\s+\w+){0,8}\s+(?:valve|annulus|annular|anulus|annual|perivalvular|paravalvular)|
+        (?:perivalvular|paravalvular)\s+\w+(?:\s+\w+){0,3}\s+calc(?:i)?f\w*|
+        calc(?:i)?f\w*\s+(?:perivalvular|paravalvular)
+    )

@@ -1,0 +1,89 @@
+# ==============================================================================
+# breast_implant
+# Current CXR shows one or more breast implants / prostheses / expanders.
+#
+# Match: breast/mammary/breasts implant/prosthesis (incl. plural + optional
+#        prosthetic/material adj); silicone or saline implant; breast/tissue/
+#        subcutaneous expander (incl. tissue expanded); breast augmentation /
+#        augmentation mammoplasty / augmentation devices; breast (tissue)
+#        artifact; postmastectomy changes *with* a stated implant; implant/
+#        prosthesis involving|in|of laterality breast; breast → left/right-sided
+#        implant/prosthesis; breast tissue with implant; breast consistent with
+#        (previously seen) implant.
+#
+# Do NOT match (prompt): dense breast tissue; gynecomastia; mastectomy /
+# reconstruction without a stated implant; chest-wall opacity; capsular
+# calcification alone; history/indication-only; prior augmentation alone;
+# explantation / removed; bare non-breast prosthesis/implant.
+# Negation/history lookbehinds are fixed-width (stdlib re).
+# ==============================================================================
+
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\sa\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sobvious\s)
+    (?<!\bhistory\sof\s)(?<!\ba\shistory\sof\s)(?<!\bknown\shistory\sof\s)
+    (?<!\bhistory\sof\sbilateral\s)(?<!\bhistory\sof\sa\s)
+    (?<!\bhistory\sof\sright\s)(?<!\bhistory\sof\sleft\s)
+    (?<!\bhistory\sof\sa\sright\s)(?<!\bhistory\sof\sa\sleft\s)
+    (?<!\bhx\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+    (?<!\bprior\s)(?<!\bprevious\s)(?<!\bold\s)
+    (?<!\bprior\sbilateral\s)(?<!\bprevious\sbilateral\s)
+    (?<!\bprior\sright\s)(?<!\bprior\sleft\s)
+    (?<!\bprevious\sright\s)(?<!\bprevious\sleft\s)
+    (?<!\bprior\sa\s)(?<!\bprevious\sa\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\bremoved\s)(?<!\bexplanted\s)
+
+    (?:
+        # 1. Explicit breast / breasts / mammary + optional adj + implant/prosthesis
+        \b(?:breasts?|mammary)\s+(?:(?:augmentation|prosthetic|silicone(?:\s+gel)?|saline)\s+)?(?:implants?|prosthes(?:is|es))
+        (?!\s+explant\w*)
+        |
+        # 2. Prompt-named materials without requiring the word "breast"
+        \b(?:silicone(?:\s+gel)?|saline)\s+implants?
+        (?!\s+explant\w*)
+        |
+        # 3. Breast expander
+        \bbreast\s+expanders?
+        |
+        # 4. Tissue expander / expanded (optional saline); subcutaneous expander
+        \b(?:saline\s+)?tissue\s+expand(?:ers?|ed)\b
+        |
+        \bsubcutaneous\s+expanders?
+        |
+        # 5. Breast augmentation (devices / current-film phrasing without
+        #    requiring the token "implant" immediately after "breast")
+        \bbreast\s+augmentation(?:\s+devices?)?
+        |
+        # 6. Augmentation mammoplasty / mammoplasties
+        \baugmentation\s+mammoplast(?:y|ies)
+        |
+        # 7. Overlying breast (tissue) artifact attributed to implants
+        \bbreast\s+(?:tissue\s+)?artifacts?
+        |
+        # 8. Postmastectomy / reconstruction restated *with* an implant
+        \bpost[- ]?mastectomy(?:\s+(?!without\b)\w+){0,8}\s+with\s+(?:an?\s+)?implants?
+        (?!\s+explant\w*)
+        |
+        # 9. Implant / prosthesis involving|in|of (the) (laterality) breast
+        \b(?:implants?|prosthes(?:is|es))\s+(?:involving|in|of)\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?breasts?
+        (?!\s+explant\w*)
+        |
+        # 10. Same-sentence breast → left/right-sided implant/prosthesis
+        \bbreasts?(?:\s+(?!without\b)[\w-]+){1,8}\s+(?:(?:a|an|the)\s+)?(?:left|right)[- ]sided\s+(?:implants?|prosthes(?:is|es))
+        (?!\s+explant\w*)
+        |
+        # 11. Breast tissue with implant (optional laterality after)
+        \bbreast\s+tissue\s+with\s+(?:an?\s+)?implants?
+        (?!\s+explant\w*)
+        |
+        # 12. Breast … consistent with (previously|prior)? (seen)? implant
+        \bbreasts?(?:\s+(?!without\b)[\w-]+){0,6}\s+consistent\s+with\s+(?:(?:previously|prior)\s+)?(?:seen\s+)?implants?
+        (?!\s+explant\w*)
+    )
+)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import FrozenSet, Iterable, Optional, Set
+from typing import FrozenSet, Iterable, Optional
 
 LLM_LABELS = (
     "definitely true",
@@ -28,8 +28,8 @@ CHEXPERT_LIKE_COLLAPSE = {
     "unmentioned": "unmentioned",
 }
 
-SUPPORT_DEVICES_CLASS = "Support Devices"
-NORMAL_CLASS = "Normal"
+SUPPORT_DEVICES_CLASS = "support_device_present"
+NORMAL_CLASS = "no_finding"
 
 
 def llm_label_to_binary_positive(label: Optional[str]) -> bool:
@@ -45,20 +45,14 @@ def to_chexpert_like(label: Optional[str]) -> str:
     return CHEXPERT_LIKE_COLLAPSE.get(key, "unmentioned")
 
 
-def is_normal_disqualifying_positive(
-    positive_classes: Iterable[str],
-    *,
-    support_devices_ok: bool = True,
-) -> bool:
+def is_normal_disqualifying_positive(positive_classes: Iterable[str]) -> bool:
     """
-    Return True if the report should NOT be treated as Normal-eligible.
+    Return True if the report should NOT be treated as no_finding-eligible.
 
-    Support-Devices-only positives do not disqualify Normal when support_devices_ok.
+    Any positive modeled class disqualifies, including support devices / device abnormality
+    (aligned with canonical no_finding semantics).
     """
-    positives: Set[str] = {c for c in positive_classes if c}
-    if support_devices_ok:
-        positives.discard(SUPPORT_DEVICES_CLASS)
-    return len(positives) > 0
+    return any(c for c in positive_classes if c)
 
 
 def final_label_for_class(

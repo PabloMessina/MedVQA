@@ -1,0 +1,283 @@
+# Pleural nodule / mass / nodular pleural tissue lesion (recall-first, prompt-faithful).
+# Exclude: intrapulmonary mass without pleural origin; smooth/diffuse thickening,
+# plaques, scarring, calcification, apical capping alone; loculated fluid /
+# empyema / pseudotumor without a tissue lesion; PleurX / pleuritic; bare
+# pleural contact / juxtapleural / extrapleural sign. Do not bridge mass to
+# pleural across effusion or fluid. History-only mesothelioma is not current.
+(?:
+        # ------------------------------------------------------------------
+        # 1. Named pleural neoplasms (current lesion, not history/DDx-only)
+        # ------------------------------------------------------------------
+        \b
+        (?<!abdominal\s)(?<!peritoneal\s)(?<!vs\s)
+        (?:
+            mesothelioma
+            |
+            solitary\s+fibrous\s+tumor(?:\s+of\s+(?:the\s+)?pleura)?
+            |
+            fibrous\s+tumor\s+of\s+(?:the\s+)?pleura
+        )
+        \b
+        (?!\s+is\s+not\s+excluded)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2a. Pleural-based / pleural-or-extrapleural tissue lesions
+        #     Allow short location/quality tokens after "based"; masslike;
+        #     soft-tissue mass; masslike; metasta* (metastasis + metastatic).
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+        pleural
+        (?:
+            [-\s]?based\s+
+            (?:
+                soft\s+tissue\s+(?:mass(?:es)?|lesions?)
+                |
+                (?:(?:(?:right|left|bilateral|upper|lower|apical|basal|posterior|
+                        anterior|lateral|medial|and|or|rounded|ovoid|lobulat\w*|
+                        nodular|tiny|small|large|mild|focal)\s+){0,4})?
+                (?:mass(?:es)?|mass-?like(?:\s+(?:opacit\w*|densit\w*|lesions?))?|
+                   nodules?|nodularity|tumors?|metasta\w*|
+                   implants?|deposits?|mammillations?|
+                   lesions?|densit(?:y|ies)|process(?:es)?|
+                   nodular\s+(?:densit\w*|opacit\w*|mass(?:es)?|lesions?))
+            )
+            |
+            \s+or\s+extrapleural\s+based
+            |
+            \s+or\s+extrapleural\s+
+            (?:mass(?:es)?|mass-?like|nodules?|nodularity|lesions?|tumors?|
+               opacit\w*|soft\s+tissue\s+(?:mass(?:es)?|lesions?)|metasta\w*|
+               implants?|deposits?|mammillations?)
+        )
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2b. Direct "pleural nodules/mass/mets/lesion/lipoma" — sentence must
+        #     not mention PET-CT earlier (blocks prior-scan-only mentions).
+        # ------------------------------------------------------------------
+        (?:^|(?<=[.!?;\n]))
+        (?:
+            (?!\bPET[-\s]?CT\b)
+            [^.!?;\n]
+        ){0,300}?
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+        pleural\s+
+        (?:mass(?:es)?|mass-?like(?:\s+opacit\w*|\s+lesions?)?|
+           nodules?|nodularity|nodular(?:\s+thickening)?|
+           metasta\w*|implants?|deposits?|mammillations?|tumors?|
+           lipomas?|spread)
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. Malignant / nodular / fibronodular pleural disease (not effusion)
+        #     Allow short and/or parenchymal bridges; scarring/opacity/structure
+        #     when nodular component is stated (smooth scarring alone excluded).
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:malignant|metasta\w*|
+           (?:fibro)?nodular|
+           reticular[-\s]?nodular)\s+
+        pleural\s+
+        (?:(?:and|or)\s+parenchymal\s+)?
+        (?!effusion\b|fluid\b)
+        (?:disease|thickening|scarring|carcinomatosis|implants?|deposits?|
+           metasta\w*|masses?|nodules?|nodularity|structure|abnormalit\w*|
+           opacit\w*|densit\w*|lesions?|
+           parenchymal\s+(?:opacit\w*|densit\w*|lesions?|scarring))
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3a. Nodular … pleural[-]parenchymal thickening / opacities
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:(?:fibro)?nodular|reticular[-\s]?nodular)
+        (?:\s+\w+){0,2}\s+
+        pleural[-\s]?parenchymal\s+
+        (?:thickening|opacit\w*|densit\w*|scarring|lesions?)
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3a2. Nodular … pleural-based opacities/densities
+        #      (nodular precedes pleural-based; bare pleural-based opacity
+        #       alone is often fluid — require nodular/fibronodular).
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:(?:fibro)?nodular|reticular[-\s]?nodular)
+        (?:\s+\w+){0,2}\s+
+        pleural[-\s]?based\s+
+        (?:opacit\w*|densit\w*|lesions?|mass(?:es)?|mass-?like|nodules?)
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3b. Pleural thickening AND nodularity; nodule(s)/nodularity along
+        #     pleural surface / deposits along the pleura
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        pleural\s+thickening\s+and\s+nodularity
+        \b
+        |
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:thickening\s+and\s+)?(?:nodularity|nodules?)
+        (?:\W+\w+){0,6}\W+
+        along\s+(?:the\s+)?pleural\s+surface
+        \b
+        |
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        nodular\s+deposits?
+        (?:\W+\w+){0,8}\W+
+        along\s+(?:the\s+)?pleura
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3c. Nodular thickening of the (laterality) pleura;
+        #     nodular … parietal pleura
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        nodular\s+thickening\s+of\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?pleura
+        \b
+        |
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        nodular(?:\s+\w+){0,3}\s+parietal\s+pleura
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3d. Mass(es) along pleural reflections / pleural spread
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        mass(?:es)?\s+along\s+(?:the\s+)?pleural\s+reflections?
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. Pathology "of the pleura"
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:(?:fibrous|soft\s+tissue|nodular)\s+)?
+        (?:mass(?:es)?|nodules?|nodularity|lesions?|tumors?|implants?|
+           deposits?|mammillations?|metasta\w*)
+        \s+of\s+(?:the\s+)?pleura
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. "... lesion/mass, pleural or extrapleural based"
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:soft\s+tissue\s+)?(?:lesions?|mass(?:es)?|nodules?|tumors?)
+        (?:\W+\w+){0,12}\W+
+        pleural\s+or\s+extrapleural\s+based
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5b. Mass/nodule later called pleural-based (no effusion/fluid bridge)
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:mass(?:es)?|mass-?like(?:\s+(?:opacit\w*|lesions?))?|nodules?)
+        (?:
+            (?!\beffusion\b)(?!\bfluid\b)
+            \W+\w+
+        ){0,18}
+        \W+
+        (?:
+            which\s+is\s+
+            |
+            that\s+is\s+
+            |
+            and\s+(?:be|is)\s+
+            |
+            favored\s+to\s+be\s+(?:\w+\s+){0,8}
+        )
+        pleural[-\s]?based
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5c. Ovoid/rounded opacity along or arising from the pleura
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:(?:ovoid|rounded|lobulat\w*|mass-?like|nodular|focal)\s+)?
+        (?:opacit\w*|mass(?:es)?|nodules?|densit\w*|lesions?)
+        (?:
+            (?!\beffusion\b)(?!\bfluid\b)
+            \W+\w+
+        ){0,8}
+        \W+
+        (?:
+            along\s+(?:the\s+)?lateral\s+aspect\s+of\s+(?:the\s+)?pleura
+            |
+            (?:abut(?:s|ting)?\s+(?:and\s+(?:may\s+)?)?)?aris(?:e|es|ing)\s+from\s+(?:the\s+)?pleura
+        )
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. Tumor nodules on pleural / diaphragmatic / chest-wall surface
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        tumor\s+nodules?
+        (?:\W+\w+){0,6}\W+
+        (?:
+            on\s+(?:the\s+)?(?:chest\s+wall|diaphragm|pleura|pleural\s+surface)
+            |
+            along\s+(?:the\s+)?(?:pleura|diaphragm|chest\s+wall)
+            |
+            in\s+the\s+(?:left|right)\s+chest
+        )
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 7. Mammillation of the pleura (tight)
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        mammill\w*\s+(?:of\s+)?(?:the\s+)?pleura
+        \b
+        |
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        pleura\s+mammill\w*
+        \b
+    )

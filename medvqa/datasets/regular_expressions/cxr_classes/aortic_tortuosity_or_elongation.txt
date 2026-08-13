@@ -1,0 +1,72 @@
+\b(?:
+        # Pathology → aorta / bare arch|knob (e.g. "mild tortuosity of the thoracic aorta",
+        # "tortuous descending aorta", "tourtous aorta", "unfolding of the aorta",
+        # "tortuosity … atherosclerotic thoracic aorta", "tortuous but not dilated … aorta",
+        # "Tortuous arch", "Unfolding of the arch", "Tortuous … not focally aneurysmal aorta").
+        # Wider clause-local bridge (no .?!) for calc/ectasia list padding; allow
+        # caliber-only "not (focally) dilated/…" inside the bridge.
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:tortu\w*|tourt\w*|elongat\w*|unfold\w*|uncoil\w*|serpentine|meander\w*)
+        (?:[^\w.?!]+(?:not\s+(?:(?:focally|significantly|markedly|grossly)\s+)?(?:dilated|enlarged|ectatic|aneurysmal|widened)\b|(?!without\b|no\b|not\b|denies\b|absent\b)\w+)){0,12}
+        [^\w.?!]+
+        (?:aort\w*|(?:(?:ascending|descending|thoracic|transverse)\s+)?arch\b|(?:aortic\s+)?(?:knob|knuckle)\b)
+
+        |
+
+        # Aorta / bare arch|knob → pathology (e.g. "aorta is slightly tortuous",
+        # "aorta is calcified and unfolded", "Arch is very tortuous",
+        # "Knob calcification and tortuosity").
+        # Ban bridging through without/no/not (except caliber-only "not dilated")
+        # so "ectasia without tortuosity" / "aorta is not tortuous" fail.
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:aort\w*|(?:(?:ascending|descending|thoracic|transverse)\s+)?arch\b|(?:aortic\s+)?(?:knob|knuckle)\b)
+        (?:[^\w.?!]+(?:not\s+(?:(?:focally|significantly|markedly|grossly)\s+)?(?:dilated|enlarged|ectatic|aneurysmal|widened)\b|(?!without\b|no\b|not\b|denies\b|absent\b)\w+)){0,12}
+        [^\w.?!]+
+        (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+        (?:tortu\w*|tourt\w*|elongat\w*|unfold\w*|uncoil\w*|serpentine|meander\w*)
+
+        |
+
+        # Kink: allow ascending/descending/thoracic; keep tight vs tube/line kinks
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        kink(?:ed|ing)?\s+(?:of\s+)?(?:the\s+)?(?:(?:ascending|descending|thoracic)\s+)?aort\w*
+        |
+        (?<!\bno\s)(?<!\bwithout\s)
+        aort\w*(?:[^\w.?!]+(?!without\b|no\b|not\b|denies\b|absent\b)\w+){0,5}[^\w.?!]+
+        (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+        kink(?:ed|ing)?
+
+        |
+
+        # Dolichoectasia / dolichoectatic (elongation compound; require aorta nearby)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        dolichoectas(?:ia|ic|tic)?
+        (?:[^\w.?!]+(?!without\b|no\b|not\b|denies\b|absent\b)\w+){0,6}
+        [^\w.?!]+
+        aort\w*
+        |
+        (?<!\bno\s)(?<!\bwithout\s)
+        aort\w*
+        (?:[^\w.?!]+(?!without\b|no\b|not\b|denies\b|absent\b)\w+){0,6}
+        [^\w.?!]+
+        (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
+        dolichoectas(?:ia|ic|tic)?
+        |
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        dolichoectatic\s+aort\w*
+        |
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        dolichoectasia\s+of\s+(?:the\s+)?(?:(?:ascending|descending|thoracic)\s+)?aort\w*
+
+        |
+
+        # Abnormal aortic course (prompt-supported); do not match "normal … course"
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        abnormal\s+aort\w*\s+course
+        |
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        abnormal\s+course\s+of\s+(?:the\s+)?(?:(?:ascending|descending|thoracic)\s+)?aort\w*
+        |
+        (?<!\bno\s)(?<!\bwithout\s)
+        aort\w*\s+(?:with\s+)?(?:an?\s+)?abnormal\s+course
+    )

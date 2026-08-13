@@ -1,0 +1,28 @@
+{
+  "class_id": "rounded_atelectasis",
+  "positives": [
+    "Rounded atelectasis in the right lower lobe.",
+    "Round atelectasis with comet-tail sign.",
+    "Folded lung consistent with rounded atelectasis.",
+    "Atelectatic pseudotumor in the posterior lung.",
+    "Possible rounded atelectasis with curving bronchi.",
+    "Upper-lobe density may represent ?round? atelectasis or pneumonia.",
+    "Folded-lung appearance in the right lower lobe.",
+    "Atelectasis with rounded morphology at the base.",
+    "Atelectasis with rounded configuration.",
+    "Atelectasis that appears rounded.",
+    "Atelectasis which appears rounded."
+  ],
+  "negatives": [
+    "Peripheral pulmonary nodule in the right lung.",
+    "Pleural-based mass along the major fissure.",
+    "Lobar atelectasis of the right lower lobe.",
+    "Linear plate-like atelectasis at the base.",
+    "Pleural thickening with rounded contour.",
+    "HISTORY CODE: ? rounded atelectasis vs mass."
+  ],
+  "negation_soft": [
+    "No rounded atelectasis is identified.",
+    "Prior rounded atelectasis unchanged from prior study."
+  ]
+}

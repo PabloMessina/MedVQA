@@ -1,0 +1,64 @@
+# prosthetic_cardiac_valve — FN-fit (fn_mine_fit_shared)
+# Hunt holes: spaced T AVR; Stable TAVR; intervening again/only/faintly/grossly;
+# percutaneous/known/presumed AVR; AVR in place / stable position; evidence of AVR;
+# coordinated AVR and MVR; TAVR in tandem / changes / prior-TAVR changes.
+# Reject: annuloplasty/annulus; MAC/native calc; ICD/LVAD/Impella/occluder;
+# history/s/p/indication without current viz; ECG aVR without device framing.
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bdenies\s)(?<!\babsent\s)
+\b(?:
+        (?:prosthetic|artificial)\s+(?:(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid)(?:\s*(?:,|and|or|/)\s*(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid))*\s+)?valves?|
+        (?:prosthetic|artificial)\s+(?:tavr|tavi)\b|
+        (?<!\bs/p\s)(?<!\bsp\s)
+        (?:mechanical|bioprosthetic)\s+(?:
+            (?:(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid)(?:\s*(?:,|and|or|/)\s*(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid))*\s+)?valves?|
+            (?:(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid)(?:\s*(?:,|and|or|/)\s*(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid))*\s+)?valvular\s+endoprosthes\w*|
+            (?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid)(?:\s*(?:,|and|or|/)\s*(?:heart|cardiac|aortic|mitral|pulmonic|pulmonary|tricuspid))*\s+prosthes\w*
+        )|
+        (?:valve|valvular)\s+(?:prosthes|endoprosthes)\w*|
+        (?:aortic|mitral|pulmonic|pulmonary|tricuspid|cardiac)\s+valve\s+(?:replacement|prosthes\w*|cage|implant)|
+        (?<!\bs/p\s)(?<!\bsp\s)(?<!history of )
+        valve\s+replacements?\s+(?:(?:is|are|was|were)\s+)?(?:again\s+)?(?:seen|noted|visualized|present(?!ing)|redemonstrated|unchanged|intact)\b|
+        replaced\s+(?:aortic|mitral|pulmonic|pulmonary|tricuspid)\s+valve|
+        (?:aortic|mitral|pulmonic|tricuspid)\s+wall\s+prosthes\w*|
+        there\s+(?:is|are)\s+(?:an?\s+)?aortic\s+core\s+valves?|
+        (?:core\s*valves?|coral\s+valves?|aortic\s+core\s+valve\s+device)
+            \s+(?:(?:has|have|had)\s+been\s+)?(?:(?:is|are|was|were)\s+)?(?:re-?\s*demonstrated|present(?!ing)|noted|again\s+noted|unchanged|intact|visualized|placed|in\s+(?:place|position|expected\s+position))\b|
+        (?:edwards\s+)?sapien(?:\s+type)?\s+(?:(?:aortic|mitral|pulmonic|pulmonary|tricuspid|cardiac)\s+)?(?:valve|device|tavr|tavi|implant)
+            (?:\s+(?:(?:is|are|was|were)\s+)?(?:re-?\s*demonstrated|present(?!ing)|noted|again\s+noted|unchanged|intact|visualized|in\s+(?:place|position|expected\s+position)))?|
+        (?:transcatheter|percutaneous|transaortic)\s+(?:aortic\s+)?valve|
+        aortic\s+prosthes\w*\s+(?:remains\s+)?(?:(?:is|are|was|were)\s+)?(?:in\s+(?:place|position|situ)|present(?!ing)|noted|visualized|unchanged|intact)\b|
+        status\s+post\s+(?:tavr|tavi)\b|
+        (?:tavr|tavi)\s+(?:prosthes\w*|valve|device|stent)|
+        stent\s+for\s+a?\s*(?:tavr|tavi)\b|
+        interval\s+tavr\b|
+        # Stable/unchanged TAVR (bare premodifier; current device status)
+        (?<!history of )(?<!\bs/p\s)(?<!\bsp\s)(?<!\bfor\s)(?<!\bof\s)(?<!\bafter\s)(?<!\brecent\s)(?<!\bbefore\s)(?<!\bconsider\s)
+        (?:stable|unchanged)\s+(?:tavr|tavi|t\s+avr)\b|
+        # TAVR/TAVI / spaced T AVR + viz / position / again / tandem
+        (?<!\bfor\s)(?<!\bof\s)(?<!\bafter\s)(?<!\brecent\s)(?<!\bbefore\s)(?<!\bs/p\s)(?<!\bsp\s)(?<!history of )(?<!\bconsider\s)
+        (?:tavr|tavi|t\s+avr)\s+(?:
+            (?:(?:is|are|was|were)\s+)?(?:(?:again|only|faintly|grossly)\s+){0,3}?(?:noted|present(?!ing)|visualized|seen|re-?demonstrated|demonstrated|unchanged|intact)\b|
+            (?:(?:is|are|was|were)\s+)?(?:(?:in\s+)?(?:good\s+|expected\s+|stable\s+)?(?:place|position|situ))\b|
+            (?:again\s+)?(?:seen|noted|demonstrated|visualized)\b
+        )|
+        (?<!history of )(?<!\bs/p\s)(?<!\bsp\s)(?<!\bfor\s)(?<!\bafter\s)(?<!\brecent\s)(?<!\bbefore\s)(?<!\bconsider\s)
+        (?:tavr|tavi|t\s+avr)\b(?:[\w\s,/.-]{0,80})?\bin\s+tandem\b|
+        # TAVR changes / changes of prior TAVR (current-film framing)
+        (?<!history of )(?<!\bs/p\s)(?<!\bsp\s)
+        (?:tavr|tavi|t\s+avr)\s+changes?\s+(?:(?:is|are|was|were)\s+)?(?:again\s+)?(?:present(?!ing)|noted|seen|unchanged|intact|visualized)\b|
+        changes?\s+(?:of\s+)?(?:prior|previous)\s+(?:tavr|tavi|t\s+avr)\b
+            (?:\s+(?:(?:is|are|was|were)\s+)?(?:again\s+)?(?:noted|seen|present(?!ing)|unchanged|intact|visualized))?|
+        # evidence of AVR/MVR (outer no- lookbehind covers "no evidence")
+        evidence\s+of\s+(?:avr|mvr)\b|
+        # AVR/MVR (+ optional known/presumed/percutaneous; coordinated AVR and MVR)
+        (?<!history of )(?<!\bs/p\s)(?<!\bsp\s)
+        (?:(?:known|presumed|percutaneous)\s+)?(?:avr|mvr)(?:\s*(?:,|and|/)\s*(?:avr|mvr))?
+            \s+(?:
+                (?:(?:is|are|was|were|remain|remains)\s+)?(?:(?:again|only|faintly|grossly)\s+){0,3}?(?:noted|present(?!ing)|visualized|seen|re-?demonstrated|demonstrated|unchanged|intact)\b|
+                (?:(?:is|are|was|were|remain|remains)\s+)?(?:stable\s+)?in\s+(?:stable\s+)?(?:place|position)\b|
+                (?:again\s+)?(?:seen|noted|demonstrated|visualized|redemonstrated)\b
+            )|
+        cardiac\s+valves?\s+(?:are|is)\s+(?:intact|unchanged|stable|redemonstrated|visualized|noted|present(?!ing))\b|
+        (?:intact|unchanged|stable|redemonstrated|visualized|noted)\s+(?:\w+\s+){0,4}cardiac\s+valves?|
+        (?:sternotomy\s+wires?(?:\s+and\s+|\s*,\s*)|hardware,\s*)(?:[\w\s,/.-]{0,80})?cardiac\s+valves?
+    )

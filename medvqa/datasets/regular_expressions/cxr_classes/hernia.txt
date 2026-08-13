@@ -1,12 +1,172 @@
+# ==============================================================================
+# hernia (umbrella)
+# Thoracic hernia / herniation: hiatal/hiatus/paraesophageal, diaphragmatic
+# (Bochdalek/Morgagni), gastric / intrathoracic stomach, bowel/omentum/viscera
+# into thorax, lung herniation, traumatic diaphragmatic injury WITH herniation.
+# Retrocardiac opacity only when attributed to hernia.
+# Do NOT match: bare abdominal hernias (umbilical/inguinal/ventral/incisional),
+# intracranial/disk herniation, reflux alone, elevated hemidiaphragm/eventration,
+# gastric pull-up, diverticulum, history-only / corrected / indication-only.
+# Negation/history lookbehinds are fixed-width (stdlib re).
+# ==============================================================================
 
-    # 1. Direct Term
-    # Matches: "Hernia", "Herniation", "Herniated"
-    \bhernia\w*
-    |
-    # 2. Named Diaphragmatic Hernias (Rare but critical)
-    # Matches: "Morgagni hernia", "Bochdalek hernia"
-    \b(?:morgagni|bochdalek)
-    |
-    # 3. Descriptive (Bowel in chest)
-    # Matches: "Colonic interposition", "Bowel loops in the hemithorax"
-    \b(?:bowel|colon|intestin\w*)\s+(?:loops?|structures?)?\s+(?:in|within|into)\s+(?:the\s+)?(?:chest|thorax|hemithorax)
+(?:
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+    (?<!\bno\sdefinite\s)(?<!\bno\sobvious\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bno\sevidence\sof\sa\s)(?<!\bno\sevidence\sof\tan\s)
+    (?<!\bno\sevidence\sof\sthe\s)
+    (?<!\bwithout\sevidence\sof\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bthere\sis\sno\s)(?<!\bthere\sare\sno\s)
+    # Do not block current "evidence of Bochdalek/hernia" — "no/without evidence of"
+    # already covered above. (hiatal child never had this lookbehind.)
+    (?<!\bno\sdefinite\sevidence\sof\s)(?<!\bno\sdefinite\sevidence\sfor\s)
+    (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)(?<!\ba\shistory\sof\s)
+    (?<!\bhistory\sof\sleft\s)(?<!\bhistory\sof\sright\s)
+    (?<!\bhistory\sof\sa\sleft\s)(?<!\bhistory\sof\sa\sright\s)
+    (?<!\bwith\sa\sleft\s)(?<!\bwith\sa\sright\s)
+    (?<!\bwith\sleft\s)(?<!\bwith\sright\s)
+    (?<!\bh/o\s)(?<!\bhx\sof\s)(?<!\bhx\s)
+    (?<!\bs/p\s)(?<!\bstatus\spost\s)
+    (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
+    (?<!\bconcern\sfor\s)(?<!\bsuspicion\sfor\s)
+    (?<!\?\s)(?<!//\s)
+    (?<!\bor\seven\s)(?<!\bsuch\sas\s)
+    (?<!\bcorrected\s)(?<!\bcorrected\sleft-sided\s)(?<!\bcorrected\sright-sided\s)
+    (?<!\bcorrected\sleft\ssided\s)(?<!\bcorrected\sright\ssided\s)
+    (?<!\brepaired\s)
+    (?<!\bHISTORY:\s)
+
+    (?:
+        # 1. Named / thoracic hernia types (not bare "hernia").
+        # "known X hernia" blocked here (indication-only); still allow
+        # "known LARGE hiatal" / "known unchanged large hiatal" (adjective intervenes).
+        (?<!\bknown\s)(?<!\bwith\sknown\s)
+        \b(?:hiatal|hiatus|para-?esophageal|peri-?esophageal|diaphragmatic|
+            sliding|rolling)\s+hernia\w*
+        (?!\s+has\s+now\s+been\s+corrected)
+        (?!\s+has\s+been\s+corrected)
+        (?!\s+was\s+corrected)
+        |
+        # Laterality prefix so "with a right Bochdalek" starts at "right" and
+        # dodges the indication lookbehind (?<!\bwith\sa\sright\s).
+        \b(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:morgagni|bochdalek)(?:\s+hernia\w*)?
+        |
+        # 2. Gastric / stomach herniation + intrathoracic stomach
+        # (allow "known intrathoracic stomach" as current finding restatement)
+        \bgastric\s+herni\w*
+        |
+        \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:stomach|gastr\w*)
+        |
+        \bintra-?thoracic\s+stomach
+        |
+        # 3. Lung herniation (adjacent + intervening laterality + clause words)
+        \b(?:lung|pulmonary)\s+herni\w*
+        |
+        \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:lung|pulmonary)\b
+        |
+        # Laterality between "the" and "lung" — require cage/wall cue (not midline).
+        \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:left|right|bilateral)\s+(?:lung|pulmonary)\b
+          (?:(?![.!?]).){0,40}?
+          (?:chest\s+wall|thoracic\s+cage|intercostal)
+        |
+        \b(?:aerated\s+)?(?:lung|pulmonary)\b
+          (?:(?![.!?]).){0,80}?
+          \b(?:may\s+be\s+|appears?\s+(?:to\s+be\s+)?|is\s+|likely\s+|
+             possibly\s+|probably\s+)?herniat\w*
+        |
+        # 4. Viscera / bowel / omentum / fat / liver / gut herniating into thorax
+        # Subject–verb: "bowel are/have herniated through (hemi)diaphragm/defect"
+        \b(?:omental\s+fat|omentum|bowel|colon(?:ic)?|intestin\w*|viscera|gut|
+            stomach|gastr\w*|liver|abdominal\s+contents?)\s+
+          (?:(?:is|are|was|were|has|have|(?:has|have|had)\s+been)\s+)?
+          herniat\w*\s+(?:into|in|through|to|across)\s+
+          (?:(?:the|a|an)\s+)?(?:anterior\s+|posterior\s+|right\s+|left\s+|lateral\s+|lower\s+|basal\s+)?
+          (?:chest(?:\s+wall)?|thorax|hemithorax|mediastin\w*|lung|(?:hemi)?diaphrag\w*)
+        |
+        # gut herniation (token absent from bowel/viscera arms alone)
+        \bgut\s+herniat\w*
+        |
+        # herniation of [portion of] (large|small) viscera/contents/liver … thorax/diaphragm
+        \bherniat\w*\s+(?:of\s+)?(?:(?:a\s+|the\s+)?(?:portion|part|loops?)\s+of\s+(?:the\s+)?)?(?:the\s+)?
+          (?:(?:large|small)\s+)?(?:bowel|colon(?:ic)?|intestin\w*|oment(?:um|al)|viscera|stomach|gastr\w*|
+             liver|abdominal\s+contents?|gut)
+          (?:(?![.!?]).){0,50}?
+          \b(?:chest|thorax|hemithorax|mediastin\w*|lung|(?:hemi)?diaphragm|chest\s+wall)
+        |
+        # Fat herniation (Morgagni/Bochdalek fat); destination optional on CXR.
+        \bherniat\w*\s+(?:of\s+)?(?:the\s+)?
+          (?:sub(?:-|\s)?diaphragmatic|intra-?abdominal|omental)\s+fat\b
+        |
+        # herniation of the (left|right) (hemi)diaphragm
+        \bherniat\w*\s+(?:of\s+)?(?:the\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:hemi)?diaphrag\w*
+        |
+        # bowel / loops of bowel within hemithorax (either word order)
+        \b(?:(?:gas[\s-]?filled\s+)?loops?\s+of\s+)?(?:bowel|colon(?:ic)?|intestin\w*|oment(?:um|al)|viscera|gut)\s+
+          (?:(?:loops?|structures?)\s+)?
+          (?:in|within|into)\s+(?:the\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:lower\s+|basal\s+)?
+          (?:chest|thorax|hemithorax|mediastin\w*)
+        |
+        \bcolonic\s+interposition\b
+        |
+        # 5. Stomach / intra-abdominal fat into lung/thorax with hernia cue
+        \b(?:stomach|intra-?abdominal\s+fat)\b
+          (?:(?![.!?]).){0,60}?
+          (?:into|in)\s+(?:the\s+)?(?:left\s+|right\s+)?(?:lower\s+)?
+          (?:lung|thorax|chest|hemithorax)
+          (?:(?![.!?]).){0,40}?\bhernia\w*
+        |
+        # 5b. Stomach … herniates into hemithorax (light clause intervener: "which")
+        \bstomach\b
+          (?:(?![.!?]).){0,40}?
+          herniat\w*\s+(?:into|in|through|to|across)\s+
+          (?:(?:the|a|an)\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:lower\s+|basal\s+)?
+          (?:chest(?:\s+wall)?|thorax|hemithorax|mediastin\w*|(?:hemi)?diaphrag\w*)
+        |
+        # 6. Retrocardiac opacity attributed to hernia (clause-local)
+        \bretrocardiac\s+(?:opacity|density|mass|air[\s-]?fluid\s+level)\b
+          (?:(?![.!?]).){0,80}?
+          \b(?:hiatal|hiatus|para-?esophageal|diaphragmatic|hernia)\b
+        |
+        # 7. Traumatic diaphragmatic rupture/injury WITH herniation
+        \b(?:traumatic\s+)?diaphragmatic\s+(?:rupture|injury|tear)\b
+          (?:(?![.!?]).){0,50}?\bherni\w*
+        |
+        # 8. Fat-containing hernia (Morgagni/Bochdalek-like without eponym)
+        \b(?:(?:posterior|anterior|right|left|paracardiac|cardiophrenic)\s+)?
+          fat[\s-]?containing\s+hernia\w*
+        |
+        # 9. Residual bare hernia — thoracic location adjective before stem
+        # (do not match umbilical/inguinal/ventral/incisional/abdominal-wall)
+        (?<!\bumbilical\s)(?<!\binguinal\s)(?<!\bventral\s)(?<!\bincisional\s)
+        (?<!\babdominal\s)(?<!\bparastomal\s)(?<!\bfemoral\s)(?<!\bspigelian\s)
+        (?<!\babdominal\swall\s)
+        \b(?:(?:moderate(?:-|\s)?sized|large|massive|small|moderate)\s+)?
+          (?:(?:left|right)(?:-sided|\ssided)?\s+)?
+          (?:paracardiac|retrocardiac|basal|posterior|anterior)\s+
+          hernia\w*
+        |
+        # 10. Residual bare hernia — thoracic framing after stem
+        (?<!\bumbilical\s)(?<!\binguinal\s)(?<!\bventral\s)(?<!\bincisional\s)
+        (?<!\babdominal\s)(?<!\bparastomal\s)(?<!\bfemoral\s)(?<!\bspigelian\s)
+        (?<!\babdominal\swall\s)
+        \b(?:(?:moderate(?:-|\s)?sized|large|massive|small|moderate)\s+)?
+          (?:(?:left|right)(?:-sided|\ssided)?\s+)?
+          hernia\w*
+          (?:
+            \s+transmits\s+(?:a\s+)?(?:loop\s+of\s+)?(?:gut|bowel)
+            |
+            \s+with\s+(?:air[\s-]?fluid\s+levels?|organoaxial\s+gastric\s+volvulus)
+            |
+            \s+may\s+be\s+(?:diaphragmatic|hiatal)
+            |
+            \s+containing\s+(?:(?:large\s+|small\s+)?(?:bowel|gut)|stomach)
+            |
+            \s+(?:in|within)\s+(?:the\s+)?(?:(?:left|right)\s+)?(?:basal\s+)?(?:hemi)?thorax
+            |
+            \s+(?:in|within)\s+(?:the\s+)?retrocardiac\s+(?:region|area|space)
+            |
+            \s+projecting\s+over\s+(?:the\s+)?(?:(?:left|right)\s+)?hemithorax
+          )
+    )
+)

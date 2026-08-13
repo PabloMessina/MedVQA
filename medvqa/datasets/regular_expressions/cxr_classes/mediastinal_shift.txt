@@ -1,77 +1,330 @@
+# ==============================================================================
+# mediastinal_shift
+# Explicit shift / deviation / displacement / push / pull of mediastinum, heart,
+# or cardiomediastinal silhouette/contour. Trachea alone is omitted (prompt:
+# tracheal deviation supports only when mediastinal displacement is also
+# stated). Do not infer from widening / mass / effusion / atelectasis.
+#
+# Gaps are clause-local ([^\w.!?;:]) to avoid cross-sentence FPs.
+# Stdlib re lookbehinds are fixed-width: enumerate modifier/list negations.
+# Section 5 drops project* (gas "projecting to the right" is not displacement).
+# pull/drawn only with anatomy + toward/to (not bare tube "pulled back").
+# FN-fit w19: migrat* on mediastinal/heart arms only (not lead/stent/wire);
+# agentive moving|pushing|pulling the mediastinum/heart (not trachea-only).
+# ==============================================================================
 
-    # ==============================================================================
-    # 1. ANATOMY ... followed by ... SHIFT / DEVIATION / DISPLACEMENT
-    # ==============================================================================
+# Shared fragments (expanded inline; stdlib re has no defines):
+#   ANATOMY: mediastinum / mediastinal(?! fat) | heart | cardiac silhouette |
+#            cardiomediastinal…
+#   SHIFT:   shift\w* | hift\w* | shoft\w* | deviat\w* | displac\w* | push\w*
+#            | migrat\w* (compact / direction-first / verb…anatomy / has-migrated)
+#            | pull(?:ed|ing) | drawn  (pull/drawn: anatomy+toward arm only)
+#            | moving|pushing|pulling the mediastinum (agentive arm)
+
+# ------------------------------------------------------------------------------
+# 1. Compact: mediastinal / cardiomediastinal shift|deviation|displacement
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bnor\s)(?<!\bneither\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)
+    (?<!\bno\sovert\s)(?<!\bno\sdefinite\s)
+    (?<!\bno\sobvious\s)(?<!\bno\sgross\s)
+    (?<!\bno\sresidual\s)(?<!\bno\sapparent\s)
+    (?<!\bno\sacute\s)(?<!\bno\snew\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bwithout\sassociated\s)(?<!\bwithout\ssubstantial\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\sevidence\sfor\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bno\sevidence\sof\sdefinite\s)
+    (?<!\bno\sevidence\sfor\sdefinite\s)
+    (?<!\bno\spneumothorax\sor\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)(?<!\bno\slonger\s)
+    (?<!\blikelihood\sof\s)(?<!\bless\slikelihood\sof\s)
+    (?<!\bno\sreason\sto\sassume\s)
+    (?<!\babsence\sof\s)
+    (?<!\bdoes\snot\sshow\s)(?<!\bdoes\snot\sdemonstrate\s)
+    (?<!\bhistory\sof\s)(?<!\bresolved\s)(?<!\bresolution\sof\s)
+    (?<!\bforeign\sbody\sor\s)(?<!\bbody\sor\s)
+    \b(?:mediastinal|cardiomediastinal)\s+
+    (?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|migrat\w*)\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 2. Direction-first: left/right[-]ward shift|deviation|displacement of anatomy
+#    "leftward shift of the mediastinum"
+#    "rightward displacement of the heart"
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)(?<!\bno\sovert\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)
+    (?<!\bwithout\sappreciable\sleftward\s)(?<!\bwithout\sappreciable\srightward\s)
+    (?<!\bwithout\ssignificant\sleftward\s)(?<!\bwithout\ssignificant\srightward\s)
+    (?<!\bno\sappreciable\sleftward\s)(?<!\bno\sappreciable\srightward\s)
+    (?<!\bwithout\sleftward\s)(?<!\bwithout\srightward\s)
+    (?<!\bno\sleftward\s)(?<!\bno\srightward\s)
+    \b(?:left|right)[- ]?ward\s+
+    (?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|push\w*|migrat\w*)\s+
+    of(?:[^\w.!?;:]+\w+){0,4}[^\w.!?;:]+
     \b(?:
-        mediastin\w*(?:\s+(?:structures?|contents?))?|
-        trachea(?:l)?|
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
         heart|
-        cardiac\s+silhouett\w*|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
         cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
         cardiomediastinum
     )\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 3. Verb ... anatomy (clause-local)
+#    "shift of the mediastinum to the left"
+#    "displacement of the cardiomediastinal silhouette"
+#    "persistent sslight hift of the mediastinum to the left"
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)
+    (?<!\bno\sovert\s)(?<!\bno\sdefinite\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
+    (?<!\bless\slikelihood\sof\s)
+    (?<!\bwithout\sappreciable\sleftward\s)(?<!\bwithout\sappreciable\srightward\s)
+    (?<!\bwithout\ssignificant\sleftward\s)(?<!\bwithout\ssignificant\srightward\s)
+    (?<!\bno\sappreciable\sleftward\s)(?<!\bno\sappreciable\srightward\s)
+    (?<!\bwithout\sleftward\s)(?<!\bwithout\srightward\s)
+    (?<!\bno\sleftward\s)(?<!\bno\srightward\s)
+    (?<!no\sovert\s)(?<!no\sdefinite\s)
+    \b(?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|push\w*|migrat\w*)\b
     (?:
-        \s+[^\s;:]+
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|neither\b)\w+
     ){0,8}
-    \s+
+    [^\w.!?;:]+
     \b(?:
-        shift\w*|
-        deviat\w*|
-        displac\w*|
-        push\w*|
-        pull\w*|
-        drawn?|       # Added for volume loss traction
-        retract\w* # Added for volume loss traction
-    )\b
-
-    |
-
-    # ==============================================================================
-    # 2. SHIFT / DEVIATION / DISPLACEMENT ... followed by ... ANATOMY
-    # ==============================================================================
-    \b(?:
-        shift\w*|
-        deviat\w*|
-        displac\w*|
-        push\w*|
-        pull\w*|
-        drawn?|
-        retract\w*
-    )\b
-    (?:
-        \s+[^\s;:]+
-    ){0,8}
-    \s+
-    \b(?:
-        mediastin\w*(?:\s+(?:structures?|contents?))?|
-        trachea(?:l)?|
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
         heart|
-        cardiac\s+silhouett\w*|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
         cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
         cardiomediastinum
     )\b
+)
 
-    |
+|
 
-    # ==============================================================================
-    # 3. STATIC POSITION INDICATING SHIFT
-    # ==============================================================================
+# ------------------------------------------------------------------------------
+# 4. Anatomy ... verb (clause-local; allows "Heart, shifted leftward")
+#    Compact "mediastinal shift" also lands here (space = gap); negation must
+#    sit before anatomy, not only before the verb.
+#    FN-fit: word budget 8→20 for long obscuration clauses; allow gap "not
+#    visualized/seen/…" and "no longer … shifted" (degree still present) while
+#    still blocking bare "not/no … shifted" and resolved "no longer shifted"
+#    via verb lookbehinds.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)
+    (?<!\bno\sovert\s)(?<!\bno\sdefinite\s)
+    (?<!\bno\sobvious\s)(?<!\bno\sgross\s)
+    (?<!\bno\sresidual\s)(?<!\bno\sapparent\s)
+    (?<!\bno\sacute\s)(?<!\bno\snew\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bwithout\sassociated\s)(?<!\bwithout\ssubstantial\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\sevidence\sfor\s)(?<!\bwithout\sevidence\sfor\s)
+    (?<!\bno\sevidence\sof\sdefinite\s)
+    (?<!\bno\sevidence\sfor\sdefinite\s)
+    (?<!\bno\spneumothorax\sor\s)
+    (?<!\blikelihood\sof\s)(?<!\bless\slikelihood\sof\s)
+    (?<!\babsence\sof\s)(?<!\bevidence\sof\s)
+    (?<!\bhistory\sof\s)(?<!\bresolved\s)(?<!\bresolution\sof\s)
+    (?<!\bforeign\sbody\sor\s)(?<!\bbody\sor\s)
     \b(?:
-        mediastin\w*(?:\s+(?:structures?|contents?))?|
-        trachea(?:l)?|
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
         heart|
-        cardiac\s+silhouett\w*|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
         cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
         cardiomediastinum
     )\b
     (?:
-        \s+[^\s;:]+
-    ){0,6}
-    \s+
-    \b(?:lies|is|appears?|seems?|project\w*|locat\w*|situat\w*)\b
+        [^\w.!?;:]+
+        (?!
+            without\b|denies\b|absent\b|neither\b|
+            no\b(?!\s+longer\b)|
+            not\b(?!\s+(?:visuali\w*|seen|identifi\w*|appreciat\w*))
+        )
+        \w+
+    ){0,20}?
+    [^\w.!?;:]+
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bneither\s)
+    (?<!\bno\slonger\s)(?<!\bno\sovert\s)
+    \b(?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|push\w*)\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 5. Anatomy is/appears/lies … off midline / to the left|right
+#    (trachea omitted; project* omitted — "mediastinum projecting to the right"
+#    is radiographic projection, not displacement). Exclude rotation/positioning/
+#    scoliosis/dextrocardia/situs when immediately attributed after the phrase.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)
+    \b(?:
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
+        heart|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
     (?:
-        \s+[^\s;:]+
-    ){0,4}
-    \s+
-    # Expanded to catch "in the right hemithorax/chest"
-    \b(?:to\s+the\s+(?:left|right)(?:\s+of\s+midline)?|off\s+midline|in(?:to)?\s+the\s+(?:left|right)\s+(?:hemithorax|chest|side))\b
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|midline\b)\w+
+    ){0,6}?
+    [^\w.!?;:]+
+    \b(?:lies|is|appears?|seems?|locat\w*|situat\w*)\b
+    (?:
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b)\w+
+    ){0,4}?
+    [^\w.!?;:]+
+    \b(?:
+        to\s+the\s+(?:left|right)(?:\s+of\s+midline)?|
+        toward(?:s)?\s+(?:the\s+)?(?:left|right)|
+        off\s+midline|
+        in(?:to)?\s+the\s+(?:left|right)\s+(?:hemithorax|chest|side)
+    )\b
+    (?!\s+(?:due\s+to|secondary\s+to|from|from\s+patient|attributable\s+to)\s+
+        (?:rotation|rotat\w*|positioning|scoliosis|dextrocardia|situs))
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 6. Anatomy + verb + direction (tight):
+#    "Mediastinum is deviated leftward"
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)
+    \b(?:
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
+        heart|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
+    (?:
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|neither\b)\w+
+    ){0,5}?
+    [^\w.!?;:]+
+    (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bneither\s)
+    \b(?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|push\w*)\b
+    [^\w.!?;:]+
+    \b(?:left|right)(?:[- ]?ward|ward)?\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 7. Bare directional shift/shoft (hedged gold: "leftward shoft cannot be
+#    excluded"). Exclude when the shift is of the trachea.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)(?<!\bno\sovert\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bwithout\sappreciable\sleftward\s)(?<!\bwithout\sappreciable\srightward\s)
+    (?<!\bwithout\ssignificant\sleftward\s)(?<!\bwithout\ssignificant\srightward\s)
+    (?<!\bno\sappreciable\sleftward\s)(?<!\bno\sappreciable\srightward\s)
+    (?<!\bwithout\sleftward\s)(?<!\bwithout\srightward\s)
+    (?<!\bno\sleftward\s)(?<!\bno\srightward\s)
+    \b(?:left|right)[- ]?ward\s+
+    (?:shift\w*|hift\w*|shoft\w*)\b
+    (?!\s+of(?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+\btrachea\w*)
+    (?!(?:[^\w.!?;:]+\w+){0,4}[^\w.!?;:]+\btrachea\w*)
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 8. Anatomy pulled / drawn toward (prompt includes pull; not bare tube "pulled
+#    back"). Tight copula+toward so NG/ETT retraction does not fire.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    \b(?:
+        mediastinum|
+        mediastinal\s+(?:structures?|contents?|silhouett\w*|contours?)|
+        heart|
+        cardiac\s+silhouett\w*|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|structures?))?|
+        cardiomediastinum
+    )\b
+    [^\w.!?;:]{1,40}
+    \b(?:pull(?:ed|ing)|drawn)\b
+    [^\w.!?;:]{1,20}
+    \b(?:to|toward(?:s)?)\b
+    (?!\s+(?:the\s+)?(?:carina|stomach|antrum|pylorus|duodenum|gej))
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 9. Anatomy has/have/is … migrated (not bare lead/stent/wire migration).
+#    "The mediastinum has migrated slightly to the left"
+#    Keep migrat* out of the broad anatomy…verb arm (section 4) to avoid
+#    "heart … lead migration" FPs.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bwithout\ssignificant\s)(?<!\bwithout\sappreciable\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bhistory\sof\s)(?<!\bresolved\s)
+    \b(?:
+        mediastinum|
+        mediastinal(?!\s+fat)(?:\s+(?:structures?|contents?|silhouett\w*|contours?))?|
+        heart|
+        cardiac\s+(?:silhouett\w*|and\s+mediastinal\s+structures?)|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|axis|structures?))?|
+        cardiomediastinum
+    )\b
+    (?:
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|neither\b)\w+
+    ){0,6}?
+    [^\w.!?;:]+
+    \b(?:has|have|is|are|was|were)\s+migrat\w*\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 10. Agentive gerund: moving|pushing|pulling the mediastinum/heart
+#     "Large pleural effusion moving the mediastinum slightly to the left
+#     of midline." Trachea-only agentives omitted (prompt).
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\slonger\s)
+    \b(?:moving|pushing|pulling)\s+the\s+
+    (?:
+        mediastinum|
+        heart|
+        cardiac\s+silhouett\w*|
+        cardiomediastinal(?:\s+(?:silhouett\w*|contours?|structures?))?|
+        cardiomediastinum
+    )\b
+)

@@ -1,60 +1,114 @@
+# Thoracic aortic wall / knob calcification (not valve, not bare athero, not abdominal-only).
+# Prompt: thoracic aorta / arch / knob / knuckle; atherosclerotic aorta OK; exclude valves,
+# coronaries, non-aortic vessels, abdominal-only aorta, history-only inference.
+# FN-fit: also allow "thoracic and (upper) abdominal aorta/aortic" — lookbehind (?<!abdominal\s)
+# alone blocked those spans even when thoracic was explicit.
+# FN-fit (fn_mine_fit_shared): long-span for aortic arch/knob/wall + forward bare aorta;
+# athero/vascular → bare aorta reverse; short-span 6→10; porcelain aorta;
+# guards: non/not/valve before calcif; granuloma/bronchial/hilar after calcif.
+
+    # Shared anatomy atoms (referenced via duplication; VERBOSE has no defines).
+    # TAB = thoracic/ascending/descending and (upper) abdominal aorta/aortic.
+    # PATH = calcific / atherosclerotic / atheroma / sclero / plaque.
 
     # ==============================================================================
-    # 1. ANATOMY ... followed by ... PATHOLOGY
-    #    Matches: "The aorta is tortuous and calcified"
-    #             "Aortic knob appears prominent and calcified"
+    # 0. PORCELAIN AORTA (severe circumferential aortic calcification synonym)
     # ==============================================================================
-    \b(?:
-        aort\w*|                # Aorta, Aortic
-        knob|arch|root          # Specific aortic parts
-    )\b
-    # THE FIX: Allow up to 6 arbitrary words
-    # This captures: "is tortuous and", "is unfolded and densely", etc.
-    (?:
-        \W+\w+
-    ){0,6}
-    \s+
-    \b(?:
-        calcif\w*|              # Calcified, calcification
-        atherosclero\w*|        # Atherosclerosis
-        atheroma\w*|            # Atheroma
-        sclero\w*|              # Sclerotic (common CXR shorthand for atherosclerosis)
-        plaque\w* # Plaques
-    )\b
+    \bporcelain\s+aorta\b
 
     |
 
     # ==============================================================================
-    # 2. PATHOLOGY ... followed by ... ANATOMY
-    #    Matches: "Calcified and tortuous aorta"
-    #             "Atherosclerotic changes of the thoracic aorta"
+    # 1. LONG-SPAN: named thoracic / aortic arch-knob-wall / bare aorta -> PATH
+    #    Recovers distant measuring / tortuosity / unfolding / as-well-as clauses.
     # ==============================================================================
-    \b(?:
-        calcif\w*|
-        atherosclero\w*|
-        atheroma\w*|
-        sclero\w*|
-        plaque\w*
-    )\b
-    # THE FIX: Allow up to 6 arbitrary words
-    # This captures: "changes involving the", "plaques within the"
     (?:
-        \W+\w+
-    ){0,6}
-    \s+
-    \b(?:
-        aort\w*|
-        knob|arch|root
-    )\b
+        \b(?:ascending|descending|thoracic|thoracoabdominal|thoraco-abdominal)\s+aort(?:a|ic)\b
+        | \b(?:ascending|descending|thoracic)\s+and\s+(?:upper\s+)?abdominal\s+aort(?:a|ic)\b
+        | \baortic\s+(?:arch|knob|knuckle|root|wall)\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baorta\b
+    )
+    (?!\s*(?:valve|valvular))
+    (?:\W+\w+){0,14}\W+
+    (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
+    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
 
     |
 
     # ==============================================================================
-    # 3. STRONG STANDALONES (Context-Free)
-    #    "Atherosclerosis" implies Aorta in CXR contexts
+    # 2. LONG-SPAN reverse: PATH -> named thoracic / aortic arch-knob-wall
+    #    (bare aorta only via §2b athero/vascular — avoids cyst/granuloma FPs)
     # ==============================================================================
-    \b(?:
-        atherosclero\w+|
-        atheroma\w+
-    )\b
-    (?!\s+coronary) # Negative lookahead for coronary arteries
+    (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
+    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
+    (?:\W+\w+){0,14}\W+
+    (?<!\bno\s)
+    (?:
+        \b(?:ascending|descending|thoracic|thoracoabdominal|thoraco-abdominal)\s+aort(?:a|ic)\b
+        | \b(?:ascending|descending|thoracic)\s+and\s+(?:upper\s+)?abdominal\s+aort(?:a|ic)\b
+        | \baortic\s+(?:arch|knob|knuckle|root|wall)\b
+    )
+    (?!\s*(?:valve|valvular))
+
+    |
+
+    # ==============================================================================
+    # 2b. Athero / vascular calc -> bare aorta (hunt: vascular…aorta; atheromatous…aorta;
+    #     calcified atherosclerotic changes … aorta)
+    # ==============================================================================
+    (?:
+        \bvascular\s+calcification\w*\b
+        | \b(?:calcified\s+)?(?:atherosclero\w*|atheroma\w*)\b
+    )
+    (?:\W+\w+){0,12}\W+
+    (?<!\bno\s)
+    (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baorta\b
+    (?!\s*(?:valve|valvular))
+
+    |
+
+    # ==============================================================================
+    # 3. SHORT-SPAN: anatomy -> pathology (≤10 intervening words; was 6)
+    #    aorta/aortic (not abdominal; not valve); knob/knuckle; OCR "aortais".
+    #    Deliberately NOT aort\w* (blocks aortico / aortopulmonary window LN).
+    # ==============================================================================
+    (?:
+        \baortic\s+(?:arch|knob|knuckle|root|wall)\b
+        | \b(?:thoracoabdominal|thoraco-abdominal)\s+aort(?:a|ic)\b
+        | \b(?:ascending|descending|thoracic)\s+and\s+(?:upper\s+)?abdominal\s+aort(?:a|ic)\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baorta\s*is\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baortais\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baorta\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baortic\b
+        | \b(?:knob|knuckle)\b
+    )
+    (?!\s*(?:valve|valvular))
+    (?:\W+\w+){0,10}\W+
+    (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
+    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
+
+    |
+
+    # ==============================================================================
+    # 4. SHORT-SPAN: pathology -> anatomy (keep ≤6; long reverse / §2b cover distant)
+    # ==============================================================================
+    (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
+    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
+    (?:\W+\w+){0,6}\W+
+    (?<!\bno\s)
+    (?:
+        \baortic\s+(?:arch|knob|knuckle|root|wall)\b
+        | \b(?:thoracoabdominal|thoraco-abdominal)\s+aort(?:a|ic)\b
+        | \b(?:ascending|descending|thoracic)\s+and\s+(?:upper\s+)?abdominal\s+aort(?:a|ic)\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baorta\b
+        | (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baortic\b
+        | \b(?:knob|knuckle)\b
+        | \barch\b
+    )
+    (?!\s*(?:valve|valvular))
+
+    # NOTE: No bare atherosclero\w*|atheroma\w* standalone (was the dominant FP driver).

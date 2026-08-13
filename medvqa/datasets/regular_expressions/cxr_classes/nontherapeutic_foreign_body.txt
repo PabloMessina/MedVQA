@@ -1,0 +1,207 @@
+\b(?:
+        # Negation prefixes used below (fixed-width lookbehinds; stdlib re).
+        # Covers "no/without (retained|additional|other|obvious|definite) radiopaque FB …"
+
+        # Explicit FB + visualization (radiopaque / radio-opaque / radio opaque / metallic opaque)
+        # "radiopaque" = radi + opaque (shared 'o'); do not use radio+opaque.
+        # Lookbehind omits \b so glued tokens like "processNo radiopaque" still negate.
+        # Short intervening modifiers OK (e.g. "with central lucency" before viz).
+        # Viz includes projected / overlie[s] / bare unchanged (FN-mine fit w19).
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!no\sretained\s)(?<!no\sadditional\s)(?<!no\sother\s)
+        (?<!no\sobvious\s)(?<!no\sdefinite\s)
+        (?<!no\sunexpected\s)
+        (?:metallic\s+)?radi(?:o\s*[-]?\s*)?opaque\s+foreign\s+(?:body|bodies|object|material)
+        (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
+        [\s,]+
+        (?:(?:is|are|was|were|has|have)\s+)?
+        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?)
+
+        |
+
+        # Explicit FB + visualization (bare). (?<!opaque\s) blocks
+        # "No radiopaque foreign body identified" when the engine skips the adjective.
+        # Intervening words before viz: "versus film artifact projecting"; commas: ", pellet, projects".
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
+        (?<!no\sretained\s)(?<!no\sadditional\s)(?<!no\sother\s)
+        (?<!no\sobvious\s)(?<!no\sdefinite\s)(?<!an\sobvious\s)
+        foreign\s+(?:body|bodies|object|material)
+        (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
+        [\s,]+
+        (?:(?:is|are|was|were|has|have)\s+)?
+        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?)
+
+        |
+
+        # "representing a small foreign body" — optional adjectives between a and foreign
+        represent(?:s|ing)?\s+a\s+(?:\w+\s+){0,3}foreign\s+(?:body|bodies)
+
+        |
+
+        (?:consistent|compatible)\s+with\s+(?:an?\s+)?(?:ingested\s+|aspirated\s+|retained\s+)?foreign\s+(?:body|bodies)
+
+        |
+
+        cannot\s+exclude\s+foreign\s+(?:body|bodies)
+
+        |
+
+        # Redemonstration / new FB without requiring adjacent viz verb
+        redemonstration\s+of\s+(?:an?\s+)?(?:\w+\s+){0,2}foreign\s+(?:body|bodies|object|material)
+        |
+        \bnew\s+foreign\s+(?:body|bodies|object|material)\b
+
+        |
+
+        # Location phrase; not "ingestion"; not "concern for FB in" / "no obvious FB in".
+        # Sites include axillary / presternal / abdominal wall / quadrant (FN-mine fit w19).
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
+        (?<!no\sobvious\s)(?<!no\sdefinite\s)(?<!an\sobvious\s)
+        (?<!concern\sfor\s)
+        foreign\s+(?:body|bodies|object|material)\s+(?:in|within)\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|stomach|esophagus|bowel|airway|bronchus|trachea|lung|chest\s+wall|thorax|chest|hemithorax|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant|RUQ|LUQ)
+        (?!\s*gestion)
+
+        |
+
+        # Quadrant / laterality FB + stability (e.g. "Right upper quadrant foreign body unchanged")
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
+        (?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant\s+foreign\s+(?:body|bodies)
+        (?:\s+(?:is|are|was|were|remains?|appear(?:s|ed)?)?)?\s+
+        (?:unchanged|stable)\b
+
+        |
+
+        # Existential: there is/are … (metallic|radiopaque) foreign body (no adjacent viz required)
+        # Allow size tokens (e.g. "1.5 cm"); decimal point OK when followed by a digit.
+        # Do not cross a "no" (blocks "there is no radiopaque foreign body").
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        there\s+(?:is|are)\s+
+        (?:(?!\bno\b)(?:[^\n.!?]|\.(?=\d))){0,40}?
+        (?:metallic\s+(?:opaque\s+)?|radi(?:o\s*[-]?\s*)?opaque\s+)
+        (?:(?:subcutaneous|tiny|small|stable|irregular)\s+)*
+        foreign\s+(?:body|bodies|object|material)
+
+        |
+
+        # retained/aspirated/ingested FB + nearby visual/location cue (skip bare history)
+        (?:retained|aspirated|ingested)\s+foreign\s+(?:body|bodies|material|object)
+        (?:\W+(?!history\b|hx\b|concern\b|eval\b|management\b|ingestion\b|no\b|not\b|without\b|for\b)\w+){0,5}
+        \W+
+        (?:seen|noted|identified|visualized|demonstrated|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|within|(?:in)\b(?!\s*gestion)|unchanged)
+
+        |
+
+        unexpected\s+foreign\s+(?:body|bodies|object|material)
+
+        |
+
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
+        metallic\s+(?:opaque\s+)?foreign\s+(?:body|bodies)
+        (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
+        [\s,]+
+        (?:(?:is|are|was|were|has|have)\s+)?
+        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?|over\b)
+
+        |
+
+        # Metallic / opaque FB + location (axillary / presternal / soft tissues / abdominal wall)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!no\sretained\s)(?<!no\sadditional\s)(?<!no\sother\s)
+        (?<!no\sobvious\s)(?<!no\sdefinite\s)(?<!no\svisualized\s)
+        (?:metallic\s+(?:opaque\s+)?|radi(?:o\s*[-]?\s*)?opaque\s+)
+        (?:(?:subcutaneous|tiny|small|stable|irregular)\s+)*
+        foreign\s+(?:body|bodies)
+        \s+(?:in|within)\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|chest\s+wall|thorax|chest|hemithorax|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant)
+
+        |
+
+        # Ballistic / projectile (not "bullet-shaped" vertebra)
+        (?:bullet|shrapnel)\s+fragments?
+        |
+        \bshrapnel\b
+        |
+        retained\s+bullet
+        |
+        \bbullets?\b(?![\s-]*shaped)
+        |
+        ballistic\s+(?:debris|fragments?|injury)
+        |
+        metallic\s+BBs?
+        |
+        \bbuckshot\b
+        |
+        metallic\s+shot\b
+        |
+        metallic\s+fragments?\s+from\s+(?:known\s+)?gunshot\s+wounds?
+        |
+        (?:scattered|multiple|innumerable)\s+(?:xxxx\s+)?densities?\s+throughout\s+(?:the\s+)?chest\s+from\s+(?:a\s+)?(?:prior\s+)?gunshot\s+wounds?
+        |
+        # Pellets / shotgun (FN-mine hunt + fit w19: bare / radiopaque pellets)
+        (?:shot\s*guns?|shotguns?)\s+pellets?
+        |
+        metallic\s+pellets?
+        |
+        radi(?:o\s*[-]?\s*)?opaque\s+pellets?
+        |
+        # Bare pellet(s) + viz / identified / location (not history-only)
+        (?<!no\s)(?<!not\s)\bpellets?
+        (?:[\s,]+(?:are|is|was|were)\s+)?
+        [\s,]+
+        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|over\b|in\b|within\b)
+        |
+        # Multiple/numerous pellets (ballistic retained FB phrasing)
+        (?:multiple|numerous|several|innumerable)\s+pellets?\b
+        |
+        # GSW / ballistic context near pellets
+        (?:gunshot\s+wounds?|GSW|ballistic\s+injury)
+        (?:(?![.!?]).){0,50}?
+        \bpellets?\b
+        |
+        # Projectile / projectile fragments (FN-mine hunt)
+        metallic\s+projectile(?:\s+fragments?)?
+        |
+        # Spatial viz only; allow short co-mentions (e.g. "projectile and mediastinal clips overlying")
+        # Do not treat clips/leads alone as FB — match requires projectile stem.
+        (?<!no\s)(?<!not\s)\bprojectiles?(?:\s+fragments?)?
+        (?:[\s,]+(?:and\s+)?(?!history\b|hx\b)\w+){0,4}?
+        [\s,]+
+        (?:overlie[sd]?|overlying|projects?|projecting|projected|superimposed|unchanged)
+        |
+        (?<!no\s)(?<!not\s)\bprojectiles?\s+fragments?
+
+        |
+
+        # Retained surgical nontherapeutic material (not clips/staples/wires)
+        radi(?:o\s*[-]?\s*)?opaque\s+ribbon\s+typical\s+of\s+surgical\s+sponge
+        |
+        surgical\s+sponges?
+        |
+        radiodense\s+filaments?\s+related\s+to\s+surgical\s+sponges?
+        |
+        \bscattered\s+gauzes?\b
+
+        |
+
+        # Other named unexpected objects / retained contrast
+        \bspoon\s+(?:is\s+)?(?:seen\s+)?(?:within|in)\s+(?:the\s+)?stomach
+        |
+        ingested\s+magnets?
+        |
+        (?:watch[- ]type|button)\s+batter(?:y|ies)
+        |
+        glass\s+fragments?
+        |
+        metallic\s+debris
+        |
+        metallic\s+objects?\s+(?:in|within|project(?:s|ing|ed)?|overlying|overlie[sd]?)
+        |
+        metallic\s+rod
+        (?:\W+(?!no\b|not\b|without\b)\w+){0,12}
+        \W+foreign\s+(?:body|bodies)
+        |
+        (?<!no\s)(?<!of\s)(?:retained|aspirated)\s+barium\b
+        |
+        (?<!no\s)millimetric\s+metallic\s+particles?\b
+        |
+        metallic\s+particles?\s+(?:are|were)\s+seen
+    )

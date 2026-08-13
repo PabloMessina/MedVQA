@@ -1,0 +1,170 @@
+# ==============================================================================
+# fibrotic_lung_change
+# Chronic fibrotic parenchymal remodeling beyond isolated focal scarring.
+#
+# Match: pulmonary / pulmonary interstitial / pulmonary parenchymal fibrosis;
+# fibrotic-fibrosing change (interstitial/appearance/native/laterality+lung/
+# distortion/disease/volume loss); honeycombing / honeycomb-type; traction
+# bronchiectasis/bronchiolectasis; UIP / usual interstitial pneumonia /
+# fibrotic|fibrosing NSIP; coarse reticulation; diffuse/extensive fibrotic
+# scarring; fibrotic process; architectural distortion via hilar retraction
+# + longstanding scarring; large cicatrices; fibrocalcific process;
+# interstitial / lung / chronic / massive / radiation / end-stage /
+# underlying fibrosis; fibrobullous change; fibrosis of/in anatomic lung
+# sites (incl. lobe + collapse); findings attributed as representing/
+# reflecting/suggestive of fibrosis; appear fibrotic; current changes
+# compatible/consistent with known IPF; ILD and fibrosis.
+#
+# Do NOT match: cystic fibrosis; indication/history-only fibrosis (IPF
+# transplant hx, ?pulm fibrosis, post-radic fibrosis in INDICATION alone);
+# CLINICAL HISTORY: pulmonary fibrosis without findings-section fibrosis;
+# bare ILD / interstitial markings without fibrosis attribution; isolated
+# apical/biapical/linear/focal scarring; fibrothorax / non-traction
+# bronchiectasis alone; atelectasis-or-fibrosis hedges for focal lines.
+# ==============================================================================
+
+\b(?:
+        # Idiopathic pulmonary fibrosis (incl. pulmoary typo). Block
+        # "transplant for idiopathic …" and "HISTORY: idiopathic …".
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bhistory:\s)
+        (?<!\bfor\s)
+        idiopathic\s+(?:pulmonary|pulmoary)\s+fibrosis
+    |
+        # Pulmonary / pulmonary interstitial / pulmonary parenchymal fibrosis —
+        # not cystic; not "… idiopathic pulmoary …" (idiopathic handled above).
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bhistory:\s)
+        (?<!\bcystic\s)
+        (?<!\bidiopathic\s)
+        (?:pulmonary|pulmoary)(?:\s+(?:interstitial|parenchymal))?\s+fibrosis
+    |
+        # Anatomically / etiologically qualified fibrosis (findings language).
+        # Omit bare post-radic (fires in INDICATION without findings fibrosis).
+        # radiation fibrosis (not only post-radiation); underlying; end-stage.
+        (?<!\bcystic\s)
+        (?:
+            biapical|bibasilar|basilar|perihilar|subpleural|
+            extensive|severe|diffuse|end-?stage|
+            underlying|
+            radiation|
+            post-?radiation|postradiation|post-?radiotherapy
+        )\s+fibrosis
+    |
+        # Interstitial / lung / chronic / massive fibrosis (not cystic; not
+        # HISTORY: fibrosis). Qualifiers avoid DDx-list "include … fibrosis".
+        # Trailing "… and interstitial fibrosis." / bare clause-end covered.
+        # Lobe-qualified fibrosis; fibrosis+collapse of lobe; fibrosis in bases.
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bknown\shistory\sof\s)
+        (?<!\bhx\sof\s)
+        (?<!\bhistory:\s)
+        (?<!\bcystic\s)
+        (?:
+            (?:
+                biapical|bibasilar|basilar|perihilar|subpleural|
+                chronic|severe|mild|diffuse|extensive|stable|
+                underlying|redemonstrat\w*\s+of
+            )\s+interstitial\s+fibrosis
+            |
+            interstitial\s+fibrosis\s+(?:in|with|are|is)
+            |
+            # Trailing "… and interstitial fibrosis." (not DDx ", interstitial fibrosis,")
+            \band\s+interstitial\s+fibrosis(?=\s*[.,;)]|$)
+            |
+            (?:left|right|bilateral)?\s*lung\s+fibrosis
+            |
+            # Lobe-qualified: "left upper lobe fibrosis"
+            (?:left|right|bilateral)\s+(?:upper|middle|lower|mid)\s+lobe\s+fibrosis
+            |
+            # Word-order: "fibrosis of the left lung" / "fibrosis in the subpleural…"
+            # / "fibrosis and collapse of the left upper lobe"
+            fibrosis\s+(?:and\s+collapse\s+)?of\s+the\s+(?:(?:left|right|bilateral)\s+)?(?:(?:upper|middle|lower|mid)\s+lobe|lung)
+            |
+            fibrosis\s+in\s+the\s+(?:subpleural|bases?(?:\s+of\s+the\s+lungs?)?|lung\s+bases?|lower\s+lobes?)
+            |
+            fibrosis\s+involving
+            |
+            chronic\s+fibrosis
+            |
+            (?:progressive\s+)?massive\s+fibrosis
+        )
+    |
+        appears\s+to\s+be\s+fibrosis|
+        appear(?:s|ed|ing)?\s+(?:to\s+be\s+)?fibrotic|
+        attributable\s+to\s+(?:pulmonary\s+)?fibrosis|
+        (?:due\s+to|perhaps\s+due\s+to|may\s+be\s+due\s+to)\s+(?:post-?radiation\s+|postradiation\s+|radiation\s+)?fibrosis|
+        fibrosis\s+or\s+bronchiectasis|
+        fibrosis,\s+likely\s+representing
+    |
+        # Findings attributed as fibrosis (not "atelectasis or fibrosis").
+        # Allow severity / underlying / radiation before fibrosis.
+        (?:
+            associated\s+with|
+            reflect(?:s|ing|ive\s+of)?|
+            represent(?:s|ing)?|
+            presumably\s+represent(?:s|ing)?|
+            probably|
+            consistent\s+with|
+            compatible\s+with|
+            suggest(?:ing|ive\s+of)|
+            (?:likely\s+)?related\s+to|
+            evolving
+        )\s+
+        (?:known\s+)?
+        (?:underlying\s+)?
+        (?:mild\s+|moderate\s+|severe\s+)?
+        (?:chronic\s+)?
+        (?:pulmonary\s+|interstitial\s+|radiation\s+|post-?radiation\s+|postradiation\s+)?
+        fibrosis
+    |
+        # Current CXR changes attributed to known IPF (not bare hx IPF alone).
+        (?:compatible|consistent)\s+with.{0,60}(?:patient'?s\s+)?(?:known\s+)?\bipf\b
+    |
+        # ILD co-mentioned with fibrosis ("… interstitial lung disease and fibrosis")
+        interstitial\s+lung\s+disease\s+and\s+fibrosis
+    |
+        # Fibrotic / fibrosing phrasing (incl. interstitial / appearance /
+        # native / laterality+lung / distortion / disease / volume loss;
+        # fibrosing NSIP).
+        fibrotic\s+(?:
+            lung|parenchymal|changes?|remodeling|change|process|scarring|
+            interstitial|appearance|native|distortion|disease|
+            volume\s+loss|
+            (?:left|right|bilateral)\s+lung
+        )|
+        fibrosing\s+(?:chronic\s+)?(?:interstitial\s+)?lung\s+disease|
+        fibrosing\s+parenchymal|
+        fibrosing\s+nsip|
+        diffuse\s+fibrotic|
+        fibro-?\s*bullous
+    |
+        # Hallmarks
+        honeycomb(?:ing|-?type|\s+appearance)|
+        traction\s+bronchi(?:ectasis|olectasis)|
+        (?<!\bhistory\sof\s)(?<!\bknown\shistory\sof\s)(?<!\bhx\sof\s)(?<!\bhistory:\s)\buip\b|
+        usual\s+interstitial\s+pneumonia|
+        late\s+fibrotic\s+stage|
+        fibrotic\s+nsip|
+        coarse.{0,20}reticulation
+    |
+        # Extensive / remodeling scarring (not isolated apical scar / fibrothorax)
+        fibrocalcific\s+process|
+        chronic\s+biapical\s+fibrocalcific|
+        large\s+cicatrices|
+        extensive\s+parenchymal\s+scarring|
+        (?:widespread|extensive|diffuse)\s+(?:pulmonary\s+)?scarring|
+        hilar\s+retraction.{0,80}longstanding\s+scarring|
+        longstanding\s+scarring.{0,80}hilar\s+retraction|
+        parenchymal\s+retraction
+    )

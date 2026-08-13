@@ -1,0 +1,48 @@
+{
+  "class_id": "hiatal_hernia",
+  "positives": [
+    "Hiatal hernia.",
+    "Large sliding hiatal hernia.",
+    "Paraesophageal hiatal hernia.",
+    "Retrocardiac air-fluid level from hiatal hernia.",
+    "Intrathoracic stomach consistent with hiatus hernia.",
+    "Retrocardiac opacity compatible with known hiatal hernia.",
+    "Retrocardiac opacity is in part due to known hiatal hernia.",
+    "Known hiatal hernia is seen in the retrocardiac region.",
+    "A retrocardiac density is compatible with known hiatal hernia.",
+    "Retrocardiac density XXXX corresponding to known hiatal hernia.",
+    "The known hiatal hernia is unchanged.",
+    "The known hiatal hernia is better visible than on the previous image.",
+    "Lucency seen behind the heart likely corresponds with known hiatal hernia.",
+    "Increased herniation of abdominal contents through known hiatal hernia.",
+    "Evidence of hiatal hernia is again seen.",
+    "Central retrocardiac opacity is consistent with history of hiatal hernia.",
+    "Large hiatal type hernia with much of the stomach above the diaphragm.",
+    "Large paraesophageal type hernia with much of the stomach above the diaphragm.",
+    "Nasogastric tube is coiled within the stomach, which is herniated above the diaphragm.",
+    "Herniation through the esophageal hiatus.",
+    "Retrocardiac air-fluid level consistent with patient's known hiatal hernia.",
+    "Rounded contour abnormality compatible with patient's known hiatal hernia.",
+    "Retrocardiac opacity that likely reflects patient's known hiatal hernia.",
+    "Large retrocardiac opacity likely represents the patient's known hiatal hernia.",
+    "Ovoid soft tissue density consistent with patient's known hiatal hernia.",
+    "Left hemidiaphragm not well visualized, likely due to patient's known hiatal hernia.",
+    "Retrocardiac density compatible with a known hiatal hernia.",
+    "Redemonstration of retrocardiac opacity, consistent with the known hiatal hernia.",
+    "Large known hiatal hernia.",
+    "Known hiatal hernia.",
+    "Known hiatal hernia is constant.",
+    "The known hiatal hernia is less apparent on this exam.",
+    "Known hiatal hernia can be faintly discerned overlying the cardiac silhouette.",
+    "Huge midline gastrointestinal hernia, probably through the esophageal hiatus.",
+    "Para esophageal hernia."
+  ],
+  "negatives": [
+    "Retrocardiac pneumonia.",
+    "Epiphrenic diverticulum suggested.",
+    "Non-hiatal diaphragmatic hernia."
+  ],
+  "negation_soft": [
+    "No hiatal hernia."
+  ]
+}

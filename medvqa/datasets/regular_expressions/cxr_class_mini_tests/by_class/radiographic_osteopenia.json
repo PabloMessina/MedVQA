@@ -1,0 +1,50 @@
+{
+  "class_id": "radiographic_osteopenia",
+  "positives": [
+    "Generalized osteopenia.",
+    "Osteopenic bones.",
+    "Decreased osseous mineralization.",
+    "Osteoporosis on radiograph.",
+    "Regional osteopenia of the visualized spine.",
+    "Demineralization of the visualized bones.",
+    "No acute osseous abnormality, although the bones are osteopenic.",
+    "No acute fractures, though bones appear diffusely demineralized.",
+    "No acute osseous abnormality detected noting osteopenia.",
+    "No acute osseous abnormalities detected, although bones are diffusely osteopenic.",
+    "No acute osseous abnormality is visualized, although the osseous structures are diffusely demineralized.",
+    "No definite acute rib fractures detected, but diffuse osseous demineralization limits sensitivity.",
+    "There are no definite traumatic findings though this is greatly limited by diffuse osteopenia.",
+    "Visualized osseous structures demonstrates no acute abnormality, though demineralized in appearance.",
+    "Bone density is decreased.",
+    "The bone density is low.",
+    "Osseous density is diminished.",
+    "Decreased mineralization of the bones.",
+    "Diffuse osteopaenia.",
+    "Hypomineralized bones.",
+    "Osseous rarefaction.",
+    "The bones are undermineralized.",
+    "No bony abnormalities other than diffuse osteopenia.",
+    "No significant bony abnormalities except for osteopenia.",
+    "Osseous structures are unremarkable except for diffuse osteopenia.",
+    "Washed-out appearance of the bones.",
+    "Diffuse undermineralization of the visualized bones.",
+    "Abdomen is otherwise unremarkable and visualized osseous structures are notable for diffuse osteopenia.",
+    "Unremarkable except for mild aortic tortuosity, unchanged generalized demineralization again noted.",
+    "Skeletal structures are unremarkable with the exception of mild osteopenia.",
+    "Osseous structures are grossly unremarkable with mild osteopenia demonstrated.",
+    "NO CONGESTIVE FAILURE DEMINERALIZATION, KYPHOSCOLIOSIS APPEAR STABLE.",
+    "There are no pleural or significant bony abnormalities except for osteopenia."
+  ],
+  "negatives": [
+    "Vertebral compression fracture.",
+    "Degenerative spondylosis.",
+    "Kyphosis.",
+    "Lytic bone lesion.",
+    "Healing rib fracture.",
+    "Demineralizing lesion in the rib."
+  ],
+  "negation_soft": [
+    "Bone density appears normal.",
+    "No osteopenia."
+  ]
+}

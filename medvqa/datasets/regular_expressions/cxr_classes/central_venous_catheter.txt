@@ -1,17 +1,710 @@
+# ==============================================================================
+# central_venous_catheter (leaf)
+# Currently visible central venous access: CVC / central line / PICC /
+# IJ or subclavian central catheter / dialysis central access /
+# multi-lumen central catheter / implanted venous port / port-a-cath /
+# named tunneled catheters (Hickman, Broviac, …) / UVC. Malposition still counts.
+#
+# Do NOT match: Swan-Ganz / PA catheter; arterial monitoring line alone;
+#        peripheral IV alone; pacemaker/ICD leads; enteric/airway/chest tubes;
+#        vague "tubes and lines"; exam-title "chest port" alone;
+#        bare site words (ij|jugular|subclavian) or bare port/reservoir;
+#        history / indication / unsuccessful attempt / guidance-for placement;
+#        local removal / no-longer-present / not-seen clauses.
+# NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+# Phase B2: framed port/IJ residuals merged from OR-helpers; bare helpers discarded.
+# 20260811: mixed-clause "central line" / IJ sheath presence; PIC/PCVC/UVC plural;
+#           IU XXXX port paraphrases; infusion/chest-wall port; Diatek; cvl/Swan/UVC FP trim.
+# FN-fit: IJ tube / vein introduction sheet / trialysis / chemoport / center-venous typo;
+#         CVCs/PICCs plural; Hickmann; dual-lumen Hickman; subclavian sheath/terminating;
+#         IJ vascular catheter; except-for / placement-after-removal mixed clauses.
+# FN-fit (fn_mine_fit_shared): PermCath camelCase; Vas-Cath hyphen; Cordis/IJ;
+#         PowerPICC agglutination; Hohn brand.
+# ==============================================================================
 
-    # 1. Acronyms & Names
-    \bcvc\b
-    |
-    \bpicc\b # Peripherally Inserted Central Catheter (Very common)
-    |
-    \bcentral\s+(?:venous\s+)?(?:line|catheter)
-    |
-    \bhickman
-    |
-    \bpermacath
-    |
-    \bswan[-]?ganz
-    |
-    \bpa\s+catheter # Pulmonary Artery catheter
-    |
-    \bintroducer\s+sheath
+(?:
+        # ------------------------------------------------------------------
+        # A. Untampered presence branches (survive earlier "removal of X")
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+            # not indication / unsuccessful attempt (prompt: current visible device only)
+            (?<!attempted\s)
+            (?<!attempting\s)
+            (?<!attempt\sat\s)
+            (?<!unsuccessful\s)
+            (?<!guidance\sfor\s)
+            (?<!evaluate\sfor\s)
+            (?<!evaluation\sfor\s)
+            \b(?:interval\s+)?placement\s+of\s+
+            (?:(?:a|an|the|left|right|bilateral)\s+){0,3}
+            (?:(?:(?:left|right)[- ]?sided|tunneled|single[- ]?lumen|dual[- ]?lumen|double[- ]?lumen|triple[- ]?lumen)\s+){0,4}
+            (?:(?:left|right|bilateral)[- ]?(?:sided\s+)?)?
+            (?:
+                (?:tunneled\s+)?(?:dual[- ]?lumen\s+|double[- ]?lumen\s+|triple[- ]?lumen\s+|single[- ]?lumen\s+)?
+                (?:left\s+|right\s+|bilateral\s+)?
+                (?:central\s+)?(?:venous\s+)?
+                (?:dialysis|hemodialysis|haemodialysis|trialysis)\s+(?:catheters?|lines?)
+                |
+                (?:tunneled\s+)?(?:central\s+)?(?:venous\s+)?(?:catheters?|lines?|cvcs?|piccs?)
+                |
+                (?:piccs?|cvcs?)\b
+                |
+                (?:right|left)\s+(?:internal\s+)?jugular\s+(?:vascular\s+)?(?:sheaths?|introducers?|cordis|catheters?|lines?|tubes?)
+            )
+        )
+        |
+        # "Devices have been removed except for the right IJ catheter..."
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+            \bexcept\s+for\s+(?:the\s+)?
+            (?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?
+            (?:
+                (?:ij|i\.j\.)\s+(?:central\s+)?(?:venous\s+)?(?:catheters?|lines?|tubes?|cvcs?)
+                |
+                (?:internal\s+)?jugular\s+(?:vascular\s+)?(?:central\s+)?(?:venous\s+)?(?:catheters?|lines?|tubes?)
+                |
+                (?:central\s+)?(?:venous\s+)?(?:catheters?|lines?|cvcs?|piccs?)
+                |
+                piccs?(?:\s+lines?)?
+            )\b
+        )
+        |
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            \b(?:residual\s+)?(?:(?:vascular\s+|cordis\s+)?(?:introducers?|sheaths?)|cordis)\b
+            (?:(?![.!?])\W+\w+){0,8}
+            \W+
+            \b(?:(?:right|left)\s+)?(?:(?:internal\s+)?jugular|ij|i\.j\.)\b
+        )
+        |
+        # "A sheath is placed in the left subclavian vein"
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            \b(?:residual\s+)?(?:(?:vascular\s+|cordis\s+)?(?:introducers?|sheaths?)|cordis)\b
+            (?:(?![.!?])\W+\w+){0,8}
+            \W+
+            \b(?:(?:right|left)\s+)?subclavian(?:\s+veins?)?\b
+            (?!\s+(?:artery|pacemaker|aicd|icd|pacing))
+        )
+        |
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            # site→device: keep spelled jugular only (IJ abbrev + walk FPs on
+            # "removal of right IJ line and sheath"); Cordis→IJ is forward walk.
+            \b(?:(?:right|left)\s+)?(?:internal\s+)?jugular\b
+            (?:(?![.!?])\W+\w+){0,6}
+            \W+
+            \b(?:(?:vascular\s+|cordis\s+)?(?:introducers?|sheaths?)|cordis)\b
+        )
+        |
+        # Framed Cordis (laterality / intravenous / sheath) — not bare company name
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\sright\s)
+            (?<!removal\sof\sleft\s)
+            (?<!removal\sof\sthe\sright\s)
+            (?<!removal\sof\sthe\sleft\s)
+            \b(?:
+                (?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)(?:intravenous\s+)?cordis(?:\s+sheaths?)?
+                |
+                (?:intravenous\s+)cordis(?:\s+sheaths?)?
+                |
+                cordis\s+sheaths?
+            )\b
+        )
+        |
+        # Mixed-clause presence: "Swan-Ganz has been removed ... and the right
+        # central line is stable" (tempered walk otherwise dies on "removed").
+        # Require presence predicate so "central line has been removed" / "attempted
+        # central line placement" / "removal of ... central line" do not match.
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\sright\s)
+            (?<!removal\sof\sleft\s)
+            (?<!removal\sof\sthe\sright\s)
+            (?<!removal\sof\sthe\sleft\s)
+            \b(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?central\s+lines?\s+
+            (?:is|are|remains?|remain)\s+
+            (?:stable|unchanged|in\s+(?:place|situ)|appropriately\s+positioned)\b
+        )
+        |
+        # "PA catheter removed ... right IJ sheath still in place"
+        # (not "Removal of right IJ Cordis sheath")
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bremoved\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\sright\s)
+            (?<!removal\sof\sleft\s)
+            (?<!removal\sof\sthe\sright\s)
+            (?<!removal\sof\sthe\sleft\s)
+            \b(?:(?:right|left)\s+)?(?:ij|i\.j\.)\s+
+            (?:(?:central\s+)?(?:venous\s+)?)?(?:sheaths?|introducers?|cordis)\b
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # B. Tempered clause scan (negation / removal / indication)
+        # ------------------------------------------------------------------
+        (?:
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bwithout\s+(?:a\s+|an\s+|left\s+|right\s+|bilateral\s+|large\s+|small\s+|residual\s+)?(?:evident\s+)?(?:pneumothorax|ptx|effusion|pneumomediastinum|consolidation|opacit\w*|edema|infiltrate))
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bno\s+longer\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\b(?:interval\s+)?(?:removal|withdrawal)\b)
+                (?!\b(?:has|have|had|was|were)\s+(?:since\s+)?(?:also\s+)?(?:been\s+)?removed\b)
+                (?!\bstatus\s+post\s+removal\b)
+                (?!\bs/?p\s+removal\b)
+                (?!\bremoved\b)
+                (?!\bremoving\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bindication\b)
+                (?!\battempt(?:ed|ing)?\b)
+                (?!\bunsuccessful\b)
+                (?!\bguidance\s+for\b)
+                (?!\beval(?:uate|uation)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,320}
+
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sleft\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sthe\sleft\s)
+        (?<!removal\sof\sthe\sright\s)
+        (?<!removal\sof\sa\sleft\s)
+        (?<!removal\sof\sa\sright\s)
+        (?<!removal\sof\sleft-sided\s)
+        (?<!removal\sof\sright-sided\s)
+        (?<!removal\sof\sthe\sleft-sided\s)
+        (?<!removal\sof\sthe\sright-sided\s)
+        (?<!removal\sof\sa\sleft-sided\s)
+        (?<!removal\sof\sa\sright-sided\s)
+        (?<!removal\sof\sbilateral\s)
+        (?<!removal\sof\sthe\sbilateral\s)
+        (?<!removal\sof\spreviously\s)
+        (?<!removal\sof\sa\spreviously\s)
+        (?<!removal\sof\sthe\spreviously\s)
+        (?<!removal\sof\spreviously\sdemonstrated\s)
+        (?<!removal\sof\sa\spreviously\sdemonstrated\s)
+        (?<!removal\sof\sthe\spreviously\sdemonstrated\s)
+        (?<!removal\sof\sright\supper\sextremity\s)
+        (?<!removal\sof\sleft\supper\sextremity\s)
+        (?<!removal\sof\sa\sright\supper\sextremity\s)
+        (?<!removal\sof\sa\sleft\supper\sextremity\s)
+        (?<!removal\sof\sthe\sright\supper\sextremity\s)
+        (?<!removal\sof\sthe\sleft\supper\sextremity\s)
+        (?<!removal\sof\sright\sij\s)
+        (?<!removal\sof\sleft\sij\s)
+        (?<!removal\sof\sthe\sright\sij\s)
+        (?<!removal\sof\sthe\sleft\sij\s)
+        (?<!removal\sof\sright\sinternal\sjugular\s)
+        (?<!removal\sof\sleft\sinternal\sjugular\s)
+        (?<!removal\sof\sthe\sright\sinternal\sjugular\s)
+        (?<!removal\sof\sthe\sleft\sinternal\sjugular\s)
+        (?<!removal\sright\s)
+        (?<!removal\sleft\s)
+        (?<!removal\sa\sright\s)
+        (?<!removal\sa\sleft\s)
+        (?<!removal\sthe\sright\s)
+        (?<!removal\sthe\sleft\s)
+        (?<!removal\sright\supper\sextremity\s)
+        (?<!removal\sleft\supper\sextremity\s)
+        (?<!removal\sright\sij\s)
+        (?<!removal\sleft\sij\s)
+        (?<!removal\sright-sided\s)
+        (?<!removal\sleft-sided\s)
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!\bnot\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bdx\s)
+        (?<!\bfor\s)
+        (?<!\brefusing\s)
+
+        (?:
+                # ----------------------------------------------------------
+                # 1. Explicit CVC / PICC / central line names
+                # ----------------------------------------------------------
+                (?:
+                    (?<!\bwith\s)
+                    # accession/date leak: "7/17/2006 CVL-LEC-RSG-V"
+                    \b(?:cvcs?|cvls?)\b(?!-)
+                )
+                |
+                \b(?:
+                    # PowerPICC agglutination (camelCase) + spaced power PICC
+                    powerpiccs?(?:\s+lines?)?
+                    |
+                    power\s*piccs?(?:\s+lines?)?
+                    |
+                    piccs?(?:\s+lines?)?
+                    |
+                    pic\s+(?:lines?|catheters?)
+                    |
+                    pcvcs?
+                    |
+                    peripherally\s+inserted\s+central\s+(?:catheters?|lines?)
+                    |
+                    # typo "center venous" for "central venous"
+                    cent(?:er|ral)\s+venous\s+(?:catheters?|caths?|lines?|access|sheaths?|introducers?)
+                    |
+                    central\s+venous\s+(?:catheters?|lines?|access|sheaths?|introducers?)
+                    |
+                    central\s+lines?
+                    |
+                    central\s+catheters?
+                    |
+                    central\s+access(?:\s+(?:catheters?|lines?|devices?))?
+                    |
+                    venous\s+access\s+(?:lines?|catheters?|devices?)
+                    |
+                    tunneled\s+(?:central\s+)?(?:venous\s+)?(?:catheters?|lines?)
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 2. Named tunneled / brand catheters (require device word
+                #    OR lumen/tip framing — "dual-lumen Hickman with tip...")
+                # ----------------------------------------------------------
+                # PermCath camelCase ≠ lowercase "permacath" under re.I (Perm+Cath).
+                # Vas-Cath needs hyphen; Hohn is a tunneled CVC brand.
+                \b(?:
+                    hickmann?|broviac|groshong|hohns?|
+                    perm(?:a)?cath|perm\.?\s*cath|
+                    vascath|vas[-.\s]*cath|quinton|diatek
+                )
+                (?:\s+type)?
+                \s+
+                (?:catheters?|lines?|central)\b
+
+                |
+                # dual-/triple-lumen brand without trailing "catheter"
+                \b(?:single|dual|double|triple|multi)[- ]?lumen\s+
+                (?:hickmann?|broviac|groshong|hohns?|perm(?:a)?cath|vascath|vas[-.\s]*cath|quinton|diatek)\b
+                |
+                # bare brand tokens (presence shorthand)
+                \bperm(?:a)?caths?\b
+                |
+                \bperm\.?\s*caths?\b
+                |
+                \bvascaths?\b
+                |
+                \bvas[-.\s]*caths?\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 3. IJ / jugular central access
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
+                )?
+                (?:
+                    i\.?\s*j\.?
+                    |
+                    internal\s+jugular
+                    |
+                    external\s+jugular
+                    |
+                    jugular
+                )
+                (?:
+                    \s+(?:vein\s+)?(?:approach\s+)?
+                    (?:large[- ]?bore\s+)?
+                    (?:(?:central\s+)?(?:venous\s+)?|vascular\s+|center\s+venous\s+)?
+                    (?:catheters?|caths?|lines?|tubes?|cvcs?|cvls?|access|sheaths?|introducers?|cordis|trialysis)
+                    |
+                    \s+(?:vein\s+)?introduction\s+she(?:ath|et)s?
+                    |
+                    (?:(?![.!?])\W+(?!\b(?:pulmonary|swan|pacemaker|aicd|icd|pacing)\b)\w+){0,8}
+                    \W+
+                    \b(?:svc|superior\s+vena|right\s+atrium|cavoatrial)\b
+                    |
+                    (?=\s+and\b)
+                )
+                (?!\s+pulmonary\s+artery)
+                (?!\s+swan)
+                (?!\s+pacemaker)
+                (?!\s+aicd)
+                (?!\s+icd)
+
+                |
+
+                \b(?:ij|i\.j\.)\s+(?:central\s+|center\s+venous\s+)?(?:venous\s+)?(?:lines?|catheters?|caths?|tubes?|cvcs?|cvls?|sheaths?|introducers?|cordis|trialysis)\b
+                (?!\s+pulmonary\s+artery)
+                (?!\s+swan)
+
+                |
+
+                # Framed IJ shorthand presence (Phase B2 residual from
+                # via_jugular helper — NOT bare \b(?:ij|jugular)\b)
+                \b(?:
+                    (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
+                    |
+                    [rl]\.?\s+
+                )?
+                (?:ij|i\.j\.)
+                \s+
+                (?:(?:is|are|remains?|remain)\s+)?
+                (?:all\s+)?
+                (?:
+                    in\s+place
+                    |
+                    appropriately\s+positioned
+                    |
+                    well\s+positioned
+                    |
+                    correctly\s+positioned
+                )\b
+                (?!(?:(?![.!?]).){0,40}?\b(?:swan|pacemaker|aicd|icd|pacing)\b)
+
+                |
+
+                # catheter/line via IJ approach (device before site)
+                # not "Swan-Ganz type catheter via the right internal jugular"
+                (?<!swan[- ]ganz\s)
+                (?<!swan[- ]ganz\stype\s)
+                (?<!pulmonary\sartery\s)
+                \b(?:
+                    (?:large[- ]?(?:bore|caliber)\s+)?
+                    (?:central\s+)?(?:venous\s+)?
+                    (?:catheters?|lines?)
+                )
+                \s+(?:via|entering\s+from)\s+(?:the\s+)?
+                (?:(?:right|left|bilateral)\s+)?
+                (?:internal\s+|external\s+)?jugular
+                \b
+                (?!(?:(?![.!?]).){0,40}?\b(?:swan|pacemaker|aicd|icd|pacing|pacer)\b)
+
+                |
+
+                # ----------------------------------------------------------
+                # 4. Subclavian central access (require device word)
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
+                )?
+                subclavian
+                \s+(?:vein\s+)?(?:approach\s+)?
+                (?:(?:central|center)\s+)?(?:venous\s+)?
+                (?:catheters?|caths?|lines?|cvcs?|cvls?|access|sheaths?|introducers?)
+                \b
+                (?!\s+swan)
+                (?!\s+pacemaker)
+                (?!\s+aicd)
+                (?!\s+icd)
+
+                |
+
+                # "Left subclavian terminating at the confluence of the brachiocephalic veins"
+                # (device-shorthand course; not artery / pacer)
+                \b(?:
+                    (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
+                )?
+                subclavian
+                \b
+                (?!\s+(?:artery|arterial|pacemaker|aicd|icd|pacing|pacer|approach))
+                (?:(?![.!?])\W+(?!\b(?:artery|pacemaker|aicd|icd|pacing|pacer)\b)\w+){0,6}
+                \W+
+                \b(?:terminat\w*|tip|ends?|projects?|projecting|course|coursing)\b
+                (?:(?![.!?])\W+\w+){0,10}
+                \W+
+                \b(?:
+                    confluence|brachiocephalic|svc|superior\s+vena|cavoatrial|
+                    right\s+atrium|mid[- ]?svc|distal\s+svc|proximal\s+svc
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 5. Implanted venous ports / port-a-cath / Mediport
+                # (Phase B2: framed residual from reservoir_central_venous_catheter
+                #  helper — NOT bare \bport\b / \breservoir\b)
+                # ----------------------------------------------------------
+                \b(?:
+                    port[- ]?a[- ]?caths?
+                    |
+                    portacaths?
+                    |
+                    # one-word / spaced "portacatheter" (helper residual)
+                    porta\s*-?\s*cathet(?:ers?)?
+                    |
+                    portacathet(?:ers?)?
+                    |
+                    # "port-a-venous catheter" (helper residual)
+                    port\s*-?\s*a\s*-?\s*venous\s+(?:catheters?|lines?)
+                    |
+                    medi\s*-?\s*ports?
+                    |
+                    mediports?
+                    |
+                    infusaports?
+                    |
+                    powerports?
+                    |
+                    # one-word chemoport
+                    chemoports?
+                    |
+                    # spaced "power port" / "chest power port"
+                    (?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?(?:chest\s+(?:wall\s+)?)?power\s+ports?
+                    |
+                    (?:chemotherapy|chemo)\s+ports?
+                    |
+                    infusion\s+ports?
+                    |
+                    implanted\s+(?:venous\s+)?ports?
+                    |
+                    ports?\s+in\s+(?:the\s+)?(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?chest\s+walls?
+                    |
+                    # IU redaction of port-a-cath (require tip/SVC — not bare "XXXX-A-XXXX is in XXXX")
+                    xxxx[- ]?a[- ]?xxxx
+                    (?=(?:(?![.!?]).){0,40}?\b(?:tip|overlies|svc|cavoatrial|atrium)\b)
+                    |
+                    (?:right|left|bilateral)[- ]?(?:sided\s+)?
+                    (?:chest\s+(?:wall\s+)?|pectoral\s+|venous\s+|subcutaneous\s+)ports?
+                    |
+                    chest\s+wall\s+ports?
+                    |
+                    venous\s+ports?
+                    |
+                    ports?\s+(?:catheters?|devices?|reservoirs?)
+                    |
+                    (?:port|catheter|cvc|central)\s+reservoirs?
+                    |
+                    reservoirs?\s+(?:ports?|catheters?|cvc)
+                    |
+                    ports?\s+terminat\w*
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 6. Dialysis / hemodialysis central catheters
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:tunneled\s+)?(?:dual[- ]?lumen\s+|double[- ]?lumen\s+|triple[- ]?lumen\s+)?
+                    (?:dialysis|hemodialysis|haemodialysis|hd|trialysis)
+                    \s+
+                    (?:catheters?|lines?|access)
+                    |
+                    tunneled\s+(?:dialysis|hemodialysis|haemodialysis|trialysis)\s+(?:catheters?|lines?)
+                    |
+                    trialysis\s+(?:catheters?|lines?)
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 7. Multi-lumen central catheters
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:triple|dual|double|multi)[- ]?lumen
+                    \s+
+                    (?:central\s+)?(?:venous\s+)?
+                    (?:catheters?|lines?)
+                    |
+                    (?:central\s+)?(?:venous\s+)?
+                    (?:triple|dual|double|multi)[- ]?lumen
+                    \s+
+                    (?:catheters?|lines?)
+                    |
+                    # IU redaction of dual/triple lumen
+                    xxxx\s+lumen\s+(?:catheters?|lines?)
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 8. Umbilical venous catheter
+                # ----------------------------------------------------------
+                (?<!rather\sthan\san\s)
+                (?<!rather\sthan\sa\s)
+                (?<!appearance\sof\sa\s)
+                (?<!appearance\sof\s)
+                \b(?:
+                    uvcs?
+                    |
+                    umbilical\s+venous\s+(?:catheters?|lines?)
+                    |
+                    venous\s+umbilical\s+(?:catheters?|lines?)
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 9. Femoral central venous line / CVL (not bare femoral line)
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:right|left|bilateral)[- ]?(?:sided\s+)?
+                )?
+                femoral(?:[- ]?approach)?
+                \s+
+                (?:
+                    central\s+(?:venous\s+)?(?:lines?|catheters?)
+                    |
+                    venous\s+(?:lines?|catheters?)
+                    |
+                    (?:cvc|cvl)
+                )\b
+
+                |
+
+                # "femoral-approach tip overlies the lower right atrium"
+                \bfemoral[- ]approach\b
+                (?:(?![.!?])\W+\w+){0,6}
+                \W+
+                \b(?:tip|terminat\w*|overlies)\b
+                (?:(?![.!?])\W+\w+){0,6}
+                \W+
+                \b(?:(?:lower\s+|upper\s+)?right\s+atrium|svc|cavoatrial|atrium)\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 10. Course / tip language → SVC / RA
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:right|left|bilateral)[- ]?(?:sided\s+)?
+                )?
+                (?:
+                    (?:tunneled\s+)?(?:dual[- ]?lumen\s+|double[- ]?lumen\s+|triple[- ]?lumen\s+|single[- ]?lumen\s+)?
+                    (?:central\s+|center\s+)?(?:venous\s+)?
+                    (?:catheters?|caths?|lines?)
+                    |
+                    venous\s+(?:catheters?|caths?|lines?)
+                    |
+                    pic\s+(?:lines?|catheters?)
+                    |
+                    piccs?(?:\s+lines?)?
+                )\b
+                (?:(?![.!?])\W+(?!\b(?:pacemaker|aicd|icd|pacing|swan|pulmonary)\b)\w+){0,14}
+                \W+
+                \b(?:
+                    tip|terminat\w*|projects?|projecting|enters?|entering|course|coursing|ends?
+                )\b
+                (?:(?![.!?])\W+\w+){0,12}
+                \W+
+                \b(?:
+                    svc|superior\s+vena\s+cava|right\s+atrium|cavoatrial(?:\s+junction)?|
+                    mid[- ]?svc|lower\s+svc|low\s+svc|distal\s+svc|proximal\s+svc|
+                    upper\s+svc|superior\s+xxxx(?:\s+xxxx)?
+                )\b
+
+                |
+
+                \b(?:catheters?|lines?)\b
+                (?:(?![.!?])\W+\w+){0,10}
+                \W+
+                \bentering\s+(?:the\s+)?(?:svc|superior\s+vena\s+cava)\b
+
+                |
+
+                \bvenous\s+(?:lines?|catheters?)\b
+                (?:(?![.!?])\W+\w+){0,12}
+                \W+
+                \b(?:tip|terminat\w*|ends?)\b
+                (?:(?![.!?])\W+\w+){0,8}
+                \W+
+                \b(?:svc|superior\s+vena\s+cava|right\s+atrium|cavoatrial)\b
+
+                |
+
+                \b(?:right|left|bilateral)[- ]?(?:sided\s+)?
+                chest\s+catheters?
+                \b
+                (?!\s+tube)
+                (?:
+                    \s+and\s+valves?
+                    |
+                    (?=(?:(?![.!?]).){0,40}?\b(?:tip|svc|atrium|port|valve|unchanged|again\s+noted|again\s+seen)\b)
+                )
+
+                |
+
+                # IU redacted chest / injection port + tip at SVC / cavoatrial
+                # (require chest|injection — do not match bare XXXX)
+                \b(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?
+                (?:chest\s+|medication\s+injection\s+)xxxx\b
+                (?:(?![.!?])\W+\w+){0,8}
+                \W+
+                \b(?:tip|terminat\w*|overlies)\b
+                (?:(?![.!?])\W+\w+){0,8}
+                \W+
+                \b(?:
+                    svc|cavoatrial(?:\s+junction)?|superior\s+vena\s+cava|
+                    mid[- ]?svc|upper\s+svc|right\s+atrium
+                )\b
+
+                |
+
+                # typo "venous introduction sheet" / "vein introduction sheet" = sheath
+                \b(?:vein|venous)\s+introduction\s+she(?:ath|et)s?\b
+
+                |
+
+                # catheter in EJV (external jugular central access)
+                \b(?:catheters?|lines?)\b
+                (?:(?![.!?])\W+\w+){0,12}
+                \W+
+                \b(?:(?:right|left)\s+)?ejv\b
+
+                |
+
+                \bvenous\s+(?:lines?|catheters?)\b
+                (?:(?![.!?])\W+\w+){0,8}
+                \W+
+                \b(?:projecting|projects|tip)\b
+                (?:(?![.!?])\W+\w+){0,8}
+                \W+
+                \b(?:(?:right|left)\s+)?(?:supraclavicular|neck(?:\s+base)?)\b
+
+                |
+
+                \b(?:presumed|likely)\s+venous\s+(?:catheters?|lines?)\b
+        )
+
+        (?!(?:(?![.!?]).){0,80}?\b(?:has|have|had|was|were|since)\s+(?:since\s+)?(?:also\s+)?(?:been\s+)?removed\b)
+        (?!(?:(?![.!?]).){0,50}?\b(?:has|have|had)\s+been\s+discontinued\b)
+        (?!(?:(?![.!?]).){0,60}?\bis\s+no\s+longer\s+(?:present|seen|visuali[sz]ed|in\s+place|recognized|identified)\b)
+        (?!(?:(?![.!?]).){0,60}?\bare\s+no\s+longer\s+(?:present|seen|visuali[sz]ed|in\s+place|recognized|identified)\b)
+        (?!(?:(?![.!?]).){0,45}?\bis\s+not\s+(?:seen|visuali[sz]ed|identified|recognized)\b)
+        (?!(?:(?![.!?]).){0,50}?\bno\s+longer\s+(?:present|recognized|identified|seen)\b)
+        )
+)

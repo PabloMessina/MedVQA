@@ -1,0 +1,128 @@
+# ==============================================================================
+# hyperinflation
+# Explicit hyperinflation / hyperexpansion / overinflation / hyperaeration /
+# overdistention / increased-or-large lung volumes on the current CXR.
+#
+# Match: hyperinflated/hyperinflation (incl. spaced/hyphenated + typos),
+# hyperexpanded/hyperexpansion (expand vs expans stems), overexpanded/
+# overexpansion/overinflation, hyperaeration, pulmonary overdistention,
+# increased|large|larger|high|generous|elevated|prominent lung volumes
+# (tight either-order templates).
+#
+# Do NOT match: COPD/emphysema/bullae/blebs/hyperlucency/saber-sheath/air
+# trapping alone; bare flattened/low diaphragms without volume language;
+# well-expanded / good inspiration; gastric/bowel overdistension;
+# "low lung volumes with increased [opacity/edema]"; indication-only
+# "eval for signs of …"; "no evidence of" / "are not hyperinflated".
+#
+# Fit (fn_mine): affirmative "evidence of" / "signs of" hyperinflation is
+# allowed; only negated scopes (no/without evidence|signs of) are blocked.
+# Volume adj set adds generous|elevated|prominent (hunt lexicon holes).
+# FN-fit (fn_mine_fit_shared): optional bilateral|overall|global between
+# adj and lung volumes; copula intensifiers +relatively|borderline; no-copula
+# "lung volumes borderline/relatively increased".
+# ==============================================================================
+
+\b(?:
+        # ------------------------------------------------------------------
+        # 1. hyper-inflation / hyper-expansion / hyper-aeration family
+        #    - expand vs expans (hyperexpanded ≠ hyperexpansion)
+        #    - typo: hyperexanded (missing 'p'), hyperinfilation
+        #    - optional space/hyphen: "hyper inflation"
+        #    - Affirmative "evidence of" / "signs of" OK; block negation only
+        # ------------------------------------------------------------------
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bno\ssign\sof\s)
+        (?<!\bno\ssigns\sof\s)
+        (?<!\bwithout\ssign\sof\s)
+        (?<!\bwithout\ssigns\sof\s)
+        (?<!\bnegative\sfor\s)
+        (?<!\bwithout\s)
+        (?<!\bno\s)
+        (?<!\bnot\s)
+        (?<!\beval\sfor\ssigns\sof\s)
+        (?<!\bevaluate\sfor\ssigns\sof\s)
+        (?<!\beval\sfor\s)
+        (?<!\bevaluate\sfor\s)
+        (?<!\brule\sout\s)
+        (?<!\bnot\sreflect\s)
+        hyper\s*-?\s*(?:
+            inf\w*lat\w*|
+            exp?(?:ans|and)\w*|
+            aerat\w*
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. over-inflation / over-expansion / over-distention
+        #    (space allowed: "over inflated", "over expansion")
+        #    Block gastric/bowel overdistension (common CXR incidental).
+        # ------------------------------------------------------------------
+        (?<!\bno\sevidence\sof\s)
+        (?<!\bwithout\sevidence\sof\s)
+        (?<!\bno\s)
+        (?<!\bnot\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\sreflect\s)
+        over\s*-?\s*(?:
+            inflat\w*|
+            exp(?:ans|and)\w*|
+            # \b before lookahead so \w* cannot backtrack into "distensio|n of stomach"
+            disten\w*\b(?!\s+of\s+(?:the\s+)?(?:stomach|gastric|bowel|colon|intestine|small\s+bowel))
+        )
+        (?!\s+(?:stomach|gastric|bowel|colon|intestine))
+
+        |
+
+        # ------------------------------------------------------------------
+        # 3. pulmonary overdistention (explicit)
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        pulmonary\s+over\s*-?\s*disten\w*
+
+        |
+
+        # ------------------------------------------------------------------
+        # 4. increased / large / high / generous / elevated / prominent
+        #    lung volume(s)  (adjective-first)
+        #    Optional bilateral|overall|global qualifier (FN-fit hunt).
+        #    Still blocks unilateral "increased left/right lung volume".
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bno\sevidence\sof\s)
+        (?:increased|large(?:r)?|high|generous|elevated|prominent)\s+
+        (?:(?:bilateral|overall|global)\s+)?
+        lung\s+volumes?
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. lung volume(s) + (copula)? + increased|large|high|generous|…
+        #    Tight templates only (avoids "low lung volumes with increased
+        #    opacities/edema"). Intensifiers: relatively|borderline (FN-fit).
+        # ------------------------------------------------------------------
+        lung\s+volumes?\s+
+        (?:
+            (?:are|is|appear(?:\s+to\s+be)?|remain)\s+
+            (?:(?:slightly|mildly|moderately|markedly|somewhat|persistently|relatively|borderline)\s+)?
+            (?:increased|large(?:r)?|high|generous|elevated|prominent)\b
+            |
+            have\s+(?:(?:slightly|mildly|moderately|markedly|somewhat|relatively|borderline)\s+)?increased\b
+            |
+            # no-copula: "Lung volumes borderline increased"
+            (?:slightly|mildly|moderately|markedly|somewhat|persistently|relatively|borderline)\s+
+            (?:increased|large(?:r)?|high|generous|elevated|prominent)\b
+        )
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. increase in lung volume(s)
+        #    Skip "slight increase … remain low" style recovery-from-low-volume.
+        # ------------------------------------------------------------------
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bslight\s)(?<!\bslightly\s)
+        increase(?:d)?\s+in\s+lung\s+volumes?
+        (?!(?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+(?:remain|remains|remaining)\s+low)
+    )

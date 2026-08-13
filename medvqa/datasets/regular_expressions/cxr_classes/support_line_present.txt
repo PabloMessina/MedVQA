@@ -1,0 +1,250 @@
+# ==============================================================================
+# support_line_present (mid-node residual)
+# Umbrella: currently visible therapeutic support / vascular-access lines.
+# Readonly child central_venous_catheter already covers CVC/PICC/port/dialysis/
+# IJ-subclavian central access. This leaf is residual phrasing the child misses:
+#   - Swan-Ganz / pulmonary-artery (PA) catheters (intentionally out of CVC)
+#   - redacted Swan forms (Swan-___), bare "pulmonary catheter", angiocatheter
+#   - Swan typos (swans Ganz / Swan-Gans) and short "IJ Swan" PAC shorthand
+#   - introducer / sheath / Cordis remaining after Swan/PAC removal
+#   - explicit "support line(s)" / "medical line(s)" / "lines and tubes"
+#   - vascular access / intravascular line language
+#   - FN-fit (fn_mine_fit_shared): residual vascular catheter(s)/line(s);
+#     IV / I.V. / intravenous line(s) — not CVC/PICC child lexicon
+#   - arterial monitoring lines; rare PCVC / introduction-sheath spellings
+#   - tempered "no appreciable change … lines and tubes"; partial withdrawal
+#
+# Do NOT match bare "line"/"catheter" (FP flood: linear opacity, pacers, drains).
+# Do NOT re-implement the CVC lexicon. Do NOT infer from ETT/enteric/chest tube,
+# pacemaker/ICD leads alone, surgical hardware, ECG stickers, O2 tubing, clothing,
+# or nontherapeutic FB. History / removal / not-seen clauses excluded locally.
+# NOTE: never write \tan / \t... in lookbehinds — \t is a TAB escape.
+# NOTE: do not use a[-\s]lines? for arterial lines — it matches ordinary "a line".
+# NOTE: do not put bare \bnor\b in the char-scan blocklist — it blocks "NOR,"
+#       (nares) mid-list and drops Swan-Ganz after ETT/NG device enumerations.
+# ==============================================================================
+
+(?:
+        # ------------------------------------------------------------------
+        # A. Untampered residual presence (survives earlier "removed")
+        #    Introducer / sheath / Cordis still in place after Swan/PAC
+        #    removal; Cordis tip localization; bare introducer with course.
+        # ------------------------------------------------------------------
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\san\s)
+            (?<!removal\sof\sleft\s)
+            (?<!removal\sof\sright\s)
+            (?<!removal\sof\sthe\sleft\s)
+            (?<!removal\sof\sthe\sright\s)
+            (?<!removal\sof\sa\sleft\s)
+            (?<!removal\sof\sa\sright\s)
+            (?<!interval\sremoval\sof\s)
+            (?<!interval\sremoval\sof\sthe\s)
+            (?<!\bremoved\s)
+            \b(?:
+                cordis(?:\s+(?:sheaths?|introducers?|catheters?|lines?|tips?))?
+                |
+                (?:(?:vascular\s+|cordis\s+)?introducers?(?!\s+needles?))
+                |
+                (?:(?:vascular\s+|cordis\s+|introducer\s+)?sheaths?)
+            )\b
+            (?:(?![.!?])\W+\w+){0,8}
+            \W+
+            \b(?:
+                remain(?:s|ing)?|
+                left\s+in\s+place|
+                still\s+(?:present|in\s+place)|
+                (?:is|are)\s+(?:still\s+)?(?:present|in\s+place|unchanged)|
+                in\s+place|
+                terminates?|
+                (?:is|lies|overlies|projects?)\s+(?:in|over|at|within)
+            )\b
+            (?!(?:(?![.!?]).){0,50}?\b(?:has|have|had|was|were|since)\s+(?:since\s+)?(?:also\s+)?(?:been\s+)?removed\b)
+            (?!(?:(?![.!?]).){0,40}?\bno\s+longer\s+(?:present|seen|visuali[sz]ed|in\s+place)\b)
+        )
+        |
+
+        # ------------------------------------------------------------------
+        # B. Tempered clause scan (negation / removal / indication)
+        # ------------------------------------------------------------------
+        (?:^|[.!?;:\n])
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:(?:significant|appreciable|substantial|definite|obvious|gross|major|notable|further|overall|apparent)\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            # Walk through "partial withdrawal" (device still present / tip described)
+            (?:
+                (?<=\bpartial\s)(?=\bwithdraw(?:al|n)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\bpartially\s)(?=\bwithdraw(?:al|n)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                (?!\bnor\s+(?:is|are|was|were|any|a|an)\b)
+                (?!\b(?:interval\s+)?(?:removal|withdrawal)\b)
+                (?!\b(?:has|have|had|was|were)\s+(?:since\s+)?(?:also\s+)?(?:been\s+)?removed\b)
+                (?!\bstatus\s+post\s+removal\b)
+                (?!\bs/?p\s+removal\b)
+                (?!\bremoved\b)
+                (?!\bremoving\b)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bindication\b)
+                (?!\battempt(?:ed|ing)?\b)
+                (?!\bunsuccessful\b)
+                (?!\bguidance\s+for\b)
+                (?!\beval(?:uate|uation)?\s+for\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,280}
+
+        (?<!removal\sof\s)
+        (?<!removal\sof\sthe\s)
+        (?<!removal\sof\sa\s)
+        (?<!removal\sof\san\s)
+        (?<!removal\sof\sleft\s)
+        (?<!removal\sof\sright\s)
+        (?<!removal\sof\sthe\sleft\s)
+        (?<!removal\sof\sthe\sright\s)
+        (?<!removal\sof\sleft-sided\s)
+        (?<!removal\sof\sright-sided\s)
+        (?<!removal\sof\sthe\sleft-sided\s)
+        (?<!removal\sof\sthe\sright-sided\s)
+        (?<!removal\sof\sall\s)
+        (?<!removal\sof\sall\slife\s)
+        (?<!removal\sof\slife\s)
+        (?<!removal\sof\sleft\ssubclavian\s)
+        (?<!removal\sof\sright\ssubclavian\s)
+        (?<!removal\sof\sthe\sleft\ssubclavian\s)
+        (?<!removal\sof\sthe\sright\ssubclavian\s)
+        (?<!interval\sremoval\sof\s)
+        (?<!interval\sremoval\sof\sthe\s)
+        (?<!interval\sremoval\sof\sa\s)
+        (?<!interval\sremoval\sof\sleft\s)
+        (?<!interval\sremoval\sof\sright\s)
+        (?<!interval\sremoval\sof\sthe\sleft\s)
+        (?<!interval\sremoval\sof\sthe\sright\s)
+        (?<!interval\sremoval\sof\sall\s)
+        (?<!interval\sremoval\sof\sall\slife\s)
+        (?<!interval\sremoval\sof\slife\s)
+        (?<!interval\sremoval\sof\sleft\ssubclavian\s)
+        (?<!interval\sremoval\sof\sright\ssubclavian\s)
+        (?<!interval\sremoval\sof\sthe\sleft\ssubclavian\s)
+        (?<!interval\sremoval\sof\sthe\sright\ssubclavian\s)
+        (?<!\bremoved\s)
+        (?<!\bremoving\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+
+        (?:
+                # ----------------------------------------------------------
+                # 1. Swan-Ganz / pulmonary artery catheter (out of CVC leaf)
+                #    + redacted Swan-___ / Swan catheter; pulmonary catheter
+                #    + swans/gans typos; short IJ Swan PAC shorthand
+                # ----------------------------------------------------------
+                \b(?:
+                    swans?[-\s_]*(?:ganz|gans|_{2,}|\.{2,}|x{2,})(?:\s+(?:catheters?|lines?))?
+                    |
+                    swan[-\s_]+(?:catheters?|lines?)
+                    |
+                    (?:ij|i\.j\.|internal\s+jugular)\s+swans?
+                    |
+                    pulmonary\s+artery\s+(?:catheters?|lines?)
+                    |
+                    pulmonary\s+catheters?
+                    |
+                    right\s+heart\s+catheters?
+                    |
+                    pa\s+(?:catheters?|lines?)
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 2. Explicit support-line / lines-and-tubes umbrella wording
+                # ----------------------------------------------------------
+                \b(?:
+                    support(?:ing)?\s+lines?
+                    |
+                    medical\s+lines?
+                    |
+                    lines?\s+and\s+tubes?
+                    |
+                    tubes?\s+and\s+lines?
+                    |
+                    lines?\s+and\s+support\s+devices?
+                    |
+                    support\s+devices?\s+and\s+lines?
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 3. Vascular access / intravascular / IV line (device word)
+                #    FN-fit: vascular catheter|line (not only "vascular access")
+                # ----------------------------------------------------------
+                \b(?:
+                    vascular\s+access
+                    |
+                    vascular\s+(?:catheters?|lines?)
+                    |
+                    intravascular\s+(?:catheters?|lines?)
+                    |
+                    (?:iv|i\.v\.|intravenous)\s+lines?
+                    |
+                    (?:external\s+(?:jugular\s+)?)?angiocatheters?
+                    |
+                    angio\s*catheters?
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 4. Arterial monitoring line (intravascular; not CVC)
+                # ----------------------------------------------------------
+                \b(?:
+                    (?:radial\s+|femoral\s+|brachial\s+)?arterial\s+lines?
+                    |
+                    a-lines?
+                )\b
+
+                |
+
+                # ----------------------------------------------------------
+                # 5. Rare residual spellings CVC may miss
+                # ----------------------------------------------------------
+                \bpcvc\b
+                |
+                \b(?:venous\s+)?introduction\s+shee?ts?\b
+                |
+                \b(?:vascular\s+)?introducers?\s+sheaths?\b
+                |
+                \bcordis(?:\s+(?:sheaths?|introducers?|catheters?|lines?|tips?))?\b
+        )
+
+        (?!(?:(?![.!?]).){0,50}?\b(?:has|have|had|was|were|since)\s+(?:since\s+)?(?:also\s+)?(?:been\s+)?removed\b)
+        (?!(?:(?![.!?]).){0,40}?\b(?:has|have|had)\s+been\s+discontinued\b)
+        (?!(?:(?![.!?]).){0,50}?\bis\s+no\s+longer\s+(?:present|seen|visuali[sz]ed|in\s+place|recognized|identified)\b)
+        (?!(?:(?![.!?]).){0,50}?\bare\s+no\s+longer\s+(?:present|seen|visuali[sz]ed|in\s+place|recognized|identified)\b)
+        (?!(?:(?![.!?]).){0,40}?\bis\s+not\s+(?:seen|visuali[sz]ed|identified|recognized)\b)
+        (?!(?:(?![.!?]).){0,40}?\bno\s+longer\s+(?:present|recognized|identified|seen|in\s+place)\b)
+)

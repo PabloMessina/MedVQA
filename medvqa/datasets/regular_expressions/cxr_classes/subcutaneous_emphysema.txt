@@ -1,21 +1,287 @@
+# ==============================================================================
+# subcutaneous_emphysema
+# Soft-tissue / subcutaneous / surgical emphysema or air|gas in chest wall,
+# neck, axillae, fascial/intramuscular planes on the current CXR.
+#
+# Match: subcut/SQ/Sub-Q emphysema|air|gas (optional site adjective / and-list);
+#        soft-tissue emphysema|air|gas (either order); chest-wall/neck/axilla
+#        air|gas (either order); fascial/intramuscular/paraspinous air;
+#        surgical emphysema; gas|air in subcutaneous tissues; presternal;
+#        air outlining pectoral muscle (ginkgo-support); OCR emphsema;
+#        extrathoracic air|gas (FN-fit).
+#
+# Do NOT match: negated / fully resolved; indication-only "for subcut…";
+#        pulmonary emphysema / PTX / pneumomediastinum alone;
+#        distal extremity / perineal-only soft-tissue gas without chest context.
+# Residual current air that is resolving/clearing / near-complete still counts.
+#
+# FN-fit (fn_mine_fit_shared): however,/with/and restarts; no…improvement of;
+#        narrow assess|eval for + responsible-for; almost/near residual post;
+#        extrathoracic air|gas.
+# ==============================================================================
 
-    # 1. Direct Subcutaneous Terms (High Precision)
-    # NOW CATCHES: "Subcutaneous gas", "SQ air", "Sub-Q emphysema"
-    \bs(?:ub)?(?:-)?(?:cutan\w*|q|sq|c)\s+(?:emphysema|gas|air)
-    |
-    # 2. Soft Tissue Terms
-    # Matches: "Soft tissue emphysema", "Air in the soft tissues"
-    \bsoft\s+tissue\s+(?:emphysema|gas|air)
-    |
-    # 3. Spatial "Leak" Detector (High Recall)
-    # Logic: "Air" or "Gas" ... followed by ... "Chest Wall / Neck / Axilla"
-    # Matches: "Gas in the left chest wall", "Air tracking into the supraclavicular region"
-    \b(?:gas|air)
-    # THE GAP: Allow up to 10 words (e.g., "seen tracking superiorly into the")
-    # Stop at periods to prevent false positives from other sentences.
-    (?:(?![.!?])\W+\w+){0,10}
-    # THE TARGET LOCATIONS (Strictly non-lung locations)
-    \s+(?:chest\s+wall|neck|axilla|supraclavicular)
-    |
-    # 4. Legacy/British Terminology
-    \bsurgical\s+emphysema
+(?:
+        # ------------------------------------------------------------------
+        # Clause-local tempered scan (negation / indication / resolution-of)
+        # Restart at contrastive although|though|however|but|except (optional
+        # comma), "there is/are", ", with …", and "and …" so
+        # "No PTX, however,/with/and … SQ" can match.
+        # Do NOT restart on bare comma (OR-list FP risk).
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but|except)[,:]?\s+
+            |
+            \bthere\s+(?:is|are)\s+
+            |
+            ,\s+with\s+
+            |
+            \band\s+
+        )
+        (?:
+            (?:
+                # Persistence: no (other|significant|interval)* change|improvement
+                (?=\b(?:no|without)\s+(?:(?:other|significant|interval|substantial|appreciable)\s+)*(?:change|improvement)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bno\s+longer\b)
+                [^.!?;:\n]
+            )
+            |
+            # Near-complete residual: allow scanning through "resolution of"
+            # (fixed-width lookbehinds required by stdlib re)
+            (?:
+                (?=\bresolution\s+of\b)(?<=\bnear\scomplete\s)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bresolution\s+of\b)(?<=\bnearly\scomplete\s)
+                [^.!?;:\n]
+            )
+            |
+            # Hedge + for subcut (FINDINGS), not indication "for subcut"
+            (?:
+                (?<=\bsuspicious\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\bworrisome\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\bconcerning\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\bsuggestive\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\bconcern\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            # Attribution: responsible/accounting for subcut (not indication)
+            (?:
+                (?<=\bresponsible\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\baccountable\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?<=\baccounting\s)(?=\bfor\s+sub)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out
+                )\b)
+                # Block bare "resolution of" but not "near complete resolution of"
+                # (handled by exception branch above)
+                (?!\bresolution\s+of\b)
+                # Indication-only: eval/assess/r/o for *subcut*, not for PTX
+                (?!\beval(?:uate)?\s+for\s+sub)
+                (?!\bassess\s+for\s+sub)
+                (?!\br/?o\s+sub)
+                (?!\bplease\s+rule\s+out\s+sub)
+                (?!\bhistory\s+of\b)
+                (?!\bhx\s+of\b)
+                (?!\bfor\s+sub(?:cutaneous|cutan\w*|qu|q)\b)
+                # Non-chest soft-tissue gas sites (block scan before stem)
+                (?!\b(?:tibia|fibula|peroneal|metacarpal|metatarsal)\b)
+                (?!\b(?:perineal|perineum|gluteal|perianal|scrotal)\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+
+        (?<!\bnot\s)
+        (?<!\bno\s)
+
+        (?:
+            # --------------------------------------------------------------
+            # 1. Direct subcut / SQ / Sub-Q (+ optional site adjectives)
+            #    Allow "and <site>" between subcut and emphysema|air|gas:
+            #    "subcutaneous and pectoral emphysema",
+            #    "subcutaneous cervical and axillary emphysema",
+            #    "subcutaneous presternal air"
+            # --------------------------------------------------------------
+            \bs(?:ub)?(?:-)?(?:cutan\w*|q|sq|c)\s+
+            (?:(?:and\s+)?(?:
+                cervical|chest|neck|axillary|axillae?|pectoral|wall|
+                soft|tissue|tissues|left|right|bilateral|bilat|
+                pre-?sternal|mediastinal|intramuscular
+            )\s+){0,5}
+            (?:and\s+)?
+            (?:emph(?:y)?sem\w*|gas|air)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 2. Soft tissue(s) emphysema|gas|air (forward)
+            # --------------------------------------------------------------
+            \bsoft[\s-]+tissues?\s+(?:emph(?:y)?sem\w*|gas|air)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 2b. Emphysema of (neck) soft tissues (reverse)
+            #     "Emphysema of the right neck soft tissues"
+            # --------------------------------------------------------------
+            \bemph(?:y)?sem\w*\s+
+            (?:(?:of|in|within)\s+(?:the\s+)?)?
+            (?:(?:left|right|bilateral|bilat)\s+)?
+            (?:(?:neck|chest|axillary|axillae?|wall)\s+)?
+            soft[\s-]+tissues?\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 2c. Cutaneous air|gas|emphysema (synonym of subcut)
+            # --------------------------------------------------------------
+            \bcutaneous\s+(?:air|gas|emph(?:y)?sem\w*)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 3. Air|gas (or OCR "at collections") … soft|subcutaneous tissue(s)
+            #    "gas seen within the soft tissues",
+            #    "gas … in the subcutaneous tissues"
+            #    Reject perineal/extremity modifiers immediately before site.
+            # --------------------------------------------------------------
+            \b(?:gas|air|at)\s+
+            (?:collections?\s+)?
+            (?:(?:(?![.!?])\W+\w+){0,6}\W+)?
+            (?:in|within)\s+(?:the\s+)?
+            (?<!\bperineal\s)(?<!\bgluteal\s)(?<!\bperianal\s)(?<!\bscrotal\s)(?<!\bpenile\s)
+            (?:soft[\s-]+tissues?|sub(?:cutaneous|cutan\w*)\s+tissues?)\b
+
+            |
+
+            \b(?:gas|air)\b
+            (?:(?![.!?])\W+\w+){0,8}
+            \W+
+            (?<!\bperineal\s)(?<!\bgluteal\s)(?<!\bperianal\s)(?<!\bscrotal\s)(?<!\bpenile\s)
+            (?:soft[\s-]+tissues?|sub(?:cutaneous|cutan\w*)\s+tissues?)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 4. Chest wall / neck / axilla / supraclavicular <-> air|gas
+            #    either order: "chest wall gas", "air in the left chest wall"
+            # --------------------------------------------------------------
+            \b(?:chest\s+wall|neck|axillae?|supraclavicular)\b
+            (?:(?![.!?])\W+\w+){0,6}
+            \W+(?:gas|air)\b
+
+            |
+
+            \b(?:gas|air)\b
+            (?:(?![.!?])\W+\w+){0,10}
+            \W+(?:chest\s+wall|neck|axillae?|supraclavicular)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 5. Fascial / intramuscular / paraspinous air|gas
+            # --------------------------------------------------------------
+            \b(?:gas|air)\b
+            (?:(?![.!?])\W+\w+){0,8}
+            \W+(?:fascial\s+planes?|intramuscular|paraspinous)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 5b. Air outlining pectoral muscle (ginkgo-leaf support)
+            # --------------------------------------------------------------
+            \b(?:air|gas)\s+outlining\s+(?:the\s+)?
+            (?:(?:left|right|bilateral|bilat)\s+)?
+            pectoral(?:is)?(?:\s+muscles?(?:\s+fibers?)?)?\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 6. Surgical emphysema (British / legacy)
+            # --------------------------------------------------------------
+            \bsurgical\s+emph(?:y)?sem\w*\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 7. Extrathoracic air|gas (FN-fit: soft-tissue / SQ synonym)
+            # --------------------------------------------------------------
+            \bextrathoracic\s+(?:air|gas)\b
+        )
+
+        # ------------------------------------------------------------------
+        # Post: fully resolved / not seen (keep nearly/almost/near/partial
+        #       even when intensifier intervenes: "almost completely/entirely
+        #       resolved"; keep resolving/clearing residual current air);
+        #       non-chest soft-tissue gas (extremity / perineum)
+        # ------------------------------------------------------------------
+        (?![^.!?;:\n]{0,100}\b(?:
+            # Aux + optional intensifier + resolved (no almost/near in between:
+            # "has almost completely resolved" does not match this arm)
+            (?:(?:has|have|is|are)\s+)(?:now\s+)?
+            (?:(?:completely|essentially|fully|entirely)\s+)?
+            (?:resolved|resolves|cleared)
+            |
+            # Intensifier + resolved only when not hedged by almost/nearly/near
+            (?<!\balmost\s)(?<!\bnearly\s)(?<!\bnear\s)(?<!\bpartially\s)(?<!\bincompletely\s)
+            (?:(?:completely|essentially|fully|entirely)\s+)
+            (?:resolved|resolves|cleared)
+            |
+            # Bare resolved (not after hedge/intensifier token)
+            (?<!\balmost\s)(?<!\bnearly\s)(?<!\bnear\s)(?<!\bpartially\s)(?<!\bincompletely\s)
+            (?<!\bcompletely\s)(?<!\bessentially\s)(?<!\bfully\s)(?<!\bentirely\s)
+            (?:resolved|resolves|cleared)
+            |
+            (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident|appreciated|visualized)
+            |
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+            |
+            (?:
+                metacarpal|metatarsal|mid\s+foot|forefoot|hindfoot|
+                ankle|toe|toes|finger|fingers|hand|foot|
+                tibia|fibula|peroneal|
+                perineal|perineum|gluteal|perianal|anus
+            )
+        )\b)
+)

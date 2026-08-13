@@ -1,0 +1,51 @@
+{
+  "class_id": "low_lung_volume",
+  "positives": [
+    "Low lung volumes on this examination.",
+    "Hypoinflated lungs with shallow inspiration.",
+    "Diminished lung volumes related to poor inspiratory effort.",
+    "Underexpanded lungs with low inspiratory volumes.",
+    "Hypoventilatory change with reduced overall expansion.",
+    "Lung volumes are low.",
+    "Lung volumes remain decreased.",
+    "Lung volumes are generally low.",
+    "VOLUME LOSS IN THE LUNGS.",
+    "Lungs are markedly under-inflated.",
+    "Lung volumes continue to be low.",
+    "Mildly shallow lung volumes.",
+    "Slightly shallow lung volumes.",
+    "Generalized low lung lungs with eventration of the left hemidiaphragm.",
+    "Incomplete inspiratory effort.",
+    "Allowing for incomplete inspiration, borderline cardiomegaly is seen.",
+    "Incomplete inspiration causes crowding of pulmonary vasculature.",
+    "Atelectasis due to suboptimal lung inspiratory effort.",
+    "Increased lung markings may be due to expiratory film.",
+    "Lungs are mildly inflated chronically.",
+    "The lungs are mildly inflated.",
+    "Interval decrease in aeration bilaterally.",
+    "Decreased aeration bilaterally.",
+    "The lungs are clear although not well expanded.",
+    "Lungs are not fully expanded.",
+    "Incomplete lung expansion.",
+    "Inadequate lung expansion.",
+    "Lung expansion is limited.",
+    "Poor overall lung expansion.",
+    "AP image obtained in less than full inspiration with crowded bronchovascular markings.",
+    "Less than full inspiration.",
+    "Not fully inspired.",
+    "Incompletely inspired lungs.",
+    "Limited lung volumes."
+  ],
+  "negatives": [
+    "Right lower lobe atelectasis with focal volume loss.",
+    "Large right pleural effusion with compressive effect.",
+    "Elevated right hemidiaphragm without low-volume wording.",
+    "Status post left upper lobectomy with hemithorax volume loss.",
+    "Lobar collapse of the right middle lobe.",
+    "Associated right lung volume loss."
+  ],
+  "negation_soft": [
+    "Lungs are well expanded.",
+    "No low lung volume is identified."
+  ]
+}
