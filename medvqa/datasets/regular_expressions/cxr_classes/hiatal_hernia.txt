@@ -6,6 +6,9 @@
 # elevated hemidiaphragm/eventration, gastric pull-up, diverticulum, history-only,
 # or negated "no hiatal hernia".
 # Negation/history lookbehinds are fixed-width (stdlib re).
+# Name stem: hiatal / hiatial typo / OCR "H iatal" / hiatus / para(o)esophageal
+# (incl. paresophageal) / peri / sliding / rolling; hyphen to hernia allowed.
+# Currently visualized "known" HH: 1b–1i. Keep blocking "with known" / indication.
 # ==============================================================================
 
 (?:
@@ -33,65 +36,89 @@
     (?<!\bHISTORY:\s)
 
     (?:
-        # HH name stem: optional inserted "type" ("hiatal type hernia")
-        # Spaced para/peri esophageal allowed (para esophageal).
+        # HH name stem: optional inserted "type" ("hiatal type hernia");
+        # hyphen "hiatal-hernia"; typo hiatial; OCR "H iatal"; British oe.
         # 1. Standard names — block bare "known … hernia" (indication/history-only);
-        # currently visualized "known" forms live in arms 1b–1f.
+        # currently visualized "known" forms live in arms 1b–1i.
         (?<!\bknown\s)(?<!\bwith\sknown\s)
-        \b(?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+        \b(?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
         # 1b. Attribution → known HH (current finding framed as known HH);
         # allow patient's / the patient's / a / the before known.
         \b(?:compatible|consistent|corresponding|corresponds)\s+(?:with|to)\s+
           (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
         \b(?:due\s+to|in\s+part\s+due\s+to|through)\s+
           (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
-        \b(?:reflects?|represents?)\s+
+        \b(?:reflects?|represents?|relates?\s+to)\s+
           (?:(?:the\s+)?patient's\s+|(?:a|the)\s+)?known\s+
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
-        # 1c. Known HH currently visualized / stable / better seen
+        # 1c. Known HH currently visualized / stable / better seen / size change.
         # Block "with known" (history/context). present\b avoids "presenting".
         (?<!\bwith\s)
         \b(?:the\s+|a\s+)?known\s+
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*\s+
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*\s+
           (?:is\s+)?(?:seen|unchanged|stable|present\b|noted|constant|redemonstrat\w*|
             better\s+visible|again\s+seen|again\s+noted|
-            less\s+apparent|
-            (?:can\s+be\s+)?faintly\s+discerned)
+            less\s+(?:well\s+)?(?:apparent|seen|visible|visualized)|
+            (?:can\s+be\s+)?faintly\s+discerned|
+            has\s+(?:decreased|increased|changed)|
+            decreased|increased)
         |
         # 1d. Explicit current possession (avoids CLINICAL HISTORY "… with known")
         \bhas\s+a\s+known\s+
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
         # 1e. Current finding attributed to "history of" HH
         \b(?:compatible|consistent)\s+with\s+(?:a\s+)?history\s+of\s+(?:a\s+)?
           (?:known\s+)?
-          (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-          (?:\s+type)?\s+hernia\w*
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
         |
         # 1f. Bare / sized known HH finding line (not "with known" / not mid-indication)
         # Sized forms anywhere; bare "Known HH." only sentence-initial / after period.
         (?<!\bwith\s)
         (?:
             \b(?:large|huge|big|small|moderate)\s+known\s+
-              (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-              (?:\s+type)?\s+hernia\w*
+              (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+              (?:[\s-]+type)?[\s-]+hernia\w*
             |
             (?:(?<=^)|(?<=\.\s)|(?<=\n))known\s+
-              (?:hiatal|hiatus|para-?\s*esophageal|peri-?\s*esophageal|sliding|rolling)
-              (?:\s+type)?\s+hernia\w*
+              (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+              (?:[\s-]+type)?[\s-]+hernia\w*
         )
+        |
+        # 1g. Copula / hedge: "is likely the known HH" / "is the known HH"
+        \b(?:is\s+likely\s+(?:the\s+)?(?:(?:the\s+)?patient's\s+)?|
+           is\s+the\s+(?:patient's\s+)?|
+           likely\s+the\s+(?:patient's\s+)?)known\s+
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
+        |
+        # 1h. Current finding / tube lying in the (patient's) known HH.
+        # Does not fire on history "in this patient with known".
+        \bin\s+(?:the\s+)?(?:patient's\s+)?known\s+
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
+        |
+        # 1i. Redemonstration of known HH (known after "of", not before hernia)
+        \bredemonstrat\w*\s+of\s+(?:(?:the\s+|a\s+)?(?:(?:the\s+)?patient's\s+)?)?known\s+
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
+          (?:[\s-]+type)?[\s-]+hernia\w*
+        |
+        # 1j. Finding-first: "the hernia is paraesophageal / paresophageal / hiatal"
+        \bhernia\w*\s+is\s+(?:a\s+|an\s+)?
+          (?:h\s*iati?al|hiatus|para-?\s*o?esophag\w*|paresophag\w*|peri-?\s*o?esophag\w*|sliding|rolling)
         |
         # 2. Gastric herniation synonyms
         \bgastric\s+herni\w*
@@ -103,12 +130,12 @@
           (?:(?![.!?]).){0,50}?
           herniat\w*\s+above\s+(?:the\s+)?diaphragm
         |
-        # 2c. Herniation / hernia through the (esophageal) hiatus
-        \bherniat\w*\s+through\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
+        # 2c. Herniation / hernia through|at|of|from the (esophageal) hiatus
+        \bherniat\w*\s+(?:through|at|of|from)\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
         |
         \bhernia\w*
           (?:(?![.!?]).){0,50}?
-          through\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
+          (?:through|at|of|from)\s+(?:the\s+)?(?:esophageal\s+)?hiatus\b
         |
         # 3. Intrathoracic stomach (allow "known intrathoracic stomach")
         \bintra-?thoracic\s+stomach

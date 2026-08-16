@@ -8,9 +8,16 @@
 # FN-fit (fn_mine_fit_shared): peribronchovascular / peribronchiolar thicken|cuff;
 # bronchial wall thickness (noun); bare thickened bronchi (not only thick-walled /
 # thickened bronchial walls).
+# FN-fit pass-2 (wave 41 hunt TPs): walls-of-bronchi order; reverse thickened
+# peribronchial tissue; bare thick after bronchial walls; bronchi-first thickened
+# walls / bronchi wall thicken; spaced peribronchial vascular cuffing; cuffing of
+# + modifiers + bronchi/airways; airway cuffing / airways show cuffing;
+# intervening interstitial on bronchial wall thicken; typos bronhcial,
+# peribrinchial, peribroncheal, peribronchical.
 # Do NOT match bronchiectasis, tram-tracks, ring shadows, prominent bronchi /
 # bronchovascular markings, interstitial markings, edema, perihilar haze, or
-# bronchitis / reactive airways alone (prompt).
+# bronchitis / reactive airways alone (prompt). Do NOT match peribronchial
+# markings / peri interstitial thickening without wall|cuff.
 # Fixed-width lookbehinds (stdlib re). Eval lowercases + squashes space.
 # ==============================================================================
 
@@ -34,19 +41,24 @@
 (?<!\bno\spleural\seffusions\sor\s)
 \b(?:
         # "bronchial wall thickening", "bronchial thickening",
-        # "bronchiolar wall thickening", typo "Brochial wall thickening";
-        # FN-fit: noun "bronchial wall thickness" / "increased … thickness"
-        (?:bro(?:n)?chial|bronchiolar)\s+(?:walls?\s+)?(?:are\s+|is\s+|appear(?:s|ing)?\s+)?(?:thicken\w*|thickness\b)
+        # "bronchiolar wall thickening", typo "Brochial" / "bronhcial";
+        # FN-fit: noun "bronchial wall thickness" / "increased … thickness";
+        # pass-2: "bronchial wall interstitial thickening"; "bronchial walls are thick"
+        (?:bro(?:nch|nhc|ch)ial|bronchiolar)\s+(?:
+            walls?\s+(?:interstitial\s+)?(?:are\s+|is\s+|appear(?:s|ing)?\s+)?(?:thicken\w*|thickness\b|thick\b)
+            |
+            (?:are\s+|is\s+|appear(?:s|ing)?\s+)?(?:thicken\w*|thickness\b)
+        )
 
         |
 
         # "thickening/thickened of the bronchial walls"
-        thicken(?:ing|ed)\s+of\s+(?:the\s+)?(?:bro(?:n)?chial|bronchiolar)\s+walls?
+        thicken(?:ing|ed)\s+of\s+(?:the\s+)?(?:bro(?:nch|nhc|ch)ial|bronchiolar)\s+walls?
 
         |
 
         # "thickened bronchial walls"
-        thickened\s+(?:bro(?:n)?chial|bronchiolar)\s+walls?
+        thickened\s+(?:bro(?:nch|nhc|ch)ial|bronchiolar)\s+walls?
 
         |
 
@@ -56,18 +68,35 @@
 
         |
 
+        # pass-2: "the walls of the bronchi are thickened"
+        walls?\s+of\s+(?:the\s+)?bronchi\s+(?:are\s+|is\s+|appear(?:s|ing)?\s+)?(?:thicken\w*|thick\b)
+
+        |
+
+        # pass-2: "bronchi with thickened walls" / "bronchi wall thickening"
+        bronchi\s+(?:(?:with\s+)?thickened\s+walls?|walls?\s+thicken\w*)
+
+        |
+
+        # pass-2: reverse "thickened peribronchial tissue" (not markings)
+        thickened\s+(?:peri|para)(?:bronch|brinch)(?:ial|eal|ical|al)\s+(?:(?:soft\s+)?tissues?|walls?)
+
+        |
+
         # "peri/parabronchial (wall|soft tissue) thickening/cuffing";
         # tolerate peribronchal / cyffing typos; soft-tissue intervening phrasing;
         # FN-fit: also peribronchovascular / peribronchiolar
-        (?:peri|para)bronch(?:ial|al|ovascular|iolar)\s+(?:(?:walls?|soft\s+tissue)\s+)?(?:thicken\w*|c[yu]ff(?:ing)?)
+        # pass-2: peribrinchial / peribroncheal / peribronchical; spaced vascular
+        (?:peri|para)(?:bronch|brinch)(?:ial|eal|ical|al|ovascular|iolar)\s+(?:(?:walls?|soft\s+tissue|vascular)\s+)?(?:thicken\w*|c[yu]ff(?:ing)?)
 
         |
 
         # "bronchial cuffing", "bronchial wall cuffing", "cuffing of the bronchi"
+        # pass-2: bronhcial; cuffing of + short modifiers + bronchi/airways
         (?:
-            (?:bro(?:n)?chial|bronchiolar)\s+(?:walls?\s+)?c[yu]ff(?:ing)?
+            (?:bro(?:nch|nhc|ch)ial|bronchiolar)\s+(?:walls?\s+)?c[yu]ff(?:ing)?
             |
-            c[yu]ffing\s+of\s+(?:the\s+)?bronchi
+            c[yu]ffing\s+of\s+(?:\w+\s+){0,4}(?:bronchi|airways?)
         )
 
         |
@@ -89,7 +118,13 @@
 
         # "airway thickening", "airway wall thickening", "central airways thickening",
         # "bronchitic airway thickening" (explicit thicken, not bronchitic-alone)
-        airways?\s+(?:walls?\s+)?thicken\w*
+        # pass-2: "airway cuffing"
+        airways?\s+(?:walls?\s+)?(?:thicken\w*|c[yu]ff(?:ing)?)
+
+        |
+
+        # pass-2: "airways show cuffing"
+        airways?\s+show\s+c[yu]ff(?:ing)?
 
         |
 
@@ -99,7 +134,7 @@
         |
 
         # Clause-local: "bronchial inflammation responsible for wall thickening"
-        (?:bro(?:n)?chial|bronchiolar)(?:[^\w.!?;:]+(?!without\b|no\b|not\b)\w+){0,5}[^\w.!?;:]+wall\s+thicken\w*
+        (?:bro(?:nch|nhc|ch)ial|bronchiolar)(?:[^\w.!?;:]+(?!without\b|no\b|not\b)\w+){0,5}[^\w.!?;:]+wall\s+thicken\w*
 
         |
 

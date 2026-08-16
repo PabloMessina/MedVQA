@@ -1,9 +1,11 @@
 # ==============================================================================
 # lobar_atelectasis
-# Explicit lobar / bilobar / multilobar atelectasis or collapse; atelectasis or
-# collapse of a named lobe (or lobe acronym); complete/total/airless involvement
-# or complete volume loss of a named lobe; Golden S / Luftsichel as lobar-collapse
-# evidence on the current CXR.
+# Explicit lobar / bi / multi / trilobar atelectasis or collapse; atelectasis or
+# collapse of a named lobe (or lobe acronym; hyphen `upper-lobe` OK); complete/
+# total/airless involvement or complete volume loss of a named lobe; Golden S /
+# Luftsichel (incl. Luft-sichel) as lobar-collapse evidence on the current CXR.
+# Attested misspellings: atlectasis, atelctasis, ateletasis, atelecatasis,
+# colaapse, collpase, collabse.
 #
 # Do NOT match: linear / plate-like / discoid / band-like / subsegmental /
 # segmental / basilar / dependent / rounded / lingular atelectasis alone;
@@ -29,11 +31,11 @@
     (?<!\bexcluding\s)
     (?<!\bresolved\s)
     (?<!\bresolving\s)
-    \b(?:multi[-\s]?|bi[-\s]?)?lobar
+    \b(?:multi[-\s]?|bi[-\s]?|tri[-\s]?)?lobar
     (?:\s+and\s+segmental)?
-    \s+(?:atelect\w*|collaps\w*)
+    \s+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     (?!\s+have\s+(?:nearly\s+)?cleared)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 2. Pathology of <named lobe | acronym | multiple lobes>
@@ -53,34 +55,34 @@
     (?<!lingular\s)
     (?<!dependent\s)
     (?<!residual\sof\spneumonia\sand\s)
-    \b(?:atelect\w*|collaps\w*)\s+(?:of|involving|affecting)\s+(?:the\s+)?(?:entire\s+|whole\s+)?
+    \b(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)\s+(?:of|involving|affecting)\s+(?:the\s+)?(?:entire\s+|whole\s+)?
     (?:
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
         (?:lul|rul|rml|rll|lll)
         |
-        (?:multiple|several|both|two|three)\s+lobes?
+        (?:multiple|several|both|two|three)[-\s]+lobes?
         |
         # Lingula + named lobe (reverse of §6b lobe→lingula order)
         lingula\s+and\s+(?:the\s+)?
         (?:
             (?<!segment\sof\sthe\s)
-            (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+            (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobe
             |
             (?<!segment\sof\sthe\sright\s)
             (?<!segment\sof\sthe\sleft\s)
-            (?:upper|middle|lower)\s+lobe
+            (?:upper|middle|lower)[-\s]+lobe
         )
     )\b
     (?!\s+attributable)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 3. Named lobe(s) -> atelectasis|collapse (clause-local; skip subtype adj)
@@ -120,25 +122,25 @@
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
-        (?:multiple|several|both|two|three)\s+lobes?
+        (?:multiple|several|both|two|three)[-\s]+lobes?
     )\b
     (?!due\s+to\s+pneumonia)
-    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|discoid|bandlike|band-like|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|lingula|patchy|streaky|subpleural|infiltrat\w*|suggestive|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial|presumably|laterally)\b)\w+){0,8}
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|discoid|bandlike|band-like|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|lingula|patchy|streaky|subpleural|infiltrat\w*|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial|presumably|laterally)\b)\w+){0,8}
     [^\w.!?;:\n]+
     (?!(?:linear|platelike|plate-like|plate\slike|discoid|bandlike|band-like|band\slike|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|patchy|streaky|partial|remaining|subpleural)\s+)
     (?!rather\s+than\s+)
     (?!versus\s+(?:focal\s+)?(?:consolidat|atelect))
     (?<!could\sreflect\s)
     (?<!due\sto\spneumonia\sor\s)
-    (?:atelect\w*|collaps\w*)
+    (?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     (?!\s+have\s+(?:nearly\s+)?cleared)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 4. Atelectasis|collapse -> named lobe(s)
@@ -163,23 +165,23 @@
     (?<!patchy\s)
     (?<!streaky\s)
     (?<!residual\sof\spneumonia\sand\s)
-    \b(?:atelect\w*|collaps\w*)\b
+    \b(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)\b
     (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|discoid|bandlike|band-like|subsegmental|segmental|basilar|bibasilar|dependent|rounded|lingular|lingula|patchy|streaky|subpleural|infiltrat\w*|suggestive|suspicious|infection|differential|fibrosis|segments?|remaining|partial|presumably|laterally)\b)\w+){0,8}
     [^\w.!?;:\n]+
     \b(?:
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
-        (?:multiple|several|both|two|three)\s+lobes?
+        (?:multiple|several|both|two|three)[-\s]+lobes?
     )\b
     (?!\s+attributable)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 5. Lobe acronym <-> pathology (tighter gap; block PNA/rather-than)
@@ -192,13 +194,13 @@
     (?<!\bsubsegmental\s)
     (?<!\bexclude\s)
     \b(?:lul|rul|rml|rll|lll)\b
-    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|pna|pneumonia|linear|platelike|plate-like|subsegmental|segmental|basilar|rounded|lingular|infiltrat\w*|suggestive|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial)\b)\w+){0,5}
+    (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|pna|pneumonia|linear|platelike|plate-like|subsegmental|segmental|basilar|rounded|lingular|infiltrat\w*|suspicious|infection|differential|versus|vs|fibrosis|segments?|remaining|partial)\b)\w+){0,5}
     [^\w.!?;:\n]+
     (?!(?:linear|platelike|plate-like|plate\slike|discoid|bandlike|band-like|subsegmental|segmental|basilar|rounded|lingular|partial|remaining)\s+)
     (?!rather\s+than\s+)
-    (?:atelect\w*|collaps\w*)
+    (?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     (?!\s+have\s+(?:nearly\s+)?cleared)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     (?<!linear\s)
     (?<!platelike\s)
@@ -208,14 +210,14 @@
     (?<!basilar\s)
     (?<!rounded\s)
     (?<!residual\sof\spneumonia\sand\s)
-    \b(?:atelect\w*|collaps\w*)\b
+    \b(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)\b
     (?:[^\w.!?;:\n]+(?!(?:without|no|not|denies|absent|rather|linear|platelike|plate-like|subsegmental|segmental|basilar|rounded|lingular|infiltrat\w*|fibrosis|segments?|remaining|partial|presumably)\b)\w+){0,5}
     [^\w.!?;:\n]+
     (?<!segment\sof\sthe\s)
     (?<!segment\sof\s)
     \b(?:lul|rul|rml|rll|lll)\b
     (?!\s+attributable)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # Adjacent / hyphenated: "RUL collapse", "left lower lobe atelectasis"
     (?<!\bno\s)
@@ -228,10 +230,10 @@
     (?<!\bexclude\s)
     (?<!\bprevious\s)
     (?<!\bprior\s)
-    \b(?:lul|rul|rml|rll|lll)[-\s]+(?:atelect\w*|collaps\w*)
+    \b(?:lul|rul|rml|rll|lll)[-\s]+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     (?!\s+have\s+(?:nearly\s+)?cleared)
     (?!\s+versus)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     (?<!\bno\s)
     (?<!\bno\sleft\s)
@@ -265,15 +267,15 @@
     (?<!\bresolved\sleft\s)
     \b(?:
         (?<!segment\sof\sthe\s)
-        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)\s+lobes?
+        (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)[-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
-    )[-\s]+(?:atelect\w*|collaps\w*)
+        (?:upper|middle|lower)[-\s]+lobes?
+    )[-\s]+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     (?!\s+have\s+(?:nearly\s+)?cleared)
     (?!\s+versus)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 6. Airless / complete|total|severe atelectasis|collapse of a named lobe
@@ -283,24 +285,24 @@
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
-        (?:both|bilateral)\s+(?:upper|middle|lower)\s+lobes?
+        (?:both|bilateral)\s+(?:upper|middle|lower)[-\s]+lobes?
     )\s+(?:is|are)\s+(?:(?:largely|essentially|nearly|almost|completely?|totally?)\s+)?airless\b
     |
     \b(?:
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
     )\b
     (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
     (?:(?:is|are|remains?|appears?)\s+)?
@@ -312,7 +314,7 @@
         |
         (?:near(?:ly)?\s+|almost\s+)?completely?\s+(?:atelect\w*|collaps\w*|airless)
         |
-        (?:near(?:ly)?\s+|almost\s+)?totally?\s+(?:atelect\w*|collaps\w*)
+        (?:near(?:ly)?\s+|almost\s+)?totally?\s+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
         |
         severely(?:,?\s+if\s+not\s+entirely)?\s+(?:atelect\w*|collaps\w*|airless)
         |
@@ -333,11 +335,11 @@
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
     )\b
     |
     # Complete/total volume loss of a named lobe (prompt-supported; not mild/nonspecific)
@@ -345,20 +347,20 @@
     (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
     (?:
         (?<!segment\sof\sthe\s)
-        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobe
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobe
+        (?:upper|middle|lower)[-\s]+lobe
     )\b
     |
     \b(?:
         (?<!segment\sof\sthe\s)
-        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobe
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobe
+        (?:upper|middle|lower)[-\s]+lobe
     )\b
     (?:[^\w.!?;:\n]+\w+){0,5}[^\w.!?;:\n]+
     (?:near(?:ly)?\s+)?(?:complete|total)\s+(?:volum\w*\s+loss|loss\s+of\s+volume)
@@ -367,11 +369,11 @@
     \bairlessness\s+(?:in|of|involving|throughout)\s+(?:the\s+)?
     (?:
         (?<!segment\sof\sthe\s)
-        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobe
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobe
+        (?:upper|middle|lower)[-\s]+lobe
         |
         (?:lul|rul|rml|rll|lll)
     )\b
@@ -401,24 +403,24 @@
         (?<!segment\sof\sthe\s)
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
     )
     \s+and\s+lingul(?:a|ar)
     (?:
         # Adjacent: "lobe and lingular atelectasis" / "atelectasis/collapse"
-        [-\s/]+(?:atelect\w*|collaps\w*)
+        [-\s/]+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
         |
         # Verb path: "lobe and lingula are|remain collapsed"
         \s+(?:is|are|remain(?:s)?|appears?|appear)
         (?:[^\w.!?;:\n]+\w+){0,3}[^\w.!?;:\n]+
-        (?:atelect\w*|collaps\w*)
+        (?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     )
     (?!\s+have\s+(?:nearly\s+)?cleared)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # Named lobe including (the) lingula → collapsed/atelectasis
     (?<!\bno\s)
@@ -429,22 +431,22 @@
     (?<!subsegmental\s)
     \b(?:
         (?<!segment\sof\sthe\s)
-        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobe
+        (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobe
         |
         (?<!segment\sof\sthe\sright\s)
         (?<!segment\sof\sthe\sleft\s)
-        (?:upper|middle|lower)\s+lobe
+        (?:upper|middle|lower)[-\s]+lobe
     )
     \s+including\s+(?:the\s+)?lingula
     (?:
-        [-\s/]+(?:atelect\w*|collaps\w*)
+        [-\s/]+(?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
         |
         \s+(?:is|are|remain(?:s)?|appears?|appear)
         (?:[^\w.!?;:\n]+\w+){0,3}[^\w.!?;:\n]+
-        (?:atelect\w*|collaps\w*)
+        (?:atelect\w*|atlectasis|atelctasis|ateletasis|atelecatasis|collaps\w*|colaapse|collpase|collabse)
     )
     (?!\s+have\s+(?:nearly\s+)?cleared)
-    (?!.{0,80}\b(?:old|prior|previous)\s+ct\b)
+    (?!.{0,80}(?<!as\snoted\son\s)(?<!as\sseen\son\s)\b(?:old|prior|previous)\s+ct\b)
     |
     # ------------------------------------------------------------------
     # 7. Eponymous lobar-collapse signs
@@ -461,9 +463,7 @@
     |
     \breverse\s+golden(?:'s)?\s+s-?(?:\s+)?(?:sign|appearance)?\b
     |
-    \bluftsichel\w*
-    |
-    \bluft\s+sichel\w*
+    \bluft[-\s]?sichel\w*
     |
     # ------------------------------------------------------------------
     # 8. Named lobe ... (near) complete/total/severe atelectasis|collapse|airless
@@ -482,9 +482,9 @@
     \b(?:
         (?:(?:right|left|bilateral|both)\s+)(?:upper|middle|lower)
           (?:\s+and\s+(?:(?:right|left)\s+)?(?:upper|middle|lower))?
-          \s+lobes?
+          [-\s]+lobes?
         |
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
         (?:lul|rul|rml|rll|lll)
     )\b
@@ -509,9 +509,9 @@
     (?<!subsegmental\s)
     (?<!segmental\s)
     \b(?:
-        (?:(?:right|left)\s+)(?:upper|middle|lower)\s+lobes?
+        (?:(?:right|left)\s+)(?:upper|middle|lower)[-\s]+lobes?
         |
-        (?:upper|middle|lower)\s+lobes?
+        (?:upper|middle|lower)[-\s]+lobes?
         |
         (?:lul|rul|rml|rll|lll)
     )\b

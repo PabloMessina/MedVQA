@@ -9,11 +9,16 @@
 # Pseudocavitation / blebs / bullae / cysts alone are out of scope.
 # "Cannot exclude a cavity", indication-only "Cavitary lesion?", and
 # not-demonstrated / occult / CT-only cavitary mentions are out of scope.
-# FN-fit (fn_mine_fit_shared): mid-lung-zone / hilar-perihilar sites;
+# FN-fit (fn_mine_fit_shared): mid-lung-zone / hilar-perihilar / basal sites;
 # thick-walled / measured / fluid-filled / irregular cavity; cavity at;
-# cavity formation; suggestion of; no (significant|interval|gross) change;
-# better seen/depicted/characterized on CT (not CT-only); bare cavities
-# with raise/suggest framing; thick-walled lesion + central air and fluid.
+# cavity formation; cavity lesion + lung zone; cavity in RUL/LUL/…;
+# suggestion of; no (significant|interval|gross) change; hop through
+# unrelated "no X, or any appreciable change … cavit*"; abscess formation
+# with pulmonary/lesion/lucency context; air/fluid slash AFL-in-lesion;
+# better seen/depicted/characterized/appreciated/visualized/evaluated/
+# demonstrated on CT (not CT-only); concern for developing cavitation
+# after a lung lesion (not indication-only); bare cavities with
+# raise/suggest framing; thick-walled lesion + central air and fluid.
 # ==============================================================================
 
 \b(?:
@@ -23,8 +28,9 @@
         #    led clauses ("No … or cavitary", "none clearly cavitated").
         #    Exception: "no (significant|interval|gross) change … cavit*" is
         #    stable positive phrasing, not negation of the finding.
-        #    Post-match CT guard: keep CT-only out, but allow "better
-        #    seen|depicted|characterized|appreciated|visualized on … CT".
+#    Post-match CT guard: keep CT-only out, but allow "better
+#    seen|depicted|characterized|appreciated|visualized|evaluated|
+#    demonstrated on … CT".
         # ------------------------------------------------------------------
         (?:
             ^
@@ -35,7 +41,7 @@
         )
         (?:
             (?:
-                (?=\bno\b(?![^.!?;:\n]{0,50}cavit)[^.!?;:\n]{0,80},\s*(?:but|however)\b)
+                (?=\bno\b(?![^.!?;:\n]{0,50}cavit)[^.!?;:\n]{0,80},\s*(?:but|however|or\s+(?:any\s+)?(?:appreciable|significant|interval|gross)\s+change)\b)
                 [^.!?;:\n]
             )
             |
@@ -79,9 +85,18 @@
             not\s+well\s+appreciated|
             (?:remains|is|are)\s+occult|
             occult\s+by|
-            (?<!better\sseen\s)(?<!better\sdepicted\s)(?<!better\scharacterized\s)(?<!better\sappreciated\s)(?<!better\svisualized\s)
+            (?<!better\sseen\s)(?<!better\sdepicted\s)(?<!better\scharacterized\s)(?<!better\sappreciated\s)(?<!better\svisualized\s)(?<!better\sevaluated\s)(?<!better\sdemonstrated\s)
             on\s+(?:the\s+)?(?:recent|prior|previous|earlier)\s+(?:chest\s+)?ct
         )\b)
+
+        |
+
+        # findings-style "concern for developing cavitation" after a lung
+        # lesion (hop still blocks bare indication "concern for cavitary")
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:consolidat\w*|mass(?:es)?|opacit\w*|infiltrat\w*|pneumonia|nodule|lesion)
+        (?:(?![.!?])(?:.){0,60}?)
+        concern\s+for\s+(?:early\s+|developing\s+)?cavit(?:ary|ation|ations|ating|ated)\b
 
         |
 
@@ -93,9 +108,11 @@
         (?:
             (?:
                 pulmonary | lung | parenchymal | apical | biapical |
+                basal | basilar | bibasal | bibasilar |
                 (?:peri)?hilar |
                 (?:right|left|bilateral)\s+(?:peri)?hilar |
                 (?:right|left|bilateral)\s+apical |
+                (?:right|left|bilateral)\s+(?:basal|basilar) |
                 (?:right|left)\s+apex |
                 air[-\s]?filled |
                 fluid[-\s]?filled |
@@ -129,7 +146,21 @@
                 right\s+upper\s+lobe\b | left\s+upper\s+lobe\b |
                 (?:upper|middle|lower|mid)\s+(?:lung|zone|lobe)\b |
                 (?:mid|middle|upper|lower)\s+lung\s+zones?\b |
-                (?:peri)?hilar\s+region\b
+                (?:peri)?hilar\s+region\b |
+                (?:RUL|RML|RLL|LUL|LLL|LML)\b
+            )
+            |
+            # "cavity lesion in the left lower lung zone"
+            cavit(?:y|ies)\s+lesions?
+            \s+(?:in|within|of|at)\s+(?:the\s+)?
+            (?:
+                (?:right|left|bilateral)\s+
+            )?
+            (?:
+                (?:upper|lower|middle|mid)\s+(?:lung|lobe|zone)s?\b |
+                (?:mid|middle|upper|lower)\s+lung\s+zones?\b |
+                lung\b | lungs\b | lobe\b |
+                (?:RUL|RML|RLL|LUL|LLL|LML)\b
             )
             |
             # grammar: "The cavity and the left upper lobe"
@@ -228,6 +259,30 @@
             |
             # "developing abscess" / "compatible with a developing abscess"
             developing\s+(?:lung\s+)?abscess(?:es)?
+            |
+            # "abscess formation" with pulmonary / lesion / lucency context
+            # (not neck / diverticular / hepatic)
+            (?:
+                (?:
+                    lung | pulmonary | parenchymal |
+                    consolidat\w* | mass(?:es)? | opacit\w* | nodule | lucen\w* |
+                    (?:right|left|bilateral)\s+(?:upper|lower|middle|mid)\s+(?:lobe|lung) |
+                    (?:right|left)\s+(?:base|lung) |
+                    (?:RUL|RML|RLL|LUL|LLL|LML)
+                )
+                \b
+                (?:(?![.!?])(?:.){0,100}?)
+                (?:early\s+|developing\s+)?abscess\s+formation
+                |
+                (?:early\s+|developing\s+)?abscess\s+formation
+                (?:(?![.!?])(?:.){0,80}?)
+                (?:
+                    (?:right|left)\s+(?:upper|lower|middle|mid)\s+(?:lobe|lung) |
+                    (?:upper|lower|middle)\s+lobe |
+                    (?:right|left)\s+base |
+                    lung | pulmonary | parenchymal | lobe
+                )\b
+            )
         )\b
 
         |
@@ -243,7 +298,7 @@
         (?:
             # level within a lesion / cavity / consolidation / mass / nodule
             # (allow laterality + lobe modifiers: "within a right lower lobe mass")
-            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            (?:air|gas)\s*[-/]?\s*fluid\s+levels?
             \s+(?:in|within)\s+(?:(?:the|a|an)\s+)?
             (?:(?:right|left|bilateral)\s+)?
             (?:(?:upper|lower|middle|mid)\s+)?
@@ -257,9 +312,9 @@
             # cavity / cavitary … air-fluid level (short window)
             (?:cavit(?:ary|ation|y|ies)|abscess(?:es)?)
             (?:(?![.!?])(?:.){0,60}?)
-            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            (?:air|gas)\s*[-/]?\s*fluid\s+levels?
             |
-            (?:air|gas)\s*[-]?\s*fluid\s+levels?
+            (?:air|gas)\s*[-/]?\s*fluid\s+levels?
             (?:(?![.!?])(?:.){0,60}?)
             (?:cavit(?:ary|ation|y|ies)|abscess(?:es)?)
             |

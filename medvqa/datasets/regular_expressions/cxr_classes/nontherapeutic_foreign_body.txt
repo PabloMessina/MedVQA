@@ -15,7 +15,7 @@
         (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
         [\s,]+
         (?:(?:is|are|was|were|has|have)\s+)?
-        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?)
+        (?:seen|identified|visualized|noted|demonstrat(?:e|es|ed)|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?|remains?)
 
         |
 
@@ -29,12 +29,16 @@
         (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
         [\s,]+
         (?:(?:is|are|was|were|has|have)\s+)?
-        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?)
+        (?:seen|identified|visualized|noted|demonstrat(?:e|es|ed)|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?|remains?)
 
         |
 
         # "representing a small foreign body" — optional adjectives between a and foreign
         represent(?:s|ing)?\s+a\s+(?:\w+\s+){0,3}foreign\s+(?:body|bodies)
+        |
+        # Hunt: "likely represent foreign body" (no article). Hedge required so
+        # fractured-device "to represent foreign body" (device_abnormality) stays out.
+        (?<!not\s)(?:likely|probably|possibly)\s+represent(?:s|ing)?\s+(?:a\s+)?(?:\w+\s+){0,3}foreign\s+(?:body|bodies)
 
         |
 
@@ -58,7 +62,7 @@
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
         (?<!no\sobvious\s)(?<!no\sdefinite\s)(?<!an\sobvious\s)
         (?<!concern\sfor\s)
-        foreign\s+(?:body|bodies|object|material)\s+(?:in|within)\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|stomach|esophagus|bowel|airway|bronchus|trachea|lung|chest\s+wall|thorax|chest|hemithorax|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant|RUQ|LUQ)
+        foreign\s+(?:body|bodies|object|material)\s+(?:in|within)\s+(?:the\s+)?(?:(?:region|area|level)\s+of\s+(?:the\s+)?)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|stomach|esophagus|bowel|airway|bronchus|trachea|lung|chest\s+wall|thorax|chest|hemithorax|hemidiaphragm|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant|RUQ|LUQ)
         (?!\s*gestion)
 
         |
@@ -87,7 +91,7 @@
         (?:retained|aspirated|ingested)\s+foreign\s+(?:body|bodies|material|object)
         (?:\W+(?!history\b|hx\b|concern\b|eval\b|management\b|ingestion\b|no\b|not\b|without\b|for\b)\w+){0,5}
         \W+
-        (?:seen|noted|identified|visualized|demonstrated|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|within|(?:in)\b(?!\s*gestion)|unchanged)
+        (?:seen|noted|identified|visualized|demonstrat(?:e|es|ed)|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|within|(?:in)\b(?!\s*gestion)|unchanged|remains?)
 
         |
 
@@ -100,7 +104,7 @@
         (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,6}?
         [\s,]+
         (?:(?:is|are|was|were|has|have)\s+)?
-        (?:seen|identified|visualized|noted|demonstrated|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?|over\b)
+        (?:seen|identified|visualized|noted|demonstrat(?:e|es|ed)|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged(?:\s+appearance)?|over\b|remains?)
 
         |
 
@@ -111,14 +115,14 @@
         (?:metallic\s+(?:opaque\s+)?|radi(?:o\s*[-]?\s*)?opaque\s+)
         (?:(?:subcutaneous|tiny|small|stable|irregular)\s+)*
         foreign\s+(?:body|bodies)
-        \s+(?:in|within)\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|chest\s+wall|thorax|chest|hemithorax|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant)
+        \s+(?:in|within)\s+(?:the\s+)?(?:(?:region|area|level)\s+of\s+(?:the\s+)?)?(?:(?:left|right|bilateral)\s+)?(?:(?:axillary|axilla|presternal|abdominal|superficial|lateral)\s+)*(?:and\s+)?(?:(?:left|right|bilateral)\s+)?(?:chest\s+wall\s+)?(?:superficial\s+)?(?:subcutaneous|soft\s+tissues?|chest\s+wall|thorax|chest|hemithorax|hemidiaphragm|axillary|axilla|presternal|abdominal\s+wall|(?:(?:right|left)\s+)?(?:upper|lower)\s+quadrant)
 
         |
 
         # Ballistic / projectile (not "bullet-shaped" vertebra)
-        (?:bullet|shrapnel)\s+fragments?
+        (?:bullet|shrapnel|schrapnel)\s+fragments?
         |
-        \bshrapnel\b
+        \b(?:shrapnel|schrapnel)\b
         |
         retained\s+bullet
         |
@@ -189,6 +193,10 @@
         |
         (?:watch[- ]type|button)\s+batter(?:y|ies)
         |
+        ingested\s+batter(?:y|ies)
+        |
+        consistent\s+with\s+(?:ingested\s+)?batteries\b
+        |
         glass\s+fragments?
         |
         metallic\s+debris
@@ -204,4 +212,76 @@
         (?<!no\s)millimetric\s+metallic\s+particles?\b
         |
         metallic\s+particles?\s+(?:are|were)\s+seen
+
+        |
+
+        # FN-mine fit (fn_mine_fit_shared): hunt TPs — FB abbrev, contains/obstruction,
+        # viz-before, named ingested/aspirated objects (not therapeutic hardware).
+
+        # Abbreviation FB with radiopaque/metallic/retained + viz (not bare ?FB)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:radi(?:o\s*[-]?\s*)?opaque|metallic|retained)\s+FB\b
+        (?:[\s,]+(?!history\b|hx\b|no\b|not\b|without\b)\w+){0,4}?
+        [\s,]+
+        (?:(?:is|are|was|were|has|have)\s+)?
+        (?:seen|identified|visualized|noted|demonstrat(?:e|es|ed)|detected|present|projects?|projecting|projected|overlie[sd]?|overlying|superimposed|unchanged)
+
+        |
+
+        # Anatomy contains a foreign body
+        (?<!no\s)(?<!not\s)
+        contains?\s+(?:an?\s+)?(?:(?:radi(?:o\s*[-]?\s*)?opaque|metallic|small|large)\s+)?foreign\s+(?:body|bodies|object|material)
+
+        |
+
+        # Foreign body obstruction of (airway); not "concern for" / "r/o"
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!opaque\s)
+        (?<!concern\sfor\s)(?<!r/o\s)
+        foreign\s+(?:body|bodies)\s+obstruction
+
+        |
+
+        # Viz-before: "again seen is radiopaque foreign body"; "demonstrate N round radiopaque foreign bodies"
+        (?<!no\s)(?<!not\s)(?<!cannot\s)
+        (?:
+            (?:(?:also|again)\s+)*seen\s+is
+            |
+            demonstrat(?:e|es|ed)
+        )
+        \s+
+        (?:(?:\d+\s+)?(?:(?!no\b|not\b|without\b)\w+\s+){0,4}?)?
+        (?:metallic\s+)?radi(?:o\s*[-]?\s*)?opaque\s+foreign\s+(?:body|bodies|object|material)
+
+        |
+
+        # Named ingested/aspirated objects without the word "foreign"
+        # (?<!for\s) blocks "evaluate/concern for aspirated tooth"
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!for\s)
+        aspirated\s+tooth
+        [\s,]+
+        (?:
+            (?:(?:is|are|was|were)\s+)?(?:seen|identified|visualized|noted|unchanged)
+            |
+            within
+            |
+            in\s+(?:the\s+)?(?:stomach|esophagus|bronchus|bronchi|airway|trachea|lung)
+        )
+        |
+        represent(?:s|ing)?\s+(?:the\s+)?aspirated\s+tooth
+        |
+        (?<!no\s)(?<!not\s)
+        ingested\s+coins?
+        [\s,]*
+        (?:seen|identified|visualized|noted|demonstrat(?:e|es|ed)|present|in\b|within|near)
+        |
+        (?<!no\s)(?<!not\s)
+        \bcoins?\s+(?:is|are|was|were)\s+seen\s+(?:in|within|near)
+        |
+        (?:consistent|compatible)\s+with\s+(?:an?\s+)?ingested\s+coins?
+        |
+        (?<!no\s)(?<!not\s)
+        there\s+(?:is|are)\s+(?:an?\s+)?dentures?
+        \s+in\s+(?:the\s+)?(?:(?:proximal|distal|upper|lower)\s+)?(?:airway|bronchus|bronchi|trachea|esophagus|stomach)
+        |
+        dentures?\s+(?:is|are|was|were)\s+(?:seen\s+)?(?:in|within)\s+(?:the\s+)?(?:(?:proximal|distal)\s+)?(?:airway|bronchus|bronchi|trachea|esophagus|stomach)
     )

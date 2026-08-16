@@ -7,6 +7,8 @@
     #   clavicles plural; endotracheal catheter; asyndetic ETT+NG; decimal
     #   intubated↔carina walk; narrow "is no longer" (not hyperinflated);
     #   tip of the tube + carina (anaphoric).
+    # FN-fit pass-2: hyphen endotracheal-tube; nasotracheal/orotracheal;
+    #   intubation↔bronchus walk; dictation typos of endotracheal.
 
     # Shared absence lookbehinds for named-device arms (inline where needed).
 
@@ -24,7 +26,9 @@
         (?<!\bwithout\s)
         (?<!\bnot\s)
         \btip\s+of\s+(?:the\s+)?(?:
-            endotracheal\s+tubes?
+            (?:endotracheal|endoetracheal|endontracheal|endotrahceal|enodtracheal|endotrachial|endotrachael)[-\s]+tubes?
+            |
+            (?:naso|oro)tracheal[-\s]+tubes?
             |
             e\.?\s*t\.?\s*[- ]?\s*tubes?
             |
@@ -93,8 +97,8 @@
             # ET tube / ET-tube / E.T. tube
             e\.?\s*t\.?\s*[- ]?\s*tubes?
             |
-            # Endotracheal tube (optional "and <other> tubes")
-            endotracheal\s+tubes?
+            # Endotracheal tube (space or hyphen) + dictation typos
+            (?:endotracheal|endoetracheal|endontracheal|endotrahceal|enodtracheal|endotrachial|endotrachael)[-\s]+tubes?
             |
             endotracheal\s+and\s+(?:\w+\s+){0,2}tubes?
             |
@@ -126,7 +130,10 @@
             endotracheal(?=\s*(?:,|remains\b|is\b|has\b|in\b|at\b|tip\b|position\b|unchanged\b|stable\b|terminates?\b))
             |
             # Oral / nasal endotracheal (tube optional when named as such)
-            (?:oral|nasal)\s+endotracheal(?:\s+tubes?)?
+            (?:oral|nasal)\s+endotracheal(?:[-\s]+tubes?)?
+            |
+            # Nasotracheal / orotracheal (prompt: oral or nasal ETT)
+            (?:naso|oro)tracheal(?:[-\s]+tubes?)?
             |
             # "ET and ... tubes" (e.g. ET and nasogastric / drainage tubes)
             et\s+and\s+(?:\w+\s+){0,3}tubes?
@@ -282,12 +289,12 @@
         # Decimal-aware walk (2.5 cm) — bare (?![.!?])\W stops at '.' in numbers.
         (?:(?:[^\w.!?\n]|\.(?=\d))+(?!without\b|no\b|not\b)\w+){0,14}
         (?:[^\w.!?\n]|\.(?=\d))+
-        \b(?:tip|carina|mainstem|trachea)\b
+        \b(?:tip|carina|mainstem|trachea|bronchus)\b
     )
     |
     (?:
         (?<!\bnot\s)(?<!\bno\s)(?<!\bpreferential\sright\s)(?<!\bpreferential\sleft\s)
-        \b(?:tip|carina|mainstem)\b
+        \b(?:tip|carina|mainstem|bronchus)\b
         (?:(?:[^\w.!?\n]|\.(?=\d))+(?!without\b|no\b|not\b)\w+){0,10}
         (?:[^\w.!?\n]|\.(?=\d))+
         \b(?:re)?intubat(?:ed|ion|ing)\b

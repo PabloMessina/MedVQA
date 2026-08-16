@@ -122,25 +122,65 @@
                healing|healed|old|remote|acute|chronic|subacute|well-healed|
                nondisplaced|non-displaced|displaced|patholog\w*|
                and|the|a|an|of|with|involving|including|as|well|
-               possibly|slightly|probably|perhaps|
+               possibly|slightly|probably|perhaps|likely|
+               is|are|was|were|been|has|have|
                sided|posterolateral|anterolateral|clavicles?|clavicular|
                scapul\w*|stern(?:um|al)?|chest|through|xxxx|___+)
         ){0,12}
         [\s,/\-():]*
-        \b(?:fractur\w*|break(?:s|ing)?|broken|callus(?:es)?|step-offs?)\b
+        \b(?:fractur\w*|break(?:s|ing)?|broken|callus(?:es)?|step[\s-]?offs?)\b
         (?![\s\w,.;:'-]{0,80}(?:documented\s+on\s+preceding|
                            not\s+(?:well\s+)?(?:appreciated|seen)\s+on\s+(?:today|today's|the\s+current|this)|
                            please\s+reassess|
                            in\s+this\s+area))
         |
 
+        # 1b. Findings-style framed anatomy-first "rib fx" (not bare indication rib fx)
+        \b(?:healing|healed|displaced|nondisplaced|non-displaced|minimally\s+displaced|
+           acute|old|remote|chronic|patholog\w*)\b
+        (?:
+            [\s,/\-():]+
+            (?:left|right|bilateral|bilat\.?|anterior|posterior|lateral|medial|
+               upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
+               seventh|eighth|ninth|tenth|eleventh|twelfth|
+               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|\d+|
+               multiple|sided|the|a|an)
+        ){1,8}
+        [\s,/\-():]+
+        \bribs?\s+fxs?\b
+        |
+
+        # 1c. Affirmative "there is/are (an) acute rib fracture"
+        # or "there is an acute fracture in … rib". Matching at "fracture"/"rib"
+        # is blocked by (?<!an acute ), which still protects exclude/concern-for.
+        \bthere\s+(?:is|are)\s+(?:an?\s+)?acute\s+
+        (?:
+            ribs?\s+fractur\w*
+            |
+            fractur\w*
+            [\s,/\-():]+
+            (?:in|of|involving|at|through|along)
+            (?:
+                [\s,/\-():]+
+                (?:the|a|an|left|right|bilateral|anterior|posterior|lateral|medial|
+                   upper|lower|middle|first|second|third|fourth|fifth|sixth|
+                   seventh|eighth|ninth|tenth|eleventh|twelfth|
+                   one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|
+                   \d+(?:st|nd|rd|th)|\d+|posterolateral|anterolateral|sided)
+            ){0,10}
+            [\s,/\-():]+
+            \bribs?\b
+        )
+        |
+
         # 2. Pathology → anatomy requiring of/involving/in/at/through/with
-        \b(?:fractur\w*|fxs?|fx's|break(?:s|ing)?|broken|callus(?:es)?|step-offs?)\b
+        \b(?:fractur\w*|fxs?|fx's|break(?:s|ing)?|broken|callus(?:es)?|step[\s-]?offs?)\b
         (?:
             [\s,/\-():]+
             (?:is|are|was|were|been|present|seen|noted|visualized|identified|
                with|callus(?:es)?|formation|relating|related|associated|
-               projecting|to|over|about)
+               projecting|to|over|about|
+               posteriorly|anteriorly|laterally|medially)
         ){0,6}
         [\s,/\-():]+
         (?:of|involving|in|at|through|along|with|over|about)
@@ -149,12 +189,14 @@
             (?:the|a|an|left|right|bilateral|bilat\.?|anterior|posterior|lateral|
                medial|upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
                seventh|eighth|ninth|tenth|eleventh|twelfth|
+               one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|
                \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|\d+|
                multiple|healing|healed|old|remote|acute|chronic|well-healed|
                previous|possibly|slightly|probably|perhaps|
                nondisplaced|non-displaced|displaced|patholog\w*|
                sided|posterolateral|anterolateral|through|chest|and|portion|
                part|aspect|aspects|arc|arcs|region|level|of|in|at|
+               distal|proximal|clavicles?|clavicular|scapul\w*|stern(?:um|al)?|
                lytic|lesion|lesions|xxxx|___+)
         ){0,14}
         [\s,/\-():]+
@@ -176,18 +218,32 @@
         # 2c. Fracture + laterality/ordinal + rib (no preposition, no commas —
         #     commas leak polytrauma lists: "clavicular fracture, bilateral rib")
         # "probable fracture lateral RIGHT ninth rib"
+        # "and" is only a continuation after a laterality/ordinal, not a first filler
+        # (avoids "fracture and ribs" FPs).
         \b(?:fractur\w*)\b
         (?:
             [\s/\-():]+
             (?:left|right|bilateral|bilat\.?|anterior|posterior|lateral|medial|
                upper|lower|middle|mid|first|second|third|fourth|fifth|sixth|
                seventh|eighth|ninth|tenth|eleventh|twelfth|
-               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|
+               one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|
+               \d+(?:st|nd|rd|th)|r?\d+(?:st|nd|rd|th)|\d+|
                multiple|displaced|nondisplaced|non-displaced|old|acute|chronic|
                healing|healed|remote|patholog\w*|posterolateral|anterolateral|
                sided|seen|noted|identified|visualized|the|a|an|
                possibly|slightly|probably|aspect|aspects|arc|arcs)
         ){1,8}
+        (?:
+            [\s/\-():]+
+            and
+            (?:
+                [\s/\-():]+
+                (?:left|right|bilateral|first|second|third|fourth|fifth|sixth|
+                   seventh|eighth|ninth|tenth|eleventh|twelfth|
+                   one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|
+                   \d+(?:st|nd|rd|th)|\d+)
+            ){1,6}
+        )?
         [\s/\-():]+
         \b(?:ribs?|costal)\b
         |
@@ -398,7 +454,8 @@
             [\s,/\-():]+\w+
         ){0,8}
         [\s,/\-():]+
-        (?:suggests?|suggestive\s+of|may\s+represent|may\s+reflect|compatible\s+with|
+        (?:suggests?|suggestive\s+of|may\s+represent|may\s+reflect|could\s+represent|
+           might\s+represent|potentially(?:\s+a)?|compatible\s+with|
            consistent\s+with|concerning\s+for|probable|possible)
         (?:
             [\s,/\-():]+\w+
@@ -413,6 +470,26 @@
         (?:left\s+|right\s+|bilateral\s+|bilat\.?\s+|anterior\s+|posterior\s+|
            lateral\s+|sided\s+|left-sided\s+|right-sided\s+|multiple\s+)*
         ribs?\s+fractur\w*
+        |
+
+        # 6c2. Known/previous rib fractures affirmed on the current exam
+        # (match starts at known/previous so history lookbehinds do not fire;
+        #  history-only "Known rib fractures." lacks the affirmation and misses)
+        \b(?:known|previous)\s+
+        (?:
+            (?:left|right|bilateral|bilat\.?|anterior|posterior|lateral|
+               sided|left-sided|right-sided|multiple|and|
+               scapular|clavicular|sternal|scapul\w*)
+            \s+
+        ){0,8}
+        \bribs?\b
+        (?:
+            \s+(?:and|scapular|clavicular|sternal|scapul\w*|left|right)
+        ){0,6}
+        \s+fractur\w*
+        \s+(?:are|is|were|was|remain(?:s|ed)?)\s+
+        (?:re-?demonstrated|again\s+(?:demonstrated|seen|noted|visualized|identified)|
+           seen|noted|visible|unchanged|stable|demonstrated)
         |
 
         # 6d. Rib … in the process of fracturing (pathologic)
@@ -468,8 +545,9 @@
         (?:
             [\s,/\-():]+
             (?:associated|relating|related|projecting|seen|noted|identified|
-               formation|stable|is|are|was|were|with|over|about|along|to|the|
+               formation|stable|is|are|was|were|with|over|about|around|along|to|the|
                a|an|left|right|posterior|anterior|lateral|medial|aspect|of|and|
+               several|lower|upper|sided|left-sided|right-sided|
                \d+(?:st|nd|rd|th)|\d+)
         ){1,12}
         [\s,/\-():]+

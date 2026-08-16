@@ -38,7 +38,18 @@
     "Stable bulge at the aortic arch corresponds to known pseudoaneurysm.",
     "Bulge in the transverse aorta is suspicious for aortic aneurysm.",
     "Suspicion for thoracic aortic aneurysm at the transverse aortic arch.",
-    "Descending thoracic aortic aneurysm."
+    "Descending thoracic aortic aneurysm.",
+    "The aortic knob is wide.",
+    "The aortic knob is prominent and an aneurysm is suspected.",
+    "Enlargement at the aortic arch.",
+    "Dilitation of the aortic knob could be secondary to aneurysm.",
+    "The aorta appears tortuous and mildly prominent in caliber.",
+    "There is an increase in the caliber of the thoracic aorta.",
+    "There is ectasia, tortuosity, and atherosclerotic calcifications of the aorta noted.",
+    "The aortic arch silhouette appears ectatic.",
+    "Ectasia, tortuosity, and nonaneurysmal calcification of the thoracic aorta are seen.",
+    "Aorta is slightly ectsatic.",
+    "The aorta shows extasia of the descending thoracic segment."
   ],
   "negatives": [
     "Tortuous unfolded aorta.",

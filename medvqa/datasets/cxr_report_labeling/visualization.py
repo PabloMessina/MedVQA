@@ -291,7 +291,7 @@ def _highlight_report_html(
     text: str,
     *,
     spans: Sequence[str],
-    quote: Optional[str] = None,
+    quote: Optional[Union[str, Sequence[str]]] = None,
     max_chars: Optional[int] = None,
 ) -> str:
     """Escape report text and highlight regex spans (yellow) + LLM quote (cyan)."""
@@ -305,6 +305,13 @@ def _highlight_report_html(
             return ""
         return r"\s+".join(re.escape(p) for p in parts)
 
+    quotes: List[str] = []
+    if isinstance(quote, str):
+        if quote.strip():
+            quotes.append(quote)
+    elif quote:
+        quotes.extend(q for q in quote if isinstance(q, str) and q.strip())
+
     # Collect case-insensitive non-overlapping mark intervals.
     intervals: List[tuple[int, int, str]] = []
     for span in spans or []:
@@ -315,12 +322,12 @@ def _highlight_report_html(
             continue
         for m in re.finditer(pat, text, flags=re.IGNORECASE):
             intervals.append((m.start(), m.end(), "span"))
-    if quote:
-        q = quote.strip()
-        pat = _flex_pattern(q) if q else ""
-        if pat:
-            for m in re.finditer(pat, text, flags=re.IGNORECASE):
-                intervals.append((m.start(), m.end(), "quote"))
+    for q in quotes:
+        pat = _flex_pattern(q.strip())
+        if not pat:
+            continue
+        for m in re.finditer(pat, text, flags=re.IGNORECASE):
+            intervals.append((m.start(), m.end(), "quote"))
 
     if not intervals:
         return f"<pre style='white-space:pre-wrap;font-family:monospace'>{html.escape(text)}</pre>"
@@ -698,3 +705,1016 @@ def inspect_regex_llm_disagreements(
     display(controls, out)
     _on_source_or_class()
     return controls
+
+
+# ---------------------------------------------------------------------------
+# Per-report regex matches (full_regex_matches jsonl + live spans)
+# ---------------------------------------------------------------------------
+
+_MATCH_INDEX_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_REPORT_BY_UID_CACHE: Dict[str, Dict[str, dict]] = {}
+
+_OCCUPANCY_ALL = "all"
+_OCCUPANCY_NONEMPTY = "nonempty"
+_OCCUPANCY_EMPTY = "empty"
+
+
+def _full_regex_matches_missing_hint(dataset: str, path: PathLike) -> str:
+    return (
+        f"Missing {path}.\n"
+        "Requires the full-corpus regex precompute (do not run apply from this widget).\n"
+        f"  DATASETS={dataset} ./medvqa/slurm/launch_cxr_precompute_regex_matches.sh\n"
+        "  # or:\n"
+        f"  python -m medvqa.scripts.cxr_report_labeling.apply_regex_to_dataset --dataset {dataset}"
+    )
+
+
+def list_full_regex_match_datasets(run_id: Optional[str] = None) -> List[str]:
+    """Dataset ids that already have ``full_regex_matches/<dataset>.jsonl``."""
+    from medvqa.datasets.cxr_report_labeling.paths import (
+        DEFAULT_RUN_ID,
+        get_full_regex_matches_path,
+    )
+    from medvqa.datasets.cxr_report_labeling.report_loaders import (
+        DATASET_CHEXPERT_PLUS,
+        DATASET_IUXRAY,
+        DATASET_MIMICCXR,
+        DATASET_REXGRADIENT,
+    )
+
+    run_id = run_id or DEFAULT_RUN_ID
+    found: List[str] = []
+    for ds in (
+        DATASET_IUXRAY,
+        DATASET_MIMICCXR,
+        DATASET_CHEXPERT_PLUS,
+        DATASET_REXGRADIENT,
+    ):
+        if os.path.isfile(get_full_regex_matches_path(run_id, ds)):
+            found.append(ds)
+    return found
+
+
+def load_full_regex_match_index(
+    dataset: str,
+    *,
+    run_id: Optional[str] = None,
+    force_reload: bool = False,
+) -> Dict[str, Any]:
+    """Load ``uid → positive_classes`` for one dataset jsonl (cached)."""
+    from medvqa.datasets.cxr_report_labeling.paths import (
+        DEFAULT_RUN_ID,
+        get_full_regex_matches_path,
+    )
+
+    run_id = run_id or DEFAULT_RUN_ID
+    key = (run_id, dataset)
+    if not force_reload and key in _MATCH_INDEX_CACHE:
+        return _MATCH_INDEX_CACHE[key]
+
+    path = get_full_regex_matches_path(run_id, dataset)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(_full_regex_matches_missing_hint(dataset, path))
+
+    uid_to_pos: Dict[str, List[str]] = {}
+    uids: List[str] = []
+    class_ids: set[str] = set()
+    n_empty = 0
+    for row in load_jsonl(path):
+        uid = row["uid"]
+        pos = list(row.get("positive_classes") or [])
+        uid_to_pos[uid] = pos
+        uids.append(uid)
+        class_ids.update(pos)
+        if not pos:
+            n_empty += 1
+
+    payload = {
+        "run_id": run_id,
+        "dataset": dataset,
+        "path": path,
+        "uids": uids,
+        "uid_to_pos": uid_to_pos,
+        "class_ids": sorted(class_ids),
+        "n_empty": n_empty,
+        "n_nonempty": len(uids) - n_empty,
+    }
+    _MATCH_INDEX_CACHE[key] = payload
+    return payload
+
+
+def _reports_by_uid(dataset: str) -> Dict[str, dict]:
+    from medvqa.datasets.cxr_report_labeling.report_loaders import load_reports_by_uid
+
+    cached = _REPORT_BY_UID_CACHE.get(dataset)
+    if cached is None:
+        cached = load_reports_by_uid(dataset)
+        _REPORT_BY_UID_CACHE[dataset] = cached
+    return cached
+
+
+def format_regex_match_inspection(
+    *,
+    uid: str,
+    dataset: str,
+    report_text: str,
+    positive_classes: Sequence[str],
+    hits: Sequence[dict],
+    max_report_chars: Optional[int] = None,
+    as_html: bool = True,
+) -> str:
+    """Format one report's precomputed classes + live named regex hits."""
+    pos = list(positive_classes)
+    hit_classes = {h["class_id"] for h in hits}
+    stale = [c for c in pos if c not in hit_classes]
+    extra = sorted(hit_classes - set(pos))
+    spans = []
+    seen_span: set[str] = set()
+    for h in hits:
+        s = h.get("span") or ""
+        if s and s not in seen_span:
+            seen_span.add(s)
+            spans.append(s)
+
+    header = (
+        f"{dataset}  uid={uid}  "
+        f"{len(pos)} precomputed class(es)  {len(hits)} live hit(s)"
+    )
+    class_line = ", ".join(pos) if pos else "(none)"
+    hit_lines: List[str] = []
+    for h in hits:
+        via = "  [via child]" if h.get("via_child") else "  [residual/leaf]"
+        hit_lines.append(f"  {h['class_id']}  ←  {h['stem']}{via}  span={h['span']!r}")
+    if not hit_lines:
+        hit_lines = ["  (no live spans — regex may have changed since precompute)"]
+
+    notes: List[str] = []
+    if stale:
+        notes.append(
+            "precomputed but no live hit: " + ", ".join(stale)
+        )
+    if extra:
+        notes.append("live hit not in precompute: " + ", ".join(extra))
+
+    if as_html:
+        report_html = _highlight_report_html(
+            report_text,
+            spans=spans,
+            quote=None,
+            max_chars=max_report_chars,
+        )
+        blocks = [
+            f"<h3 style='margin:0.2em 0'>{html.escape(header)}</h3>",
+            f"<div><b>positive_classes:</b> {html.escape(class_line)}</div>",
+            "<div><b>live stems</b> (yellow = regex span)</div>",
+            "<ul style='margin:0.2em 0'>",
+        ]
+        if hits:
+            for h in hits:
+                via = "via child" if h.get("via_child") else "residual/leaf"
+                blocks.append(
+                    "<li>"
+                    f"<code>{html.escape(str(h['class_id']))}</code> ← "
+                    f"<code>{html.escape(str(h['stem']))}</code> "
+                    f"({html.escape(via)}) "
+                    f"span={html.escape(repr(h.get('span')))}"
+                    "</li>"
+                )
+        else:
+            blocks.append(
+                "<li>(no live spans — regex may have changed since precompute)</li>"
+            )
+        blocks.append("</ul>")
+        for note in notes:
+            blocks.append(f"<div><b>note:</b> {html.escape(note)}</div>")
+        blocks.extend(["<hr/><div><b>report</b></div>", report_html])
+        return "\n".join(blocks)
+
+    text = report_text or ""
+    if max_report_chars is not None and len(text) > max_report_chars:
+        text = text[:max_report_chars] + "\n... [truncated]"
+    lines = ["=" * 80, header, f"positive_classes: {class_line}", "live stems:"]
+    lines.extend(hit_lines)
+    lines.extend(notes)
+    lines.extend(["--- report ---", text])
+    return "\n".join(lines)
+
+
+def inspect_regex_matches_for_report(
+    *,
+    run_id: Optional[str] = None,
+    default_dataset: Optional[str] = None,
+    max_report_chars: Optional[int] = 8000,
+    as_html: bool = True,
+):
+    """ipywidgets browser over ``full_regex_matches/<dataset>.jsonl``.
+
+    Uses precomputed ``positive_classes`` for the class list; recomputes named
+    spans live for the selected report (jsonl has no spans by default).
+    """
+    import ipywidgets as widgets
+    from IPython.display import HTML, clear_output, display
+
+    from medvqa.datasets.cxr_report_labeling.paths import DEFAULT_RUN_ID
+    from medvqa.datasets.cxr_report_labeling.regex_matching import explain_regex_hits
+    from medvqa.datasets.cxr_report_labeling.report_loaders import DATASET_IUXRAY
+
+    run_id = run_id or DEFAULT_RUN_ID
+    datasets = list_full_regex_match_datasets(run_id)
+    if not datasets:
+        from medvqa.datasets.cxr_report_labeling.paths import get_full_regex_matches_path
+
+        print(
+            _full_regex_matches_missing_hint(
+                DATASET_IUXRAY,
+                get_full_regex_matches_path(run_id, DATASET_IUXRAY),
+            )
+        )
+        return None
+
+    if default_dataset is None or default_dataset not in datasets:
+        default_dataset = (
+            DATASET_IUXRAY if DATASET_IUXRAY in datasets else datasets[0]
+        )
+
+    dataset_dd = widgets.Dropdown(
+        options=datasets,
+        value=default_dataset,
+        description="dataset",
+        layout=widgets.Layout(width="200px"),
+    )
+    occupancy_dd = widgets.Dropdown(
+        options=[
+            ("all reports", _OCCUPANCY_ALL),
+            ("regex nonempty", _OCCUPANCY_NONEMPTY),
+            ("regex empty", _OCCUPANCY_EMPTY),
+        ],
+        value=_OCCUPANCY_NONEMPTY,
+        description="filter",
+        layout=widgets.Layout(width="220px"),
+    )
+    class_dd = widgets.Dropdown(
+        options=[("(any class)", "")],
+        value="",
+        description="class",
+        layout=widgets.Layout(width="320px"),
+    )
+    index_slider = widgets.IntSlider(
+        value=0,
+        min=0,
+        max=0,
+        step=1,
+        description="index",
+        continuous_update=False,
+        layout=widgets.Layout(width="360px"),
+    )
+    uid_text = widgets.Text(
+        value="",
+        description="uid",
+        placeholder="paste uid and Go",
+        layout=widgets.Layout(width="420px"),
+    )
+    go_btn = widgets.Button(description="Go to uid", button_style="info")
+    out = widgets.Output()
+
+    state: Dict[str, Any] = {
+        "index": None,
+        "filtered": [],
+        "jump_uid": None,
+    }
+
+    def _ensure_index() -> Optional[Dict[str, Any]]:
+        ds = dataset_dd.value
+        try:
+            idx = load_full_regex_match_index(ds, run_id=run_id)
+        except FileNotFoundError as exc:
+            state["index"] = None
+            with out:
+                clear_output(wait=True)
+                print(str(exc))
+            return None
+        state["index"] = idx
+        class_opts = [("(any class)", "")] + [(c, c) for c in idx["class_ids"]]
+        prev = class_dd.value
+        class_dd.options = class_opts
+        if prev in idx["class_ids"] or prev == "":
+            class_dd.value = prev
+        else:
+            class_dd.value = ""
+        return idx
+
+    def _filtered_uids() -> List[str]:
+        idx = state.get("index")
+        if not idx:
+            return []
+        uid_to_pos = idx["uid_to_pos"]
+        occupancy = occupancy_dd.value
+        class_id = class_dd.value or ""
+        out_uids: List[str] = []
+        for uid in idx["uids"]:
+            pos = uid_to_pos.get(uid) or []
+            if occupancy == _OCCUPANCY_EMPTY and pos:
+                continue
+            if occupancy == _OCCUPANCY_NONEMPTY and not pos:
+                continue
+            if class_id and class_id not in pos:
+                continue
+            out_uids.append(uid)
+        return out_uids
+
+    def _sync_slider(*_args):
+        filtered = _filtered_uids()
+        state["filtered"] = filtered
+        index_slider.max = max(len(filtered) - 1, 0)
+        if index_slider.value > index_slider.max:
+            index_slider.value = index_slider.max
+
+    def _selected_uid() -> Optional[str]:
+        jump = state.get("jump_uid")
+        idx = state.get("index")
+        if jump and idx and jump in idx["uid_to_pos"]:
+            return jump
+        filtered = state.get("filtered") or []
+        if not filtered:
+            return None
+        i = int(index_slider.value)
+        i = max(0, min(i, len(filtered) - 1))
+        return filtered[i]
+
+    def _render(*_args):
+        idx = state.get("index")
+        if not idx:
+            return
+        uid = _selected_uid()
+        with out:
+            clear_output(wait=True)
+            if uid is None:
+                print(
+                    f"No reports for dataset={dataset_dd.value} "
+                    f"filter={occupancy_dd.value} class={class_dd.value or '(any)'}"
+                )
+                return
+            pos = list(idx["uid_to_pos"].get(uid) or [])
+            try:
+                reports = _reports_by_uid(idx["dataset"])
+            except Exception as exc:
+                print(f"Failed to load reports for {idx['dataset']}: {exc}")
+                return
+            rec = reports.get(uid)
+            if rec is None:
+                print(f"uid {uid} is in the match jsonl but not in the report loader")
+                return
+            text = rec.get("report_text") or ""
+            hits = explain_regex_hits(text, pos)
+            jump = state.get("jump_uid")
+            extra_note = ""
+            if jump == uid:
+                filtered = state.get("filtered") or []
+                if uid not in filtered:
+                    extra_note = (
+                        "<div><i>Showing pasted uid (not in the current filter).</i></div>"
+                    )
+            formatted = format_regex_match_inspection(
+                uid=uid,
+                dataset=idx["dataset"],
+                report_text=text,
+                positive_classes=pos,
+                hits=hits,
+                max_report_chars=max_report_chars,
+                as_html=as_html,
+            )
+            n_f = len(state.get("filtered") or [])
+            meta = (
+                f"<div>jsonl={html.escape(idx['path'])}  "
+                f"n={len(idx['uids'])}  empty={idx['n_empty']}  "
+                f"filter_n={n_f}</div>"
+            )
+            if as_html:
+                display(HTML(meta + extra_note + formatted))
+            else:
+                print(meta.replace("<div>", "").replace("</div>", ""))
+                print(formatted)
+
+    def _on_dataset(*_args):
+        state["jump_uid"] = None
+        if _ensure_index() is None:
+            return
+        _sync_slider()
+        _render()
+
+    def _on_filter(*_args):
+        state["jump_uid"] = None
+        _sync_slider()
+        _render()
+
+    def _on_go(_btn=None):
+        raw = (uid_text.value or "").strip()
+        idx = state.get("index")
+        if not raw or not idx:
+            return
+        if raw not in idx["uid_to_pos"]:
+            with out:
+                clear_output(wait=True)
+                print(f"uid not in {idx['dataset']} match jsonl: {raw}")
+            return
+        state["jump_uid"] = raw
+        filtered = state.get("filtered") or _filtered_uids()
+        if raw in filtered:
+            index_slider.value = filtered.index(raw)
+        _render()
+
+    dataset_dd.observe(_on_dataset, names="value")
+    occupancy_dd.observe(_on_filter, names="value")
+    class_dd.observe(_on_filter, names="value")
+    index_slider.observe(_render, names="value")
+    go_btn.on_click(_on_go)
+
+    row1 = widgets.HBox([dataset_dd, occupancy_dd, class_dd, index_slider])
+    row2 = widgets.HBox([uid_text, go_btn])
+    display(row1, row2, out)
+    _on_dataset()
+    return row1
+
+
+# ---------------------------------------------------------------------------
+# Per-report released labels (final_labels sparse jsonl)
+# ---------------------------------------------------------------------------
+
+_FINAL_LABELS_CACHE: Dict[tuple, Dict[str, Any]] = {}
+
+_OCC_FINDING_TRUE = "finding_true"
+_OCC_NORMAL_TRUE = "normal_true"
+_OCC_REGEX_EMPTY = "regex_empty"
+
+_LABEL_COLORS = {
+    "definitely true": "#1b7f3a",
+    "likely true": "#4caf50",
+    "unknown": "#6b7280",
+    "likely false": "#d97706",
+    "definitely false": "#b91c1c",
+    "unmentioned": "#9ca3af",
+}
+
+
+def _final_labels_missing_hint(dataset: str, path: PathLike) -> str:
+    return (
+        f"Missing {path}.\n"
+        "Requires IU-style verify + materialize (do not run Slurm from this widget).\n"
+        f"  JOB_SOURCE=regex_positives DATASETS={dataset} "
+        "./medvqa/slurm/launch_cxr_annotate_batch_loop.sh\n"
+        "  python -m medvqa.scripts.cxr_report_labeling.materialize_final_labels "
+        f"--dataset {dataset} --stage regex_backed\n"
+        f"  JOB_SOURCE=no_finding DATASETS={dataset} "
+        "./medvqa/slurm/launch_cxr_annotate_batch_loop.sh\n"
+        "  python -m medvqa.scripts.cxr_report_labeling.materialize_final_labels "
+        f"--dataset {dataset} --stage final"
+    )
+
+
+def list_final_label_datasets(run_id: Optional[str] = None) -> List[str]:
+    """Dataset ids that already have ``final_labels/<dataset>_sparse.jsonl``."""
+    from medvqa.datasets.cxr_report_labeling.paths import (
+        DEFAULT_RUN_ID,
+        get_final_labels_dir,
+    )
+    from medvqa.datasets.cxr_report_labeling.report_loaders import (
+        DATASET_CHEXPERT_PLUS,
+        DATASET_IUXRAY,
+        DATASET_MIMICCXR,
+        DATASET_REXGRADIENT,
+    )
+
+    run_id = run_id or DEFAULT_RUN_ID
+    out_dir = get_final_labels_dir(run_id)
+    found: List[str] = []
+    for ds in (
+        DATASET_IUXRAY,
+        DATASET_MIMICCXR,
+        DATASET_CHEXPERT_PLUS,
+        DATASET_REXGRADIENT,
+    ):
+        if os.path.isfile(os.path.join(out_dir, f"{ds}_sparse.jsonl")):
+            found.append(ds)
+    return found
+
+
+def load_final_labels_index(
+    dataset: str,
+    *,
+    run_id: Optional[str] = None,
+    force_reload: bool = False,
+) -> Dict[str, Any]:
+    """Load sparse released cells grouped by uid (cached)."""
+    from medvqa.datasets.cxr_report_labeling.paths import (
+        DEFAULT_RUN_ID,
+        get_final_labels_dir,
+    )
+
+    run_id = run_id or DEFAULT_RUN_ID
+    key = (run_id, dataset)
+    if not force_reload and key in _FINAL_LABELS_CACHE:
+        return _FINAL_LABELS_CACHE[key]
+
+    out_dir = get_final_labels_dir(run_id)
+    sparse_path = os.path.join(out_dir, f"{dataset}_sparse.jsonl")
+    if not os.path.isfile(sparse_path):
+        raise FileNotFoundError(_final_labels_missing_hint(dataset, sparse_path))
+
+    uid_to_cells: Dict[str, List[dict]] = {}
+    class_ids: set[str] = set()
+    labels_seen: set[str] = set()
+    for row in load_jsonl(sparse_path):
+        uid = row["uid"]
+        uid_to_cells.setdefault(uid, []).append(row)
+        if row.get("class_id"):
+            class_ids.add(row["class_id"])
+        if row.get("label"):
+            labels_seen.add(str(row["label"]))
+
+    uids_path = os.path.join(out_dir, f"{dataset}_uids.jsonl")
+    uids: List[str] = []
+    if os.path.isfile(uids_path):
+        for row in load_jsonl(uids_path):
+            uid = row.get("uid")
+            if uid:
+                uids.append(uid)
+        extra = [u for u in uid_to_cells if u not in set(uids)]
+        uids.extend(extra)
+    else:
+        uids = list(uid_to_cells.keys())
+
+    n_finding_true = 0
+    n_normal_true = 0
+    n_regex_empty = 0
+    from medvqa.datasets.cxr_report_labeling.label_semantics import (
+        LLM_POSITIVE_LABELS,
+        NORMAL_CLASS,
+    )
+
+    for uid in uids:
+        cells = uid_to_cells.get(uid) or []
+        nf = next((c for c in cells if c.get("class_id") == NORMAL_CLASS), None)
+        others = [c for c in cells if c.get("class_id") != NORMAL_CLASS]
+        if any(
+            (c.get("label") or "").strip().lower() in LLM_POSITIVE_LABELS
+            for c in others
+        ):
+            n_finding_true += 1
+        if nf and (nf.get("label") or "").strip().lower() in LLM_POSITIVE_LABELS:
+            n_normal_true += 1
+        if not others:
+            n_regex_empty += 1
+
+    payload = {
+        "run_id": run_id,
+        "dataset": dataset,
+        "sparse_path": sparse_path,
+        "uids_path": uids_path if os.path.isfile(uids_path) else None,
+        "uids": uids,
+        "uid_to_cells": uid_to_cells,
+        "class_ids": sorted(class_ids),
+        "labels_seen": sorted(labels_seen),
+        "n_finding_true": n_finding_true,
+        "n_normal_true": n_normal_true,
+        "n_regex_empty": n_regex_empty,
+    }
+    _FINAL_LABELS_CACHE[key] = payload
+    return payload
+
+
+def _sort_sparse_cells(cells: Sequence[dict]) -> List[dict]:
+    from medvqa.datasets.cxr_report_labeling.label_semantics import (
+        NORMAL_CLASS,
+        PRESENCE_RANK,
+    )
+
+    def _key(row: dict) -> tuple:
+        cid = row.get("class_id") or ""
+        lab = (row.get("label") or "").strip().lower()
+        nf = 0 if cid == NORMAL_CLASS else 1
+        rank = -int(PRESENCE_RANK.get(lab, 0))
+        return (nf, rank, cid)
+
+    return sorted(cells, key=_key)
+
+
+def format_final_labels_inspection(
+    *,
+    uid: str,
+    dataset: str,
+    report_text: str,
+    cells: Sequence[dict],
+    regex_hits: Optional[Sequence[dict]] = None,
+    max_report_chars: Optional[int] = None,
+    as_html: bool = True,
+) -> str:
+    """Format one report's released sparse labels (+ optional live regex hits)."""
+    from medvqa.datasets.cxr_report_labeling.label_semantics import NORMAL_CLASS
+
+    ordered = _sort_sparse_cells(cells)
+    quotes = [
+        c.get("own_relevant_quote")
+        for c in ordered
+        if c.get("own_relevant_quote")
+    ]
+    spans: List[str] = []
+    seen_span: set[str] = set()
+    for h in regex_hits or []:
+        s = h.get("span") or ""
+        if s and s not in seen_span:
+            seen_span.add(s)
+            spans.append(s)
+
+    nf = next((c for c in ordered if c.get("class_id") == NORMAL_CLASS), None)
+    n_other = sum(1 for c in ordered if c.get("class_id") != NORMAL_CLASS)
+    nf_lab = (nf or {}).get("label") or "(missing)"
+    header = (
+        f"{dataset}  uid={uid}  "
+        f"no_finding={nf_lab}  other_sparse={n_other}"
+    )
+
+    def _cell_line(c: dict) -> str:
+        via = c.get("matched_via") or []
+        via_s = ",".join(str(v) for v in via) if via else ""
+        return (
+            f"  {c.get('class_id')}  {c.get('label')}  "
+            f"res={c.get('resolution')}  via={via_s or '-'}  "
+            f"dom={c.get('dominated_by') or '-'}  "
+            f"quote={c.get('own_relevant_quote')!r}"
+        )
+
+    if as_html:
+        report_html = _highlight_report_html(
+            report_text,
+            spans=spans,
+            quote=quotes,
+            max_chars=max_report_chars,
+        )
+        blocks = [
+            f"<h3 style='margin:0.2em 0'>{html.escape(header)}</h3>",
+            "<table style='border-collapse:collapse;font-size:13px;margin:0.4em 0'>",
+            "<tr>"
+            "<th style='text-align:left;padding:2px 8px'>class</th>"
+            "<th style='text-align:left;padding:2px 8px'>label</th>"
+            "<th style='text-align:left;padding:2px 8px'>resolution</th>"
+            "<th style='text-align:left;padding:2px 8px'>matched_via</th>"
+            "<th style='text-align:left;padding:2px 8px'>dominated_by</th>"
+            "<th style='text-align:left;padding:2px 8px'>quote</th>"
+            "</tr>",
+        ]
+        if ordered:
+            for c in ordered:
+                lab = str(c.get("label") or "")
+                color = _LABEL_COLORS.get(lab.strip().lower(), "#111")
+                via = c.get("matched_via") or []
+                via_s = ", ".join(str(v) for v in via) if via else ""
+                cid = str(c.get("class_id") or "")
+                weight = "bold" if cid == NORMAL_CLASS else "normal"
+                blocks.append(
+                    "<tr>"
+                    f"<td style='padding:2px 8px;font-weight:{weight}'>"
+                    f"<code>{html.escape(cid)}</code></td>"
+                    f"<td style='padding:2px 8px;color:{color};font-weight:600'>"
+                    f"{html.escape(lab)}</td>"
+                    f"<td style='padding:2px 8px'>{html.escape(str(c.get('resolution') or ''))}</td>"
+                    f"<td style='padding:2px 8px'>{html.escape(via_s)}</td>"
+                    f"<td style='padding:2px 8px'>{html.escape(str(c.get('dominated_by') or ''))}</td>"
+                    f"<td style='padding:2px 8px'>{html.escape(str(c.get('own_relevant_quote') or ''))}</td>"
+                    "</tr>"
+                )
+        else:
+            blocks.append(
+                "<tr><td colspan='6' style='padding:2px 8px'>"
+                "(no sparse cells for this uid)</td></tr>"
+            )
+        blocks.append("</table>")
+        if regex_hits:
+            blocks.append("<div><b>live regex stems</b> (yellow = span)</div><ul style='margin:0.2em 0'>")
+            for h in regex_hits:
+                via = "via child" if h.get("via_child") else "residual/leaf"
+                blocks.append(
+                    "<li>"
+                    f"<code>{html.escape(str(h['class_id']))}</code> ← "
+                    f"<code>{html.escape(str(h['stem']))}</code> "
+                    f"({html.escape(via)}) "
+                    f"span={html.escape(repr(h.get('span')))}"
+                    "</li>"
+                )
+            blocks.append("</ul>")
+        legend = (
+            "<div>report "
+            "(cyan = LLM quote, yellow = live regex span if enabled)</div>"
+        )
+        blocks.extend(["<hr/>", legend, report_html])
+        return "\n".join(blocks)
+
+    text = report_text or ""
+    if max_report_chars is not None and len(text) > max_report_chars:
+        text = text[:max_report_chars] + "\n... [truncated]"
+    lines = ["=" * 80, header, "sparse cells:"]
+    if ordered:
+        lines.extend(_cell_line(c) for c in ordered)
+    else:
+        lines.append("  (none)")
+    if regex_hits:
+        lines.append("live regex stems:")
+        for h in regex_hits:
+            via = "[via child]" if h.get("via_child") else "[residual/leaf]"
+            lines.append(f"  {h['class_id']}  ←  {h['stem']}  {via}  span={h['span']!r}")
+    lines.extend(["--- report ---", text])
+    return "\n".join(lines)
+
+
+def inspect_final_labels_for_report(
+    *,
+    run_id: Optional[str] = None,
+    default_dataset: Optional[str] = None,
+    max_report_chars: Optional[int] = 8000,
+    as_html: bool = True,
+    show_regex_spans: bool = True,
+):
+    """ipywidgets browser over ``final_labels/<dataset>_sparse.jsonl``.
+
+    Missing classes are ``unmentioned`` (not listed). Optional live regex spans
+    for non-``no_finding`` sparse classes.
+    """
+    import ipywidgets as widgets
+    from IPython.display import HTML, clear_output, display
+
+    from medvqa.datasets.cxr_report_labeling.label_semantics import (
+        LLM_LABELS,
+        LLM_POSITIVE_LABELS,
+        NORMAL_CLASS,
+    )
+    from medvqa.datasets.cxr_report_labeling.paths import DEFAULT_RUN_ID
+    from medvqa.datasets.cxr_report_labeling.report_loaders import DATASET_IUXRAY
+
+    run_id = run_id or DEFAULT_RUN_ID
+    datasets = list_final_label_datasets(run_id)
+    if not datasets:
+        from medvqa.datasets.cxr_report_labeling.paths import get_final_labels_dir
+
+        print(
+            _final_labels_missing_hint(
+                DATASET_IUXRAY,
+                os.path.join(get_final_labels_dir(run_id), "iuxray_sparse.jsonl"),
+            )
+        )
+        return None
+
+    if default_dataset is None or default_dataset not in datasets:
+        default_dataset = (
+            DATASET_IUXRAY if DATASET_IUXRAY in datasets else datasets[0]
+        )
+
+    dataset_dd = widgets.Dropdown(
+        options=datasets,
+        value=default_dataset,
+        description="dataset",
+        layout=widgets.Layout(width="180px"),
+    )
+    occupancy_dd = widgets.Dropdown(
+        options=[
+            ("all reports", _OCCUPANCY_ALL),
+            ("any finding true", _OCC_FINDING_TRUE),
+            ("no_finding true", _OCC_NORMAL_TRUE),
+            ("regex empty", _OCC_REGEX_EMPTY),
+        ],
+        value=_OCCUPANCY_ALL,
+        description="filter",
+        layout=widgets.Layout(width="220px"),
+    )
+    class_dd = widgets.Dropdown(
+        options=[("(any class)", "")],
+        value="",
+        description="class",
+        layout=widgets.Layout(width="280px"),
+    )
+    label_dd = widgets.Dropdown(
+        options=[("(any label)", "")] + [(lab, lab) for lab in LLM_LABELS],
+        value="",
+        description="label",
+        layout=widgets.Layout(width="220px"),
+    )
+    index_slider = widgets.IntSlider(
+        value=0,
+        min=0,
+        max=0,
+        step=1,
+        description="index",
+        continuous_update=False,
+        layout=widgets.Layout(width="320px"),
+    )
+    regex_cb = widgets.Checkbox(
+        value=show_regex_spans,
+        description="live regex spans",
+        indent=False,
+    )
+    uid_text = widgets.Text(
+        value="",
+        description="uid",
+        placeholder="paste uid and Go",
+        layout=widgets.Layout(width="420px"),
+    )
+    go_btn = widgets.Button(description="Go to uid", button_style="info")
+    out = widgets.Output()
+
+    state: Dict[str, Any] = {
+        "index": None,
+        "filtered": [],
+        "jump_uid": None,
+    }
+
+    def _ensure_index() -> Optional[Dict[str, Any]]:
+        ds = dataset_dd.value
+        try:
+            idx = load_final_labels_index(ds, run_id=run_id)
+        except FileNotFoundError as exc:
+            state["index"] = None
+            with out:
+                clear_output(wait=True)
+                print(str(exc))
+            return None
+        state["index"] = idx
+        class_opts = [("(any class)", "")] + [(c, c) for c in idx["class_ids"]]
+        prev = class_dd.value
+        class_dd.options = class_opts
+        if prev in idx["class_ids"] or prev == "":
+            class_dd.value = prev
+        else:
+            class_dd.value = ""
+        return idx
+
+    def _filtered_uids() -> List[str]:
+        idx = state.get("index")
+        if not idx:
+            return []
+        occupancy = occupancy_dd.value
+        class_id = class_dd.value or ""
+        want_lab = (label_dd.value or "").strip().lower()
+        out_uids: List[str] = []
+        for uid in idx["uids"]:
+            cells = idx["uid_to_cells"].get(uid) or []
+            others = [c for c in cells if c.get("class_id") != NORMAL_CLASS]
+            nf = next((c for c in cells if c.get("class_id") == NORMAL_CLASS), None)
+            if occupancy == _OCC_FINDING_TRUE:
+                if not any(
+                    (c.get("label") or "").strip().lower() in LLM_POSITIVE_LABELS
+                    for c in others
+                ):
+                    continue
+            elif occupancy == _OCC_NORMAL_TRUE:
+                if not (
+                    nf
+                    and (nf.get("label") or "").strip().lower() in LLM_POSITIVE_LABELS
+                ):
+                    continue
+            elif occupancy == _OCC_REGEX_EMPTY:
+                if others:
+                    continue
+            if class_id:
+                hit = next((c for c in cells if c.get("class_id") == class_id), None)
+                if hit is None:
+                    continue
+                if want_lab and (hit.get("label") or "").strip().lower() != want_lab:
+                    continue
+            elif want_lab:
+                if not any(
+                    (c.get("label") or "").strip().lower() == want_lab for c in cells
+                ):
+                    continue
+            out_uids.append(uid)
+        return out_uids
+
+    def _sync_slider(*_args):
+        filtered = _filtered_uids()
+        state["filtered"] = filtered
+        index_slider.max = max(len(filtered) - 1, 0)
+        if index_slider.value > index_slider.max:
+            index_slider.value = index_slider.max
+
+    def _selected_uid() -> Optional[str]:
+        jump = state.get("jump_uid")
+        idx = state.get("index")
+        if jump and idx and (
+            jump in idx["uid_to_cells"] or jump in idx["uids"]
+        ):
+            return jump
+        filtered = state.get("filtered") or []
+        if not filtered:
+            return None
+        i = int(index_slider.value)
+        i = max(0, min(i, len(filtered) - 1))
+        return filtered[i]
+
+    def _render(*_args):
+        idx = state.get("index")
+        if not idx:
+            return
+        uid = _selected_uid()
+        with out:
+            clear_output(wait=True)
+            if uid is None:
+                print(
+                    f"No reports for dataset={dataset_dd.value} "
+                    f"filter={occupancy_dd.value} class={class_dd.value or '(any)'} "
+                    f"label={label_dd.value or '(any)'}"
+                )
+                return
+            cells = list(idx["uid_to_cells"].get(uid) or [])
+            try:
+                reports = _reports_by_uid(idx["dataset"])
+            except Exception as exc:
+                print(f"Failed to load reports for {idx['dataset']}: {exc}")
+                return
+            rec = reports.get(uid)
+            if rec is None:
+                print(f"uid {uid} is in final labels but not in the report loader")
+                return
+            text = rec.get("report_text") or ""
+            regex_hits: List[dict] = []
+            if regex_cb.value:
+                from medvqa.datasets.cxr_report_labeling.regex_matching import (
+                    explain_regex_hits,
+                )
+
+                pos = [
+                    c["class_id"]
+                    for c in cells
+                    if c.get("class_id") and c["class_id"] != NORMAL_CLASS
+                ]
+                if pos:
+                    regex_hits = explain_regex_hits(text, pos)
+            jump = state.get("jump_uid")
+            extra_note = ""
+            if jump == uid:
+                filtered = state.get("filtered") or []
+                if uid not in filtered:
+                    extra_note = (
+                        "<div><i>Showing pasted uid (not in the current filter).</i></div>"
+                    )
+            formatted = format_final_labels_inspection(
+                uid=uid,
+                dataset=idx["dataset"],
+                report_text=text,
+                cells=cells,
+                regex_hits=regex_hits,
+                max_report_chars=max_report_chars,
+                as_html=as_html,
+            )
+            n_f = len(state.get("filtered") or [])
+            meta = (
+                f"<div>sparse={html.escape(idx['sparse_path'])}  "
+                f"n={len(idx['uids'])}  finding_true={idx['n_finding_true']}  "
+                f"no_finding_true={idx['n_normal_true']}  "
+                f"regex_empty={idx['n_regex_empty']}  filter_n={n_f}</div>"
+            )
+            if as_html:
+                display(HTML(meta + extra_note + formatted))
+            else:
+                print(meta.replace("<div>", "").replace("</div>", ""))
+                print(formatted)
+
+    def _on_dataset(*_args):
+        state["jump_uid"] = None
+        if _ensure_index() is None:
+            return
+        _sync_slider()
+        _render()
+
+    def _on_filter(*_args):
+        state["jump_uid"] = None
+        _sync_slider()
+        _render()
+
+    def _on_go(_btn=None):
+        raw = (uid_text.value or "").strip()
+        idx = state.get("index")
+        if not raw or not idx:
+            return
+        if raw not in idx["uid_to_cells"] and raw not in set(idx["uids"]):
+            with out:
+                clear_output(wait=True)
+                print(f"uid not in {idx['dataset']} final labels: {raw}")
+            return
+        state["jump_uid"] = raw
+        filtered = state.get("filtered") or _filtered_uids()
+        if raw in filtered:
+            index_slider.value = filtered.index(raw)
+        _render()
+
+    dataset_dd.observe(_on_dataset, names="value")
+    occupancy_dd.observe(_on_filter, names="value")
+    class_dd.observe(_on_filter, names="value")
+    label_dd.observe(_on_filter, names="value")
+    index_slider.observe(_render, names="value")
+    regex_cb.observe(_render, names="value")
+    go_btn.on_click(_on_go)
+
+    row1 = widgets.HBox(
+        [dataset_dd, occupancy_dd, class_dd, label_dd, index_slider]
+    )
+    row2 = widgets.HBox([uid_text, go_btn, regex_cb])
+    display(row1, row2, out)
+    _on_dataset()
+    return row1

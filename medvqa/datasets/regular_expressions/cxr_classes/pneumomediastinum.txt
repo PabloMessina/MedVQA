@@ -10,6 +10,9 @@
 # soften previous(ly) in tempered scan for comparison/current-affirm clauses;
 # although|though contrastive restart; arm 1b appears stable; arm 1c
 # decrease/increase before previously described PM.
+# FN-fit pass-2: attested dictation typos (pneumomediastium, pnemomediastinum,
+# pneummediastinum); hyphen mediastinal-air; hyphen ring-around-the-artery;
+# extrapleural air sign (not bare extrapleural air).
 #
 # Do NOT match: negated / resolved / resolution-of / previous-only;
 # indication / rule-out / assess-for; isolated subcutaneous emphysema;
@@ -41,7 +44,7 @@
                 # Contrastive: "no pneumothorax, but/although … pneumomediastinum"
                 # Only scan BEFORE contrastive marker; do not allow when "no"
                 # already scopes pneumomediastinum (e.g. "no PM, but PTX").
-                (?=\bno\b(?:(?!pneumo[\s-]?mediastin)(?!(?:although|though|,?\s*(?:but|however))\b)[^.!?;:\n]){0,90}(?:although|though|,?\s*(?:but|however))\b)
+                (?=\bno\b(?:(?!(?:pn(?:eu|e)mo[\s-]?|pneum)mediasti[nu])(?!(?:although|though|,?\s*(?:but|however))\b)[^.!?;:\n]){0,90}(?:although|though|,?\s*(?:but|however))\b)
                 [^.!?;:\n]
             )
             |
@@ -82,7 +85,7 @@
             |
             (?:(?<!\bwith\s)(?<!\bw/\s))
         )
-        \bpneumo[\s-]?mediastin\w*\b
+        \b(?:pn(?:eu|e)mo[\s-]?|pneum)mediasti[nu]\w*\b
         (?!\?)
         (?![^.!?;:\n]{0,80}\b(?:
             (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
@@ -100,7 +103,7 @@
         (?:^|[.!?;:\n])
         [^.!?;:\n]{0,120}?
         \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
-        \bpneumo[\s-]?mediastin\w*\b
+        \b(?:pn(?:eu|e)mo[\s-]?|pneum)mediasti[nu]\w*\b
         (?![^.!?;:\n]{0,80}\b(?:
             (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
             (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident)|
@@ -131,7 +134,7 @@
         )\b
         [^.!?;:\n]{0,80}?
         \b(?:the\s+)?previously\s+(?:seen|described|noted|demonstrated|identified|reported)\s+
-        \bpneumo[\s-]?mediastin\w*\b
+        \b(?:pn(?:eu|e)mo[\s-]?|pneum)mediasti[nu]\w*\b
         (?![^.!?;:\n]{0,80}\b(?:
             (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
             no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
@@ -165,7 +168,7 @@
             )
         ){0,220}
         \b(?:
-            mediastinal\s+(?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))
+            mediastinal[\s-]+(?:free[\s-]+)?(?:air|gas|emphysema|lucenc(?:y|ies))
             |
             (?:free\s+)?(?:air|gas|emphysema|lucenc(?:y|ies))\s+(?:in|within|of)\s+(?:the\s+)?(?:upper\s+|superior\s+|lower\s+|anterior\s+)?mediastin\w*
             |
@@ -308,7 +311,7 @@
             )
         ){0,220}
         \b(?:
-            ring\s+around\s+(?:the\s+)?artery(?:\s+sign)?
+            ring[\s-]+around[\s-]+(?:the[\s-]+)?artery(?:[\s-]+sign)?
             |
             tubular\s+artery(?:\s+sign)?
             |
@@ -321,6 +324,9 @@
             spinnaker(?:[-\s]sail)?(?:\s+sign)?
             |
             haystack(?:\s+sign)?
+            |
+            # Prompt-listed named sign; require "sign" (bare extrapleural air = PTX/chest wall)
+            extrapleural[\s-]+air[\s-]+sign
         )\b
 
         |

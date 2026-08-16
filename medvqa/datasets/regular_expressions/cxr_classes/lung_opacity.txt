@@ -22,6 +22,13 @@
 # lung / pulmonary insertions; markings-appear ADJ; increase-in markings;
 # haziness/hazy (lung/RDS-framed); RDS granular density. Do not re-lexicon children.
 #
+# FN-fit pass-2 (approved hunt TPs): adj-first hazy lungs; opac* typos
+# (opacitites/opacitiy/opacifcation); lung/lobe-framed infiltrated;
+# granular appearance (not only densit*); interstitial accentuation;
+# copula+dense (retrocardiac/lung); parenchymal lung disease; lobe is
+# opaque; shadowing at; pulmonary clouding. Not: hemithorax white-out,
+# perivascular haze, density overlying, bare lung markings, CXR attenuation.
+#
 # Do NOT re-implement child lexicons. Do NOT match: vascular congestion alone;
 # pleural effusion / PTX / pneumomediastinum / SQ emphysema; support devices;
 # extrapulmonary densities/artifacts (nipple/breast/cardiac shadow, sinus/
@@ -130,7 +137,7 @@
         (?<!frontal\s)
         (?<!mastoid\s)
         (?<!paranasal\s)
-        \bopac(?:ity|ities|ifi\w*)\b
+        \bopac(?:it(?:y|ies|ites|iy)|ifi\w*|ifcation)\b
         # not GI/GU/sinus contrast opacification phrasing after the root
         (?!\s+(?:the\s+)?(?:stomach|bowel|colon|rectum|bladder|duodenum|small\s+bowel))
         (?!\s+of\s+(?:the\s+)?(?:(?:left|right|bilateral)\s+)?(?:maxillary|sphenoid|ethmoid|frontal|paranasal|mastoid|sinus))
@@ -185,6 +192,25 @@
             cannot\s+be\s+(?:seen|identified|detected|appreciated|visualized)|
             no\s+longer\s+(?:seen|present)
         )\b)
+
+        |
+
+        # ==============================================================
+        # 2b. Verb "infiltrated" with lung/lobe copula (not procedure/
+        #     fatty/soft-tissue). Keep unframed infiltrated out.
+        # ==============================================================
+        \b(?:
+            (?:(?:right|left|both|bilateral|the)\s+)?(?:lung|lungs|lobe|lobes)\b
+            \s+(?:is|are|appears?|remain(?:s|ed)?)\s+
+            (?:(?:diffusely|mildly|slightly|moderately|markedly|completely|fully)\s+)?
+            infiltrated
+            |
+            (?:(?:diffusely|mildly|slightly|moderately|markedly)\s+)?infiltrated\s+
+            (?:(?:right|left|both|bilateral|lower|upper|middle|mid)\s+){0,3}
+            (?:lung|lungs|lobe|lobes)
+        )\b
+        (?!\s+(?:with|by)\s+(?:contrast|lidocaine|local|anesthesia))
+        (?!\?)
 
         |
 
@@ -287,7 +313,25 @@
             rds\s+(?:granular\s+)?densit\w*
             |
             granular\s+densit\w*(?=[^.!?;:\n]{0,40}\b(?:rds|lung|lungs|pulmonary|diffuse(?:ly)?)\b)
+            |
+            (?:(?:diffuse(?:ly)?|fine|coarse|mild)\s+)?granular\s+appearance
+            (?=[^.!?;:\n]{0,60}\b(?:lungs?|parenchyma|pulmonary|rds|respiratory\s+distress)\b)
         )\b
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 4c. Copula + dense (not densit*) — retrocardiac / lung / lobe
+        # ==============================================================
+        \b(?:
+            (?:retrocardiac|lung|lungs|pulmonary|parenchymal|lobe|lobar|basilar|bibasilar|apical|perihilar)\w*
+            (?:\s+(?:field|zone|region|area|base|apex|lower|upper|middle|left|right|on|the|of|at)){0,6}
+            \s+
+            (?:(?:still|again|now|also)\s+)?(?:remain(?:s|ed)?|is|are|appear(?:s|ed)?|stay(?:s|ed)?|looks?)\s+
+            dense
+        )\b
+        (?!\s+(?:calcif|ossif|bone|bones|breast|liver|spleen|metal|cement|contrast))
         (?!\?)
 
         |
@@ -299,7 +343,9 @@
         \b(?:
             (?:lung|pulmonary|parenchymal|acinar|alveolar|airspace|air\s*space|infiltrat\w*|interstitial)\s+shadow\w*
             |
-            shadow(?:ing)?\s+(?:in|of|within|over)\s+(?:(?:the|a|an|left|right|both|bilateral|each|this|mid(?:dle)?|lower|upper|lateral|basal|basilar|posterior|anterior)\s+){0,6}(?:lung|pulmonary|parenchyma|lobe|bas\w*|apex|hemithorax)\w*
+            shadow(?:ing)?\s+(?:in|of|within|over|at)\s+(?:(?:the|a|an|left|right|both|bilateral|each|this|mid(?:dle)?|lower|upper|lateral|basal|basilar|posterior|anterior)\s+){0,6}(?:lung|pulmonary|parenchyma|lobe|bas\w*|apex|hemithorax)\w*
+            |
+            (?:pulmonary|parenchymal|lung)\s+clouding
         )\b
         (?!\?)
 
@@ -321,6 +367,8 @@
             (?:(?:increased|mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse)\s+)?prominence\s+of\s+(?:the\s+)?(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?markings?
             |
             accentuation\s+of\s+(?:the\s+)?(?:bronchovascular|(?:pulmonary\s+)?interstitial)\s+(?:lung\s+)?markings?
+            |
+            (?:(?:mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse|bibasilar|basilar|bilateral)\s+)*(?:pulmonary\s+)?interstitial\s+accentuation\b
             |
             (?:(?:mild|slight(?:ly)?|moderate(?:ly)?|marked|diffuse)\s+)+(?:increase|increasing)\s+(?:in|of)\s+(?:the\s+)?(?:pulmonary\s+)?interstitial\s+(?:lung\s+)?markings?
             |
@@ -355,6 +403,8 @@
             hazy\s+densit\w*(?=[^.!?;:\n]{0,50}\b(?:lung|lungs|pulmonary|parenchyma|bas\w*|lobe|lobes|hemithorax|lower|upper|mid)\w*)
             |
             (?:lungs?|lung\s+fields?|pulmonary\s+parenchyma)\s+(?:are\s+|is\s+|appear(?:s|ed)?\s+)?(?:(?:diffusely|mildly|slightly|moderately|markedly)\s+)?hazy\b
+            |
+            (?:(?:diffuse(?:ly)?|mild(?:ly)?|slight(?:ly)?|moderate(?:ly)?|marked(?:ly)?|patchy|bibasilar|basilar|bilateral)\s+)?hazy\s+lungs\b
         )\b
         (?!\?)
         (?!\s+(?:at\s+)?(?:the\s+)?(?:costophrenic|cp)\s+angles?)
@@ -374,5 +424,23 @@
             overlying\s+(?:soft\s+tissue|breast)|
             (?:known\s+)?hiatal\s+hernia
         )\b)
+
+        |
+
+        # ==============================================================
+        # 8. Lobe-scoped opaque (not opac*; not hemithorax / tube tips)
+        # ==============================================================
+        \b(?:(?:right|left|both|bilateral|lower|upper|middle|mid)\s+){1,4}(?:lobe|lobes|lobar)\s+(?:is|are|appears?|remain(?:s|ed)?)\s+opaque\b
+        (?!\s+(?:tip|tube|catheter|ng|dobhoff|feeding|foreign))
+        (?!\?)
+
+        |
+
+        # ==============================================================
+        # 9. Parenchymal lung disease (airspace/alveolar *disease* exists;
+        #    this umbrella wording is not child pneumonia/consolidation)
+        # ==============================================================
+        \bparenchymal\s+lung\s+disease\b
+        (?!\?)
     )
 )

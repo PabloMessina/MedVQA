@@ -50,6 +50,12 @@
             |
             lung\s+tumor
             |
+            \bpancoast\s+(?:tumors?|mass(?:es)?|cancers?)
+            |
+            (?<!indication:\s)
+            \b(?:RUL|LUL|RML|LLL|RLL)\s+mass(?:es)?
+            (?:\s+(?:with|is|was|are|measuring|unchanged|stable|again|demonstrat\w*))
+            |
             bronchogenic\s+(?:carcinomas?|cancers?|malignanc\w*|ca\b)
             |
             # Mass lesion + intrapulmonary locus (not mediastinal/abdominal)
@@ -166,7 +172,7 @@
         \bnodular\s+
         (?:(?:perihilar|interstitial)\s+)?
         (?:
-            opacit(?:y|ies)|densit(?:y|ies)|foci|focus|lung|
+            opacit(?:y|ies)|opacifications?|densit(?:y|ies)|foci|focus|lung|
             alveolar(?:\s+pattern)?|component|consolidation|pattern|appearance|
             air[-\s]?space|parenchymal(?:\s+opacit(?:y|ies))?|opacifies|
             lung\s+condition|metastas\w*|mets
@@ -190,7 +196,7 @@
         \bmicronodules?\b
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
-        coin\s+lesions?
+        coin(?:[- ]shaped\s+lesions?|\s+lesions?)
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?<!isoechoic\s)
@@ -274,7 +280,7 @@
         pulmonary\s+metastat\w*
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
-        cannonballs?(?:\s+(?:metastas\w*|mets|nodules?|mass(?:es)?))?
+        cannon\s*balls?(?:\s+(?:metastas\w*|mets|nodules?|mass(?:es)?))?
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
         retrocardiac\s+(?:mass(?:es)?|nodules?)
@@ -282,13 +288,18 @@
         # Opacity concerning for / representing a mass (short gap)
         # FN-fit: also developing/underlying mass lesion; may be due to …
         (?<!no\s)(?<!not\s)(?<!without\s)
-        (?:opacit(?:y|ies)|density|densities|fullness)
+        (?:opacit(?:y|ies)|opacifications?|density|densities|fullness)
         (?:\s+\w+){0,8}?
         \s+(?:
             concerning\s+for|may\s+represent|could\s+reflect|representing|
             may\s+be\s+due\s+to|due\s+to
         )\s+
-        (?:an?\s+)?(?:(?:developing|underlying|central)\s+)?mass(?:\s+lesion)?\b
+        (?:an?\s+)?
+        (?:
+            (?:(?:developing|underlying|central)\s+)?mass(?:\s+lesion)?\b
+            |
+            space[- ]occupying\s+(?:process|lesions?|mass(?:es)?)
+        )
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:pneumonia|infection|abscess)\s+or\s+a?\s*mass\b
@@ -315,13 +326,20 @@
         # FN-fit (fn_mine_fit_shared): residual parent holes only —
         # lesions-in-lungs / septic emboli / hamartoma order / SPN /
         # mass-lesion hedges / subpleural nodular density /
-        # space-occupying / tumor-in-lobe-or-hilus.
+        # space-occupying / tumor-in-lobe-or-hilus /
+        # pass-2: mass-or-nodule / lung cancer / Pancoast / coin-shaped /
+        # cannon ball / LUL mass / nodular opacification / laterality /
+        # opacity/mass slash / lobe-first granulomatous disease.
         # Do NOT re-lexicon readonly calcified_pulmonary_nodule_or_granuloma.
         # ------------------------------------------------------------------
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?<!cavitary\s)(?<!cavitated\s)(?<!cavitating\s)
         (?:nodular|multiple|scattered|innumerable|bilateral)\s+
-        lesions?\s+in\s+(?:the\s+)?lungs?
+        lesions?(?:\s+noted)?\s+(?:in|within)\s+(?:the\s+)?
+        (?:(?:apical|basal|posterior|anterior|medial|lateral|superior|inferior)\s+segment\s+of\s+(?:the\s+)?)?
+        (?:(?:right|left|bilateral|both)\s+)?
+        (?:(?:upper|mid|middle|lower)\s+)?
+        (?:lungs?|lobe|midlung)
         |
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:(?:multifocal|cavitary|multiple)\s+)*
@@ -375,6 +393,7 @@
         (?<!mediastinal\s)(?<!abdominal\s)(?<!osseous\s)(?<!skeletal\s)
         tumors?
             \s+in\s+(?:the\s+)?
+            (?:region\s+of\s+(?:the\s+)?)?
             (?:(?:right|left)\s+)?
             (?:
                 (?:(?:upper|mid|middle|lower)\s+)?(?:lobe|lung|midlung)
@@ -382,4 +401,43 @@
                 (?:hilus|hilum)
             )
             \b
+        |
+        # Positive "mass or nodule" list (bare-nodule keeps (?<!mass or ))
+        (?<!no\s)(?<!not\s)(?<!nor\s)(?<!without\s)
+        (?<!no\sevidence\sof\s)(?<!without\sevidence\sof\s)
+        (?<!no\sfocal\s)(?<!no\sdefinite\s)(?<!no\snew\s)
+        (?<!no\ssuspicious\s)(?<!negative\sfor\s)
+        (?<!free\sof\s)(?<!absence\sof\s)(?<!without\sa\s)
+        (?<!suspicious\spulmonary\s)(?<!suspicious\slung\s)
+        mass\s+or\s+nodules?
+        |
+        # Lobe-first granulomatous disease (parent residual; not child calcified lexicon)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:(?:right|left)\s+)?
+        (?:(?:upper|mid|middle|lower)\s+)?
+        (?:lobe|lung|midlung)\s+granulomatous\s+disease
+        |
+        # Slash opacity/mass ( "/" is a clause break for the core family)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!mediastinal\s)(?<!pleural\s)(?<!abdominal\s)
+        (?<!breast\s)(?<!chest\swall\s)
+        opacit(?:y|ies)\s*/\s*mass(?:es)?
+        |
+        # Space-occupying process/lesion with intrapulmonary locus (finding-first)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!mediastinal\s)(?<!abdominal\s)(?<!subphrenic\s)
+        space[- ]occupying\s+(?:process|lesions?|mass(?:es)?)
+            (?:\s+\w+){0,6}?
+            \s+(?:in|within)\s+(?:the\s+)?
+            (?:(?:right|left)\s+)?
+            (?:(?:upper|mid|middle|lower)\s+)?
+            (?:lobe|lung|midlung|apex)
+        |
+        # Opacity/density attributed to lung cancer (not indication-only "with lung cancer")
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:opacit(?:y|ies)|opacifications?|densit(?:y|ies)|mass(?:es)?)
+            (?:\s+\w+){0,14}?
+            \s+(?:corresponds?\s+to|corresponding\s+to|compatible\s+with|consistent\s+with|representing)
+            (?:\s+(?:the\s+)?)?(?:known\s+)?
+            (?:lung|pulmonary)\s+cancers?
     )

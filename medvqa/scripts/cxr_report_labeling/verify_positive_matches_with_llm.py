@@ -1,4 +1,13 @@
-"""LLM-verify regex-positive (report, class) pairs on full datasets."""
+"""DEPRECATED: do not use for production verify.
+
+This path uses ``orchestrate_api_calls`` with ``--max_queries 50`` and writes
+legacy ``resume_key`` rows. Full-corpus regex-positive verify goes through the
+Gemini Batch loop instead:
+
+    JOB_SOURCE=regex_positives DATASETS=iuxray ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
+
+See ``medvqa/scripts/cxr_report_labeling/README.md`` (IU runbook).
+"""
 
 from __future__ import annotations
 
@@ -14,7 +23,11 @@ from medvqa.datasets.cxr_report_labeling.class_registry import (
     build_class_registry,
     load_system_prompt_text,
 )
-from medvqa.datasets.cxr_report_labeling.paths import DEFAULT_RUN_ID, get_cache_run_dir, get_results_run_dir
+from medvqa.datasets.cxr_report_labeling.paths import (
+    DEFAULT_RUN_ID,
+    get_cache_run_dir,
+    get_results_run_dir,
+)
 from medvqa.datasets.cxr_report_labeling.report_loaders import (
     DATASET_CHEXPERT_PLUS,
     DATASET_IUXRAY,
@@ -25,7 +38,10 @@ from medvqa.datasets.cxr_report_labeling.report_loaders import (
     load_mimiccxr_reports,
     load_rexgradient_reports,
 )
-from medvqa.datasets.cxr_report_labeling.schemas import annotation_resume_key, build_nli_query
+from medvqa.datasets.cxr_report_labeling.schemas import (
+    annotation_resume_key,
+    build_nli_query,
+)
 from medvqa.scripts.cxr_report_labeling.annotate_reports_with_llm import (
     estimate_jobs,
     parse_llm_model_output,
@@ -54,7 +70,9 @@ def _load_reports_by_uid(dataset: str) -> Dict[str, dict]:
 def _load_sample_gold(path: Optional[str]) -> Dict[Tuple[str, str], str]:
     if path is None or not os.path.exists(path):
         return {}
-    from medvqa.scripts.cxr_report_labeling.eval_regex_vs_llm import load_annotations_flexible
+    from medvqa.scripts.cxr_report_labeling.eval_regex_vs_llm import (
+        load_annotations_flexible,
+    )
 
     ann = load_annotations_flexible(path)
     return {k: v["label"] for k, v in ann.items()}
@@ -202,6 +220,12 @@ def main():
     parser.add_argument("--estimate_only", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
+    setup_logging()
+    logger.warning(
+        "verify_positive_matches_with_llm.py is deprecated. Use "
+        "JOB_SOURCE=regex_positives with launch_cxr_annotate_batch_loop.sh "
+        "(see scripts/cxr_report_labeling/README.md)."
+    )
     run_verify_positives(
         dataset=args.dataset,
         run_id=args.run_id,

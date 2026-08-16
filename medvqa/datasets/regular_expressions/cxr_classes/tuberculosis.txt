@@ -13,20 +13,32 @@
 # FN-fit (fn_mine_fit_shared): history-attribution bridges (related-to /
 # intervening the|prior|known; due-to history) + carve treatment|surgery|
 # biopsy "for tuberculosis" out of the bare (?<!\bfor\s) guard.
+# Pass-2 hunt TPs: possessive Ghon/Ranke; finding c/w TB (keep D's (?<!\bc/w\s)
+# so "symptoms c/w TB" stays blocked); typical|classic|diagnostic for TB;
+# clause-initial "TB is present" (keep D's (?!\s+is\s+present) for negated
+# "no evidence of … tuberculosis is present"); tubercular; dotted t.b.
 # ==============================================================================
 
 (?:
   # --------------------------------------------------------------------------
   # A. Named TB sequelae (prompt-positive even without the word TB)
   # --------------------------------------------------------------------------
-  \b(?:ghon\s+(?:focus|complex|lesion)|ranke\s+complex)\b
+  \b(?:ghon(?:['’]s)?\s+(?:focus|complex|lesion)|ranke(?:['’]s)?\s+complex)\b
 
   |
 
   # --------------------------------------------------------------------------
   # B. Finding-level hedge → explicit TB (not indication r/o / eval / screen)
   # --------------------------------------------------------------------------
-  \b(?:concerning|suspicious|worrisome)\s+for\s+(?:active\s+)?(?:pulmonary\s+)?(?:tb|tuberculo\w*)\b
+  \b(?:concerning|suspicious|worrisome|typical|classic|diagnostic)\s+for\s+(?:active\s+)?(?:pulmonary\s+)?(?:tb|tuberculo\w*|tubercular)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # B2. Current finding attributed via c/w TB (D still blocks bare c/w TB,
+  #     e.g. "no symptoms c/w TB" in indication)
+  # --------------------------------------------------------------------------
+  \b(?:scar(?:ring)?|cavitat(?:e[ds]?|ing|ion|ory)|changes?|disease|findings?|opacit(?:y|ies)|thickening|infiltrate|consolidat\w*|fibro(?:calcific|nodular|thorax)?|granuloma(?:s|ta)?)\s+c/w\s+(?:(?:old|prior|healed|inactive|active)\s+)?(?:pulmonary\s+)?(?:tb|tuberculo\w*|tubercular)\b
 
   |
 
@@ -34,15 +46,15 @@
   # C. Visible sequelae attributed via history-of TB (not bare history-only)
   #    Allow intervening the|a / prior|reported|known before "history of".
   # --------------------------------------------------------------------------
-  \b(?:compatible|consistent)\s+with\s+(?:(?:the|a)\s+)?(?:(?:prior|reported|known)\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+  \b(?:compatible|consistent)\s+with\s+(?:(?:the|a)\s+)?(?:(?:prior|reported|known)\s+)?history\s+of\s+(?:tb|tuberculo\w*|tubercular)\b
 
   |
 
-  \brelated\s+to\s+(?:the\s+)?(?:known\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+  \brelated\s+to\s+(?:the\s+)?(?:known\s+)?history\s+of\s+(?:tb|tuberculo\w*|tubercular)\b
 
   |
 
-  \bdue\s+to\s+(?:(?:a|the)\s+)?(?:(?:known|prior|reported)\s+)?history\s+of\s+(?:tb|tuberculo\w*)\b
+  \bdue\s+to\s+(?:(?:a|the)\s+)?(?:(?:known|prior|reported)\s+)?history\s+of\s+(?:tb|tuberculo\w*|tubercular)\b
 
   |
 
@@ -50,11 +62,19 @@
   # C2. Current finding attributed via treatment / resection / biopsy "for TB"
   #     (bare lexicon still blocks generic "… for TB" via lookbehind)
   # --------------------------------------------------------------------------
-  \b(?:(?:prior\s+)?treatment|pneumonectomy|lobectomy)\s+for\s+(?:tb|tuberculo\w*)\b
+  \b(?:(?:prior\s+)?treatment|pneumonectomy|lobectomy)\s+for\s+(?:tb|tuberculo\w*|tubercular)\b
 
   |
 
-  \b(?:biopsied\s+and\s+)?positive\s+for\s+(?:tb|tuberculo\w*)\b
+  \b(?:biopsied\s+and\s+)?positive\s+for\s+(?:tb|tuberculo\w*|tubercular)\b
+
+  |
+
+  # --------------------------------------------------------------------------
+  # C3. Affirmative "TB is present" at clause start (not "no evidence of …
+  #     tuberculosis is present", which D's (?!\s+is\s+present) still blocks)
+  # --------------------------------------------------------------------------
+  (?:^|(?<=[.!?:;]\s))(?:active\s+)?(?:(?:pulmonary|miliary)\s+)?(?:tb|tuberculo\w*|tubercular)\s+is\s+present\b
 
   |
 
@@ -101,12 +121,18 @@
       (?<!\bfungus\sor\s)
       (?<!\bunlikely\sto\sbe\sisolated\sadenopathy\sdue\sto\s)
 
-      \b(?:
-          tuberculo\w*|
-          tb|
-          mycobacterium\s+tuberculosis|
-          koch(?:['’]s)?\s+disease
-      )\b
+      (?:
+          \b(?:
+              tuberculo\w*|
+              tubercular|
+              tb|
+              mycobacterium\s+tuberculosis|
+              koch(?:['’]s)?\s+disease
+          )\b
+          |
+          # dotted T.B. — trailing \b fails after '.' (both non-word)
+          (?<![a-z0-9])t\.b\.(?![a-z0-9])
+      )
 
       (?!\s+screening)
       (?!\s+cultures)

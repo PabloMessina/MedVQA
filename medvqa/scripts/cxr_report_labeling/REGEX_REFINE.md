@@ -997,9 +997,11 @@ Workdirs: `.agent/regex_refine/20260811_051641/groups/{consolidation,pneumonia,e
 
 ## Suggested next
 
+IU-first **regex-positive LLM verify + integrate** (Gemini Batch loop, not `verify_positive_matches_with_llm.py`): runbook in [`README.md`](README.md#iu-first-regex-positive-verify--integrate). Do not start MIMIC/CheXpert/ReX until IU `no_finding` merge has been eyeballed.
+
 Post-promote production-OR scan: `.agent/regex_refine/_recall_scan_20260811_054411/` (job 93333; 383071 ann / 4849 samples). P-trim waves landed with **R held** (edema also **R +0.015**). Residual top FN×(1−R) is still CPA / support-tube/line / device_abnormality / lobar / graft — prompt ceilings, do not reopen from sample gold alone. Remaining high-FP umbrellas (`lung_opacity` FP 216, ECS 68, `calcification` 62) are mostly OR extras / children. Skip PVC / TB.
 
-**Full-corpus FN mining** (new lexicon holes the 4849 samples never showed): [`FN_MINE.md`](FN_MINE.md).
+**Full-corpus FN mining** (new lexicon holes the 4849 samples never showed): [`FN_MINE.md`](FN_MINE.md). Do not casually re-run FN-mine / promote from this verify work.
 
 ## Non-goals / pitfalls
 

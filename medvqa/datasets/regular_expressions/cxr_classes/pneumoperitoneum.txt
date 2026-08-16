@@ -6,8 +6,11 @@
 # peritoneal / intra-abdominal / abdominal air|gas;
 # free air|gas under/below/beneath/(underneath) the (hemi)diaphragm;
 # subdiaphragmatic / subphrenic / infradiaphragmatic air|gas;
-# Rigler / double-wall / cupola sign (when present / attributed);
-# extraluminal air|gas (abdomen / LUQ / under diaphragm).
+# Rigler / double-wall / cupola / leaping-dolphin sign (when attributed);
+# extraluminal air|gas (abdomen / LUQ / under diaphragm);
+# location-first beneath|under (hemi)diaphragm … free air;
+# lucency/crescent under hemidiaphragm or around hepatic dome attributed
+# to free air.
 #
 # FN-fit (fn_mine_fit_shared / wave-33 hunt):
 # - contrastive restart at although|though|however|but;
@@ -15,6 +18,12 @@
 # - previously-seen PP / subphrenic|subdiaphragmatic air still present
 #   (decrease / unchanged / less apparent);
 # - extraluminal air|gas arm; diaphragm "aspects of" gap.
+#
+# FN-fit (fn_mine_fit_shared / wave-44 hunt):
+# - leaping dolphin + cupola representing/indicating/suggestive of free air;
+# - location-first under|beneath (hemi)diaphragm … free air;
+# - lucency under hemidiaphragm / hepatic-dome crescent attributed to free air;
+# - scan-through "not well seen" visualization hedge.
 #
 # Do NOT match: negated / resolved / resolution-of / not-seen / simulate;
 # indication / rule-out / history-only "with pneumoperitoneum";
@@ -50,6 +59,12 @@
             |
             (?:
                 (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # visualization hedge, not a finding-negation
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
                 [^.!?;:\n]
             )
             |
@@ -171,6 +186,12 @@
             )
             |
             (?:
+                # visualization hedge, not a finding-negation
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
                 (?!\b(?:
                     no|not|without|nor|neither|
                     free\s+of|clear\s+of|negative\s+for|
@@ -225,6 +246,12 @@
         (?:
             (?:
                 (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # visualization hedge, not a finding-negation
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
                 [^.!?;:\n]
             )
             |
@@ -290,6 +317,12 @@
             |
             (?:
                 (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # visualization hedge, not a finding-negation
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
                 [^.!?;:\n]
             )
             |
@@ -392,6 +425,12 @@
             )
             |
             (?:
+                # visualization hedge, not a finding-negation
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
                 (?!\b(?:
                     no|not|without|nor|neither|
                     free\s+of|clear\s+of|negative\s+for|
@@ -433,11 +472,89 @@
         |
 
         # ------------------------------------------------------------------
-        # 5. Rigler / double-wall / cupola sign
-        #    Cupola: require attribution toward pneumoperitoneum (prompt).
+        # 4b. Location-first: beneath|under (hemi)diaphragm … free air
+        #     (arm 4 requires air|gas before under|beneath).
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\brule\s+out\b)
+                (?!\blooking\s+for\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:under|below|beneath|underneath|inferior\s+to)\s+(?:the\s+)?
+        (?:
+            (?:right|left|both|bilateral|central|medial|lateral)\s+
+            (?:and\s+(?:the\s+)?(?:right|left|central|medial|lateral)\s+)?
+        )?
+        (?:aspects?\s+of\s+(?:the\s+)?)?
+        (?:hemi)?diaphragm\w*
+        (?:
+            \s+(?:there\s+)?(?:is|are|was|were|seen|present|visualized|noted|identified|evident|appreciated|demonstrated)
+        ){0,4}
+        \s+
+        (?!\b(?:no|not|without)\b)
+        (?:(?:a\s+)?(?:small|large|moderate|trace)\s+(?:amount\s+of\s+|volume\s+of\s+)?)?
+        free\s+(?:air|gas)
+        (?!\?)
+        (?![^.!?;:\n]{0,90}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared|clearing)|
+            (?:is|are|was|were)\s+not\s+(?:seen|identified|detected|present|evident|visualized|appreciated|redemonstrated)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated|discernable|discernible)|
+            (?:likely\s+)?within\s+(?:a\s+)?(?:loop\s+of\s+)?(?:bowel|colon|stomach|gastric)|
+            chilaiditi|
+            gastric\s+bubble
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 5. Rigler / double-wall / cupola / leaping-dolphin sign
+        #    Cupola and leaping dolphin: require attribution to PP / free air
+        #    (prompt). Widen cupola beyond consistent|compatible with.
+        #    Do not match bare anatomic "diaphragmatic cupola" (no "sign").
+        #    Do not match continuous-diaphragm (often pneumomediastinum).
         # ------------------------------------------------------------------
         (?:^|[.!?;:\n])
         (?:
+            (?:
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
             (?:
                 (?!\b(?:
                     no|not|without|nor|neither|
@@ -451,8 +568,201 @@
         \b(?:
             (?:rigler(?:'s|s)?|double[\s-]?wall)\s+sign
             |
-            cupola\s+sign
-            \s+(?:consistent|compatible|concordant|suspicious)\s+with\s+
+            (?:leaping\s+dolphin|cupola)\s+sign
+            \s+
+            (?:
+                (?:consistent|compatible|concordant|suspicious)\s+with
+                |
+                (?:representing|indicating)
+                |
+                (?:suggestive)\s+of
+                |
+                (?:worrisome|concerning)\s+for
+            )
+            \s+
             (?:pneumo[\s-]?peritoneum|aeroperitoneum|free\s+(?:air|gas))\w*
         )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6. Lucency / crescentic lucency under (hemi)diaphragm attributed
+        #    to free air (arm 4 wants air|gas, not lucency). Keep gastric
+        #    bubble / Chilaiditi / PTX / versus-stomach out.
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\brule\s+out\b)
+                (?!\blooking\s+for\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:(?:subtle|faint|thin|small|mild|new|continuous|curvilinear|crescent(?:ic)?)\s+)*
+        lucenc(?:y|ies)\b
+        (?:
+            \s+(?:is|are|was|were|seen|present|visualized|noted|identified|evident|appreciated|demonstrated)
+        ){0,4}
+        \s+
+        (?:under|below|beneath|underneath|inferior\s+to)\s+(?:the\s+)?
+        (?:
+            (?:right|left|both|bilateral|central|medial|lateral)\s+
+            (?:and\s+(?:the\s+)?(?:right|left|central|medial|lateral)\s+)?
+        )?
+        (?:aspects?\s+of\s+(?:the\s+)?)?
+        (?:hemi)?diaphragm\w*
+        (?:
+            \s+(?:is|are|was|were|seen|present|visualized|noted|identified|evident|appreciated|demonstrated)
+        ){0,4}
+        \s+
+        (?:
+            (?:consistent|compatible|concordant|suspicious)\s+with
+            |
+            (?:representing|indicating)
+            |
+            (?:suggestive)\s+of
+            |
+            (?:worrisome|concerning)\s+for
+        )
+        \s+
+        (?:residual\s+)?
+        (?:
+            (?:pneumo[\s-]?peritoneum|aeroperitoneum)\w*
+            |
+            free\s+(?:(?:intra[\s-]?peritoneal|peritoneal|intra[\s-]?abdominal|abdominal)\s+)?(?:air|gas)
+            |
+            (?:intra[\s-]?peritoneal|peritoneal)\s+(?:free\s+)?(?:air|gas)
+        )
+        (?!\?)
+        (?![^.!?;:\n]{0,80}\b(?:
+            versus|vs\.?|
+            gastric\s+bubble|
+            fundus|
+            chilaiditi|
+            colon(?:ic)?\s+interposition|
+            less\s+likely|
+            subpulmonic|
+            pneumothorax|
+            fat\s+interface|
+            stomach
+        )\b)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 6b. Crescentic lucency around hepatic dome attributed to free air
+        # ------------------------------------------------------------------
+        (?:
+            ^
+            |
+            [.!?;:\n]
+            |
+            \b(?:although|though|however|but)\s+
+        )
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\b(?:previous|previously)\s+(?:radiograph|exam(?:ination)?|study|film|image|cxr|x-?ray|chest\s+(?:radiograph|film|x-?ray))\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bnot\s+well\s+(?:seen|visualized|appreciated|identified|demonstrated|apparent)\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    absent|absence\s+of|denies|
+                    ruled\s+out|rule\s+out|
+                    previous|previously
+                )\b)
+                (?!\bresolution\s+of\b)
+                (?!\beval(?:uate|uation)?\s+(?:for|of)\b)
+                (?!\bassess\s+for\b)
+                (?!\br/?o\b)
+                (?!\brule\s+out\b)
+                (?!\blooking\s+for\b)
+                [^.!?;:\n]
+            )
+        ){0,220}
+        \b(?:(?:subtle|faint|thin|small|mild|new|curvilinear|crescent(?:ic)?)\s+)*
+        lucenc(?:y|ies)\b
+        (?:
+            \s+(?:is|are|was|were|seen|present|visualized|noted|identified|evident|appreciated|demonstrated)
+        ){0,4}
+        \s+
+        (?:around|over|overlying|along|adjacent\s+to|at)
+        \s+(?:the\s+)?
+        (?:hepatic\s+dome|dome\s+of\s+(?:the\s+)?(?:liver|hepatic)|liver\s+dome)
+        [^.!?;:\n]{0,80}?
+        (?:
+            (?:consistent|compatible|concordant|suspicious)\s+with
+            |
+            (?:representing|indicating)
+            |
+            (?:suggestive)\s+of
+            |
+            (?:worrisome|concerning)\s+for
+        )
+        \s+
+        (?:residual\s+)?
+        (?:
+            (?:pneumo[\s-]?peritoneum|aeroperitoneum)\w*
+            |
+            free\s+(?:(?:intra[\s-]?peritoneal|peritoneal|intra[\s-]?abdominal|abdominal)\s+)?(?:air|gas)
+            |
+            (?:intra[\s-]?peritoneal|peritoneal)\s+(?:free\s+)?(?:air|gas)
+        )
+        (?!\?)
+        (?![^.!?;:\n]{0,80}\b(?:
+            versus|vs\.?|
+            gastric\s+bubble|
+            fundus|
+            chilaiditi|
+            colon(?:ic)?\s+interposition|
+            less\s+likely|
+            subpulmonic|
+            pneumothorax|
+            fat\s+interface|
+            stomach
+        )\b)
 )

@@ -19,6 +19,13 @@
 # - Lexicon: osteopaenia, hypo/underminerali*, rarefaction (anatomy-framed).
 # - Washed-out appearance of (the) bones (noun-phrase order).
 # - Scan through "no congestive failure" run-on before demineralization.
+# FN-fit pass-2 (wave 45 hunt TPs):
+# - Restarts: abnormality/fractures with; no change in (persistence);
+#   (no|without) congestive failure (run-on).
+# - Scan-through: no change in; without congestive failure.
+# - decrease/reduction in bone density; stacked spinal/vertebral bone density.
+# - bone mineralization is decreased; decreased density of (the) (visualized) bones.
+# - Typos: osteopena, osteopnea, ostepeni*, deminerallization.
 # ==============================================================================
 
 (?:
@@ -46,6 +53,15 @@
             )\s+
             |
             \bunremarkable\s+with\s+
+            |
+            # "No … abnormality with diffuse osteopenic change"
+            \b(?:abnormalit(?:y|ies)|fractures?)\s+with\s+
+            |
+            # Persistence: "NO CHANGE IN DIFFUSE OSTEOPENIA"
+            \bno\s+change\s+in\s+
+            |
+            # Run-on: "NO/WITHOUT CONGESTIVE FAILURE DEMINERALIZATION"
+            \b(?:no|without)\s+congestive\s+failure\s+
         )
         (?:
             (?:
@@ -57,6 +73,18 @@
                 # Run-on: "NO CONGESTIVE FAILURE DEMINERALIZATION" — allow
                 # first char of "no" so demineralization remains reachable.
                 (?=\bno\s+congestive\s+failure\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?=\bwithout\s+congestive\s+failure\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                # Persistence: scan through "no change in" (not a negation of
+                # the later osteopenia mention).
+                (?=\bno\s+change\s+in\b)
                 [^.!?;:\n]
             )
             |
@@ -95,12 +123,15 @@
             # 1. Explicit medical terms
             #    osteopenia/osteopaenia/osteopenic; osteoporosis/osteoporotic;
             #    demineralized / demineralization (not "demineralizing");
-            #    hypo/undermineralization
+            #    hypo/undermineralization; attested dictation typos
             # ==============================================================
             \b(?:
                 osteop(?:ae|e)ni\w*|
+                osteopena|
+                osteopnea|
+                ostepeni\w*|
                 osteoporo\w*|
-                deminerali[sz](?:ed|ation)s?|
+                deminerall?i[sz](?:ed|ation)s?|
                 hypominerali[sz]\w*|
                 under[\s-]?minerali[sz]\w*
             )\b
@@ -109,10 +140,12 @@
 
             # ==============================================================
             # 2. Descriptive: low / decreased bone density or mineralization
+            #    "decrease in bone density"; "decreased spinal bone density"
             # ==============================================================
             \b(?:
-                decreas\w*|low|diminished|reduced|poor|loss\s+of
+                decreas\w*|reductions?|low|diminished|reduced|poor|loss\s+of
             )\b
+            (?:\s+in)?
             (?:
                 \s+(?:diffuse|generalized|overall|gross|severe|mild)
             ){0,2}
@@ -120,6 +153,9 @@
             \b(?:
                 bone|osseous|skeletal|vertebral|spinal|bony
             )\b
+            (?:
+                \s+(?:bone|osseous|skeletal|vertebral|spinal|bony)
+            )?
             (?:
                 \s+(?:mineral|matrix)
             ){0,2}
@@ -131,13 +167,13 @@
             |
 
             # ==============================================================
-            # 2b. Reversed: "(bone|osseous) density is decreased/low/…"
+            # 2b. Reversed: "(bone|osseous) density/mineralization is decreased"
             # ==============================================================
             \b(?:
                 bone|osseous|skeletal|bony
             )\b
             \s+
-            \bdensity\b
+            \b(?:density|minerali[sz]ation)\b
             (?:
                 \s+(?:is|are|appears?|seems?|looks?)
             )?
@@ -149,7 +185,7 @@
             |
 
             # ==============================================================
-            # 2c. "decreased mineralization of the bones"
+            # 2c. "decreased mineralization/density of the (visualized) bones"
             # ==============================================================
             \b(?:
                 decreas\w*|low|diminished|reduced|poor|loss\s+of
@@ -158,8 +194,9 @@
                 \s+(?:diffuse|generalized|overall|gross|severe|mild)
             ){0,2}
             \s+
-            \bminerali[sz]ation\b
+            \b(?:density|minerali[sz]ation)\b
             \s+of\s+(?:the\s+)?
+            (?:(?:visualized|imaged|seen)\s+)?
             \b(?:bones?|osseous|skeletal|vertebral|spinal|bony)(?:\s+structures?)?\b
 
             |
@@ -185,8 +222,9 @@
             ){0,3}
             \s+
             \b(?:
-                osteop(?:ae|e)ni\w*|osteoporo\w*|
-                deminerali[sz](?:ed|ation)s?|
+                osteop(?:ae|e)ni\w*|osteopena|osteopnea|ostepeni\w*|
+                osteoporo\w*|
+                deminerall?i[sz](?:ed|ation)s?|
                 hypominerali[sz]\w*|
                 under[\s-]?minerali[sz]\w*|
                 raref(?:action|ied)|

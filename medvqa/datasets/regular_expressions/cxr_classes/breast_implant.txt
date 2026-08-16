@@ -2,14 +2,15 @@
 # breast_implant
 # Current CXR shows one or more breast implants / prostheses / expanders.
 #
-# Match: breast/mammary/breasts implant/prosthesis (incl. plural + optional
-#        prosthetic/material adj); silicone or saline implant; breast/tissue/
-#        subcutaneous expander (incl. tissue expanded); breast augmentation /
+# Match: breast/mammary/breasts implant/prosthesis (incl. plural, possessive,
+#        hyphen, optional prosthetic/material/calcified adj, typo prothesis);
+#        silicone or saline implant; breast/tissue/subcutaneous expander
+#        (incl. hyphen tissue-expander, tissue expanded); breast augmentation /
 #        augmentation mammoplasty / augmentation devices; breast (tissue)
-#        artifact; postmastectomy changes *with* a stated implant; implant/
-#        prosthesis involving|in|of laterality breast; breast → left/right-sided
-#        implant/prosthesis; breast tissue with implant; breast consistent with
-#        (previously seen) implant.
+#        artifact; (post)mastectomy *with* a stated implant / implant
+#        reconstruction; implant/prosthesis involving|in|of laterality breast;
+#        breast → left/right-sided implant/prosthesis; breast tissue with
+#        implant; breast consistent with (previously seen) implant.
 #
 # Do NOT match (prompt): dense breast tissue; gynecomastia; mastectomy /
 # reconstruction without a stated implant; chest-wall opacity; capsular
@@ -41,18 +42,21 @@
 
     (?:
         # 1. Explicit breast / breasts / mammary + optional adj + implant/prosthesis
-        \b(?:breasts?|mammary)\s+(?:(?:augmentation|prosthetic|silicone(?:\s+gel)?|saline)\s+)?(?:implants?|prosthes(?:is|es))
+        #    Possessive (breast's), hyphen (breast-implant), calcified modifiers,
+        #    typo prothesis.
+        \b(?:breasts?|mammary)(?:['’]s)?[-\s]+(?:(?:augmentation|prosthetic|silicone(?:\s+gel)?|saline|partially|calcified)\s+){0,3}(?:implants?|prosthes(?:is|es)|prothesis)
         (?!\s+explant\w*)
         |
         # 2. Prompt-named materials without requiring the word "breast"
         \b(?:silicone(?:\s+gel)?|saline)\s+implants?
         (?!\s+explant\w*)
         |
-        # 3. Breast expander
-        \bbreast\s+expanders?
+        # 3. Breast expander (space or hyphen)
+        \bbreast[-\s]+expanders?
         |
-        # 4. Tissue expander / expanded (optional saline); subcutaneous expander
-        \b(?:saline\s+)?tissue\s+expand(?:ers?|ed)\b
+        # 4. Tissue expander / expanded (optional saline; space or hyphen);
+        #    subcutaneous expander
+        \b(?:saline\s+)?tissue[-\s]+expand(?:ers?|ed)\b
         |
         \bsubcutaneous\s+expanders?
         |
@@ -66,8 +70,8 @@
         # 7. Overlying breast (tissue) artifact attributed to implants
         \bbreast\s+(?:tissue\s+)?artifacts?
         |
-        # 8. Postmastectomy / reconstruction restated *with* an implant
-        \bpost[- ]?mastectomy(?:\s+(?!without\b)\w+){0,8}\s+with\s+(?:an?\s+)?implants?
+        # 8. (Post)mastectomy restated *with* an implant / implant reconstruction
+        \b(?:post[- ]?)?mastectom(?:y|ies)(?:\s+(?!without\b)\w+){0,8}\s+with\s+(?:an?\s+)?implants?
         (?!\s+explant\w*)
         |
         # 9. Implant / prosthesis involving|in|of (the) (laterality) breast

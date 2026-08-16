@@ -4,30 +4,48 @@
 #
 # Match: ground glass / ground-glass / groundglass (+ optional intervening adj +
 # opacity/density/pattern/change/appearance, incl. airspace + opacification via
-# opaci\w*, typo oapcit*); GGO(s); GG opacities/densities/patterns/changes.
+# opaci\w*, typo oapcit*); GGO(s); GG / GG- opacities/densities/patterns/changes.
 # Bare "ground-glass"/"groundglass" when not followed by a morph stem (morph
 # branch owns those).
 #
 # CT-compare rescue: allow current-film GGO with "better seen/evaluated/
 # appreciated/assessed/demonstrated/visualized/characterized on CT",
 # "as characterized/demonstrated/noted/on … CT", "similar to … on (prior) CT",
-# "corresponding to … prior CT", or "consistent with … seen on prior CT".
-# FN-fit (fn_mine_fit_shared): hunt residual CT-guard holes only.
+# "corresponding to … prior CT", "consistent with … seen on prior CT",
+# or "also seen/noted/… on (prior) CT" (persist + also-seen).
+# Comparison-prefix exception: "compared with/to (prior) CT," or "concurrent
+# review with prior chest CT," then current-film GGO after the comma (CT in the
+# comparison clause is not a CT-only description).
 #
 # Do NOT match: grated/OCR junk (mini-test negative; often effusion/not GGO);
 # hazy/granular/RDS/edema inference; bare airspace opacity / consolidation;
 # CT/CTA-only or prior-CT attribution ("on prior chest CT", "described on the
 # most recent CT chest") without a current-finding rescue; clause that already
-# mentions CT/CTA before the hit; negated / not-seen-on-this-exam phrasing.
+# mentions CT/CTA before the hit (unless the comparison-prefix exception);
+# negated / not-seen-on-this-exam phrasing.
 # ==============================================================================
 
 (?:
         # --- GGO abbreviation / GG + morph ---
         (?:^|[.!?;:\n])
         (?:
-            (?!\bcta?\b)
-            [^.!?;:\n]
-        ){0,220}
+            (?:
+                (?!\bcta?\b)
+                [^.!?;:\n]
+            ){0,220}
+            |
+            [^.!?;:\n]{0,180}?
+            (?:
+                compared\s+(?:with|to|against)|
+                (?:in\s+)?comparison\s+(?:with|to)|
+                (?:concurrent|simultaneous)\s+review\s+with
+            )
+            [^.!?;:\n]{0,80}?
+            \b(?:(?:chest|prior|previous|recent|outside)\s+){0,3}cta?\b
+            [^,.!?;:\n]{0,50}
+            ,
+            [^.!?;:\n]{0,160}
+        )
         (?<!\bno\s)
         (?<!\bwithout\s)
         (?<!\bno\sevidence\sof\s)
@@ -35,7 +53,7 @@
         (?<!\bnegative\sfor\s)
         (?<!\bfree\sof\s)
         (?<!\bclear\sof\s)
-        (?:\bggos?\b|\bgg\s+(?:opaci\w*|densit\w*|patterns?|changes?)\b)
+        (?:\bggos?\b|\bgg[\s-]+(?:opaci\w*|densit\w*|patterns?|changes?)\b)
         (?!\s+on\s+(?:(?:a|the|recent|prior|previous|earlier)\s+)?(?:chest\s+)?cta?\b)
         (?![^.!?;:\n]{0,160}\b(?:
             (?:are|is|was|were)\s+not\s+(?:well\s+)?(?:seen|appreciated|visualized|evident)|
@@ -49,7 +67,8 @@
                 as\s+(?:characterized|demonstrated|noted|on)\b|
                 similar\s+to|
                 corresponding\s+to|
-                consistent\s+with
+                consistent\s+with|
+                also\s+(?:seen|noted|demonstrated|appreciated|shown|visualized)
             ))
             [^.!?;:\n]{0,140}\b(?:
                 (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+
@@ -67,9 +86,23 @@
         # --- ground[- ]glass / groundglass + morphology ---
         (?:^|[.!?;:\n])
         (?:
-            (?!\bcta?\b)
-            [^.!?;:\n]
-        ){0,220}
+            (?:
+                (?!\bcta?\b)
+                [^.!?;:\n]
+            ){0,220}
+            |
+            [^.!?;:\n]{0,180}?
+            (?:
+                compared\s+(?:with|to|against)|
+                (?:in\s+)?comparison\s+(?:with|to)|
+                (?:concurrent|simultaneous)\s+review\s+with
+            )
+            [^.!?;:\n]{0,80}?
+            \b(?:(?:chest|prior|previous|recent|outside)\s+){0,3}cta?\b
+            [^,.!?;:\n]{0,50}
+            ,
+            [^.!?;:\n]{0,160}
+        )
         (?<!\bno\s)
         (?<!\bwithout\s)
         (?<!\bno\sevidence\sof\s)
@@ -92,7 +125,8 @@
                 as\s+(?:characterized|demonstrated|noted|on)\b|
                 similar\s+to|
                 corresponding\s+to|
-                consistent\s+with
+                consistent\s+with|
+                also\s+(?:seen|noted|demonstrated|appreciated|shown|visualized)
             ))
             [^.!?;:\n]{0,140}\b(?:
                 (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+
@@ -110,9 +144,23 @@
         # --- bare ground[- ]glass / groundglass (no trailing morph/typo stem) ---
         (?:^|[.!?;:\n])
         (?:
-            (?!\bcta?\b)
-            [^.!?;:\n]
-        ){0,220}
+            (?:
+                (?!\bcta?\b)
+                [^.!?;:\n]
+            ){0,220}
+            |
+            [^.!?;:\n]{0,180}?
+            (?:
+                compared\s+(?:with|to|against)|
+                (?:in\s+)?comparison\s+(?:with|to)|
+                (?:concurrent|simultaneous)\s+review\s+with
+            )
+            [^.!?;:\n]{0,80}?
+            \b(?:(?:chest|prior|previous|recent|outside)\s+){0,3}cta?\b
+            [^,.!?;:\n]{0,50}
+            ,
+            [^.!?;:\n]{0,160}
+        )
         (?<!\bno\s)
         (?<!\bwithout\s)
         (?<!\bno\sevidence\sof\s)
@@ -135,7 +183,8 @@
                 as\s+(?:characterized|demonstrated|noted|on)\b|
                 similar\s+to|
                 corresponding\s+to|
-                consistent\s+with
+                consistent\s+with|
+                also\s+(?:seen|noted|demonstrated|appreciated|shown|visualized)
             ))
             [^.!?;:\n]{0,140}\b(?:
                 (?:identified|seen|noted|demonstrated|shown|appreciated|described|reported)\s+on\s+

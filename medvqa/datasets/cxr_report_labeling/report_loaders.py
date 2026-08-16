@@ -26,6 +26,14 @@ DATASET_CHEXPERT_PLUS = "chexpert_plus"
 DATASET_REXGRADIENT = "rexgradient"
 DATASET_IUXRAY = "iuxray"
 
+# IU first: inventory / verify runbooks print this corpus before the large ones.
+ALL_DATASETS = (
+    DATASET_IUXRAY,
+    DATASET_MIMICCXR,
+    DATASET_CHEXPERT_PLUS,
+    DATASET_REXGRADIENT,
+)
+
 _STUDY_ID_FROM_PATH = re.compile(r"/s(\d+)\.txt$", re.IGNORECASE)
 
 
@@ -199,3 +207,19 @@ def load_all_datasets(
     if DATASET_IUXRAY in wanted:
         out[DATASET_IUXRAY] = load_iuxray_reports(limit=iu_limit)
     return out
+
+
+def load_dataset_reports(dataset: str, limit: Optional[int] = None) -> List[dict]:
+    if dataset == DATASET_MIMICCXR:
+        return load_mimiccxr_reports(limit=limit)
+    if dataset == DATASET_CHEXPERT_PLUS:
+        return load_chexpert_plus_reports(limit=limit)
+    if dataset == DATASET_REXGRADIENT:
+        return load_rexgradient_reports(limit_per_split=limit)
+    if dataset == DATASET_IUXRAY:
+        return load_iuxray_reports(limit=limit)
+    raise ValueError(f"Unknown dataset: {dataset}")
+
+
+def load_reports_by_uid(dataset: str, limit: Optional[int] = None) -> Dict[str, dict]:
+    return {r["uid"]: r for r in load_dataset_reports(dataset, limit=limit)}

@@ -1,10 +1,12 @@
 
-    # 1. Standard phrasing (with optional specific intervening words)
+    # 1. Standard phrasing (optional hyphen; optional forming/creating gap)
     # Matches: "azygos lobe", "azygous fissure", "azygos accessory lobe",
-    # "azigos vein fissure", "azygos pseudofissure", "azygos pseudo-fissure"
-    \b(?:azyg|azig)\w*(?:\s+(?:vein|accessory))?\s+(?:pseudo[\s-]*)?(?:lobe|fissure)
+    # "azigos vein fissure", "azygos pseudofissure", "azygos pseudo-fissure",
+    # "azygos-fissure", "azygos vein forming a fissure"
+    \b(?:azyg|azig)\w*(?:[\s-]+(?:vein|accessory))?(?:[\s-]+(?:form(?:ing|ed)|creat(?:ing|ed))(?:[\s-]+(?:a|an|the))?)?[\s-]+(?:pseudo[\s-]*)?(?:lobe|fissure)
     |
-    # 2. Inverted phrasing
+    # 2. Inverted phrasing (of/from; formed/created by — not locative "lobe by")
     # Matches: "lobe of the azygos", "fissure of the azygos",
-    # "pseudofissure of the azygos"
-    \b(?:pseudo[\s-]*)?(?:lobe|fissure)\s+of\s+(?:the\s+)?(?:azyg|azig)\w*
+    # "pseudofissure of the azygos", "accessory fissure from the azygos",
+    # "fissure formed by the azygos"
+    \b(?:pseudo[\s-]*)?(?:lobe|fissure)\s+(?:of|from|(?:formed|created)\s+by)\s+(?:the\s+)?(?:azyg|azig)\w*

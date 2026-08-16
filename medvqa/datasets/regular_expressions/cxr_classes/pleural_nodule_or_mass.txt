@@ -13,9 +13,9 @@
         (?:
             mesothelioma
             |
-            solitary\s+fibrous\s+tumor(?:\s+of\s+(?:the\s+)?pleura)?
+            solitary\s+fibrous\s+tumou?r(?:\s+of\s+(?:the\s+)?pleura)?
             |
-            fibrous\s+tumor\s+of\s+(?:the\s+)?pleura
+            fibrous\s+tumou?r\s+of\s+(?:the\s+)?pleura
         )
         \b
         (?!\s+is\s+not\s+excluded)
@@ -33,9 +33,9 @@
         (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
         pleural
         (?:
-            [-\s]?based\s+
+            (?:ly)?[-\s]?based\s+
             (?:
-                soft\s+tissue\s+(?:mass(?:es)?|lesions?)
+                soft\s+tissue\s+(?:mass(?:es)?|lesions?|densit(?:y|ies))
                 |
                 (?:(?:(?:right|left|bilateral|upper|lower|apical|basal|posterior|
                         anterior|lateral|medial|and|or|rounded|ovoid|lobulat\w*|
@@ -114,16 +114,18 @@
         |
 
         # ------------------------------------------------------------------
-        # 3a2. Nodular … pleural-based opacities/densities
-        #      (nodular precedes pleural-based; bare pleural-based opacity
-        #       alone is often fluid — require nodular/fibronodular).
+        # 3a2. Nodular/masslike/lobulated … pleural-based opacities/densities
+        #      (qualifier precedes pleural-based; bare pleural-based opacity
+        #       alone is often fluid). Block loculated fluid DDx.
         # ------------------------------------------------------------------
         \b
         (?<!\bno\s)(?<!\bwithout\s)
-        (?:(?:fibro)?nodular|reticular[-\s]?nodular)
+        (?:(?:fibro)?nodular|reticular[-\s]?nodular|mass[-\s]?like|lobulat\w*)
         (?:\s+\w+){0,2}\s+
-        pleural[-\s]?based\s+
-        (?:opacit\w*|densit\w*|lesions?|mass(?:es)?|mass-?like|nodules?)
+        pleural(?:ly)?[-\s]?based\s+
+        (?!loculat|effusion|fluid|collection)
+        (?:opacit\w*|densit\w*|lesions?|mass(?:es)?|mass-?like|nodules?|
+           shadowing|structure)
         \b
 
         |
@@ -279,5 +281,102 @@
         \b
         (?<!\bno\s)(?<!\bwithout\s)
         pleura\s+mammill\w*
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 8. Copula: (the) pleura is/appears nodular
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?:(?:the|adjacent|right|left|bilateral|both)\s+)*
+        pleura
+        \s+(?:is|are|appears?|looks?|was|were)\s+
+        (?!not\s)
+        nodular
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 9. Pleural / fissural studding (metastatic implants)
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:(?:nodular|metasta\w*)\s+)?studding
+        (?:\s+\w+){0,3}\s+
+        (?:of|along)\s+(?:the\s+)?
+        (?:(?:left|right|bilateral|both|lateral|medial|visceral|parietal|
+            major|minor|oblique|horizontal)\s+)*
+        (?:pleurae?|pleural\s+surface|fissures?)
+        \b
+        |
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        pleural\s+studding
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 10. Lobulated pleural thickening / pleural-based structure
+        #     (mass-like; not loculated fluid / collection / effusion)
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        lobulat\w*\s+
+        pleural(?:ly)?
+        (?:
+            \s+thickening
+            |
+            [-\s]?based\s+
+            (?!loculat|effusion|fluid|collection)
+            (?:structure|shadowing|mass(?:es)?|nodules?|lesions?)
+        )
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 11. Metastases to the pleura (not only "of the pleura")
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+        metasta\w*\s+to\s+(?:the\s+)?pleura
+        \b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 12. Pleural mets (abbrev.). Skip indication/history sentences.
+        # ------------------------------------------------------------------
+        (?:^|(?<=[.!?;\n]))
+        (?!\s*(?:indication|clinical\s+(?:history|data)|history|pmh)\s*:)
+        (?:
+            (?!\bPET[-\s]?CT\b)
+            [^.!?;\n]
+        ){0,300}?
+        \b
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bhx\s)
+        pleural\s+mets?\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # 13. Nodularity … later pleural[-]parenchymal scarring/thickening
+        # ------------------------------------------------------------------
+        \b
+        (?<!\bno\s)(?<!\bwithout\s)
+        nodularity
+        (?:
+            (?!\beffusion\b)(?!\bfluid\b)
+            \W+\w+
+        ){0,8}
+        \W+
+        pleural[-\s]?parenchymal
+        (?:\s+(?:scarring|thickening|opacit\w*|densit\w*|lesions?))?
         \b
     )

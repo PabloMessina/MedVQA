@@ -2,11 +2,12 @@
 (?:
     (?<!\btemporary\s)(?<!\btemp\s)(?<!\bepicardial\s)(?<!\bexternal\s)
     \b(?:
-        (?:permanent\s+|leadless\s+|biventricular\s+)?pacemakers?|
+        (?:permanent\s+|leadless\s+|biventricular\s+)?pace\s?makers?|
         \baicds?\b(?!\s+pockets?\b)|
         implantable\s+cardioverter(?:[-\s]?defibrillators?)?|
         cardiac\s+resynchronization(?:\s+therapy)?|
         \bcrt[-\s]?[pd]\b|
+        crt\s+devices?|
         \bppms?\b|
         pacers?(?:\s*/\s*(?:aicds?|icds?))?(?!\s+wires?\s+removal)(?!\s+pads?\b)(?!\s+or\s+(?:resuscitation|defibrillator))|
         pacing\s+devices?|
@@ -14,9 +15,10 @@
         pacing\s+hardware|
         cardiac\s+conduction\s+devices?|
         cardiac\s+pacemaking\s+devices?|
+        cardiac\s+rhythm\s+(?:management\s+)?devices?|
         electronic\s+cardiac\s+devices?|
         implantable\s+cardiac\s+devices?|
-        cardiac\s+devices?\s+(?:superimposed|in\b|overlying|over\b|with\b|and\b|noted|seen|visualized|present|projects?|appears?)|
+        (?:intra)?cardiac\s+devices?\s+(?:superimposed|in\b|overlying|over\b|with\b|and\b|noted|seen|visualized|present|projects?|appears?)|
         cardiac\s+(?:xxxx\s+)?generators?|
         cardiac\s+pulse\s+generators?|
         cardiac\s+xxxx\s+devices?|
@@ -38,7 +40,8 @@
         (?:new\s+)?subcutaneous\s+(?:left|right)?\s*(?:paramedian\s+)?icds?\b(?!\s+remov)|
         icds?(?:\s*/\s*pacemakers?)?\s+(?:generators?|leads?|wires?|lines?|hardware|devices?|is|are|remains?|with|shows?|unchanged|noted|seen|visualized|present|implant|extends?|projects?|appears?)(?!\s+remov)|
         icds?\s+and(?:\s+its)?\s+leads?|
-        icds?\s+in\s+(?:place|(?:the\s+)?(?:left|right)\b)|
+        icds?\s+in\s+(?:place|situ|(?:the\s+)?(?:left|right)\b)|
+        there\s+(?:is|are)\s+(?:an?\s+)?icds?\b(?!-?\d)(?!\s+pockets?\b)|
         (?:tip\s+of\s+(?:the\s+|an?\s+)?)icds?\b(?!-?\d)|
         (?:has\s+)?received\s+(?:an?\s+)?icds?\b(?!-?\d)|
         (?:pulse\s+generators?|generator\s+packs?)\s+(?:with\s+)?(?:\w+\s+){0,2}leads?|

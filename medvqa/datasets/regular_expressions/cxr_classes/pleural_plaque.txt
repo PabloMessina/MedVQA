@@ -3,11 +3,14 @@
             # 1. Pleural / Diaphragmatic / Subpleural Plaques (with optional intervening modifiers)
             # Matches: "pleural plaques", "pleural calcified plaques",
             # "diaphragmatic plaques", "pleural plaquing", "subpleural plaques",
-            # "Apical pleural thickening with presumed calcified plaques"
-            # (?!plaqu) keeps greedy modifiers from swallowing plaquing/plaque
+            # "Apical pleural thickening with presumed calcified plaques",
+            # "pleural thickening worse on the left and presumed calcified plaques",
+            # typos: "pleural placques", "pleural plauques"
+            # Plaque token: pla(?:c?que[a-z]*|uques?|quing)  (plaque/s, plaquing, placques, plauques)
+            # (?!pla(?:c?q|uq)) keeps greedy modifiers from swallowing plaque tokens
             (?:pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|subpleur[a-z]*)
-            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,5}
-            [\s,;()/-]+(?<!without\s)(?<!no\s)plaqu(?:ing|e[a-z]*)
+            (?:[\s,;()/-]+(?!pla(?:c?q|uq))(?!atheroscler)(?!aort)(?!carotid)[a-z-]+){0,8}
+            [\s,;()/-]+(?<!without\s)(?<!no\s)pla(?:c?que[a-z]*|uques?|quing)
 
             |
 
@@ -22,8 +25,12 @@
             # "Calcified plaque at the right diaphragm",
             # "Calcified plaque projects over the right upper hemithorax",
             # "A calcified plaque is seen at the left apex",
-            # "Calcified plaque at the left lower thoracic chest wall"
-            (?:calcif[a-z]*[\s,;()/-]+)?plaqu(?:ing|e[a-z]*)
+            # "Calcified plaque at the left lower thoracic chest wall",
+            # "Calcified plaques involving the diaphragms",
+            # "Calcified plaques of the parietal pleura",
+            # "Calcified plaques at the costophrenic angles",
+            # "calcified plaque ... including ... the pleural surfaces"
+            (?:calcif[a-z]*[\s,;()/-]+)?pla(?:c?que[a-z]*|uques?|quing)
             (?:[\s,;()/-]+(?:
                 along|on|over|overlie|overlies|overlying|overlain|
                 project|projects|projecting|
@@ -31,11 +38,13 @@
                 left|right|both|lateral|lower|upper|mid|basal|base|bases|
                 apical|apex|costal|posterior|anterior|inferior|superior|lung|
                 at|is|are|was|were|seen|noted|a|an|again|
-                thoracic|periphery|peripheral
-            )){0,10}
+                thoracic|periphery|peripheral|
+                involving|lining|including|parietal|visceral|
+                multiple|areas|well|as|lobe|lobes|surface|surfaces
+            )){0,16}
             [\s,;()/-]+(?:
                 pleur[a-z]*|diaphragm[a-z]*|hemidiaphragm[a-z]*|
-                subpleur[a-z]*|hemithorax|apex|apices|
+                subpleur[a-z]*|hemithorax|apex|apices|costophrenic|
                 (?:thoracic[\s,;()/-]+)?chest[\s-]+wall
             )
 
@@ -44,8 +53,8 @@
             # 3. Inverted Anatomy (e.g., "calcific chest wall plaques",
             # "thoracic chest wall plaques")
             (?:thoracic[\s,;()/-]+)?chest[\s-]+wall
-            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,3}
-            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+            (?:[\s,;()/-]+(?!pla(?:c?q|uq))[a-z-]+){0,3}
+            [\s,;()/-]+pla(?:c?que[a-z]*|uques?|quing)
 
             |
 
@@ -75,8 +84,8 @@
             (?<!indication:\ )(?<!history:\ )
             (?:(?:calcif[a-z]*|widespread|extensive|multiple|bilateral|coarse|mild)[\s,;()/-]+){0,3}
             asbest(?:os|osis)(?:[\s-]+related)?
-            (?:[\s,;()/-]+(?!plaqu)[a-z-]+){0,2}
-            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+            (?:[\s,;()/-]+(?!pla(?:c?q|uq))[a-z-]+){0,2}
+            [\s,;()/-]+pla(?:c?que[a-z]*|uques?|quing)
 
             |
 
@@ -85,7 +94,7 @@
             # "plaquing ... consistent with asbestos",
             # "plaques at the lung bases ... asbestos"
             (?<!atherosclerotic\ )(?<!atheroma\ )(?<!aortic\ )(?<!aorta\ )
-            (?:calcif[a-z]*[\s,;()/-]+)?plaqu(?:ing|e[a-z]*)
+            (?:calcif[a-z]*[\s,;()/-]+)?pla(?:c?que[a-z]*|uques?|quing)
             (?![^.!?]{0,120}(?:\baort|\batheroscler|\bcarotid|\bcoronar|\bvascular|\bvessel))
             [^.!?]{0,100}?
             asbest(?:os|osis)
@@ -111,7 +120,7 @@
             [^.!?]{0,90}?
             (?:consistent\s+with|represents?|likely\s+represents?)
             (?:[\s,;()/-]+(?:a|an|the|calcif[a-z]*)){0,4}
-            [\s,;()/-]+plaqu(?:ing|e[a-z]*)
+            [\s,;()/-]+pla(?:c?que[a-z]*|uques?|quing)
 
             |
 

@@ -3,48 +3,49 @@
         # slash laterality: left/main, right/central (FN-fit hunt)
         # size adjective before (sided/main/central/bilateral/proximal/hilar) PA — avoid "arterial hypertension"
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!mimicking\sa\s)(?<!history\sof\s)(?<!hx\sof\s)
-        (?:enlarged|dilated|ectatic|aneurysmal|large|plump|prominent|engorged)
+        (?:enlarged|dilated|ectatic|aneurysmal|large|plump|promin[ae]nt|engorged)
         \s+(?:(?:bilateral|both|main|central|proximal|hilar|right|left)(?:\s+and\s+(?:the\s+)?(?:right|left|main|central|proximal|hilar))?(?:[/ ]+(?:main|central))?\s+)?
         pulmonary\s+art{1,2}er(?:y|ies)\b
         (?!\s+at\s+(?:that|the)\s+time)
 
         |
 
-        # enlarged/dilated/prominent PA abbreviations
+        # enlarged/dilated/promin[ae]nt PA abbreviations
         (?<!no\s)(?<!not\s)(?<!history\sof\s)(?<!hx\sof\s)
-        (?:enlarged|dilated|prominent|large|plump|engorged)
+        (?:enlarged|dilated|promin[ae]nt|large|plump|engorged)
         \s+(?:(?:main|central|right|left|proximal|hilar)\s+)?pas?\b
 
         |
 
         # PA then short clause-local gap then size language (block negation in the gap)
-        # gap {0,6}: covers "particularly the right main, appear prominent"
+        # gap {0,6}: covers "particularly the right main, appear promin[ae]nt"
         (?<!no\s)(?<!not\s)(?<!idiopathic\s)(?<!due\sto\s)(?<!possibility\sof\s)(?<!mimicking\sa\s)
         (?:(?:bilateral|both|main|central|proximal|hilar|right|left)(?:\s+and\s+(?:the\s+)?(?:right|left|main|central|proximal|hilar))?(?:[/ ]+(?:main|central))?\s+)?
         pulmonary\s+art{1,2}er(?:y|ies)\b
-        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal)\b)\w+){0,6}[^\w.!?;:]+
-        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|prominent|prominence|engorg\w*)\b
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|neither|nor)\b)\w+){0,6}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|promin[ae]nt|prominence|plump|engorg\w*)\b
         (?!\s+at\s+(?:that|the)\s+time)
 
         |
 
-        # enlargement / dilatation / prominence / (prominent|increased) caliber OF PA
+        # enlargement / dilatation / ectasia / prominence / (increased|increase in) caliber OF PA/trunk/MPA
         # optional "outline of" gap; guard differentials and "lesser/decreased prominence of ..."
         # slash laterality: left/main pulmonary artery
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?<!due\sto\s)(?<!possibility\sof\s)(?<!concern\sfor\s)(?<!suggestive\sof\s)
+        (?<!no\sevidence\sof\s)(?<!without\sevidence\sof\s)
         (?<!lesser\s)(?<!less\s)(?<!decreased\s)(?<!reduced\s)(?<!diminished\s)
-        (?:enlarg\w*|dilat\w*|ectasia|aneurysm\w*|prominence|(?:prominent|increased)\s+(?:caliber|diameter|size))
+        (?:enlarg\w*|dilat\w*|ectasia|aneurysm\w*|prominence|(?:promin[ae]nt|increased)\s+(?:caliber|diameter|size)|increase\s+in\s+(?:caliber|diameter|size))
         \s+of\s+(?:the\s+)?(?:outline\s+of\s+(?:the\s+)?)?
         (?:(?:bilateral|both|main|central|proximal|hilar|right|left)(?:\s+and\s+(?:the\s+)?(?:right|left|main|central|proximal|hilar))?(?:[/ ]+(?:main|central))?\s+)?
-        pulmonary\s+art{1,2}er(?:y|ies)\b
+        (?:pulmonary\s+art{1,2}er(?:y|ies)|pulmonary\s+trunk|\bmpa)\b
         (?!\s+at\s+(?:that|the)\s+time)
 
         |
 
-        # enlarged/dilated/prominent appearance of PA
+        # enlarged/dilated/promin[ae]nt appearance of PA
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!history\sof\s)(?<!hx\sof\s)
-        (?:enlarged|dilated|prominent|large|plump|engorged)
+        (?:enlarged|dilated|promin[ae]nt|large|plump|engorged)
         \s+appearance\s+of\s+(?:the\s+)?
         (?:(?:bilateral|both|main|central|proximal|hilar|right|left)(?:\s+and\s+(?:the\s+)?(?:right|left|main|central|proximal|hilar))?(?:[/ ]+(?:main|central))?\s+)?
         pulmonary\s+art{1,2}er(?:y|ies)\b
@@ -62,9 +63,9 @@
 
         |
 
-        # increased caliber/diameter of/to PA
+        # increased caliber / increase in caliber of/to PA
         (?<!no\s)(?<!not\s)
-        increased\s+(?:caliber|diameter|size)\s+(?:of\s+|to\s+)?(?:the\s+)?
+        increas(?:ed|e\s+in)\s+(?:caliber|diameter|size)\s+(?:of\s+|to\s+)?(?:the\s+)?
         (?:(?:bilateral|both|main|central|proximal|hilar|right|left)(?:\s+and\s+(?:the\s+)?(?:right|left|main|central|proximal|hilar))?(?:[/ ]+(?:main|central))?\s+)?
         pulmonary\s+art{1,2}er(?:y|ies)\b
 
@@ -82,7 +83,7 @@
         # pulmonary arterial contour / segment (MPA segment language)
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?<!lesser\s)(?<!less\s)(?<!decreased\s)(?<!reduced\s)(?<!diminished\s)
-        (?:enlarged|dilated|ectatic|aneurysmal|large|plump|prominent|engorged)
+        (?:enlarged|dilated|ectatic|aneurysmal|large|plump|promin[ae]nt|engorged)
         \s+(?:(?:bilateral|both|main|central|proximal|hilar|right|left)\s+)?
         pulmonary\s+arterial\s+(?:contour|segment)s?\b
         |
@@ -97,20 +98,33 @@
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!idiopathic\s)
         (?:(?:bilateral|both|main|central|proximal|hilar|right|left)\s+)?
         pulmonary\s+arterial\s+(?:contour|segment)s?\b
-        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal)\b)\w+){0,4}[^\w.!?;:]+
-        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|prominent|prominence|engorg\w*)\b
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|neither|nor)\b)\w+){0,4}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|promin[ae]nt|prominence|engorg\w*)\b
 
         |
 
-        # pulmonary trunk / MPA (negation-in-gap)
+        # pulmonary trunk / MPA / outflow tract / RPA / LPA (negation-in-gap)
+        # optional main before trunk; plump after MPA; RPA/LPA require size language
         (?<!no\s)(?<!not\s)
-        (?:pulmonary\s+trunk|\bmpa\b|main\s+pa)
-        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal)\b)\w+){0,4}[^\w.!?;:]+
-        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|prominent|engorg\w*)\b
+        (?:pulmonary\s+trunk|\bmpa\b|main\s+pa|pulmonary\s+outflow\s+tract|\brpa\b|\blpa\b)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|neither|nor)\b)\w+){0,4}[^\w.!?;:]+
+        (?:enlarg\w*|dilat\w*|ectas\w*|aneurysm\w*|promin[ae]nt|plump|engorg\w*)\b
         (?!\s+at\s+(?:that|the)\s+time)
         |
         (?<!no\s)(?<!not\s)
-        (?:enlarged|dilated|ectatic|aneurysmal|prominent|large|plump|engorged)\s+(?:pulmonary\s+trunk|\bmpa\b)
+        (?:enlarged|dilated|ectatic|aneurysmal|promin[ae]nt|large|plump|engorged)\s+(?:(?:main|central)\s+)?(?:pulmonary\s+trunk|\bmpa\b|pulmonary\s+outflow\s+tract|\brpa\b|\blpa\b)
+
+        |
+
+        # MPA/PA convexity / convex contour (abnormal central PA prominence)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?<!no\sevidence\sof\s)(?<!without\sevidence\sof\s)
+        (?<!lesser\s)(?<!less\s)
+        (?:(?:promin[ae]nt|large)\s+)?convexity
+        \s+(?:of|in\s+(?:the\s+)?region\s+of)
+        \s+(?:the\s+)?
+        (?:(?:bilateral|both|main|central|proximal|hilar|right|left)\s+)?
+        (?:pulmonary\s+art{1,2}er(?:y|ies)|pulmonary\s+trunk|\bmpa)\b
 
         |
 
@@ -130,7 +144,7 @@
         # hila/hilum abnormal attributed to dilated arteries (central PA, not bare vasculature)
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:hila|hilum|hilus)\b
-        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal)\b)\w+){0,10}[^\w.!?;:]+
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|neither|nor)\b)\w+){0,10}[^\w.!?;:]+
         (?:(?:probably|possibly|likely|presumably)\s+)?
         (?:due\s+to|from|representing|reflecting|secondary\s+to|attributable\s+to)\s+
         dilated\s+arter(?:y|ies)\b

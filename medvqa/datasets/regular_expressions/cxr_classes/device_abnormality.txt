@@ -17,7 +17,8 @@
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bno\sevidence\sof\s)
         (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)(?<!\brule\sout\s)(?<!\br/o\s)
         \b(?:
-            malposition(?:ed)?|
+            malposition(?:ed|ing)?|
+            malplaced|
             misplac(?:ed|ement)|
             misdirect(?:ed|ion)|
             aberran(?:t|tly)|
@@ -37,6 +38,7 @@
             feeding\s+tubes?|dobb?hoff(?:\s+tubes?)?|
             chest\s+tubes?|thoracostomy\s+tubes?|pigtail(?:\s+catheters?)?|
             central\s+(?:venous\s+)?(?:lines?|catheters?)|picc(?:\s+lines?)?|cvc|
+            (?:ij|internal\s+jugular|jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?)|
             swan[- ]ganz|pulmonary\s+artery\s+catheters?|
             (?:intra[- ]?aortic\s+)?balloon\s+pumps?|iabps?|
             (?:transesophageal\s+)?temperature\s+probes?|
@@ -74,6 +76,7 @@
             feeding\s+tubes?|dobb?hoff(?:\s+tubes?)?|
             chest\s+tubes?|thoracostomy\s+tubes?|pigtail(?:\s+catheters?)?|
             central\s+(?:venous\s+)?(?:lines?|catheters?)|picc(?:\s+lines?)?|cvc|
+            (?:ij|internal\s+jugular|jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?)|
             swan[- ]ganz|pulmonary\s+artery\s+catheters?|
             (?:intra[- ]?aortic\s+)?balloon\s+pumps?|iabps?|
             (?:transesophageal\s+)?temperature\s+probes?|
@@ -86,7 +89,8 @@
         )\b
         (?:(?![.!?])\W+(?!evaluate\s+for|eval\s+for)\w+){0,8}\W+
         \b(?:
-            malposition(?:ed)?|
+            malposition(?:ed|ing)?|
+            malplaced|
             misplac(?:ed|ement)|
             misdirect(?:ed|ion)|
             aberran(?:t|tly)|
@@ -112,6 +116,7 @@
             with\s+a\s+kink|
             kink\s+in\s+(?:the\s+)?(?:distal|proximal|mid)\b|
             \bis\s+kinked\b|
+            lines?\s+appears?\s+(?:to\s+be\s+)?kink(?:ed|ing)|
             kinking\s+of\s+(?:the\s+)?(?:mid|distal|proximal)\s+course\s+of\s+(?:the\s+)?
                 (?:catheters?|tubes?|lines?|leads?|picc|drains?)
         )\b
@@ -488,7 +493,8 @@
                 (?:appear(?:s|ed)?\s+to\s+be\s+|were\s+|is\s+|are\s+|again\s+)?(?:extra\s*thoracic|extrathoracic)|
                 (?:at|in)\s+(?:the\s+)?(?:approximate\s+)?(?:gastroesophageal|ge)\s+junction|
                 (?:at|in)\s+(?:the\s+)?(?:distal|proximal)\s+esophag\w*|
-                in\s+the\s+plane\s+of\s+the\s+intercostal
+                in\s+the\s+plane\s+of\s+the\s+intercostal|
+                (?:in|within)\s+(?:the\s+)?subcutaneous(?:\s+tissues?)?
             )
         )\b
 
@@ -639,6 +645,99 @@
             (?:tip|line|catheter|picc|cvc)\b
             (?:(?![.!?])\W+\w+){0,10}\W+
             (?:does|do)\s+not\s+cross\s+(?:the\s+)?midline
+        )\b
+
+        |
+
+        # ------------------------------------------------------------------
+        # U. Hunt residuals (high/low-lying ETT, enteric-in-airway,
+        #    suboptimal, CVC-in-RV, NG above diaphragm, esophageal ETT,
+        #    vocal cords, bronchial intubation, hairpin, PICC long-gap
+        #    misplaced, pigtail/sideport subcutaneous / outside chest wall,
+        #    ETT deep-in / located-within mainstem).
+        # ------------------------------------------------------------------
+        \b(?:
+            # high-lying / low-lying ETT (hyphen or space)
+            (?:high|low)[\s-]lying\s+(?:endotracheal\s+tubes?|ett|et\s+tubes?)
+            |
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            (?:high|low)[\s-]lying
+            |
+            # enteric / NG in trachea or bronchial tree (not ETT-in-trachea)
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,10}\W+
+            (?:in|within|into)\s+(?:the\s+)?
+                (?:trachea|bronchial\s+tree|
+                   (?:(?:right|left)\s+)?(?:(?:lower|middle|upper)\s+(?:lobe\s+)?)?bronchial\s+tree)
+            |
+            # NG/enteric tip above the diaphragm
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:tip\s+)?(?:is\s+|remains?\s+|lies\s+|still\s+)?above\s+(?:the\s+)?diaphragm
+            |
+            # hairpin loop (enteric / catheter / Swan)
+            (?:nasogastric|orogastric|enteric|feeding|ng|dobb?hoff)\s+tubes?\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            hairpin
+            |
+            (?:swan[- ]ganz|swans?[- ]ganz|picc(?:\s+lines?)?|catheters?)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            hairpin
+            |
+            # suboptimal position of a named support device (not indication-only)
+            (?<!\bconcern\sfor\s)(?<!\bevaluate\sfor\s)(?<!\brule\sout\s)(?<!\br/o\s)
+            suboptimal(?:ly)?\s+(?:position(?:ed|ing)?|placed|placement)\b
+            (?:(?![.!?])\W+\w+){0,6}\W+
+            (?:dobb?hoff|endotracheal|ett|et\s+tubes?|nasogastric|orogastric|enteric|
+               feeding|ng|chest|picc|central|catheters?|tubes?|lines?)
+            |
+            # CVC/PICC/IJ tip in the ventricle (not a pacing lead)
+            (?:picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+               (?:ij|internal\s+jugular|jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?))\b
+            (?:(?![.!?])\W+\w+){0,16}\W+
+            (?:(?:with\s+(?:its\s+)?)?tip\s+)?(?:in|within|into)\s+(?:the\s+)?(?:right|left)\s+ventricle
+            |
+            # PICC/CVC still misplaced after a long clause (not absence)
+            (?:picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?))\b
+            (?:(?![.!?])\W+(?!not\s+visualized|not\s+seen|not\s+identified|not\s+apparent)\w+){0,14}\W+
+            (?:misplac(?:ed|ement)|malposition(?:ed|ing)?|malplaced)
+            |
+            # Migration of tip of <laterality> PICC (4-token gap; A1 stays {0,3})
+            migrat(?:ed|ing|ion)\s+of\s+(?:the\s+)?tip\s+of\s+
+                (?:(?:the|a|an|left|right|left-sided|right-sided)\s+){0,2}
+                (?:picc(?:\s+lines?)?|central\s+(?:venous\s+)?(?:lines?|catheters?)|
+                   (?:ij|internal\s+jugular|jugular|subclavian)\s+(?:central\s+)?(?:venous\s+)?(?:lines?|catheters?))
+            |
+            # ETT terminates in esophagus (without intubat*)
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:terminates?|terminating|ends?|ending|is|lies|located)\s+(?:in|within|into)\s+(?:the\s+)?esophag\w*
+            |
+            # ETT tip at vocal cords / glottis
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?:tip\s+)?(?:is\s+|lies\s+|projects?\s+|projecting\s+)?
+                (?:at|at\s+the\s+level\s+of)\s+(?:the\s+)?(?:vocal\s+cords?|glottis)
+            |
+            # selective / laterality bronchial intubation (no mainstem lemma)
+            (?:selective\s+)?(?:right|left|unilateral)\s+(?:main\s+)?bronchial\s+intubat\w*
+            |
+            endobronchial\s+intubat\w*
+            |
+            # pigtail / chest tube projects outside chest wall
+            (?:pigtail|chest\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,12}\W+
+            projects?\s+outside\s+(?:of\s+)?(?:the\s+)?chest(?:\s+wall)?
+            |
+            # ETT deep in / located within mainstem (copula / located, not intubat*)
+            (?:endotracheal\s+tubes?|ett|et\s+tubes?)\b
+            (?:(?![.!?])\W+\w+){0,8}\W+
+            (?<!\bnot\s)(?:deep\s+in|located\s+within)\s+(?:the\s+)?(?:right|left)\s+main(?:stem|\s+stem)
+            |
+            tip\s+of\s+(?:the\s+)?(?:endotracheal\s+tubes?|ett|et\s+tubes?)\s+
+                (?:is\s+|appears?\s+)?(?:located\s+)?(?:within|in|into)\s+(?:the\s+)?
+                (?:right|left)\s+main(?:stem|\s+stem)
         )\b
 
 )

@@ -3,11 +3,12 @@
 # Pleural-space air/gas on the CURRENT CXR.
 #
 # Match: pneumothorax / PTX / aerothorax / tension PTX (+ common typos /
-# truncations: pneumo, pnthx, pneumthorax); deep sulcus; (visceral) pleural
-# line when PTX-framed; pleural air/gas (incl. air-filled / filled-with-air
-# word-order, free air in the pleura, apical/fissural sliver, loculated /
-# costophrenic pocket). Hydro/hemo/pyo lexical forms included (child leaf
-# still owns air-fluid coexistence for composed recall).
+# truncations: pneumo, pnthx, pneumthorax, pneumothroax, neumothorax); deep
+# sulcus (incl. laterality-inserted); (visceral) pleural line when PTX-
+# framed (incl. line of the visceral pleura; no vs absent markings);
+# pleural / intrapleural air/gas; hemithorax air + collapsed lung.
+# Hydro/hemo/pyo lexical forms included (child leaf still owns air-fluid
+# coexistence for composed recall).
 #
 # FN-fit (fn_mine_fit_shared): residual parent only — do not re-lexicon
 # hydropneumothorax child.
@@ -111,8 +112,13 @@
         (?<!\?)
         (?<!\?\s)
         \b(?:
-            # o? covers missing-o typo pneumthorax; stem still needs thora*
-            (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora(?:x|ces)\w*
+            # o? covers missing-o typo pneumthorax; throa|thrax|throra cover
+            # pneumothroax / pneumothrax / pneumothrorax. Do NOT add n? before
+            # th (pneumonthorax) — that stem is indication-slash / negated.
+            (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?th(?:ora|roa|rax|rora)(?:x|ces)\w*
+            |
+            # missing-p typo (findings-style; not hydro* child lexicon)
+            neumothora(?:x|ces)\w*
             |
             aerothora(?:x|ces)\w*
             |
@@ -151,10 +157,12 @@
         |
 
         # ------------------------------------------------------------------
-        # 1a. Impression "concerning for pneumothorax" (positive framing).
+        # 1a. Impression attribution: concerning/suspicious/worrisome/
+        #     positive/diagnostic for pneumothorax (positive framing).
         #     Main stem blocks via soft-concern + (?<!for ) lookbehind.
-        #     Use gerund "concerning" only — bare "clinical concern for" is
-        #     often indication / unresolved clinical question language.
+        #     Keep eval / concern / r/o / question for blocked. Gerund
+        #     "concerning" only — bare "clinical concern for" is often
+        #     indication / unresolved clinical question language.
         # ------------------------------------------------------------------
         (?:
             ^
@@ -163,12 +171,40 @@
             |
             (?<!history)(?<!indication)(?<!data)(?<!info):
         )
-        [^.!?;:\n]{0,120}
+        (?:
+            (?:
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                [^.!?;:\n]
+            )
+            |
+            (?:
+                (?!\b(?:
+                    no|not|without|nor|neither|
+                    free\s+of|clear\s+of|negative\s+for|
+                    ruled\s+out|rule\s+out|rule|
+                    evaluate|eval|assess|assessment|
+                    concern|concerned|
+                    exclude|excluding|
+                    please|
+                    question
+                )\b)
+                (?!\beval(?:uate)?\s+for\b)
+                (?!\bassess(?:ment)?\s+for\b)
+                (?!\bquestion\s+(?:of|for)\b)
+                (?!\br/?o\b)
+                [^.!?;:\n]
+            )
+        ){0,120}
         (?<!\bclinical\s)
-        \bconcerning\s+for\s+
+        (?<!\bclinically\s)
+        \b(?:concerning|suspicious|worrisome|positive|diagnostic)\s+for\s+
         (?:(?:a|an|the|left|right|bilateral|small|large|tiny|apical|residual|possible)\s+){0,6}
         (?:(?:hydro|hemo|haemo|pyo|hemato)[\s\-]*)?p(?:neu|nue|ne|nu)mm?o?thora(?:x|ces)?\w*
         (?!\?)
+        (?![^.!?;:\n]{0,70}\b(?:
+            (?:has\s+|have\s+)?(?:resolv\w*|cleared)|
+            no\s+longer\s+(?:seen|present|evident|visualized|appreciated)
+        )\b)
 
         |
 
@@ -265,16 +301,16 @@
             )
         ){0,180}
         (?:
-            (?:appearance|presence|suggestion)\s+of\s+(?:a\s+)?deep\s+sulcus
+            (?:appearance|presence|suggestion)\s+of\s+(?:a\s+)?deep\s+(?:(?:right|left|bilateral)\s+)?(?:costophrenic\s+)?sulcus
             |
-            \bdeep\s+sulcus(?:\s+(?:sign|appearance|present|on|at|in))?
+            \bdeep\s+(?:(?:right|left|bilateral)\s+)?(?:costophrenic\s+)?sulcus(?:\s+(?:sign|appearance|present|on|at|in))?
         )\b
         (?!\?)
         (?!\s+(?:from\s+)?(?:bowel|colon|gas|stomac\w*|chilaiditi))
         (?![^.!?;:\n]{0,70}\b(?:
-            no\s+(?:definite\s+|frank\s+|gross\s+|overt\s+)?(?:pneumotho|\bptx\b)|
+            no\s+(?:(?:definite|frank|gross|overt|signs?|evidence|findings?)\s+(?:of\s+)?)?(?:pneumotho|\bptx\b)|
             not\s+(?:a\s+)?(?:pneumotho|\bptx\b)
-        )\b)
+        ))
 
         |
 
@@ -305,9 +341,13 @@
                 [^.!?;:\n]
             )
         ){0,160}
-        \b(?:visceral\s+)?pleural\s+(?:line|edge|surface)\b
+        (?:
+            \b(?:visceral\s+)?pleural\s+(?:line|edge|surface)\b
+            |
+            \bline\s+of\s+(?:the\s+)?visceral\s+pleura\b
+        )
         [^.!?;:\n]{0,90}
-        (?:pneumotho\w*|\bptx\b|pleural\s+(?:air|gas)|absent\s+(?:peripheral\s+)?(?:lung\s+)?markings)
+        (?:pneumotho\w*|\bptx\b|pleural\s+(?:air|gas)|(?:absent|no)\s+(?:peripheral\s+)?(?:lung\s+)?markings)
 
         |
 
@@ -368,6 +408,7 @@
                     ruled\s+out|rule\s+out|
                     question|
                     subcutane\w*|mediastin\w*|pericardi\w*|peritone\w*|
+                    periaortic|
                     bulla|bullae|bleb
                 )\b)
                 (?!\bquestion\s+of\b)
@@ -398,6 +439,15 @@
             |
             # iatrogenic / costophrenic pocket of gas (thoracentesis-framed optional)
             (?:(?:residual|iatrogenic|post[\s\-]?procedural)\s+)?(?:pocket|collection)\s+of\s+(?:air|gas)\s+in\s+(?:the\s+)?(?:(?:right|left)\s+)?costophrenic\s+(?:sulcus|angle|recess)
+            |
+            # intrapleural air/gas (parent residual; mediastinum/SQ/periaortic
+            # blocked in the tempered scan above)
+            \bintrapleural\s+(?:air|gas)\b
+            |
+            # complete PTX without pneumo* token: hemithorax air + collapse
+            (?:air|gas)\s+(?:in|within)\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?hemithorax
+            [^.!?;:\n]{0,70}
+            (?:surrounds\s+(?:a\s+)?)?(?:collapsed|airless)\s+(?:(?:right|left)\s+)?lung
         )
         (?!\?)
         (?![^.!?;:\n]{0,80}\b(?:

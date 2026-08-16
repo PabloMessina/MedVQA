@@ -4,12 +4,14 @@
 # or mass-like lesion on the current CXR.
 #
 # Match: mediastinal mass / mass-like / tumor; intervening soft[- ]tissue;
-# mass in/within (compartment incl. mid/lower ranges) mediastinum;
+# mass in/within/occupying (compartment incl. mid/lower ranges) mediastinum;
+# mass is noted|seen in mediastinum; mediastinum contains a mass;
 # mass-like opacity|density in mediastinum; mass projecting into mediastinum;
 # cervicomediastinal mass; mediastinal lesion ... mass; mass behind the heart;
 # lesion in the (anterior) mediastinum; station-scoped mass lesion not excluded;
-# nodal / conglomerate / adenopathy/mass; paratracheal / prevascular /
-# retrosternal soft[- ]tissue mass; mediastinal[/and]hilar mass;
+# nodal / conglomerate / (lymph)adenopathy/mass; paratracheal / prevascular /
+# retrosternal soft[- ]tissue or well-circumscribed mass;
+# mediastinal[/and]hilar mass;
 # AP / aortopulmonary window mass (noun-order, region-of, is-seen);
 # mass arising from the mediastinum; mass in the anterior clear space.
 #
@@ -184,11 +186,65 @@
         (?<!\bdemonstrates\scystic\s)
         (?<!\bdemonstrated\scystic\s)
         (?:(?:soft[-\s]?tissue|large|small|rounded)\s+)?
-        mass(?:es)?\s+(?:(?:is|are|was|were)\s+seen\s+)?(?:in|of|within)\s+(?:the\s+)?
+        mass(?:es)?\s+(?:(?:is|are|was|were)\s+)?(?:(?:noted|seen|identified|present|located)\s+)?(?:in|of|within)\s+(?:the\s+)?
         (?:(?:anterior|middle|mid(?:dle)?|posterior|superior|upper|lower)
            (?:\s+to\s+(?:mid(?:dle)?|lower|upper|anterior|posterior|superior))?\s+)?
         mediastinum
         (?!\s+as\s+seen\s+on)
+        (?!\s+seen\s+on)
+        (?!\s+on\s+(?:prior\s+|chest\s+|recent\s+|previous\s+)?(?:CT|CTA|MRI|MRA)\b)
+
+        |
+
+        # mass occupying ... mediastinum (optional short skip; occupying-and-widening)
+        (?<!\bevaluate\sfor\s)
+        (?<!\beval\sfor\s)
+        (?<!\brule\sout\s)
+        (?<!\br/o\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhistory\sof\sa\s)
+        (?<!\bhistory\sof\san\s)
+        (?<!\bhistory:\s)
+        (?<!\bclinical\shistory:\s)
+        (?<!\bindication:\s)
+        (?<!\bhx\sof\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bor\s)
+        (?<!\bon\sCT\s)
+        (?<!\bon\sprior\sCT\s)
+        mass(?:es)?
+        (?:[^\w.!?;]+(?!without\b|no\b|not\b)\w+){0,8}[^\w.!?;]+
+        occupying(?:\s+and\s+widening)?
+        \s+(?:the\s+)?
+        (?:(?:anterior|middle|mid(?:dle)?|posterior|superior|upper|lower|right|left|bilateral|right-sided|left-sided)\s+){0,3}
+        mediastinum
+        (?!\s+as\s+seen\s+on)
+        (?!\s+seen\s+on)
+        (?!\s+on\s+(?:prior\s+|chest\s+|recent\s+|previous\s+)?(?:CT|CTA|MRI|MRA)\b)
+
+        |
+
+        # inverted: (compartment) mediastinum contains a mass
+        (?<!\bevaluate\sfor\s)
+        (?<!\beval\sfor\s)
+        (?<!\brule\sout\s)
+        (?<!\br/o\s)
+        (?<!\bhistory\sof\s)
+        (?<!\bhistory:\s)
+        (?<!\bclinical\shistory:\s)
+        (?<!\bindication:\s)
+        (?<!\bhx\sof\s)
+        (?<!\bno\s)
+        (?<!\bwithout\s)
+        (?<!\bnot\s)
+        (?<!\bor\s)
+        (?<!\bon\sCT\s)
+        (?:(?:anterior|middle|mid(?:dle)?|posterior|superior|upper|lower)\s+)?
+        mediastinum\s+(?:contains?|containing)\s+(?:(?:a|an|the)\s+)?
+        (?:(?:large|small|soft[-\s]?tissue)\s+)?
+        mass(?:es)?
         (?!\s+seen\s+on)
         (?!\s+on\s+(?:prior\s+|chest\s+|recent\s+|previous\s+)?(?:CT|CTA|MRI|MRA)\b)
 
@@ -351,11 +407,11 @@
         (?<!\bor\s)
         (?:(?:right|left|bilateral|upper|lower|marked|bulky|large)\s+){0,2}
         (?:(?:para[-\s]?tracheal|pretracheal|prevascular|retrosternal|subcarinal|mediastinal)\s+)?
-        adenopathy\s*[/-]\s*mass(?:es)?
+        (?:lymph)?adenopathy\s*[/-]\s*mass(?:es)?
 
         |
 
-        # mediastinal-station mass (optional intervening soft tissue; not bare hilar)
+        # mediastinal-station mass (optional intervening soft tissue / size-shape; not bare hilar)
         (?<!\bno\s)
         (?<!\bwithout\s)
         (?<!\bevaluate\sfor\s)
@@ -365,7 +421,8 @@
         (?<!\bor\s)
         (?:(?:right|left|bilateral|upper|lower)\s+)?
         (?:para[-\s]?tracheal|pretracheal|prevascular|retrosternal|subcarinal)
-        \s+(?:soft[-\s]?tissue\s+)?(?:mediastinal\s+)?mass(?:es)?
+        (?:\s+(?:soft[-\s]?tissue|well[-\s]?(?:circumscribed|defined)|circumscribed|rounded|lobulated|oval|ovoid|large|small|bulky|mediastinal)){0,3}
+        \s+mass(?:es)?
 
         |
 

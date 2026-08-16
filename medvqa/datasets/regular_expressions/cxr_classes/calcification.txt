@@ -28,11 +28,27 @@
 |
 
 # ==============================================================================
-# 2. Costochondral mineralization (prompt residual; not bare bone mineraliz*)
+# 2. Costochondral / costal-cartilage mineralization or ossification
+# Prompt residual (not bare bone mineraliz*; not DISH / ALL / HO / fracture fragment)
 # ==============================================================================
-\bmineraliz\w*\s+(?:of\s+)?(?:the\s+)?costochondral\b
+\bmineraliz\w*\s+(?:of\s+)?(?:the\s+)?
+(?:(?:left|right|anterior|posterior|first|second|third|fourth|fifth|1st|2nd|3rd|asymmetric)\s+)*
+(?:costochondral\b|costal\s+cartilag\w*|chondral\s+cartilag\w*)
 |
 \bcostochondral\b(?:\s+\w+){0,4}\s+mineraliz\w*\b
+|
+\b(?:costal|chondral)\s+cartilag\w*(?:\s+\w+){0,3}\s+mineraliz\w*\b
+|
+# "ossification of the (anterior left) costochondral/costal cartilage"
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+\bossification\s+of\s+(?:the\s+)?
+(?:(?:left|right|anterior|posterior|first|second|third|fourth|fifth|1st|2nd|3rd|asymmetric)\s+)*
+(?:costochondral|costal|chondral)\s+cartilag\w*
+|
+# "costal cartilage ossification" / "costochondral ossification"
+\b(?:costochondral|costal|chondral)\s+cartilag\w*(?:\s+\w+){0,3}\s+ossification\b
+|
+\bcostochondral\s+ossification\b
 
 |
 
@@ -43,6 +59,26 @@
 \bcontain(?:s|ing)?\s+calcium\b
 |
 \bcalcium\s+(?:deposit\w*|densit\w*|fleck\w*)\b
+|
+# "calcium in (several mediastinal) lymph nodes" — not calcium ingestion / serum
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+(?<!\bserum\s)(?<!\bionized\s)
+\bcalcium\s+in\s+
+(?:(?:the|several|multiple|some|few|scattered|bilateral|many|enlarged)\s+)*
+(?:(?:right|left|upper|lower|middle|mediastinal|hilar|perihilar|paratracheal|cardiophrenic)\s+)*
+(?:lymph\s+)?nodes?\b
+(?!\s+channel)
+|
+(?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+(?<!\bserum\s)(?<!\bionized\s)
+\bcalcium\s+in\s+(?:the\s+)?(?:mediastinum|hila|hilum)\b
+|
+# other-site calcific deposit in CXR FOV (not "collection of calcium")
+\bmilk\s+of\s+calcium\b
+|
+# radiographic Ca++ density notation (not Ca++ channel blocker)
+\bCa\s*\+\+
+(?!\s+channel)
 |
 # "calcium within them" / "calcium within the nodule" — not serum-within-limits
 (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)

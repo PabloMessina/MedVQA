@@ -38,7 +38,20 @@
     "Persistently increased size of the cardiomediastinal silhouette.",
     "Increased cardiomediastinal silhouette size.",
     "Unchanged large mediastinal contour.",
-    "Persistent broad cardiomediastinal silhouette."
+    "Persistent broad cardiomediastinal silhouette.",
+    "The cardiomediastinal shadow is enlarged, but unchanged.",
+    "Cardiomediastinal shadow is enlarged with a prominent left auricle, but is unchanged.",
+    "The cardiomediastinal shadow is widened, but stable.",
+    "Mild increase in the cardiomediastinal silhouette.",
+    "There has been interval increase in the cardiomediastinal silhouette.",
+    "Interval increase in cardiomediastinal caliber.",
+    "Increase in cardiomediastinal silhouette.",
+    "CARDIOMEDIASTINAL SILHOUTTE IS ENLARGED, BUT STABLE.",
+    "Cardiomediastinal silhouette is increased in size in comparison to the prior study.",
+    "Cardiomediastinal sillouette is unchanged and appears enlarged due to prominent mediastinal fat seen on prior CT.",
+    "The cardiomediastinal borders are widened.",
+    "A mediastinal mass widens the cardiomediastinal silhouette.",
+    "Adenopathy enlarges the cardiomediastinal silhouette."
   ],
   "negatives": [
     "Normal heart size and mediastinal contours.",

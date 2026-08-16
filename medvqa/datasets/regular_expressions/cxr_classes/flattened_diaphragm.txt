@@ -4,18 +4,21 @@
 # diaphragm on the current CXR (prompt-faithful).
 #
 # Match: flatten(ed/ing) (+ OCR flattered) / bare flat (+ degree adverbs,
-# optional "appearing") of/to/in/near (hemi)diaphragm; optional contour/
+# optional "appearing") of/to/in/on/along/near (hemi)diaphragm; optional contour/
 # appearance/dome/configuration bridge; aspect/margin site bridges; anatomic
-# site (posterior/anterior/medial/lateral/mid/…) plus laterality; hyphenated
-# hemi-diaphragm; diaphragm … remain/are/that-are … flatten*|straighten*|flat
-# (adverbs incl. minimally + short "are … and are" gaps); flatten/straighten/
-# flat of the left/right ellipsis; contour-of-diaphragm-first then
-# straighten/flatten/flat; straighten(ed/ing) of/to (hemi)diaphragm; loss of
-# the normal (domed) contour/curvature of the (hemi)diaphragm.
+# site (posterior/anterior/medial/lateral/mid/adjacent/…) plus laterality;
+# hyphenated or spaced hemi(-)diaphragm; diaphram/hemidiaphram typos;
+# diaphragm … remain/are/also appear/that-are … flatten*|straighten*|flat|straight
+# (adverbs incl. minimally/significantly + "are … low in position and/with");
+# flatten/straighten/flat of the left/right ellipsis; contour-of-diaphragm-first
+# then straighten/flatten/flat; flatten and elevation of; flattened elevated;
+# comma "which now appears flattened"; loss of the normal (domed) contour/
+# curvature of the (hemi)diaphragm.
 #
 # Do NOT match: silhouette "loss of the (hemi)diaphragm" from opacity /
 # atelectasis / consolidation; bare low/depressed diaphragm or hyperinflation
-# alone; elevation/eventration/tenting; "decreased elevation".
+# alone; elevation/eventration/tenting; "decreased elevation"; straight
+# catheters/views (straight only after a (hemi)diaphragm subject).
 #
 # Negation: fixed-width lookbehinds for no/without/not/nor of / no evidence of
 # (covers "NO EVIDENCE OF … NOR OF FLATTENING" and "without flattening").
@@ -31,20 +34,20 @@
         (?<!\bno\s)
         (?<!\bnot\s)
         (?<!\bnor\sof\s)
-        (?:(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|low)\s+)*
+        (?:(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|significantly|low)\s+)*
         (?:flatt(?:en(?:ed|ing)?|ered)|straighten(?:ed|ing)|flat)
         (?:
-            \s+(?:(?:is|are)\s+)?(?:seen|noted|demonstrated|visualized)\s+(?:of|to|in)\s+
+            \s+(?:(?:is|are)\s+)?(?:seen|noted|demonstrated|visualized)\s+(?:of|to|in|on|along|near)\s+
             |
-            \s+(?:(?:contour|appearance|dome|configuration)s?\s+)?(?:of|to|in)\s+
+            \s+(?:and\s+elevation\s+)?(?:(?:contour|appearance|dome|configuration)s?\s+)?(?:of|to|in|on|along|near)\s+
             |
             \s+(?:appearing\s+)?
         )?
         (?:the\s+)?
-        (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid)\s+)*
+        (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid|adjacent|elevated)\s+)*
         (?:(?:aspect|margin|contour|surface)\s+of\s+(?:the\s+)?)?
-        (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid)\s+)*
-        (?:hemi-?)?diaphragm\w*
+        (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid|adjacent|elevated)\s+)*
+        (?:hemi[-\s]?)?diaphr(?:agm|am)\w*
         |
         (?<!\bno\sevidence\sof\s)
         (?<!\bwithout\sevidence\sof\s)
@@ -56,30 +59,33 @@
         (?<!\bnot\s)
         (?<!\bnor\sof\s)
         (?:flatt(?:en(?:ed|ing)?|ered)|straighten(?:ed|ing)|flat)
-        \s+(?:of|to|in)\s+(?:the\s+)?(?:left|right)(?=\s*(?:(?:hemi-?)?diaphragm|[.,;:]|$))
+        \s+(?:of|to|in|on|along|near)\s+(?:the\s+)?(?:left|right)(?=\s*(?:(?:hemi[-\s]?)?diaphr(?:agm|am)|[.,;:]|$))
         |
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-        (?:hemi-?)?diaphragms?(?:atic)?
-        (?:\s+domes?)?
+        (?:hemi[-\s]?)?diaphr(?:agm|am)\w*
+        (?:\s+(?:domes?|contours?))?
+        (?:\s*,)?
+        (?:\s+(?:also|now))?
         (?:
             \s+(?:that|which)
             |
             \s+(?:are|is|appears?|remain(?:s|ing)?|have\s+a|has\s+a)
-            (?:\s+(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|low|high|positioned))+
-            (?:\s+and)?
+            (?:\s+(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|significantly|low|high|positioned|low-lying))+
+            (?:\s+in\s+position)?
+            (?:\s+(?:and|with))?
         )?
-        \s+(?:are\s+|is\s+|appears?\s+|remain(?:s|ing)?\s+|have\s+a\s+|has\s+a\s+|that\s+are\s+|that\s+is\s+|which\s+are\s+|which\s+is\s+)?
-        (?:(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally)\s+)*
-        (?:flatten\w*|straighten\w*|\bflat\b)
+        \s+(?:(?:now\s+)?(?:are\s+|is\s+|appears?\s+|remain(?:s|ing)?\s+|have\s+a\s+|has\s+a\s+|that\s+are\s+|that\s+is\s+|which\s+are\s+|which\s+is\s+))?
+        (?:(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|significantly|now)\s+)*
+        (?:flatten\w*|straighten\w*|\bflat\b|\bstraight\b)
         |
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
         (?:contour|appearance|dome)s?
         \s+of\s+(?:the\s+)?
         (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid)\s+)*
-        (?:hemi-?)?diaphragm\w*
+        (?:hemi[-\s]?)?diaphr(?:agm|am)\w*
         \s+(?:is|are|appears?|remain(?:s|ing)?)
-        (?:\s+(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally))*
-        \s+(?:flatten\w*|straighten\w*|\bflat\b)
+        (?:\s+(?:quite|somewhat|relatively|slightly|mildly|moderately|abnormally|very|mild|slight|minimally|significantly))*
+        \s+(?:flatten\w*|straighten\w*|\bflat\b|\bstraight\b)
         |
         loss\s+of\s+(?:the\s+)?normal\s+(?:domed\s+)?diaphragmatic
         (?:\s+(?:contour|curvature|dome)s?)?
@@ -87,5 +93,5 @@
         loss\s+of\s+(?:the\s+)?normal\s+(?:domed\s+)?(?:contour|curvature|dome)s?
         \s+(?:of\s+)?(?:the\s+)?
         (?:(?:right|left|both|bilateral(?:ly)?|posterior|anterior|medial|lateral|superior|inferior|mid)\s+)*
-        (?:hemi-?)?diaphragm\w*
+        (?:hemi[-\s]?)?diaphr(?:agm|am)\w*
     )

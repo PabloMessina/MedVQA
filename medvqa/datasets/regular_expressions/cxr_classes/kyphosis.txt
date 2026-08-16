@@ -5,10 +5,17 @@
 # FN-fit (fn_mine_fit_shared): Scheuermann eponym = thoracic kyphotic deformity
 # (disease / changes / wedging-linked). Do not chase bare wedging, lateral scoliosis,
 # Harrington/thoracic deformity alone, or differential-only Scheuermann.
-\b(?:hyper)?kypho\w*
+# FN-fit pass-2: letter-swap khyphosis; gibbosity; Dowager's hump; exaggerated dorsal
+# curvature with thoracic/spine context. Do not add hyphotic positioning, hypokyphosis,
+# bare thoracic curvature, isolated scoliosis, or unattested cyphosis/kiphosis/humpback.
+\b(?:hyper)?kh?ypho\w*
 |
-\bgibb(?:us|ous)\w*
+\bgibb(?:us|ous|osity)\w*
 |
 \bround[-\s]?back(?:\s+deformit\w*)?
 |
 \bscheuermann\w*
+|
+\bdowager(?:['’]s)?\s+hump
+|
+\bexaggerated\s+dorsal\s+curvature\s+of\s+(?:the\s+)?(?:thoracic\s+)?spine

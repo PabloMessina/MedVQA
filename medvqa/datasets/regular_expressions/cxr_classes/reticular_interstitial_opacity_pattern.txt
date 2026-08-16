@@ -7,8 +7,9 @@
 # reticular+granular, same “explicit reticular component” rule as
 # reticulonodular); reticulolinear; reticulointerstitial; reticuloalveolar;
 # noduloreticular; truncated reticula+pattern; IU “retic./retic markings”;
-# common typos (retricular, reitcular, recticular, reticuonodular,
-# reticulonudar, reticulnodular); net/network/mesh/lace-like phrasing;
+# common typos (retricular, reitcular, recticular, retincular,
+# recicular, erticular, retuticular, reticuonodular, reticulonudar,
+# reticulnodular); net/network/mesh/lace-like phrasing;
 # meshwork/lacework + pulmonary opacity/pattern trailer.
 #
 # Do NOT match: bare septal thickening / Kerley lines; interstitial markings
@@ -55,12 +56,19 @@
             reticulo[\s-]*interstit\w*|
             # reticuloalveolar / reticulo-alveolar (reticular + alveolar component)
             reticulo[\s-]*alveol\w*|
-            # IU abbreviation of reticular markings (optional period: "Retic. opacities")
-            retic\.?\s+(?:markings|opacit(?:y|ies)|densit(?:y|ies)|pattern|change)\b|
+            # IU abbreviation of reticular (optional period: "Retic. opacities").
+            # Trailers include interstitial|pulmonary; period form also matches
+            # "retic. at the (lung )bases" without a morphology trailer.
+            retic\.?\s+(?:markings|opacit(?:y|ies)|densit(?:y|ies)|pattern|change|interstitial|pulmonary)\b|
+            retic\.\s+at\s+the\s+(?:lung\s+)?bases\b|
             # Frequent report typos observed on this freeze set
             retricular|
             reitcular|
             recticular|
+            retincular|
+            recicular|
+            erticular|
+            retuticular|
             reitculonodul\w*|
             reitculo[\s-]*nodul\w*|
             reticuonodul\w*

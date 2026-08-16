@@ -21,6 +21,11 @@ from medvqa.datasets.cxr_report_labeling.paths import (
     get_cache_run_dir,
     get_results_run_dir,
 )
+from medvqa.datasets.cxr_report_labeling.report_loaders import ALL_DATASETS
+from medvqa.datasets.cxr_report_labeling.verify_jobs import (
+    JOB_SOURCE_SAMPLES,
+    JOB_SOURCES,
+)
 from medvqa.scripts.cxr_report_labeling.annotate_reports_with_llm import (
     DEFAULT_MODEL_NAME,
     run_annotation,
@@ -72,6 +77,9 @@ def submit_with_backoff(
     skip_annotation_paths: Optional[list] = None,
     config_extra: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    job_source: str = JOB_SOURCE_SAMPLES,
+    datasets: Optional[list] = None,
+    compact_labels_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Call batch_mode=submit, retrying on 429 with exponential backoff."""
     sleep_s = backoff_initial_s
@@ -93,6 +101,9 @@ def submit_with_backoff(
                 skip_annotation_paths=skip_annotation_paths,
                 config_extra=config_extra,
                 reasoning_effort=reasoning_effort,
+                job_source=job_source,
+                datasets=datasets,
+                compact_labels_path=compact_labels_path,
             )
             info["submit_attempts"] = attempt
             info["n_429_waits"] = n_429
@@ -129,6 +140,9 @@ def run_batch_loop(
     skip_annotation_paths: Optional[list] = None,
     config_extra: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    job_source: str = JOB_SOURCE_SAMPLES,
+    datasets: Optional[list] = None,
+    compact_labels_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     setup_logging()
     if samples_path is None:
@@ -136,11 +150,13 @@ def run_batch_loop(
 
     progress_path = _progress_path(run_id)
     logger.info(
-        "Starting annotation batch loop run_id=%s model=%s chunk_size=%d "
-        "max_tokens_per_request=%d temperature=%s progress=%s skip_paths=%s "
+        "Starting annotation batch loop run_id=%s model=%s job_source=%s datasets=%s "
+        "chunk_size=%d max_tokens_per_request=%d temperature=%s progress=%s skip_paths=%s "
         "reasoning_effort=%s",
         run_id,
         model_name,
+        job_source,
+        datasets,
         chunk_size,
         max_tokens_per_request,
         temperature,
@@ -158,6 +174,9 @@ def run_batch_loop(
         "temperature": temperature,
         "skip_annotation_paths": list(skip_annotation_paths or []),
         "reasoning_effort": reasoning_effort,
+        "job_source": job_source,
+        "datasets": list(datasets or []),
+        "compact_labels_path": compact_labels_path,
         "progress_path": str(progress_path),
         "chunks": [],
     }
@@ -185,6 +204,9 @@ def run_batch_loop(
             skip_annotation_paths=skip_annotation_paths,
             config_extra=config_extra,
             reasoning_effort=reasoning_effort,
+            job_source=job_source,
+            datasets=datasets,
+            compact_labels_path=compact_labels_path,
         )
         n_queued = int(prep.get("n_jobs_queued") or 0)
         n_uid = prep.get("n_uid_intents")
@@ -234,6 +256,9 @@ def run_batch_loop(
             skip_annotation_paths=skip_annotation_paths,
             config_extra=config_extra,
             reasoning_effort=reasoning_effort,
+            job_source=job_source,
+            datasets=datasets,
+            compact_labels_path=compact_labels_path,
         )
         batch = submit_info.get("batch") or {}
         batch_id = batch.get("batch_id")
@@ -262,15 +287,24 @@ def run_batch_loop(
             skip_annotation_paths=skip_annotation_paths,
             config_extra=config_extra,
             reasoning_effort=reasoning_effort,
+            job_source=job_source,
+            datasets=datasets,
+            compact_labels_path=compact_labels_path,
         )
         collect_batch = collect_info.get("batch") or {}
         n_saved = collect_batch.get("n_saved")
         status = collect_batch.get("batch_status")
+        counts = collect_batch.get("collect_counts") or {}
         logger.info(
-            "Chunk %d collect status=%s n_saved=%s (%.1fs)",
+            "Chunk %d collect status=%s n_api_parsed=%s/%s n_parse_failed=%s "
+            "n_rows_after_fanout=%s n_fanout_extra=%s (%.1fs)",
             chunk_idx,
             status,
-            n_saved,
+            counts.get("n_parsed"),
+            counts.get("n_api_responses"),
+            counts.get("n_parse_failed"),
+            counts.get("n_rows_after_fanout", n_saved),
+            counts.get("n_extra_from_fanout"),
             time.time() - t_collect0,
         )
 
@@ -285,12 +319,15 @@ def run_batch_loop(
             "batch_id": batch_id,
             "batch_status": status,
             "n_saved": n_saved,
+            "collect_counts": counts,
             "n_new_rows": collect_info.get("n_new_rows"),
             "submit_attempts": submit_info.get("submit_attempts"),
             "n_429_waits": submit_info.get("n_429_waits"),
             "elapsed_s": round(elapsed, 2),
             "save_path": collect_info.get("save_path") or prep.get("save_path"),
             "config_slug": prep.get("config_slug"),
+            "job_source": job_source,
+            "fail_sidecar": collect_info.get("fail_sidecar"),
         }
         _append_progress(progress_path, progress_row)
         summary["chunks"].append(progress_row)
@@ -353,6 +390,23 @@ def main():
         default=None,
         help="OpenAI-compat reasoning_effort (Gemini 3 thinking_level). Default minimal for gemini-3.5-flash-lite.",
     )
+    parser.add_argument(
+        "--job_source",
+        default=JOB_SOURCE_SAMPLES,
+        choices=list(JOB_SOURCES),
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=None,
+        choices=list(ALL_DATASETS),
+        help="Required for regex_positives / no_finding (exactly one corpus)",
+    )
+    parser.add_argument(
+        "--compact_labels_path",
+        default=None,
+        help="Compact jsonl for job_source=no_finding",
+    )
     args = parser.parse_args()
     summary = run_batch_loop(
         run_id=args.run_id,
@@ -370,6 +424,9 @@ def main():
         skip_annotation_paths=args.skip_annotation_paths,
         config_extra=args.config_extra,
         reasoning_effort=args.reasoning_effort,
+        job_source=args.job_source,
+        datasets=args.datasets,
+        compact_labels_path=args.compact_labels_path,
     )
     print(json.dumps({k: v for k, v in summary.items() if k != "chunks"}, indent=2))
 

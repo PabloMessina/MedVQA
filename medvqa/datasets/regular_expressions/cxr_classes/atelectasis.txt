@@ -6,20 +6,27 @@
 # hypoinflation, nonspecific linear/streaky opacity, or effusion/PTX alone.
 #
 # Residual mid-node lexicon (children lobar/rounded stay readonly):
-#   1) word-bounded atelectasis stems (+ typos; FN-fit: atelctasis)
-#   2) anatomy-linked collapse (+ colapse typo); gap bans no/without/rather/vs;
-#      pulmonary collapse; collapse … adjacent|near|next to
-#   3) under-expansion / underaeration of a lung region
+#   1) word-bounded atelectasis stems (+ typos; FN-fit: atelctasis, ateletasis)
+#   2) anatomy-linked collapse (+ colapse / collapose / collpase / collase);
+#      gap bans no/without/rather/vs; pulmonary collapse;
+#      collapse … adjacent|near|next to;
+#      modifiers dependent|discoid|linear|subsegmental (no trailing anatomy);
+#      laterality+upper/mid/lower + collapse (no gap: avoid vertebral);
+#      DDx "edema|opacity|infection or <collapse-typo>"
+#   3) under-expansion / underaeration / incomplete expansion / hypoaeration
+#      of a lung region
 #   4) attributed volume loss
 #   5) regional volume loss — FN-fit (fn_mine_fit_shared): left/right base;
 #      at both bases; optional of/in; slash VL/consolidation|infiltrate;
 #      VL and infiltrate; multi-lobe and-gap; perihilar; medial; thorax;
 #      retrocardiac VL[/consolidation]
-#   6) plate-/band-/discoid opacity|density without an atelect* stem
-#      (prompt morphology; skip scar/artifact attribution)
+#   6) plate-/band-/discoid opacity|density; linear bands of opacity;
+#      discoid changes (prompt morphology; skip scar/artifact attribution)
+#   7) airless + lung/base/basilar (named-lobe airless stays on lobar child)
 #
 # Negation: light tempered scan; digit-colon ignored (times); bare "without"
 # blocks "without X or atelectasis"; "with or without atelectasis" allowed.
+# Restart at although|though|however|but (contrastive "no X but … atelectasis").
 # FN-fit: do not soft-block bare "suspect" (blocks "Suspect … atelecatsis").
 # Post-hit drops "atelectatic (changes) have/has cleared|resolved".
 # Compiled IGNORECASE|VERBOSE. Fixed-width lookbehinds only.
@@ -33,6 +40,9 @@
         |
         # Section headers like IMPRESSION: — not clock times (12:59)
         (?<!history)(?<!indication)(?<!data)(?<!info)(?<!\d):
+        |
+        # Contrastive restart: "no pneumonia but there is subsegmental atelectasis"
+        \b(?:although|though|however|but)\s+
     )
     (?:
         (?:
@@ -118,6 +128,7 @@
                 ateltec\w*|
                 atelelec\w*|
                 ateletc\w*|
+                ateletas\w*|
                 atelecat\w*|
                 atelelct\w*|
                 ateelct\w*|
@@ -135,7 +146,7 @@
         # 2. Anatomy-linked collapse
         # --------------------------------------------------------------
         (?:
-            \b(?:collaps|collasp|colaps)\w*
+            \b(?:collaps|collasp|colaps|collapose|collpase|collase)\w*
             (?:
                 \W+
                 (?!(?:no|not|without|rather|vs\.?|versus)\b)
@@ -147,7 +158,7 @@
                 (?:the\s+)?(?:right|left|bilateral|both)\s+
             )?
             (?:
-                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|subsegment(?:al)?\w*|
                 l[lu]l|r[lmu]l|lingula\w*|
                 (?:bi)?basilar\w*|base\w*|
                 zone\w*|field\w*|hemithorax|
@@ -155,7 +166,7 @@
             )
             |
             \b(?:
-                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|
+                lung\w*|lob(?:ar|e)\w*|segment(?:al)?\w*|subsegment(?:al)?\w*|
                 l[lu]l|r[lmu]l|lingula\w*|
                 (?:bi)?basilar\w*|base\w*|
                 zone\w*|field\w*|hemithorax|
@@ -168,13 +179,20 @@
                 \w+
             ){0,8}
             \s+
-            (?:collaps|collasp|colaps)\w*
+            (?:collaps|collasp|colaps|collapose|collpase|collase)\w*
             |
-            \b(?:underlying|associated|adjacent|compressive|passive|obstructive|resorptive|cicatricial|bibasilar)\s+(?:collaps|collasp|colaps)\w*
+            \b(?:underlying|associated|adjacent|compressive|passive|obstructive|resorptive|cicatricial|bibasilar|dependent|discoid|linear|subsegmental)\s+(?:collaps|collasp|colaps|collapose|collpase|collase)\w*
+            |
+            # laterality + upper/mid/lower + collapse (adjacent; no gap so
+            # "left lower vertebral collapse" does not leak)
+            \b(?:right|left|bilateral|both)\s+(?:upper|middle|lower|mid)\s+(?:collaps|collasp|colaps|collapose|collpase|collase)\w*
+            |
+            # pulmonary DDx "... edema or collpase" (typo stems only)
+            \b(?:edema|consolidat\w*|pneumoni\w*|infiltrate\w*|opacit\w*|infection)\s+(?:or|vs\.?|versus)\s+(?:collapose|collpase|collase)\b
             |
             # collapse … adjacent|near|next to (effusion / compressive);
             # keep gap short so vertebral-body collapse does not leak
-            \b(?:collaps|collasp|colaps)\w*
+            \b(?:collaps|collasp|colaps|collapose|collpase|collase)\w*
             (?:
                 \W+
                 (?!(?:no|not|without|rather|vs\.?|versus)\b)
@@ -190,10 +208,13 @@
         |
 
         # --------------------------------------------------------------
-        # 3. Under-expansion / underaeration of a lung region
+        # 3. Under-expansion / underaeration / incomplete expansion /
+        #    hypoaeration of a lung region
+        #    hypoaerat / incomplete expansion: finding→region only
+        #    (do not fire on global "lungs are hypoaerated")
         # --------------------------------------------------------------
         (?:
-            \b(?:under[\s\-]?expand\w*|under[\s\-]?aerat\w*|poorly\s+expand\w*)
+            \b(?:under[\s\-]?expand\w*|under[\s\-]?aerat\w*|poorly\s+expand\w*|incomplete\s+expansion|hypoaerat\w*)
             (?:(?![.!?])\W+\w+){0,6}
             \s+
             (?:
@@ -336,6 +357,38 @@
             # word-boundary so \w* cannot backtrack past "opacities"/"opacity"
             # to dodge the scar/artifact lookahead
             (?!\s+(?:\w+\s+){0,10}(?:scar(?:s|ring|red)?\b|fibros[ei]\w*|artifact\b|external\b))
+            |
+            # linear bands of opacity (not band-like)
+            \blinear\s+bands?\s+(?:of\s+)?(?:opacit\w*|densit\w*)\b
+            (?!\s+(?:\w+\s+){0,10}(?:scar(?:s|ring|red)?\b|fibros[ei]\w*|artifact\b|external\b))
+            |
+            # discoid changes (morphology without opacity|density)
+            \bdiscoid\s+changes\b
+            (?!\s+(?:\w+\s+){0,10}(?:scar(?:s|ring|red)?\b|fibros[ei]\w*|artifact\b|external\b))
+        )
+        (?!\?)
+
+        |
+
+        # --------------------------------------------------------------
+        # 7. Airless lung / base / basilar (not named-lobe; child owns that)
+        # --------------------------------------------------------------
+        (?:
+            \bairless
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            (?:
+                (?:the\s+)?(?:right|left|bilateral|both)\s+
+            )?
+            (?:lung\w*|base\w*|(?:bi)?basilar\w*)
+            |
+            \b(?:
+                (?:(?:the\s+)?(?:right|left|bilateral|both)\s+)?
+                (?:lung\w*|base\w*|(?:bi)?basilar\w*)
+            )
+            (?:(?![.!?])\W+\w+){0,6}
+            \s+
+            airless\b
         )
         (?!\?)
     )

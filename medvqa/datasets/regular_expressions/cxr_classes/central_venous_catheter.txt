@@ -20,6 +20,9 @@
 #         IJ vascular catheter; except-for / placement-after-removal mixed clauses.
 # FN-fit (fn_mine_fit_shared): PermCath camelCase; Vas-Cath hyphen; Cordis/IJ;
 #         PowerPICC agglutination; Hohn brand.
+# FN-fit pass-2: IJV / RIJ-LIJ; PICCline; hyphen central-venous; portocath;
+#         CVAD; power injectable / dual / framed chest port; Cnetral+cathter;
+#         mixed-clause PICC remains (other-device removal).
 # ==============================================================================
 
 (?:
@@ -133,6 +136,29 @@
             \b(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?central\s+lines?\s+
             (?:is|are|remains?|remain)\s+
             (?:stable|unchanged|in\s+(?:place|situ)|appropriately\s+positioned)\b
+        )
+        |
+        # "REMOVAL OF CHEST TUBES ..., RIGHT PICC REMAINS"
+        # (tempered walk dies on earlier removal; require remains / in-place —
+        #  not "PICC is removed")
+        (?:
+            (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+            (?<!removal\sof\s)
+            (?<!removal\sof\sthe\s)
+            (?<!removal\sof\sa\s)
+            (?<!removal\sof\sright\s)
+            (?<!removal\sof\sleft\s)
+            (?<!removal\sof\sthe\sright\s)
+            (?<!removal\sof\sthe\sleft\s)
+            \b(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?
+            (?:picclines?|piccs?(?:\s+lines?)?|cvcs?|cvads?)
+            \s+
+            (?:
+                (?:remains?|remain)(?!\s+(?:to\s+be\s+)?removed)
+                (?:\s+(?:in\s+(?:place|situ)|unchanged|stable))?
+                |
+                (?:is|are)\s+(?:stable|unchanged|in\s+(?:place|situ)|present|noted)
+            )\b
         )
         |
         # "PA catheter removed ... right IJ sheath still in place"
@@ -256,6 +282,9 @@
         (?<!\bdx\s)
         (?<!\bfor\s)
         (?<!\brefusing\s)
+        # history shorthand immediately before device ("h/o portocath")
+        (?<!\bh/o\s)
+        (?<!\bhx\sof\s)
 
         (?:
                 # ----------------------------------------------------------
@@ -264,7 +293,7 @@
                 (?:
                     (?<!\bwith\s)
                     # accession/date leak: "7/17/2006 CVL-LEC-RSG-V"
-                    \b(?:cvcs?|cvls?)\b(?!-)
+                    \b(?:cvcs?|cvls?|cvads?)\b(?!-)
                 )
                 |
                 \b(?:
@@ -272,6 +301,9 @@
                     powerpiccs?(?:\s+lines?)?
                     |
                     power\s*piccs?(?:\s+lines?)?
+                    |
+                    # agglutinated PICCline (one token; spaced PICC line already covered)
+                    picclines?
                     |
                     piccs?(?:\s+lines?)?
                     |
@@ -281,10 +313,10 @@
                     |
                     peripherally\s+inserted\s+central\s+(?:catheters?|lines?)
                     |
-                    # typo "center venous" for "central venous"
-                    cent(?:er|ral)\s+venous\s+(?:catheters?|caths?|lines?|access|sheaths?|introducers?)
-                    |
-                    central\s+venous\s+(?:catheters?|lines?|access|sheaths?|introducers?)
+                    # hyphen "central-venous"; typo "center" / "Cnetral";
+                    # CVC-framed cathter (not PleurX/Swan); chest port after
+                    # "central venous"
+                    c(?:ent(?:er|ral)|netral)[- ]+venous\s+(?:chest\s+(?:wall\s+)?)?(?:cath(?:e)?ters?|caths?|lines?|access|sheaths?|introducers?|ports?)
                     |
                     central\s+lines?
                     |
@@ -334,22 +366,28 @@
                 # 3. IJ / jugular central access
                 # ----------------------------------------------------------
                 \b(?:
-                    (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
-                )?
-                (?:
-                    i\.?\s*j\.?
-                    |
-                    internal\s+jugular
-                    |
-                    external\s+jugular
-                    |
-                    jugular
+                    (?:
+                        (?:right|left|bilateral|bilat\.?)[- ]?(?:sided\s+)?
+                    )?
+                    (?:
+                        # IJV before IJ so "IJV catheter" is not eaten as IJ+V
+                        ijv
+                        |
+                        i\.?\s*j\.?
+                        |
+                        internal\s+jugular
+                        |
+                        external\s+jugular
+                        |
+                        jugular
+                    )
                 )
                 (?:
                     \s+(?:vein\s+)?(?:approach\s+)?
                     (?:large[- ]?bore\s+)?
                     (?:(?:central\s+)?(?:venous\s+)?|vascular\s+|center\s+venous\s+)?
-                    (?:catheters?|caths?|lines?|tubes?|cvcs?|cvls?|access|sheaths?|introducers?|cordis|trialysis)
+                    (?:chest\s+(?:wall\s+)?)?
+                    (?:catheters?|caths?|lines?|tubes?|cvcs?|cvls?|access|sheaths?|introducers?|cordis|trialysis|ports?)
                     |
                     \s+(?:vein\s+)?introduction\s+she(?:ath|et)s?
                     |
@@ -367,7 +405,21 @@
 
                 |
 
-                \b(?:ij|i\.j\.)\s+(?:central\s+|center\s+venous\s+)?(?:venous\s+)?(?:lines?|catheters?|caths?|tubes?|cvcs?|cvls?|sheaths?|introducers?|cordis|trialysis)\b
+                # agglutinated RIJ / LIJ — device word required (not "position of RIJ and trachea")
+                \b[rl]ij\s+(?:vein\s+)?(?:approach\s+)?
+                (?:(?:central\s+)?(?:venous\s+)?|vascular\s+|center\s+venous\s+)?
+                (?:chest\s+(?:wall\s+)?)?
+                (?:catheters?|caths?|lines?|tubes?|cvcs?|cvls?|access|sheaths?|introducers?|cordis|trialysis|ports?)
+                \b
+                (?!\s+pulmonary\s+artery)
+                (?!\s+swan)
+                (?!\s+pacemaker)
+                (?!\s+aicd)
+                (?!\s+icd)
+
+                |
+
+                \b(?:[rl]ij|ijv|ij|i\.j\.)\s+(?:central\s+|center\s+venous\s+)?(?:venous\s+)?(?:chest\s+(?:wall\s+)?)?(?:lines?|catheters?|caths?|tubes?|cvcs?|cvls?|sheaths?|introducers?|cordis|trialysis|ports?)\b
                 (?!\s+pulmonary\s+artery)
                 (?!\s+swan)
 
@@ -424,7 +476,8 @@
                 subclavian
                 \s+(?:vein\s+)?(?:approach\s+)?
                 (?:(?:central|center)\s+)?(?:venous\s+)?
-                (?:catheters?|caths?|lines?|cvcs?|cvls?|access|sheaths?|introducers?)
+                (?:chest\s+(?:wall\s+)?)?
+                (?:catheters?|caths?|lines?|cvcs?|cvls?|access|sheaths?|introducers?|ports?)
                 \b
                 (?!\s+swan)
                 (?!\s+pacemaker)
@@ -461,7 +514,7 @@
                 \b(?:
                     port[- ]?a[- ]?caths?
                     |
-                    portacaths?
+                    port[ao]caths?
                     |
                     # one-word / spaced "portacatheter" (helper residual)
                     porta\s*-?\s*cathet(?:ers?)?
@@ -482,8 +535,8 @@
                     # one-word chemoport
                     chemoports?
                     |
-                    # spaced "power port" / "chest power port"
-                    (?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?(?:chest\s+(?:wall\s+)?)?power\s+ports?
+                    # spaced "power port" / "power injectable port" / "chest power port"
+                    (?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?(?:chest\s+(?:wall\s+)?)?power\s+(?:injectable\s+)?ports?
                     |
                     (?:chemotherapy|chemo)\s+ports?
                     |
@@ -498,9 +551,14 @@
                     (?=(?:(?![.!?]).){0,40}?\b(?:tip|overlies|svc|cavoatrial|atrium)\b)
                     |
                     (?:right|left|bilateral)[- ]?(?:sided\s+)?
+                    (?:dual\s+|double\s+)?
                     (?:chest\s+(?:wall\s+)?|pectoral\s+|venous\s+|subcutaneous\s+)ports?
                     |
                     chest\s+wall\s+ports?
+                    |
+                    # finding-style "STABLE POSITIONING OF CHEST PORT" — not exam-title
+                    # "DX CHEST PORT" (dx lookbehind above) / "chest portable" (\\b after port)
+                    (?:stable\s+)?positioning\s+of\s+(?:(?:the|a|an)\s+)?(?:(?:right|left|bilateral)[- ]?(?:sided\s+)?)?(?:dual\s+|double\s+)?chest\s+ports?
                     |
                     venous\s+ports?
                     |
@@ -611,6 +669,8 @@
                     venous\s+(?:catheters?|caths?|lines?)
                     |
                     pic\s+(?:lines?|catheters?)
+                    |
+                    picclines?
                     |
                     piccs?(?:\s+lines?)?
                 )\b

@@ -9,6 +9,8 @@
 # FN-fit (fn_mine_fit_shared): Kerley "B" quotes; ___/XXXX A and B lines
 # (optional 2nd redaction); bare curly lines; prominent interlobular septa;
 # septal|interstitial (___ B) lines; edema in … interlobular septa.
+# FN-fit pass-2: Kerley type [ABC]; septal (edema|interstitial|[ABC]-)? lines;
+# (___ B), lines comma; septa are thickened; interlobular septal prominence.
 
     # --- Kerley family (kerley|kerly|kirley; hyphen/space/quotes; Blines) ---
     # Optional ASCII/curly quotes around A/B/C: Kerley "B" lines
@@ -21,7 +23,7 @@
     (?<!\bno\sevidence\sof\s)
     (?<!\bnegative\sfor\s)
     (?:well[\s-]defined|definite|obvious|clear(?:ly)?|frank)\s+
-    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:[abc][\s"“”'-]*)?lines?
+    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:type[\s-]+)?(?:[abc][\s"“”'-]*)?lines?
     |
     (?<!\bno\s)
     (?<!\bnot\s)
@@ -31,7 +33,7 @@
     (?<!\bno\sevidence\sof\s)
     (?<!\bnegative\sfor\s)
     (?:well[\s-]defined|definite|obvious|clear(?:ly)?|frank)\s+
-    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*[abc]\b
+    (?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:type[\s-]+)?[abc]\b
     |
     # Bare Kerley; block leftover "… well-defined Kerley" after "without"
     (?<!\bno\s)
@@ -46,7 +48,7 @@
     (?<!\bdefinite\s)
     (?<!\bobvious\s)
     (?<!\bfrank\s)
-    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:[abc][\s"“”'-]*)?lines?
+    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:type[\s-]+)?(?:[abc][\s"“”'-]*)?lines?
     |
     (?<!\bno\s)
     (?<!\bnot\s)
@@ -60,7 +62,7 @@
     (?<!\bdefinite\s)
     (?<!\bobvious\s)
     (?<!\bfrank\s)
-    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*[abc]\b
+    \b(?:kerley|kerly|kirley)(?:['’]?s)?[\s"“”'-]*(?:type[\s-]+)?[abc]\b
     |
     # OCR garble: "ARKS" ≈ Kerley (seen with edema phrasing)
     (?<!\bno\s)
@@ -84,7 +86,7 @@
     # Parenthetical redaction: septal|interstitial (___ B) lines
     (?<!\bno\s)
     (?<!\bwithout\s)
-    \b(?:(?:thickened|discrete)\s+)?(?:septal|interstitial)\s+\((?:_{2,}|\bxxxx)\s*[abc]\)\s*lines?
+    \b(?:(?:thickened|discrete)\s+)?(?:septal|interstitial)\s+\((?:_{2,}|\bxxxx)\s*[abc]\)\s*,?\s*lines?
     |
     # --- Septal lines (split so "No interstitial septal lines" negates) ---
     (?<!\bno\s)
@@ -107,7 +109,7 @@
     (?<!\bno\sinterlobular\s)
     (?<!\bwithout\sinterstitial\s)
     (?<!\bwithout\sinterlobular\s)
-    \bseptal\s+lines?
+    \bseptal\s+(?:(?:edema|interstitial|[abc])[\s-]*)?lines?
     |
     # --- Septal thickening: CT-before in the same clause + "on … CT" ---
     (?:^|[.!?;:\n])
@@ -122,7 +124,7 @@
     (?<!\black\sof\s)
     (?<!\bno\sevidence\sof\s)
     (?<!\bnegative\sfor\s)
-    \binterlobular\s+septal\s+thicken\w*
+    \binterlobular\s+septal\s+(?:thicken\w*|prominen\w*)
     (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
     |
     (?:^|[.!?;:\n])
@@ -172,7 +174,7 @@
     ){0,220}
     (?<!\bno\s)
     (?<!\bwithout\s)
-    \binterlobular\s+septa\w*\s+(?:are|is|appear(?:s)?)\s+(?:more\s+)?prominent
+    \binterlobular\s+septa\w*\s+(?:are|is|appear(?:s)?)\s+(?:more\s+)?(?:prominent|thickened)
     (?!(?:(?![.!?]).){0,70}?\bon\s+(?:the\s+)?(?:\S+\s+){0,4}?(?:chest\s+)?CT\b)
     |
     # Matches: "linear interlobular septal ..."

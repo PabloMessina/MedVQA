@@ -13,11 +13,14 @@
         # the size token so "aorta is very tortuous and may be generally large" hits.
         # Ban stent/graft/mediastinum bridges (widened mediastinum after aortic stent).
         # (?:if\s+not\s+)?ecta*: understatement "tortuous, if not ectatic".
+        # FN-fit: prominent in caliber (not mere prominence); typos dilitation /
+        # ectsatic / extasia. Anatomy-first \bwide\b is a dedicated arm (not here:
+        # "aortic window is wide" is AP-window, not enlargement).
         (?<!\bno\s)(?<!\bwithout\s)
         (?:(?:ascending|descending|thoracic|lower\s+thoracic|upper\s+thoracic|visualized(?:\s+thoracic)?|thoracoabdominal|thoraco-abdominal)\s+)?(?:(?<=thoracoabdominal\s)|(?<=thoraco-abdominal\s)|(?<!abdominal\s))(?:aorta\b|aortic\b)
         (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|stent|graft|mediastin\w*|cardiac|silhouette|heart)\b)\w+){0,10}[^\w.!?;:]+
         (?<!\bwithout\s)(?<!\bno\s)(?<!\bnot\s)
-        (?:enlarged|dilat\w*|(?:if\s+not\s+)?ecta(?:tic|sia|sis)|(?<!non-)aneurysmal|widen(?:ed|ing)|(?:generally\s+)?\blarge\b|increased(?:\s+in)?\s+(?:caliber|diameter|size))\b
+        (?:enlarged|(?:dilat\w*|dilitation)|(?:if\s+not\s+)?(?:ecta(?:tic|sia|sis)|ectsatic|extasia)|(?<!non-)aneurysmal|widen(?:ed|ing)|(?:generally\s+)?\blarge\b|increased(?:\s+in)?\s+(?:caliber|diameter|size)|prominent(?:ly)?\s+in\s+(?:caliber|diameter|size))\b
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
 
         |
@@ -39,9 +42,9 @@
         # the aortic arch; enlarged silhouette ... aorta).
         (?<!\bno\s)(?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)(?<!\bno\saneurysmal\s)(?<!\bno\ssignificant\saneurysmal\s)(?<!\bwithout\s)(?<!\bnot\s)
         (?:
-            (?<!/)(?:dilat\w*|aneurysmal|widen(?:ed|ing)|increased(?:\s+in)?\s+(?:caliber|diameter|size))
+            (?<!/)(?:dilat\w*|dilitation|aneurysmal|widen(?:ed|ing)|increased(?:\s+in)?\s+(?:caliber|diameter|size))
             |
-            ecta(?:tic|sia|sis)
+            (?:ecta(?:tic|sia|sis)|ectsatic|extasia)
         )
         # Gap 0–5 (keep tight — wider gap FP: "mediastinum is widened … aortic knob").
         # "ectatic and mildly tortuous ascending and descending …" covered by tight-adj arm.
@@ -59,7 +62,7 @@
         # and "enlarged and atherosclerotic changes of the aorta" / "widening at
         # the level of the aortic arch" fail. "No significant aneurysmal dilatation".
         (?<!\bno\s)(?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)(?<!\bno\sevidence\sof\s)(?<!\bno\saneurysmal\s)(?<!\bno\ssignificant\saneurysmal\s)(?<!\bwithout\s)(?<!\bwithout\ssignificant\s)(?<!\bnot\s)
-        (?:enlarg\w*|dilat\w*|ecta(?:tic|sia|sis)|widening|aneurysm(?:al)?\s+(?:dilat\w*|enlarg\w*)|increased(?:\s+in)?\s+(?:caliber|diameter|size))
+        (?:enlarg\w*|dilat\w*|dilitation|(?:ecta(?:tic|sia|sis)|ectsatic|extasia)|widening|aneurysm(?:al)?\s+(?:dilat\w*|enlarg\w*)|increase(?:d)?(?:\s+in)?(?:\s+the)?\s+(?:caliber|diameter|size))
         (?:[^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|with\b|cardiac\b|heart\b|silhouette\b|atherosclero\w*|calcifi\w*|mediastin\w*|level\b)\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
         (?:
             # thoracic/ascending already named, then optional "and (upper) abdominal aorta"
@@ -72,12 +75,44 @@
 
         |
 
+        # FN-fit: ectasia, tortuosity, and athero/calcifications of the aorta.
+        # Dedicated so OF-arm keeps calcifi/athero bans ("enlarged and atherosclerotic
+        # changes of the aorta").
+        (?<!\bno\s)(?<!\bno\ssignificant\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:ecta(?:tic|sia|sis)|ectsatic|extasia)
+        (?:[^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|cardiac\b|heart\b|mediastin\w*|level\b|with\b)\w+){0,8}[^\w.!?;:]+of[^\w.!?;:]+
+        (?:
+            (?:the[^\w.!?;:]+)?(?:(?:ascending|descending|thoracic|thoracoabdominal|thoraco-abdominal)[^\w.!?;:]+)+(?:and(?:/or)?[^\w.!?;:]+(?:the[^\w.!?;:]+)?(?:(?:upper|lower|abdominal)[^\w.!?;:]+)*)?aorta\b
+            |
+            (?:the[^\w.!?;:]+)?
+            (?:(?:ascending|descending|thoracic|visualized|lower|upper|thoracoabdominal|thoraco-abdominal)[^\w.!?;:]+)*
+            (?:(?<=thoracoabdominal\s)|(?<=thoraco-abdominal\s)|(?<!abdominal\s)(?<!infrarenal\s))(?:aorta\b|aortic\b)
+        )
+
+        |
+
+        # FN-fit: "Enlargement at the aortic arch" (OF-arm is of-only; not "at the level").
+        # Ban cardiac/heart/silhouette prefixes (LV/cardiac enlargement near the arch).
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?<!\bcardiac\s)(?<!\bheart\s)(?<!\bsilhouette\s)(?<!\bventricular\s)(?<!\batrial\s)(?<!\bmediastinal\s)
+        enlarg\w+\s+at\s+(?:the\s+)?(?:(?:ascending|descending|thoracic)\s+)?aortic\s+(?:arch|knob)\b
+
+        |
+
+        # FN-fit: anatomy-first wide (knob/arch/aorta), not aortic window/hiatus/valve.
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:aorta\b|aortic\s+(?:knob|arch|contour)\b)
+        (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|window|hiatus|valve|nipple)\b)\w+){0,4}[^\w.!?;:]+
+        \bwide\b
+
+        |
+
         # Tight adjective + aortic anatomy, allowing short intervening tortuous/calcified
         # (e.g. "enlarged and tortuous aorta", "enlarged calcified thoracic aorta",
         # "enlarged aortic contour", "ectatic and mildly tortuous ascending and
         # descending thoracic aorta"). thoracoabdominal is thoracic-inclusive.
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!/)
-        (?:enlarged|dilated|ectatic|(?<!non-)aneurysmal|\blarge\b|\bwide\b)
+        (?:enlarged|dilated|ectatic|ectsatic|(?<!non-)aneurysmal|\blarge\b|\bwide\b)
         (?:\s+(?:and\s+)?(?:(?:mildly|moderately|slightly)\s+)?(?:tortuous|calcified|atherosclerotic|unfolded|elongated))*
         \s+(?:(?:ascending|descending|thoracic|thoracoabdominal|thoraco-abdominal)(?:\s+and(?:/or)?\s+(?:ascending|descending|thoracic))*\s+)?
         (?:aortic\s+(?:knob|arch|contour|silhouette)|aorta\b|thoracic\s+aorta\b)
@@ -90,17 +125,27 @@
         # FN-fit: aortic silhouette is mildly ectatic.
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
         (?:(?:thoracoabdominal|thoraco-abdominal)\s+)?(?:(?<=thoracoabdominal\s)|(?<=thoraco-abdominal\s)|(?<!abdominal\s))
-        aortic\s+(?:enlarg\w*|ecta(?:tic|sia|sis)|dilat\w*|knob\s+(?:is\s+)?enlarg\w*|arch\s+(?:is\s+)?(?:enlarg\w*|dilat\w*|ecta(?:tic|sia|sis))|silhouette\s+(?:is\s+)?(?:(?:mildly|moderately|slightly)\s+)?(?:enlarg\w*|dilat\w*|ecta(?:tic|sia|sis)|(?<!non-)aneurysmal))
+        aortic\s+(?:enlarg\w*|(?:ecta(?:tic|sia|sis)|ectsatic|extasia)|dilat\w*|dilitation|knob\s+(?:is\s+)?(?:enlarg\w*|dilat\w*|wide|widened)|arch\s+(?:is\s+)?(?:enlarg\w*|dilat\w*|(?:ecta(?:tic|sia|sis)|ectsatic|extasia))|(?:arch\s+)?silhouette\s+(?:is\s+|appears\s+)?(?:(?:mildly|moderately|slightly)\s+)?(?:enlarg\w*|dilat\w*|(?:ecta(?:tic|sia|sis)|ectsatic|extasia)|(?<!non-)aneurysmal))
 
         |
 
-        # Prominent aortic arch/knob ONLY with an explicit measurement (prompt: mere
-        # prominence does not count unless increased size/caliber).
+        # Prominent aortic arch/knob ONLY with an explicit measurement or suspected
+        # aneurysm (prompt: mere prominence does not count).
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-        (?:prominent\s+|prominence\s+of\s+(?:the\s+)?)
-        (?:(?:ascending|descending|thoracic)\s+)?
-        aortic\s+(?:arch|knob)
-        [^\w.!?;:]+measur\w*
+        (?:
+            (?:prominent\s+|prominence\s+of\s+(?:the\s+)?)
+            (?:(?:ascending|descending|thoracic)\s+)?
+            aortic\s+(?:arch|knob)
+            (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,8}[^\w.!?;:]+
+            (?:measur\w*|aneurysm)
+            |
+            # anatomy-first: "aortic knob is prominent and an aneurysm is suspected"
+            aortic\s+(?:arch|knob)
+            (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,8}[^\w.!?;:]+
+            prominent
+            (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent)\b)\w+){0,8}[^\w.!?;:]+
+            aneurysm
+        )
 
         |
 

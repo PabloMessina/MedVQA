@@ -12,6 +12,8 @@
 # spaced mid clavicular; mid-clavicle; humerus/glenoid list walks; as-well-as
 # without sided; again demonstrated; deformity→healed prior fx; postop
 # fixation…fracture reduction; callus formation…clavicle…healing fracture.
+# Pass-2 hunt TPs: collarbone; both/head in fx→anatomy fillers; L/R laterality;
+# fracture-dislocation hyphen; list-walk lower/sided/posterior/ordinals/proximal.
 # ==============================================================================
 
 (?:
@@ -45,15 +47,19 @@
     (?:
         # 1. Anatomy → pathology (incl. lists; midclavicular deformity→healed prior fx).
         #    No fixation/device/hardware fillers here (avoids screw/device "fractured").
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \s*,?\s*(?:and\s+|or\s+)?
-            (?:(?:left|right|bilateral|bilat\.?|multiple)\s+)*
+            (?:(?:left[\s-]?sided|right[\s-]?sided|left|right|bilateral|bilat\.?|
+                 multiple|both|lower|upper|posterior|anterior|lateral|medial|
+                 proximal|distal|mid|middle|
+                 first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|
+                 \d+(?:st|nd|rd|th)|sided|and)\s+)*
             (?:ribs?|ribcage|rib\s*cage|scapul\w*|stern(?:um|al)?|humer\w*|shoulder|glenoid)
         ){0,4}
         (?:
             (?:\s*,?\s*|\s+)
-            (?:of|the|a|an|left|right|mid|middle|midshaft|mid-?shaft|shaft|
+            (?:of|the|a|an|left|right|both|heads?|[LR]|mid|middle|midshaft|mid-?shaft|shaft|
                  distal|proximal|medial|lateral|third|thirds|3rd|one-?third|
                  mid-to-distal|is|are|shows|demonstrates|demonstrat\w*|exhibits|
                  appears|appear\w*|with|has|have|again|still|similar|
@@ -69,7 +75,7 @@
 
         # 1b. Postop: clavicular (internal) fixation … fracture reduction
         #     (requires "fracture reduction", not bare hardware / device fractured)
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,8}
@@ -86,10 +92,10 @@
         #    distal tip|end / lateral component / humerus intervener / again demonstrated).
         #    Keep deformit*→clavicle (baseline sample-gold: redacted "remote XXXX",
         #    "suggests old injury", bare contour deformity of clavicle).
-        \b(?:fractur\w*|fx|break(?:s|ing)?|broken|callus(?:es)?|comminut\w*|non-?union|malunion|deformit\w*)\b
+        \b(?:fractur\w*(?:-dislocations?)?|fx|break(?:s|ing)?|broken|callus(?:es)?|comminut\w*|non-?union|malunion|deformit\w*)\b
         (?:
             (?:\s*,?\s*|\s+)
-            (?:of|the|a|an|left|right|mid|middle|midshaft|mid-?shaft|shaft|
+            (?:of|the|a|an|left|right|both|heads?|[LR]|mid|middle|midshaft|mid-?shaft|shaft|
                distal|proximal|medial|lateral|third|thirds|3rd|one-?third|
                mid-to-distal|aspect|sided|inferior|superior|patholog\w*|known|
                old|remote|healing|healed|acute|chronic|oblique|mildly|minimally|displaced|
@@ -101,7 +107,7 @@
                deformit\w*|as|well|bilateral|bilat\.?|contour|appearing)
         ){0,18}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         |
 
         # 3. Fracture … as well as … clavicle (optional sided; distal/proximal)
@@ -112,7 +118,7 @@
         \s+as\s+well\s+as\s+(?:the\s+)?
         (?:(?:left|right)(?:-|\s)?sided\s+|(?:left|right)\s+)?
         (?:distal|proximal|medial|lateral|mid(?:[\s-])?|middle\s+)?
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         |
 
         # 4. Periosteal new bone / foreshortening at clavicle + trauma/fracture framing
@@ -121,7 +127,7 @@
             \W+\w+
         ){0,10}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,8}
@@ -130,7 +136,7 @@
         |
 
         # 5. Clavicle … post-traumatic / fracture deformity (require trauma/fx framing)
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,8}
@@ -146,7 +152,7 @@
                  distal|proximal|medial|lateral|mid|middle|old|remote)
         ){0,8}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         |
 
         # 6b. Deformities of … clavicles … compatible/consistent with (healed) prior fractures
@@ -157,7 +163,7 @@
                  distal|proximal|medial|lateral)
         ){0,6}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,8}
@@ -173,7 +179,7 @@
             \W+\w+
         ){0,8}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,6}
@@ -189,7 +195,7 @@
             \W+\w+
         ){0,10}
         \s+
-        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular)\b
+        \b(?<!acromio)(?:mid[\s-]?clavicular|mid-?clavicles?|clavicles?|clavicular|collar[\s-]?bones?)\b
         (?:
             \W+\w+
         ){0,8}

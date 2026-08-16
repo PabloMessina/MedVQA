@@ -1,7 +1,7 @@
 # CXR report labeling scripts
 
-Notebook-friendly entry points used by
-`medvqa/notebooks/datasets/CXR report labeling pipeline.ipynb`.
+[`medvqa/notebooks/datasets/CXR report labeling pipeline.ipynb`](../../notebooks/datasets/CXR%20report%20labeling%20pipeline.ipynb)
+is a **runbook and interactive QA** notebook (paths, Slurm/CLI copy-paste, complexity / P/R/F1 / per-report regex browsers). It is **not** the job driver: Batch annotate, full-corpus regex, eval, verify, and materialize run from the scripts and Slurm wrappers below.
 
 Canonical class ontology (YAML + reviews/HTML):  
 `medvqa/datasets/cxr_report_labeling/ontology/`  
@@ -11,18 +11,20 @@ NLI class prompts: `medvqa/prompts/cxr_classes/`.
 |--------|------|
 | `run_srr_bert_leaves.py` | GPU SRR-BERT labeling + disk cache |
 | `sample_reports.py` | K1/K2/K3 sampling → `results/.../samples.jsonl` |
-| `annotate_reports_with_llm.py` | Capped sample LLM annotation (interactive or Gemini hybrid Batch: prepare → submit → collect) |
-| `run_annotation_batch_loop.py` | Tier-1 overnight loop: chunked prepare → submit (429 backoff) → collect |
+| `summarize_regex_matches.py` | Inventory full-corpus regex matches + remaining unique `content_key`s / `ceil(N/CHUNK_SIZE)` (IU first) |
+| `annotate_reports_with_llm.py` | LLM annotation: sample cartesian **or** `--job_source regex_positives` / `no_finding` (Gemini hybrid Batch: prepare → submit → collect) |
+| `run_annotation_batch_loop.py` | Overnight loop: chunked prepare → submit (429 backoff) → collect; threads `JOB_SOURCE` / `DATASETS` |
 | `compact_sample_annotations.py` | Migrate legacy flat annotations → namespaced `query_hash` cache + fan-out |
-| `eval_regex_vs_llm.py` | Metrics (+ optional FP/FN dumps) vs LLM gold; uses `batch_match_prompt_classes` (`--num_processes`, `--lightweight`) |
-
-Slurm: `medvqa/slurm/launch_cxr_eval_regex_vs_llm.sh` (CPU-only lightweight recall scan; default 16 CPUs).
+| `eval_regex_vs_llm.py` | Metrics (+ optional FP/FN dumps) vs LLM gold; uses `batch_match_prompt_classes` (`--num_processes`, `--lightweight`). Default class list includes `no_finding` as a regex-empty proxy |
 | `snapshot_regex_refine.py` | Freeze annotations/samples/regexes under `.agent/regex_refine/<stamp>/` |
 | `eval_regex_subgraph.py` | Agent API: leaf regexes from a workdir + ontology label/match propagation |
 | `run_regex_mini_tests.py` | Per-class regex mini-report sanity tests (`cxr_class_mini_tests/by_class/`) |
 | `apply_regex_to_dataset.py` | Full-dataset regex matches |
-| `verify_positive_matches_with_llm.py` | LLM verify regex positives |
-| `materialize_final_labels.py` | Final Unmentioned / 5-way labels |
+| `verify_positive_matches_with_llm.py` | **Deprecated** (`orchestrate_api_calls`, `--max_queries 50`). Use `JOB_SOURCE=regex_positives` on the Batch loop. |
+| `materialize_final_labels.py` | Integrate regex-backed 6-way labels (`--stage regex_backed` then `--stage final` for `no_finding`) |
+
+Slurm: `medvqa/slurm/launch_cxr_eval_regex_vs_llm.sh` (CPU-only lightweight recall scan; default 16 CPUs).
+Slurm annotate loop: `medvqa/slurm/launch_cxr_annotate_batch_loop.sh`.
 
 ### Overnight Tier-1 Gemini Batch loop (Slurm)
 
@@ -35,12 +37,17 @@ CPU-only job; one chunk of unique `query_hash`es at a time (fits ~3M enqueued-to
 ```text
 cache/.../llm_annotations/<model>/sys_<8hex>_t<temp>_mt<max_tokens>/
   sample_annotations.jsonl
+  verify_<dataset>.jsonl
+  verify_no_finding_<dataset>.jsonl
+  failed_query_hashes.jsonl
 ```
 
 - `content_key` = hash(report_text_hash | prompt_hash | system_prompt_hash) — model-agnostic
 - `query_hash` = hash(content_key | model | config) — inference resume key
 - Leftover-only retry (same model, new config): point `--skip_annotation_paths` at the prior jsonl; writes go to a new `sys_…_mt…` dir
 - System-prompt change → new `sys_<hash>` dir and full re-annotate (content_keys all change)
+- Same-config parse/length/missing-batch failures go in `failed_query_hashes.jsonl` and are **not** retried in later chunks of that config. Leftover retry = new `MODEL_NAME` / `MAX_TOKENS_PER_REQUEST` + `SKIP_ANNOTATION_PATHS` on **successes only** (not the fail sidecar).
+- Full-corpus verify writes `verify_<dataset>.jsonl` — do **not** append those rows into `sample_annotations.jsonl`.
 
 ```bash
 # Smoke one chunk:
@@ -68,6 +75,54 @@ python -m medvqa.scripts.cxr_report_labeling.run_annotation_batch_loop \
 ```
 
 Requires `GEMINI_API_KEY` in the environment (repo `.env` loaded by `medvqa.settings`).
+
+### IU-first regex-positive verify + integrate
+
+Do **not** start MIMIC / CheXpert / ReX until IU integrate + `no_finding` have been eyeballed. Regex matches are already in `cache/.../full_regex_matches/`. Do **not** use `verify_positive_matches_with_llm.py`.
+
+**Semantics:** class C is a candidate if C or any ontology descendant is in `positive_classes` (jsonl ∪ DAG ancestors). Else released `unmentioned`. Presence entailment among `{C} ∪ matched descendants`: `definitely true` > `likely true`; else C's own LLM if C matched; else `unknown` (`resolution=descendants_matched_none_positive`). After regex-backed integrate, `no_finding` is auto-false if any other class is `definitely true` / `likely true`; otherwise LLM.
+
+1. Inventory (CPU, no API) — remaining unique `content_key`s after sample gold, `ceil(N/2000)`:
+
+```bash
+python -m medvqa.scripts.cxr_report_labeling.summarize_regex_matches \
+  --run_id v1_k1200_iu400 --datasets iuxray
+# optionally omit --datasets to print all four (IU first)
+```
+
+2. Smoke one IU regex-positive chunk:
+
+```bash
+JOB_SOURCE=regex_positives DATASETS=iuxray MAX_CHUNKS=1 TIME=4:00:00 \
+  ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
+```
+
+3. Full IU loop (`MAX_CHUNKS` unset) after smoke looks healthy:
+
+```bash
+JOB_SOURCE=regex_positives DATASETS=iuxray TIME=3-00:00:00 \
+  ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
+```
+
+4. Materialize regex-backed 6-way labels; spot-check a few uids (empties + a regex-hit report):
+
+```bash
+python -m medvqa.scripts.cxr_report_labeling.materialize_final_labels \
+  --dataset iuxray --stage regex_backed
+# writes results/.../final_labels/iuxray.jsonl, iuxray_sparse.jsonl, iuxray_labels.npz
+```
+
+5. Second wave `no_finding` (auto-false reports skip the API), then final merge:
+
+```bash
+JOB_SOURCE=no_finding DATASETS=iuxray TIME=1-00:00:00 \
+  ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
+
+python -m medvqa.scripts.cxr_report_labeling.materialize_final_labels \
+  --dataset iuxray --stage final
+```
+
+Leftover-only (failed hashes from this config): new `mt` / `MODEL_NAME` + `SKIP_ANNOTATION_PATHS` pointing at successful `verify_iuxray.jsonl` and `sample_annotations.jsonl` — not the fail sidecar.
 
 Compact a legacy flat `llm_annotations/<model>/sample_annotations.jsonl`:
 
@@ -112,9 +167,11 @@ See **Mid-nodes / hierarchy-aware refine** and **Sub-agent brief template** in [
 ### Regex FN mining (full-corpus hunt then fit)
 
 Separate from sample-gold refine: find prompt-true regex misses on
-`full_regex_matches/*.jsonl` (strata A/B/C) and optionally sample-gold FNs via
-`sample_gold_fns.pkl` (stratum D), turn them into short mini-test positives, then
-fit owned leaves. Playbook + paste-ready hunt/fit briefs: [`FN_MINE.md`](FN_MINE.md).
+`full_regex_matches/*.jsonl` (stratum C via `keyword_candidates`; A/B optional)
+and optionally sample-gold FNs via `sample_gold_fns.pkl` (stratum D). Default
+new waves are **S-first** (invent holes, then D+C; `similar_tokens` expands C
+typos). Turn accepted misses into short mini-test positives, then fit owned
+leaves. Playbook + paste-ready hunt/fit briefs: [`FN_MINE.md`](FN_MINE.md).
 Kit: `medvqa.datasets.cxr_report_labeling.fn_mine`. Coordinator stop/go between
 waves; no extra LLM annotation. Rebuild D index:
 `python -m medvqa.datasets.cxr_report_labeling.fn_mine --build-sample-gold-fn-index`.

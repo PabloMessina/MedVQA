@@ -25,6 +25,10 @@
 # FN-fit w19: DDx "versus resolving …" not over-suppress; hedge "question
 # consolidat*"; "not (very) well defined" before air bronchograms; "without
 # congestive failure/CHF" before consolidat*/air bronchogram in-clause.
+# FN-fit hunt: typos cosolidat/condolidat, airplace, alvoelar, bronchogram
+# variants; postposed airspace related; airspace-type; airspace morphology;
+# opacification of the airspaces; opacities in an airspace distribution.
+# Do not reopen pneumonia / generic opacity / infiltrate-alone.
 # ==============================================================================
 
 (?:
@@ -41,7 +45,7 @@
                 | without\s+(?:associated\s+)?(?:mediastinal\s+)?shift
                 | without\s+definite\s+correlative
                 | without\s+(?:congestive\s+(?:heart\s+)?failure|chf)\b
-                | question(?=\s+(?:of\s+)?(?:consolidat|consolodat|consildat|conolidat)\w*)
+                | question(?=\s+(?:of\s+)?(?:consolidat|consolodat|consildat|conolidat|cosolidat|condolidat)\w*)
                 | resolution\s+of\b(?![^.!;:\n]{0,60}\b(?:consolidat|air[\s\-]?space|alveolar))
             )\b)
             [^.!;:\n]
@@ -76,7 +80,7 @@
     (?<!without\sevidence\sof\sfocal\s)
     (?<!unusual\s)(?<!due\sto\snew\s)
     (?<!//\s)(?<!\?\s)
-    \b(?:consolidat|consolodat|consildat|conolidat)\w*\b
+    \b(?:consolidat|consolodat|consildat|conolidat|cosolidat|condolidat)\w*\b
     (?!\?)
     (?!\s+is\s+likely\s+atelectasis)
     (?!\s+is\s+a\s+consideration)
@@ -129,7 +133,7 @@
     ){0,300}
     (?<!without\s)(?<!without\sfocal\s)(?<!without\sevidence\sof\s)
     (?<!//\s)(?<!\?\s)(?<!no\s)
-    \bair[\s\-]?bronchogram\w*\b
+    \bair[\s\-]?br(?:onchi|onch|och)o?gram\w*\b
     (?!\?)
     (?!\s+(?:is|are)\s+not\b(?!\s+(?:significantly\s+)?(?:changed|different)\b))
     (?!\s+not\s+(?:present|seen|identified|visualized|appreciated|evident)\b)
@@ -175,8 +179,9 @@
         (?<!than\s)(?<!than\sacute\s)(?<!than\searly\s)
         (?<!clear\s)(?<!clearing\sof\s)(?<!clearing\sof\sleft\sbase\s)
         (?<!granular\s)(?<!granular\spulmonary\s)
+        (?<!normal\s)
         (?<!//\s)(?<!\?\s)
-        \b(?:air[\s\-]?space|(?<=basilar)air\s+space|(?<!nodular\s)alveolar)
+        \b(?:air[\s\-]?space|airplace|(?<=basilar)air\s+space|(?<!nodular\s)alv(?:eolar|oelar))
         (?:
             [\s\.,;:\-\(\)]+
             (?:and(?:\s*/\s*or)?|or|with|
@@ -198,14 +203,41 @@
             | shadow\w*
             | areas?
             | abnormalit\w*
+            | morpholog\w*
         )
         |
         # 3b. postposed alveolar morphology ("opacities are alveolar in appearance")
         (?<!without\s)(?<!//\s)(?<!\?\s)
         \b(?:opacit\w*|densit\w*|infiltrat\w*|shadow\w*)
         \s+(?:are|is|appear(?:s|ing)?(?:\s+to\s+be)?)\s+
-        (?<!nodular\s)alveolar
+        (?<!nodular\s)alv(?:eolar|oelar)
         (?:\s+in\s+(?:appearance|nature|character|distribution))?
+        |
+        # 3c. postposed airspace related / in appearance
+        #     "opacities, some of which are airspace related"
+        (?<!without\s)(?<!//\s)(?<!\?\s)
+        \b(?:opacit\w*|densit\w*|infiltrat\w*|shadow\w*)
+        [^.!;:\n]{0,40}?
+        (?:\bare|\bis|\bappear(?:s|ing)?(?:\s+to\s+be)?)\s+
+        (?:air[\s\-]?space|airplace)
+        \s+(?:related|in\s+(?:appearance|nature|character|distribution))
+        |
+        # 3d. airspace-type / airspace type + appearance|opacity|…
+        (?<!without\s)(?<!//\s)(?<!\?\s)
+        \b(?:air[\s\-]?space|airplace)
+        [\s\-]+type
+        [\s\.,;:\-\(\)]+
+        (?:appearance|opacit\w*|opacif\w*|densit\w*|infiltrat\w*|pattern|process|disease|shadow\w*|areas?|abnormalit\w*|morpholog\w*)
+        |
+        # 3e. opacification of the airspaces (finding-first)
+        (?<!without\s)(?<!//\s)(?<!\?\s)(?<!clearing\sof\s)
+        \bopacif\w*\s+of\s+(?:the\s+)?(?:air[\s\-]?spaces?|airplace)
+        |
+        # 3f. opacities in an airspace distribution
+        (?<!without\s)(?<!//\s)(?<!\?\s)
+        \b(?:opacit\w*|densit\w*|infiltrat\w*|shadow\w*)
+        [^.!;:\n]{0,40}
+        \bin\s+(?:an?\s+)?(?:air[\s\-]?space|airplace)\s+distribution\b
     )
     (?![^.!;:\n]{0,80}(?:
         \b(?:has|have)(?:\s+nearly)?\s+(?:resolv\w*|cleared|clearing)\b|

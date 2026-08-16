@@ -2,23 +2,26 @@
 # low_lung_volume
 # Global low inspiratory lung expansion on the current CXR.
 #
-# Match: low/decreased/diminished/reduced/small/limited lung volume(s) (either
-# order), low-volume film, hypoinflation / underinflation / hypoexpansion /
-# underexpansion, poorly/under/hypo-inflated lungs, mildly/slightly inflated
-# (under-expansion paraphrase), shallow / poor / limited / inadequate /
-# suboptimal / submaximal / incomplete inspiration, less-than-full /
-# not-fully / incompletely inspired, shallow (lung) volumes, low inspiratory
-# volumes or effort, suboptimal lung inspiratory effort, volumes continue to
-# be low, hypoventilatory / hypoaeration / decreased aeration (bilateral/
-# global), incomplete/inadequate/poor/limited (lung) expansion, not well/
-# fully expanded lungs, expiratory appearance, due-to expiratory film
-# (findings-sense). Global "volume loss in the lungs" (no laterality).
-# IU XXXX inspiratory effort. Typos: lowlung volumes, low lung lungs.
+# Match: low/decreased/diminished/reduced/small/limited/poor lung volume(s)
+# (either order), low-volume (chest) film, hypoinflation / underinflation /
+# hypoexpansion / underexpansion, poorly/under/hypo-inflated lungs,
+# mildly/slightly inflated (under-expansion paraphrase), shallow / poor /
+# limited / inadequate / suboptimal / submaximal / incomplete inspiration
+# (adj-first or subject-first, including degree/level of), decreased/
+# diminished inspiration, less-than-full / not-fully / incompletely inspired,
+# shallow (lung) volumes, low inspiratory volumes or effort, suboptimal lung
+# inspiratory effort, volumes continue to be low / telegram volumes small,
+# hypoventilatory / hypoaeration / decreased aeration (bilateral/global),
+# incomplete/inadequate/poor/limited/decreased (lung|chest) expansion, not
+# well/fully expanded lungs, expiratory appearance, due-to expiratory film
+# or findings-sense obtained/taken in expiration. Global "volume loss in the
+# lungs" (no laterality). IU XXXX inspiratory effort. Typos: lowlung volumes,
+# low lung lungs.
 #
-# FN-fit (fn_mine_fit_shared): hunt residual paraphrases — mildly inflated;
-# bilateral/global ↓ aeration; not well/fully expanded; incomplete/inadequate/
-# poor/limited (lung) expansion; less-than-full / not-fully / incompletely
-# inspired; limited lung volumes.
+# FN-fit (fn_mine_fit_shared): hunt residual paraphrases — subject-first
+# inspiration is shallow/suboptimal; decreased/diminished inspiration;
+# poor/suboptimal lung volumes; low-volume chest film; obtained in expiration;
+# decreased lung expansion; limited chest expansion; telegram lung volumes small.
 #
 # Do NOT match: unilateral/focal/lobar volume loss; atelectasis alone; effusion;
 # resection / small hemithorax; elevated hemidiaphragm without low-volume or
@@ -65,6 +68,11 @@
             limited\s+
             (?!(?:right|left|unilateral)\s+)
             (?:lung\s+)?volumes?
+            |
+            # poor/suboptimal/inadequate lung volumes (adj gap vs low/decreased)
+            (?:poor|suboptimal|inadequate)\s+
+            (?!(?:right|left|unilateral)\s+)
+            lung\s+volumes?
         )
 
         |
@@ -75,8 +83,8 @@
 
         |
 
-        # low-volume film / exam / study / portable technique
-        low[-\s]?volume\s+(?:film|exam(?:ination)?|study|radiograph(?:s)?|portable|technique)
+        # low-volume (chest) film / exam / study / portable technique
+        low[-\s]?volume\s+(?:chest\s+)?(?:film|exam(?:ination)?|study|radiograph(?:s)?|portable|technique)
 
         |
 
@@ -112,7 +120,7 @@
             (?:decreased|diminished|reduced)
             |
             (?:slightly|mildly|somewhat|generally|still)?\s*
-            (?:decreased|diminished|reduced|lower|low)
+            (?:decreased|diminished|reduced|lower|low|small)
             |
             which\s+remain\w*\s+(?:slightly|mildly|very|somewhat)?\s*low
         )
@@ -203,6 +211,13 @@
             shallow(?:er)?\s+
             (?:inspir\w*|breath(?:ing)?|lung\s+inflat\w*|(?:lung\s+)?volumes?)
             |
+            # subject-first: (degree/level/depth of) inspiration is/appears
+            # shallow|poor|limited|suboptimal|…
+            (?:(?:the\s+)?(?:degree|level|depth)\s+of\s+)?inspirations?\s+
+            (?:is|are|appears?\s+to\s+be|seems?\s+to\s+be|remains?)\s+
+            (?:slightly|mildly|somewhat|still|very)?\s*
+            (?:shallow|poor|limited|suboptimal|inadequate|incomplete)
+            |
             # poor/limited/…/incomplete inspiration or effort; optional interposed "lung"
             (?:poor(?:er|ly)?|limited|inadequate|suboptimal|submaximal|fair|XXXX|
                incomplete)\s+
@@ -218,6 +233,9 @@
             |
             low\s+(?:level\s+of\s+)?inspir\w*
             |
+            # decreased/diminished inspiration (not only inspiratory effort)
+            (?:decreased|diminished)\s+inspirations?\b
+            |
             (?:low|lower|reduced|decreased|limited)\s+
             inspirator(?:y)?\s+(?:effort|excursion|volumes?)
             |
@@ -228,12 +246,14 @@
             |
             (?:decreased|reduced|limited|shallow)\s+depth\s+of\s*inspir\w*
             |
-            reduced\s+(?:inspiratory\s+)?(?:lung\s+)?expansion
+            (?:reduced|decreased|diminished)\s+(?:inspiratory\s+)?(?:lung\s+)?expansion
+            (?!\s+of\s+(?:the\s+)?(?:right|left|upper|lower|middle|post[- ]?op))
             |
-            # incomplete/inadequate/poor/limited/(suboptimal) (overall) (lung)
-            # expansion — block "… expansion of the right/left …"
-            (?:incomplete|inadequate|poor(?:er)?|limited|suboptimal)\s+
-            (?:overall\s+)?(?:lung\s+)?expansion
+            # incomplete/inadequate/poor/limited/(suboptimal)/decreased (overall)
+            # (lung|chest) expansion — block "… expansion of the right/left …"
+            (?:incomplete|inadequate|poor(?:er)?|limited|suboptimal|decreased|
+               diminished)\s+
+            (?:overall\s+)?(?:(?:lung|chest)\s+)?expansion
             (?!\s+of\s+(?:the\s+)?(?:right|left|upper|lower|middle|post[- ]?op))
             |
             # subject-first: (lung) expansion is/appears limited|poor|…
@@ -258,6 +278,14 @@
             # (not bare technique labels / recommended expiratory views)
             (?:due\s+to|secondary\s+to|related\s+to|from|reflect(?:s|ing)?)\s+
             (?:an?\s+)?expirator(?:y)?\s+(?:film|view|radiograph|exam(?:ination)?)
+            |
+            # findings-sense: film/images obtained|taken in expiration
+            # (not dedicated PTX expiratory-view requests)
+            (?:film|image|radiograph|exam(?:ination)?)s?\s+
+            (?:(?:was|were|is|are)\s+)?
+            (?:obtained|taken)\s+in\s+expiration
+            (?!\s+(?:to\s+(?:evaluate|assess|exclude|rule|look)|
+                    for\s+(?:(?:a|an)\s+)?(?:pneumothorax|pneumo|ptx)))
         )
 
         |

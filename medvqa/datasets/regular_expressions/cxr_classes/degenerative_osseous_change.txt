@@ -5,39 +5,54 @@
 \b(?:
         # Degenerative + optional short anatomic/severity fillers + finding noun.
         # Include spurr(ing)/spurs/spine/wedging/arthropathy (prompt-faithful).
-        degenerative\s+(?:\w+[-\s]*){0,5}(?:changes?|disease|narrowing|arthrosis|arthritis|arthropath\w*|spurr(?:ing)?|spurs?|spine|wedging)|
+        # FN-fit: attested misspellings (degeenrative / degenrative / degnerative /
+        # degenerateive); optional nearby OCR forms degeneritive / dgenerative.
+        (?:degenerative|degeenrative|degenrative|degnerative|degenerateive|degeneritive|dgenerative)\s+(?:\w+[-\s]*){0,5}(?:changes?|disease|narrowing|arthrosis|arthritis|arthropath\w*|spurr(?:ing)?|spurs?|spine|wedging)|
 
         # Degenerative AC / shoulder / glenohumeral joints (no changes/disease noun)
         degenerative\s+(?:(?:bilateral|both|left|right|mild|moderate|severe)\s+)?
             (?:ac|acromioclavicular|glenohumeral|shoulder)\s+joints?|
 
         # Word-order variant: disc/joint/endplate degeneration; degeneration of the spine/shoulder
+        # FN-fit: compound spinal/vertebral/facet degeneration (not "degeneration of").
         (?:disc|disk|joint|endplate)(?:\s+and\s+(?:disc|disk|endplate))?\s+degeneration|
+        (?:spinal|vertebral|facet)\s+degeneration|
         degenerat(?:ion|ed|ive)\s+of(?:\s+the)?(?:\s+(?:bilateral|both|left|right|mild|moderate|severe|thoracic|lumbar|cervical|thoracolumbar))*\s+
             (?:spine|vertebra\w*|discs?|disks?|joints?|shoulders?|glenohumeral|acromioclavicular|ac\s+joints?)|
         degenerated\s+(?:(?:thoracic|lumbar|cervical|thoracolumbar)\s+)?(?:spine|vertebra\w*)|
 
         # Spondylosis / spondylotic / common "spondylitic" misspelling
+        # FN-fit: missing-o typo spondylsis
         spondylos(?:is|es)?|
+        spondylsis|
         spondylot(?:ic|ic)(?:\s+changes?)?|
         spondylitic(?:\s+changes?)?|
 
         # OA / osteoarthrosis with joint or spine context (avoid indication-only "osteoarthritis")
+        # FN-fit: OA in/at/involving FOV joints; reverse "changes of osteoarthritis";
+        # anatomy-verb "shoulders show osteoarthritis". Do not add hand/foot joints.
         (?:
             (?:glenohumeral|acromioclavicular|shoulder|spinal|spine|vertebral|facet|
                cervical|thoracic|lumbar|joint)\s+osteoarthr\w*
             |
-            osteoarthr\w*\s+of(?:\s+the)?(?:\s+(?:bilateral|right|left|bilat))?\s+
-                (?:spine|shoulder|glenohumeral|acromioclavicular|ac\s+joints?|cervical|thoracic|
-                   lumbar|joints?|vertebra\w*)
+            osteoarthr\w*\s+(?:of|in|at|involving)(?:\s+the)?(?:\s+(?:bilateral|both|right|left|bilat|mild|moderate|severe))*\s+
+                (?:spine|shoulders?|glenohumeral|acromioclavicular|ac\s+joints?|cervical|thoracic|
+                   lumbar|joints?|vertebra\w*|facet)
             |
             osteoarthr\w*\s+(?:changes?|disease)
+            |
+            (?:changes?|disease)\s+of\s+osteoarthr\w*
+            |
+            (?:(?:visualized|visualised)\s+)?(?:shoulders?|glenohumeral(?:\s+joints?)?|acromioclavicular(?:\s+joints?)?|ac\s+joints?)\s+
+                (?:show|shows|demonstrate|demonstrates|exhibit|exhibits)\s+osteoarthr\w*
             |
             # IU de-id: "left XXXX XXXX osteoarthritis"
             (?:XXXX\s+){1,3}osteoarthr\w*
         )|
 
         osteophyt\w*|
+        # FN-fit: vertebral lipping (osteophyte synonym); require spine/vertebral context
+        (?:(?:anterior|posterior|lateral|marginal)\s+)?lipp(?:ing|ed)\s+of(?:\s+the)?(?:\s+(?:mid|lower|upper|thoracic|lumbar|cervical|thoracolumbar))*\s+(?:spine|vertebra\w*)|
         # DISH / AS bridging (prompt includes DISH; syndesmophyte is the spur)
         syndesmophyt\w*|
         arthritic\s+(?:changes?|disease)|

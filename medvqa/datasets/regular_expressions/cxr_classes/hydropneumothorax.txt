@@ -5,6 +5,9 @@
 # Wave-26 fit: apical/CP/spaced hemi-thorax AFL; post-resection/pneumonectomy
 # AFL; air-fluid collection+ipsilateral effusion; pleural space/cavity/gas↔fluid;
 # lucent thickening air+effusion; ipsilateral / on-the-side PTX with fluid.
+# Wave-41 fit: inverted pneumohemo; AFL slash/reverse/interface; hydrothorax+PTX;
+# air+fluid loculation/collection (pleural/hemithorax/pneumonectomy-gated);
+# PTX abbr + same-side effusion; hyro/hyrdo typos; hedge before pleural-space air.
 
 # 1. Explicit lexical forms (current film only; not history/indication-only)
 (?:
@@ -13,13 +16,13 @@
     (?<!\bno\s)(?<!\bnot\s)(?<!\bnot\sa\s)(?<!\bwithout\s)
     (?<!\bappear\sto\sbe\sa\s)(?<!\bappears\sto\sbe\sa\s)
     (?<!\bexclude\sa\s)(?<!\bexcluding\sa\s)
-    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*)\b
+    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*|pneumo[\s\-]*(?:hemo|haemo)tho\w*|hyr(?:o|do|dro)[\s\-]*pneumotho\w*|hydropheumotho\w*|hydropneutho\w*)\b
   |
     # Current-film verb cue (addendum / "shows a hydro pneumothorax")
     (?:shows?|demonstrat\w*|reveals?|there\s+(?:is|are))\s+(?:a\s+|an\s+)?
     (?:(?:small|large|moderate|tiny|minimal|loculat\w+|right|left|apical|basal|basilar)\s+)*
     (?<!\bno\s)(?<!\bnot\s)(?<!\bappear\sto\sbe\sa\s)
-    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*)\b
+    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*|pneumo[\s\-]*(?:hemo|haemo)tho\w*|hyr(?:o|do|dro)[\s\-]*pneumotho\w*|hydropheumotho\w*|hydropneutho\w*)\b
   |
     # Header-free reports: no HISTORY/INDICATION header in the lead-in
     \A(?![\s\S]{0,2500}?(?:clinical\s+history|\bindication|reason\s+for(?:\s+(?:study|exam))?)\s*:)
@@ -27,7 +30,7 @@
     (?<!\bno\s)(?<!\bnot\s)(?<!\bnot\sa\s)(?<!\bwithout\s)
     (?<!\bappear\sto\sbe\sa\s)(?<!\bappears\sto\sbe\sa\s)
     (?<!\bexclude\sa\s)(?<!\bexcluding\sa\s)
-    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*)\b
+    \b(?:hydro[\s\-]*pneumotho\w*|pneumo[\s\-]*hydrotho\w*|(?:hemo|haemo|pyo)[\s\-]*pneumotho\w*|hemat(?:o)?[\s\-]*pneumotho\w*|hydropnumotho\w*|pneumo[\s\-]*(?:hemo|haemo)tho\w*|hyr(?:o|do|dro)[\s\-]*pneumotho\w*|hydropheumotho\w*|hydropneutho\w*)\b
 )
 
 |
@@ -35,30 +38,30 @@
 # 2. Air-/gas-fluid level with pleural / hemithorax / pneumothorax framing
 #    (not lung-base AFL in bronchi/cavity; not hernia/GI/abscess/mediastinum)
 (?:
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|bronch\w*|mediastin\w*)\b)[^\n\.]){0,80}
     (?:\bpleural\b|hemithora\w*|\bpneumotho\w*|\bhydropneumo)
   |
     (?:\bpleural\b|hemithora\w*|\bpneumotho\w*|\bhydropneumo)
     (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|bronch\w*|mediastin\w*)\b)[^\n\.]){0,80}
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
   |
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     \s+(?:in|within|at)\s+(?:the\s+)?
     (?:(?:right|left|bilateral|lower|upper|basal|basilar)\s+)*
     (?:pleural(?:\s+space)?|hemithora\w*)
   |
     # lung-base AFL only if not bronchi/cavity/abscess in the same clause
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     \s+(?:in|within|at)\s+(?:the\s+)?
     (?:(?:right|left|bilateral|lower|upper|basal|basilar)\s+)*
     lung\s+base
     (?![\s\S]{0,100}?\b(?:bronch\w*|cavit\w*|abscess|bulla|bleb|hernia|stomach|bowel)\b)
   |
-    (?:\bpleural\b|hemithora\w*)\s+(?:air|gas)[\s\-]*(?:fluid|liquid)\s+levels?
+    (?:\bpleural\b|hemithora\w*)\s+(?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))\s+(?:levels?|interface)
   |
     # "air collection with air-fluid level … within the pleural space"
-    air\s+collection\s+with\s+(?:air|gas)[\s\-]*(?:fluid|liquid)\s+levels?
+    air\s+collection\s+with\s+(?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))\s+(?:levels?|interface)
     [^\n]{0,130}
     (?:within\s+(?:the\s+)?)?pleural\s+space
 )
@@ -67,7 +70,7 @@
 
 # 3. Pneumothorax with an explicit fluid component
 (?<!\bno\s)(?<!\bwithout\s)
-\bpneumm?otho\w*[^\n\.]{0,50}with\s+(?:a\s+)?(?:small|large|moderate|tiny|minimal)?\s*fluid\s+component
+\bpneumm?otho\w*[^\n\.]{0,50}with\s+(?:a\s+)?(?:small|large|moderate|tiny|minimal|enlarging)?\s*(?:fluid|hydrothorax)\s+component
 
 |
 
@@ -128,14 +131,14 @@
     \b(?P=s1)\b(?:(?:-|\s+)sided)?
     (?:(?!\b(?:right|left|no|without)\b)[\s\S]){0,70}?
     (?<!\bno\s)(?<!\bwithout\s)
-    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*)
+    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*|\bhydrothorax\b)
   |
     (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
     (?<!\bresolution\sof\s)(?<!\bresolution\sof\sthe\s)
     (?<!\bresolved\s)(?<!\bresolving\s)
     \b(?P<s2>right|left)\b(?:(?:-|\s+)sided)?\s+
     (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|apical|basilar|basal|new)\s+)*
-    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*)
+    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*|\bhydrothorax\b)
     (?:(?!\b(?:rule\s*out|r/o|evaluate\s+for|evaluate\b|assess\s+for|not\s+(?:felt\s+to\s+)?represent|resolution\s+of|resolved|no\s+longer|decompression\s+of|previously\s+seen|previously\s+noted)\b)(?!\bno\s+evidence\s+of\s+(?:pneumm?otho\w*|(?:pleural\s+)?effusion\w*|pleural\s+fluid\b|\bhemotho\w*))(?!\bor\s+(?:(?:a|an|the|any|no|not|[\w\-]+)\s+){0,6}(?:(?:pleural\s+)?effusion\w*|pneumm?otho\w*|hemotho\w*|haemotho\w*|pleural\s+fluid\b))(?!\b(?:no|without)\b(?!\s+significant\s+change)(?!\s+change\s+in)(?:\s+\w+){0,5}\s+(?:(?:right|left|definite|appreciable|overt|residual|small|large|moderate|tiny|minimal)\s+)*(?:pneumm?otho\w*|(?:pleural\s+)?effusion\w*|pleural\s+fluid\b|\bhemotho\w*))[\s\S]){0,380}?
     (?<!\bpreviously\sseen\s)(?<!\bpreviously\snoted\s)
     (?<!\bprevious\s)(?<!\bprior\s)
@@ -157,7 +160,7 @@
     \b(?P=s5)\b(?:(?:-|\s+)sided)?
     (?:(?!\b(?:right|left|no|without)\b)[\s\S]){0,70}?
     (?<!\bno\s)(?<!\bwithout\s)
-    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*)
+    (?:pleural\s+fluid\b|pleural\s+effusion\w*|pleural\s+collection\w*|\beffusion\w*|\bhemotho\w*|\bhaemotho\w*|\bhydrothorax\b)
   |
     # 5a2-comma (legacy): "pneumothorax on the right, residual … effusion"
     (?<!\bno\s)(?<!\bwithout\s)
@@ -199,11 +202,11 @@
     pneumm?otho\w*\s*(?:,|and|with|&)\s+(?:a\s+|an\s+|some\s+|very\s+)?
     (?:small\s+|large\s+|moderate\s+|tiny\s+|minimal\s+|loculat\w+\s+|persistent\s+|residual\s+|stable\s+|some\s+|very\s+)*
     (?:(?P=s3)(?:(?:-|\s+)sided)?\s+)?
-    (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*|\bhemotho\w*|\bhaemotho\w*)
+    (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*|\bhemotho\w*|\bhaemotho\w*|\bhydrothorax\b)
   |
     \b(?P<s4>right|left)(?:(?:-|\s+)sided)?\s+
     (?:small\s+|large\s+|moderate\s+|tiny\s+|minimal\s+|loculat\w+\s+|persistent\s+|residual\s+|stable\s+)*
-    (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*|\bhemotho\w*|\bhaemotho\w*)\s*(?:,|and|with|&)\s+(?:a\s+|an\s+|some\s+|very\s+)?
+    (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*|\bhemotho\w*|\bhaemotho\w*|\bhydrothorax\b)\s*(?:,|and|with|&)\s+(?:a\s+|an\s+|some\s+|very\s+)?
     (?:small\s+|large\s+|moderate\s+|tiny\s+|minimal\s+|loculat\w+\s+|persistent\s+|residual\s+|stable\s+|apical\s+|basilar\s+|basal\s+|probable\s+|possible\s+|suspected\s+|some\s+|very\s+)*
     (?:(?P=s4)(?:(?:-|\s+)sided)?\s+)?
     (?<!\bno\s)
@@ -262,7 +265,7 @@
     (?:(?:prior|previous|old)\s+)?(?:(?:right|left)(?:[\-\s]sided)?\s+)?
     (?:chest\s+(?:drain|tube)|thoracostom\w*|pigtail(?:\s+catheter)?)
     (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele)\b)[^\n\.]){0,140}?
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
 )
 
 |
@@ -274,7 +277,7 @@
     #     Gate: no cavity/bleb/mass walk-up; no "with an AFL"; no AFL-within-bleb
     (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|bronch\w*|mediastin\w*|neo[\-\s]?esophag\w*|mass)\b)[^\n\.]){0,80}
     (?<!\bwith\san\s)(?<!\bwith\sa\s)(?<!\bwith\s)
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     (?!\s+(?:within|in)\s+(?:a\s+|an\s+)?[^\n\.]{0,50}?\b(?:bleb|bulla|cavit\w*|mass|pneumatocele|abscess)\b)
     (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|bronch\w*|mediastin\w*|neo[\-\s]?esophag\w*|mass)\b)[^\n\.]){0,90}
     (?:
@@ -286,30 +289,30 @@
   |
     (?:(?!\b(?:cavit\w*|bleb|bulla|mass|pneumatocele|abscess)\b)[^\n\.]){0,60}
     (?:(?:small|large|moderate|tiny|minimal|right|left|bilateral)\s+)*
-    \bapical\s+(?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    \bapical\s+(?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     (?!\s+(?:within|in)\s+(?:a\s+|an\s+)?[^\n\.]{0,40}?\b(?:bleb|bulla|cavit\w*|mass|pneumatocele|abscess)\b)
   |
     (?:(?!\b(?:cavit\w*|bleb|bulla|mass|pneumatocele|abscess)\b)[^\n\.]){0,60}
     (?<!\bwith\san\s)(?<!\bwith\sa\s)(?<!\bwith\s)
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     (?!\s+(?:within|in)\s+(?:a\s+|an\s+)?[^\n\.]{0,50}?\b(?:bleb|bulla|cavit\w*|mass|pneumatocele|abscess)\b)
     \s+(?:in|within|at|over|projects?\s+over)\s+(?:the\s+)?
     (?:(?:right|left|bilateral|lower|upper|basal|basilar|bases?\s+of\s+(?:the\s+)?)\s+)*
     (?:hemi\s+thora\w*|(?:lung\s+)?apex\b|costophrenic(?:\s+(?:sinus|angle|recess))?)
   |
     # 7b. Post-pneumonectomy / post-resection AFL (not bare basal AFL)
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     [^\n\.]{0,100}?
     (?:pneumonectomy(?:\s+cavity)?|(?:lung\s+)?resection)
   |
     (?:status\s+post|s/?p|after|following|post)\s+
     (?:(?:a\s+|the\s+|left\s+|right\s+)*)?(?:lung\s+)?(?:pneumonectomy|resection)
     [^\n\.]{0,120}?
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
   |
     (?:(?:small|large|moderate|tiny|minimal)\s+)*
     (?:basal|basilar|apical)\s+(?:(?:right|left)\s+)?
-    (?:air|gas)[\s\-]*(?:fluid|liquid)(?:\s+fluid)?\s+levels?
+    (?:(?:air|gas)[\s\-/]*(?:fluid|liquid)|(?:fluid|liquid)[\s\-/]*(?:air|gas))(?:\s+fluid)?\s+(?:levels?|interface)
     [^\n\.]{0,80}?
     (?:after|post|following|status\s+post)\s+(?:(?:a\s+|the\s+|left\s+|right\s+)*)?(?:lung\s+)?(?:resection|pneumonectomy)
   |
@@ -326,7 +329,7 @@
     # 7d. Bare pleural space/cavity air|gas ↔ fluid (no hydro*/PTX stem)
     pleural\s+space\s+(?:air|gas)\s+and\s+(?:layering\s+)?fluid
   |
-    (?:meniscus\s+(?:due\s+to|from|of)\s+)?fluid\s+and\s+pleural\s+space\s+(?:air|gas)
+    (?:meniscus\s+(?:due\s+to|from|of)\s+)?fluid\s+and\s+(?:(?:possibly|probably|likely|maybe|perhaps)\s+)?pleural\s+space\s+(?:air|gas)
   |
     pleural\s+(?:cavity|space)\s+(?:contains|with)\s+(?:air|gas)\s+and\s+(?:layering\s+)?fluid
   |
@@ -362,3 +365,53 @@
     (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable)\s+)*
     (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*)
 )
+
+|
+
+# 8. Wave-41 hunt residuals. Combined pleural air+fluid only — not isolated
+#    PTX/effusion, not GI/cavity/wound AFL, not indication/history-only.
+(?:
+    # 8a. "air and fluid" / "mixed air and fluid" loculation or collection
+    (?:mixed\s+)?(?:air|gas)\s+and\s+fluid\s+pleural\s+(?:loculat\w+|collections?)
+  |
+    (?:mixed\s+)?(?:air|gas)\s+and\s+fluid\s+(?:loculat\w+|collections?)
+    (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|wound|mediastin\w*)\b)[^\n\.]){0,90}
+    (?:hemithora\w*|pleural\s+(?:space|cavity)|pneumonectomy|(?:probably|possibly|likely)\s+pleural)
+  |
+    collections?\s+of\s+(?:air|gas)\s+and\s+fluid
+    (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|bleb|pneumatocele|wound|mediastin\w*)\b)[^\n\.]){0,110}
+    (?:\bpleural\b|hemithora\w*|pneumonectomy)
+  |
+    (?:pleural\s+)?effusion\w*
+    (?:(?!\b(?:hiatal|hernia|stomach|bowel|abscess|cavit\w*|bulla|wound|mediastin\w*)\b)[^\n\.]){0,180}?
+    (?:mixed\s+)?(?:air|gas)\s+and\s+fluid\s+(?:loculat\w+|collections?)
+  |
+    # 8b. Same-clause sided PTX + hydrothorax (not OR-list)
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bresolved\s)(?<!\brule\sout\s)(?<!\bevaluate\sfor\s)(?<!\bassess\sfor\s)
+    (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \b(?P<h1>right|left)(?:(?:-|\s+)sided)?\s+
+    (?:(?:apical|basilar|basal|small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \bpneumm?otho\w*
+    (?:(?!\b(?:no|without|resolved|\bor\b|rule\s*out|r/o)\b)[^\n\.]){0,110}?
+    \bhydrothorax\b
+  |
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\brule\sout\s)
+    (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \b(?P<h2>right|left)(?:(?:-|\s+)sided)?\s+
+    (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \bhydrothorax\b
+    (?:(?!\b(?:no|without|resolved|\bor\b|rule\s*out|r/o)\b)[^\n\.]){0,80}?
+    \bpneumm?otho\w*
+  |
+    # 8c. PTX abbreviation + same-side effusion (laterality required; not unsided)
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bhistory\sof\s)(?<!\bevaluate\sfor\s)(?<!\bassess\sfor\s)(?<!\brule\sout\s)
+    (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \b(?P<x1>right|left)(?:(?:-|\s+)sided)?\s+
+    (?:(?:apical|basilar|basal|small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|new)\s+)*
+    \bptx\b
+    \s*(?:,|and|with|&)\s+(?:a\s+|an\s+|some\s+|very\s+)?
+    (?:(?:small|large|moderate|tiny|minimal|loculat\w+|persistent|residual|stable|some|very)\s+)*
+    (?:(?:(?P=x1)(?:(?:-|\s+)sided)?\s+)?)?
+    (?:pleural\s+fluid\b|(?:pleural\s+)?effusion\w*|pleural\s+collection\w*|\bhydrothorax\b)
+)
+

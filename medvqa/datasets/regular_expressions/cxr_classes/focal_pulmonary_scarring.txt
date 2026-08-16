@@ -14,7 +14,7 @@
 # ==============================================================================
 
 \b(?:
-        (?:focal|limited|localized|postinflammatory|bibasilar|postinfectious|fibrocalcific)\s+(?:pulmonary\s+)?(?:scar(?:ring)?|linear\s+scar)|
+        (?:focal|limited|localized|post.?inflammatory|bibasilar|post.?infectious|fibrocalcific)\s+(?:pulmonary\s+)?(?:scar(?:ring)?|linear\s+scar)|
         pulmonary\s+scarring|
         lung\s+scarring|
         # Apical (pleural/pleuroparenchymal) scarring. No trailing \b so glued
@@ -23,8 +23,13 @@
         (?<!\w/o\s)(?<!\bb/l\s)apical\s+(?:fibronodular\s+)?(?:pleural-?parenchymal\s+|pleural\s+)?scarring(?!\s+seen\s+on\s+(?:the\s+)?prior)(?!\s+or\s+thickening)|
         scarring\s+with\s+architectural\s+distortion|
         fibrocalcific\s+scarring|
+        fibro-?atelectat\w*|
         fibrotic\s+scar(?:ring)?\b|
         scar\s+formations?\b|
+        # Adjective scarred after lobe/apex/base (not unlocalized "scarred lungs")
+        (?:lobe|apex|apices|base|bases|lingula)\s+(?:is\s+|are\s+)?(?:chronically\s+|mildly\s+|severely\s+)?scarred\b(?!\s+(?:emphysematous|bronchiectatic))|
+        # scar tissue (parenchymal); block surgical/skin/chest-wall
+        (?<!\bsurgical\s)(?<!\bskin\s)(?<!\bincisional\s)(?<!\bwall\s)(?:old\s+|chronic\s+|pulmonary\s+|parenchymal\s+)?scar\s+tissue\b|
         chronic\s+(?:linear|apical|lingular|parenchymal)\s+(?:opacit\w*|scar(?:ring)?)|
         # biapical + common typo biaprical
         bia(?:pical|prical)\s+(?:pleural-?parenchymal\s+|pleural\s+)?(?:parenchymal\s+)?(?:fibronodular\s+)?scar(?:s|ring)?|
@@ -34,7 +39,7 @@
         parenchymal\s+(?:and\s+pleural\s+)?scar(?:s|ring)?\b|
         subjacent\s+scarring|
         # Spatial "scar(s|ring) in/at/…" but not "scarring in this region on old CT"
-        scar(?:s|ring)?\s+(?:at|in|along|of|projecting|within)\b(?!\s+(?:this\s+region\s+)?on\s+(?:old|prior|previous))|
+        scar(?:s|ring)?\s+(?:at|in|along|of|projecting|within|involving)\b(?!\s+(?:this\s+region\s+)?on\s+(?:old|prior|previous))|
         # Atelectasis vs scar (slash, or, versus, and, and/or); IU atalectesis typo.
         # Plain "and" recovers "atelectasis and scarring"; block prior-CT-only phrasing.
         # Do NOT put bronchiectasis on both sides (would match "atelectasis and bronchiectasis").
@@ -44,8 +49,10 @@
         scar(?:ring)?\s*(?:/|and)\s*bronchiectasis|
         (?:perihilar\s+)?scarring\s*/\s*atelectasis|
         scarring\s+and\s+(?:atelectasis|volume\s+loss|consolidation|fibrotic\s+change)|
+        # reverse order of scarring-and-volume-loss
+        (?:postoperative\s+)?volume\s+loss\s+and\s+scar(?:ring)?|
         (?:streak|streaks|small\s+streak)\s+of\s+scarring|
-        (?:regions?|areas?)\s+of\s+(?:mild\s+)?(?:chronic\s+)?scarring|
+        (?:regions?|areas?|foc(?:us|i))\s+of\s+(?:mild\s+|small\s+)?(?:chronic\s+)?scarring|
         long.?standing\s+scarring|
         scarring\s+changes?|
         post.?radiation\s+(?:and\s+)?scarring|
@@ -61,15 +68,20 @@
         scar.?like|
         cicatric(?:es|ial)|
         bia(?:pical|prical)\s+fibrotic\s+change|
+        # Isolated apical/biapical fibrosis = limited scar (not diffuse ILD)
+        (?<!\bextensive\s)(?<!\bdiffuse\s)(?:bia(?:pical|prical)|apical)\s+fibrosis\b|
         # Localized fibrotic change; block extensive/diffuse/severe (sibling class)
         (?<!\bextensive\s)(?<!\bdiffuse\s)(?<!\bsevere\s)fibrotic\s+changes?\s+in\s+(?:the\s+)?(?:left|right|bilateral|upper|lower|suprahilar|perihilar|basilar|apical|retrocardiac|mid)\b|
         apical\s+fibrotic\s+changes?|
         bia(?:pical|prical)\s+fibrocalcific\s+changes?|
-        (?:right|left|bilateral)\s+(?:upper|lower|middle)\s+lobe\s+scar(?:ring)?\b|
-        (?:lingular|perihilar|basilar|retrocardiac|suprahilar|midlung|mid-lung|mid\s+lung(?:\s+zone)?|peribronchial|infrahilar|bia(?:pical|prical))\s+(?:parenchymal\s+)?scar(?:s|ring)?\b|
+        (?:(?:right|left|bilateral)\s+)?(?:upper|lower|middle)\s+lobe\s+scar(?:ring)?\b|
+        \b(?:RUL|LUL|RML|LLL|RLL)\s+scar(?:ring)?\b|
+        (?:lingular|perihilar|basilar|retrocardiac|suprahilar|midlung|mid-lung|mid\s+lung(?:\s+zone)?|peribronchial|infrahilar|paramediastinal|bia(?:pical|prical))\s+(?:parenchymal\s+)?scar(?:s|ring)?\b|
+        (?:right|left)[-\s]sided\s+(?:parenchymal\s+)?scar(?:s|ring)?\b|
         (?:right|left|bilateral)\s+(?:mid\s+)?(?:lung\s+zone\s+)?scarring|
         (?:right|left|bilateral)\s+apical\s+linear\s+scar\b|
-        linear\s+(?:\w+\s+){0,6}scar(?:ring)?\b|
+        # linear … scarring, plus typos scaring / ccarring
+        linear\s+(?:\w+\s+){0,6}(?:scar(?:ring|ing)?|ccarring)\b|
         # bare "likely scarring" / "likely denote scarring" (represent/reflect/due-to optional)
         likely\s+(?:(?:represent(?:ing|s)?|reflect(?:ing|s)?|due\s+to|denote\w*)\s+)?(?:areas\s+of\s+)?(?:mild\s+|minor\s+|minimal\s+)?(?:chronic\s+)?scar(?:s|ring)?\b|
         either\s+representing\s+scarring|
@@ -90,8 +102,8 @@
         # "possibly scarring" / "possibly representing scarring"
         possibly\s+(?:representing\s+)?(?:minor\s+|minimal\s+|mild\s+)?scar(?:ring)?\b|
         (?:infectious|inflammatory)\s+\w+\s+with\s+scarring|
-        # "scarring is seen/present/noted at|in|within …" intervening verb
-        (?<!\bpleural\s)(?:mild\s+|minimal\s+|minor\s+|stable\s+|chronic\s+)?scar(?:ring)?\s+is\s+(?:seen|present|noted|identified|demonstrated|evident|unchanged|similar|stable|chronic)(?:\s+(?:at|in|within|along|of)\b)?|
+        # "scarring is seen/present/noted …"; optional "is" for "stable scarring noted in"
+        (?<!\bpleural\s)(?:mild\s+|minimal\s+|minor\s+|stable\s+|chronic\s+)?scar(?:ring)?\s+(?:is\s+)?(?:seen|present|noted|identified|demonstrated|evident|unchanged|similar|stable|chronic)(?:\s+(?:at|in|within|along|of)\b)?|
         scarring\s+(?:at|of)\s+(?:the\s+)?(?:right|left|bilateral)\s+(?:lung\s+)?base|
         # location without preposition: "scarring left base", "scarring right infrahilar region"
         scar(?:ring)?\s+(?:left|right|bilateral)\s+(?:lung\s+)?(?:base|bases|apex|apices|infrahilar|perihilar|suprahilar|midlung|mid-lung|mid\s+lung)(?:\s+region)?\b|

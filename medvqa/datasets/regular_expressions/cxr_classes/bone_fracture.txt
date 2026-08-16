@@ -11,6 +11,12 @@
 # walks. FN-fit: `apparent` is a §1 hedge modifier (keep skip-start so
 # "no apparent …" cannot restart at anatomy); §2 walk includes `thoracic`
 # so "fractures of thoracic … and the sternum" can reach residual sternum.
+# FN-fit pass-2: residual parent only (scapula/sternum/humerus/shoulder).
+# Dedicated arms start at `known` / `previously noted` so those lookbehinds
+# do not block currently visible mentions; keep history/indication guards.
+# Walks: median/wing/blade/about/along; 2f `from`; 2g cannot-exclude;
+# 2h cortical disruption; hyphen `fractured-appearing`; chronic-changes /
+# dysmorphic sequela framed with fracture. Do not copy rib/clavicle/VCF.
 # Do NOT merge helper bare deform* / dislocat* or callus_rib.
 # Do NOT infer from wedging/collapse, DJD, hardware, or broken devices.
 # Do NOT match: bare deformity; history/indication-only; negation; degenerative
@@ -109,7 +115,7 @@
         (?<!\bdisplaced\s)(?<!\bacute\s)(?<!\bapparent\s)(?<!\bgrossly\s)
         (?<!\bgrossly\sdisplaced\s)(?<!\bproximal\s)
         (?<!\boblique\sr\s)
-        \b(?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle|medial|
+        \b(?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle|medial|median|
                lateral|anterior|posterior|superior|inferior|multiple|mult|
                old|remote|acute|healing|healed|chronic|patholog\w*|iatrogen\w*|
                nondisplaced|non-displaced|displaced|comminuted|impacted|
@@ -137,9 +143,9 @@
         )\b
         (?:
             \s+(?:of|the|a|an|left|right|bilateral|bilat\.?|mid|middle|distal|proximal|
-                 medial|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
+                 medial|median|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
                  neck|head|and|shaft|metadiaphys\w*|metaphys\w*|diaphys\w*|epiphys\w*|
-                 surgical|tubercle|margin|margins|spine|base|
+                 surgical|tubercle|margin|margins|spine|base|wing|blade|about|along|
                  body|bodies|process|processes|compression|portion|junction|region|
                  is|are|shows|demonstrates|appears|with|has|have|again|still|seen|
                  similar|old|remote|acute|healing|healed|chronic|patholog\w*|
@@ -166,8 +172,8 @@
                  pacemaker|tube|tubes|line|lines|device|devices|hardware|sternotomy))
         (?:
             [,\s]+(?:and\s+)?(?:of|the|a|an|left|right|bilateral|bilat\.?|mid|middle|distal|proximal|
-                 medial|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
-                 aspect|sided|patholog\w*|known|old|remote|
+                 medial|median|lateral|anterior|posterior|superior|inferior|upper|lower|third|thirds|
+                 aspect|sided|patholog\w*|known|old|remote|about|along|linear|
                  healing|healed|chronic|acute|in|at|through|involving|to|are|with|
                  slight|irregularity|surgical|tubercle|margin|margins|spine|base|
                  nondisplaced|non-displaced|displaced|comminuted|impacted|depressed|
@@ -263,7 +269,8 @@
         (?:
             [,\s]+(?:suggests?|suggestive|compatible|consistent|indicative|of|with|for|
                  the|patient'?s|known|prior|old|remote|a|an|scapul\w*|humer\w*|
-                 sternal?|proximal|distal)
+                 sternal?|proximal|distal|is|are|again|noted|seen|likely|from|
+                 presumably|probably|possibly)
         ){0,12}
         [,\s]+fractur\w*
         (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
@@ -276,31 +283,34 @@
         # ------------------------------------------------------------------
         \blucenc\w*
         (?:
-            [,\s]+(?:through|in|of|the|a|an|left|right|along|across)
+            [,\s]+(?:through|in|of|the|a|an|left|right|along|across|over)
         ){0,6}
         [,\s]+
         \b(?:scapul\w*|stern(?:um|al)|humer\w*|acromi\w*|glenoid)\b
         (?:
             [,\s]+(?:spine|body|neck|margin|margins|wing|blade|base|potentially|possibly|
                  may|be|representing|a|an|nondisplaced|non-displaced|displaced|
-                 suspicious|concerning|for|probable|possible)
+                 suspicious|concerning|for|probable|possible|along|the|medial|median|
+                 scapular|cannot|exclude|although|of|left|right|over)
         ){0,12}
         [,\s]+fractur\w*
 
         |
 
         # ------------------------------------------------------------------
-        # 2h. FN-fit residual: cortical irregularity … FOV bone … fracture
+        # 2h. FN-fit residual: cortical irregularity/disruption … FOV bone … fx
         # ------------------------------------------------------------------
-        \bcortical\s+irregularit\w*
+        \bcortical\s+(?:irregularit\w*|disruption|step(?:-?off)?)
         (?:
-            [,\s]+(?:of|the|a|an|left|right|mid|middle|lower|upper|about|along|minimal)
+            [,\s]+(?:of|the|a|an|left|right|mid|middle|lower|upper|about|along|minimal|
+                 anterior|posterior|cortex)
         ){0,8}
         [,\s]+
         \b(?:stern(?:um|al)|humer\w*|scapul\w*|acromi\w*|clavicles?|ribs?|osseous|bony)\b
         (?:
             [,\s]+(?:body|bodies|concerning|suspicious|for|a|an|nondisplaced|non-displaced|
-                 possible|probable|slight|irregularity)
+                 possible|probable|slight|irregularity|consistent|with|the|previous|
+                 prior|mid|of)
         ){0,10}
         [,\s]+fractur\w*
 
@@ -310,6 +320,73 @@
         # 2i. FN-fit residual: evidence of callus formation (lookbehind bypass)
         # ------------------------------------------------------------------
         \b(?:(?:some|definite|clear|possible)\s+)?evidence\s+of\s+callus\s+formation\b
+        |
+
+        # ------------------------------------------------------------------
+        # 2j. known + residual FOV bone + fracture (bypass (?<!known ))
+        # ------------------------------------------------------------------
+        \b(?:patient'?s\s+)?known\s+
+        (?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle|medial|median|
+            lateral|anterior|posterior|left-sided|right-sided)\s+){0,4}
+        (?:scapul\w*|stern(?:um|al)|manubri\w*|xiphoid|humer\w*|
+           shoulder(?:\s+girdle)?|glenohumeral|glenoid|acromi\w*|coracoid)\b
+        \s+(?:fractur\w*|fxr?)\b
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
+        |
+
+        # ------------------------------------------------------------------
+        # 2k. previously noted/identified + residual FOV bone + fracture
+        # ------------------------------------------------------------------
+        \bpreviously\s+(?:noted|identified|seen|described)\s+
+        (?:(?:left|right|bilateral|bilat\.?|proximal|distal|mid|middle)\s+){0,4}
+        (?:scapul\w*|stern(?:um|al)|manubri\w*|xiphoid|humer\w*|
+           shoulder(?:\s+girdle)?|glenohumeral|glenoid|acromi\w*|coracoid)\b
+        \s+(?:fractur\w*|fxr?)\b
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
+        |
+
+        # ------------------------------------------------------------------
+        # 2l. hyphen hedge: fractured-appearing + residual FOV bone
+        # ------------------------------------------------------------------
+        \bfractured[- ]appearing\s+
+        (?:(?:the|a|an|left|right|proximal|distal|mid|middle)\s+){0,4}
+        (?:scapul\w*|stern(?:um|al)|manubri\w*|xiphoid|humer\w*|
+           shoulder(?:\s+girdle)?|glenoid|acromi\w*|coracoid)\b
+        |
+
+        # ------------------------------------------------------------------
+        # 2m. chronic changes … residual FOV bone … from prior fracture
+        # ------------------------------------------------------------------
+        \bchronic\s+changes?\b
+        (?:
+            [,\s]+(?:seen|in|of|the|a|an|left|right|proximal|distal|mid|middle)
+        ){0,8}
+        [,\s]+
+        \b(?:humer\w*|scapul\w*|stern(?:um|al)|acromi\w*|glenoid|shoulder)\b
+        (?:
+            [,\s]+(?:presumably|probably|likely|possibly|from|prior|old|remote|a|an)
+        ){0,8}
+        [,\s]+fractur\w*
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
+        |
+
+        # ------------------------------------------------------------------
+        # 2n. residual FOV bone … dysmorphic … from prior fracture
+        # ------------------------------------------------------------------
+        \b(?:humer\w*|scapul\w*|stern(?:um|al)|acromi\w*|glenoid|shoulder)\b
+        (?:
+            [,\s]+(?:appears?|is|looks?|an?|the|left|right)
+        ){0,4}
+        [,\s]+dysmorph\w*
+        (?:
+            [,\s]+(?:probably|likely|presumably|possibly|from|prior|old|remote|a|an|the)
+        ){0,8}
+        [,\s]+fractur\w*
+        (?!\s+(?:wire|wires|suture|sutures|cerclage|catheter|catheters|lead|leads|
+                 pacemaker|tube|tubes|line|lines|device|devices|hardware))
         |
 
         # ------------------------------------------------------------------
@@ -348,6 +425,7 @@
     (?!\s+is\s+not\sincluded)
     (?!\s+not\sincluded\sin)
     (?![\s\w,.;:'-]{0,80}documented\s+on\s+preceding)
-    (?![\s\w,.;:'-]{0,80}not\s+(?:well\s+)?(?:appreciated|seen)\s+on\s+(?:today|today's|the\s+current|this))
+    (?![\s\w,.;:'-]{0,80}not\s+(?:well\s+)?(?:appreciated|seen|visualized|demonstrated)\s+on\s+(?:today|today's|the\s+current|this))
+    (?![\s\w,.;:'-]{0,80}poorly\s+(?:appreciated|seen|visualized))
     (?![\s\w,.;:'-]{0,60}please\s+reassess)
 )

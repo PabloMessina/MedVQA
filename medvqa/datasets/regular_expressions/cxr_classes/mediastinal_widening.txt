@@ -4,12 +4,15 @@
 # widening (e.g. superior / upper / mid mediastinum) on the current CXR.
 #
 # Match: mediastinal widening (incl. comma-list findings); widened /
-# wide-appearing / broader mediastinum (incl. silhouette/contour);
-# widened appearance to the mediastinum; widening of the (mid and upper)
-# mediastinum or truncated "superior mediastinal"; mediastinum/contour/
-# silhouette is widened/enlarged/broad/wider; increase in mediastinal
-# size/caliber; named-region enlargement/prominence/fullness/broad;
-# mediastinal vascular pedicle widened.
+# wide-appearing / broader/broadened mediastinum (incl. silhouette/contour/
+# shadow); widened appearance to the mediastinum; widening of the (mid and
+# upper) mediastinum or truncated "superior mediastinal"; mediastinum/contour/
+# silhouette/shadow is widened/enlarged/broad/wider; increase in mediastinal
+# size/caliber/width (incl. adjective-first and inverted width/diameter of
+# post-op mediastinum); named-region enlargement/prominence/fullness/broad
+# (incl. copula "is full"); mediastinal vascular pedicle widened.
+# Technique lookahead skips "not/no due to magnification". Explicit
+# "widening of … mediastinum is due to tortuous vessels" is allowed.
 #
 # Do NOT match: cardiomediastinal silhouette enlargement/prominence alone;
 # aortic enlargement/ectasia/tortuosity alone; focal mediastinal mass;
@@ -59,7 +62,7 @@
         (?!\s+is\s+anticipated)
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
 
         |
 
@@ -71,13 +74,13 @@
         (?<!\bno\s)
         (?<!\bwithout\s)
         (?<!\bnot\s)
-        (?:cardiomegaly|edema|effusion|atelectasis|consolidation|pneumonia|opacity|infiltrate|hyperinflation|pneumothorax),\s+
+        (?:cardiomegaly|edema|effusion|atelectasis|consolidation|pneumonia|opacit(?:y|ies)|infiltrate|hyperinflation|pneumothorax|congestion),\s+
         (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
         mediastinal\s+widening
         (?!\s+is\s+anticipated)
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
 
         |
 
@@ -97,12 +100,13 @@
         (?<!\?\s)
         (?<!\bfor\s)
         (?:
-            (?:\bwide(?:r|-appearing)?\b|widen(?:ed|ing)|\bbroad(?:er)?\b)\s+
+            (?:\bwide(?:r|-appearing)?\b|widen(?:ed|ing)|\bbroad(?:er|ened)?\b)\s+
             (?:(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)\s+)?
             (?:
                 (?:mediastin(?:um|ium)|mediastnium)\b
                 |
-                mediastinal\s+(?:silhouette|contour)s?\b
+                mediastinal\s+(?:silhouette|contour|shadow)s?\b
+                (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|nodal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
             )
             |
             # "widened appearance to the mediastinum"
@@ -111,12 +115,12 @@
             (?:
                 (?:mediastin(?:um|ium)|mediastnium)\b
                 |
-                mediastinal\s+(?:silhouette|contour)s?\b
+                mediastinal\s+(?:silhouette|contour|shadow)s?\b
             )
         )
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous|cardiomegaly|aortic|aorta))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous|cardiomegaly|aortic|aorta))
 
         |
 
@@ -137,21 +141,28 @@
             (?:(?:\s+and\s+|\s*,\s*|\s+)\s*(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior))?
             \s+mediastinal\b
             (?!\s+(?:mass|node|nodes|adenopathy|lymph|hematoma|goiter|vessel|vessels|fat|stripe|opacity|opacities)\b)
+            (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
             |
+            # full mediastinum: allow "due to tortuous vessels" (explicit widening)
             (?:
                 (?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)
                 (?:(?:\s+and\s+|\s*,\s*|\s+)\s*(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior))?
                 \s+
             )?
+            (?:mediastin(?:um|ium)|mediastnium)\b
+            |
+            # contour/silhouette/shadow: keep tortuous-as-cause block (sample FP)
             (?:
-                (?:mediastin(?:um|ium)|mediastnium)\b
-                |
-                mediastinal\s+(?:contour|silhouette|contents|soft\s+tissue|region)s?\b
-            )
+                (?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior)
+                (?:(?:\s+and\s+|\s*,\s*|\s+)\s*(?:right|left|upper|mid(?:dle)?|superior|lower|anterior|posterior))?
+                \s+
+            )?
+            mediastinal\s+(?:contour|silhouette|shadow|contents|soft\s+tissue|region)s?\b
+            (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
         )
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
 
         |
 
@@ -171,22 +182,22 @@
         (?:
             (?:mediastin(?:um|ium)|mediastnium)
             |
-            mediastinal\s+(?:contour|silhouette|contents)s?
+            mediastinal\s+(?:contour|silhouette|shadow|contents)s?
         )
             (?:
             (?:[^\w.!?;:]+(?!(?:without|no|not|nor|denies|absent|normal)\b)\w+){0,5}[^\w.!?;:]+
             (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)(?<!\bnor\s)(?<!\bappreciably\s)
-            (?:widen(?:ed|ing)|\bwide(?:r|-appearing)?\b|\bbroad(?:er)?\b)\b
+            (?:widen(?:ed|ing)|\bwide(?:r|-appearing)?\b|\bbroad(?:er|ened)?\b)\b
             |
             # enlarged/broad/wider: local copula only
             \s+
             (?:is|are|appears?|remain(?:s)?)\s+
             (?:mildly\s+|minimally\s+|markedly\s+|slightly\s+|somewhat\s+|diffusely\s+)?
-            (?:enlarged|\bbroad(?:er)?\b|\bwider\b)\b
+            (?:enlarged|\bbroad(?:er|ened)?\b|\bwider\b)\b
         )
         (?!\s+on\s+(?:the\s+)?(?:prior\s+|chest\s+|recent\s+)?(?:CT|CTA|MRI|MRA)\b)
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification|tortuous))
 
         |
 
@@ -218,6 +229,21 @@
             (?:[^\w.!?;:]+(?!(?:without|no|not)\b)\w+){0,4}[^\w.!?;:]+
             (?:increase(?:d|s)?|enlarg\w*|widen\w*)
             (?![\s\S]{0,120}?has\s+reversed)
+            |
+            # adjective-first: "increased mediastinal width" (no "in")
+            increase(?:d|s)?\s+(?:(?:right|left|upper|mid(?:dle)?|superior|lower)\s+)?
+            mediastinal\s+(?:caliber|size|width|diameter)
+            (?![\s\S]{0,160}?has\s+reversed)
+            |
+            # inverted / post-op: "width of the mediastinum is increased";
+            # "transverse diameter of the postoperative mediastinum has increased"
+            (?:transverse\s+)?(?:size|caliber|width|diameter)\s+of\s+(?:the\s+)?
+            (?:post-?operative\s+|postop(?:erative)?\s+)?
+            (?:(?:right|left|upper|mid(?:dle)?|superior|lower)\s+)?
+            (?:mediastin(?:um|ium)|mediastnium)\b
+            (?:[^\w.!?;:]+(?!(?:without|no|not|nor|denies|absent|normal|decreas)\b)\w+){0,5}[^\w.!?;:]+
+            (?:(?:has|have|is|are|appears?|remain(?:s)?)\s+)?(?:increase(?:d|s)?|enlarg\w*|widen\w*)
+            (?![\s\S]{0,160}?has\s+reversed)
         )
 
         |
@@ -234,7 +260,7 @@
         (?<!\bnonspecific\s)
         (?<!\bmild\snonspecific\s)
         (?:
-            (?:enlarged|prominent|wide(?:r|-appearing)?|broad(?:er)?)\s+(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            (?:enlarged|prominent|wide(?:r|-appearing)?|broad(?:er|ened)?)\s+(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
             |
             (?:prominence|enlargement)\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
             |
@@ -242,17 +268,24 @@
             fullness\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
             (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|paratracheal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b|hematoma|seroma|goiter|thyroid))
             |
-            (?:enlarged|prominent|broad(?:er)?)\s+contour\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            # named-region copula full: "the upper mediastinum is full"
+            (?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\s+
+            (?:is|are|appears?|remain(?:s)?)\s+
+            (?:mildly\s+|minimally\s+|markedly\s+|slightly\s+|somewhat\s+|diffusely\s+)?
+            full\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|paratracheal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b|hematoma|seroma|goiter|thyroid))
+            |
+            (?:enlarged|prominent|broad(?:er|ened)?)\s+contour\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:superior|upper|mid(?:dle)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
             |
             (?<!cardio)(?<!cardio-)
             (?<!\bparatracheal\s)
-            (?:enlarged|prominent|broad(?:er)?)\s+mediastinal\s+(?:silhouette|contour)s?\b
-            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
+            (?:enlarged|prominent|broad(?:er|ened)?)\s+mediastinal\s+(?:silhouette|contour|shadow)s?\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|nodal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
             |
             (?<!cardio)(?<!cardio-)
             (?<!\bparatracheal\s)
-            (?:enlarged|prominent|broad(?:er)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
-            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
+            (?:enlarged|prominent|broad(?:er|ened)?)\s+(?:mediastin(?:um|ium)|mediastnium)\b
+            (?![^\n.!?;:]{0,90}(?:lymphadenopathy|adenopathy|nodal|(?:history\s+of\s+)?(?:a\s+)?(?:mediastinal\s+)?mass\b))
             |
             (?:prominence|enlargement|fullness)\s+of\s+(?:the\s+)?(?:mediastin(?:um|ium)|mediastnium)\b
             (?!\s+(?:drain|drains|clip|clips|tube|tubes|catheter|wire|wires|fat|vessel|vessels|vein|veins|lymph|node|adenopathy|mass)\b)
@@ -265,16 +298,16 @@
             |
             (?<!cardio)(?<!cardio-)
             (?<!\bsegment\sof\sthe\s)
-            mediastin(?:um|al\s+(?:contours?|silhouettes?))\s+
+            mediastin(?:um|al\s+(?:contours?|silhouettes?|shadows?))\s+
             (?:is\s+|are\s+|appears?\s+|remain(?:s)?\s+)?
             (?:mildly\s+|minimally\s+|markedly\s+|slightly\s+|somewhat\s+)?
-            (?:prominent|enlarged|broad(?:er)?|wider)\b
+            (?:prominent|enlarged|broad(?:er|ened)?|wider)\b
             (?!\s+(?:pericardial|fat|pad)\b)
             (?![^\n.!?;:]{0,100}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,50}(?:rotation|technique|positioning|tortuous))
             (?![^\n.!?;:]{0,80}tortuos)
         )
         (?![^\n.!?;:]{0,90}technique[- ]related)
-        (?![^\n.!?;:]{0,140}(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
+        (?![^\n.!?;:]{0,140}(?<!\bnot\s)(?<!\bno\s)(?:due\s+to|secondary\s+to)\s+[^\n.!?;:]{0,70}(?:technique|positioning|rotation|magnification))
 
         |
 

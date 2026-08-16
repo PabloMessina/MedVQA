@@ -42,7 +42,8 @@
         |
 
         # Reverse order: "atelectasis, rounded" / "atelectasis that is/appears rounded"
-        \batelect\w*(?:,\s*|\s+(?:that\s+(?:is|appears)\s+|which\s+(?:is|appears)\s+|appearing\s+)?)round(?:ed)?\b
+        # Bare copula: "atelectasis is rounded" / "atelectasis appears rounded"
+        \batelect\w*(?:,\s*|\s+(?:that\s+(?:is|appears)\s+|which\s+(?:is|appears)\s+|appearing\s+|is\s+|appears\s+)?)round(?:ed)?\b
         |
         # "atelectasis with rounded morphology|configuration|appearance|contour|shape"
         \batelect\w*\s+with\s+round(?:ed)?\s+(?:morphology|configuration|appearance|contour|shape)\b
@@ -55,9 +56,11 @@
         |
         \bblesovsky(?:\s+syndrome)?\b
         |
-        \bround(?:ed)?[?]*\s+lung\s+collapse\b
+        # "rounded lung collapse" / "rounded collapse" / optional pulmonary
+        \bround(?:ed)?[?]*\s+(?:(?:lung|pulmonary)\s+)?collapse\b
         |
-        \batelect\w*[-\s]+pseudo[-\s]*tumou?rs?\b
+        # atelectatic pseudotumor / pseudomass (not bare pseudomass)
+        \batelect\w*[-\s]+pseudo[-\s]*(?:tumou?rs?|mass(?:es)?)\b
 
         |
 

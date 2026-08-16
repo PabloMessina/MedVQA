@@ -101,3 +101,81 @@ def resolve_sample_annotations_path(
     if config_slug is None:
         return legacy
     return get_sample_annotations_path(run_id, model_name, config_slug)
+
+
+def get_full_regex_matches_path(run_id: str, dataset: str) -> str:
+    path = os.path.join(get_cache_run_dir(run_id), "full_regex_matches")
+    os.makedirs(path, exist_ok=True)
+    return os.path.join(path, f"{dataset}.jsonl")
+
+
+def get_verify_annotations_path(
+    run_id: str,
+    model_name: str,
+    config_slug: str,
+    dataset: str,
+    *,
+    no_finding: bool = False,
+) -> str:
+    name = (
+        f"verify_no_finding_{dataset}.jsonl"
+        if no_finding
+        else f"verify_{dataset}.jsonl"
+    )
+    return os.path.join(
+        get_llm_annotations_dir(run_id, model_name, config_slug),
+        name,
+    )
+
+
+def get_failed_query_hashes_path(
+    run_id: str,
+    model_name: str,
+    config_slug: str,
+) -> str:
+    """Same-config failed ``query_hash`` sidecar (not reused across model/config)."""
+    return os.path.join(
+        get_llm_annotations_dir(run_id, model_name, config_slug),
+        "failed_query_hashes.jsonl",
+    )
+
+
+def get_final_labels_dir(run_id: str = DEFAULT_RUN_ID) -> str:
+    path = os.path.join(get_results_run_dir(run_id), "final_labels")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def resolve_verify_annotations_path(
+    run_id: str,
+    model_name: str,
+    dataset: str,
+    *,
+    config_slug: Optional[str] = None,
+    no_finding: bool = False,
+) -> str:
+    """Resolve ``verify_*.jsonl``; prefer ``config_slug``, else newest mtime."""
+    name = (
+        f"verify_no_finding_{dataset}.jsonl"
+        if no_finding
+        else f"verify_{dataset}.jsonl"
+    )
+    if config_slug:
+        return get_verify_annotations_path(
+            run_id, model_name, config_slug, dataset, no_finding=no_finding
+        )
+    safe_model = model_name.replace("/", "_")
+    model_dir = os.path.join(get_cache_run_dir(run_id), "llm_annotations", safe_model)
+    candidates: list[str] = []
+    if os.path.isdir(model_dir):
+        for sub_name in os.listdir(model_dir):
+            sub = os.path.join(model_dir, sub_name)
+            if os.path.isdir(sub):
+                p = os.path.join(sub, name)
+                if os.path.isfile(p):
+                    candidates.append(p)
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return candidates[0]
+    # Default even if missing
+    return os.path.join(model_dir, name)

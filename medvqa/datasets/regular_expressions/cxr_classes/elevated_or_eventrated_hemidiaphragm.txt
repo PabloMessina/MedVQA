@@ -2,25 +2,33 @@
         # Decreased / less / reduced elevation = improvement, not current elevation
         # (both baseline FPs: "decreased elevation of the left hemidiaphragm").
         # rais(?:ed|ing) only — bare "raise" / "raising the question" excluded.
-        # FN-fit (fn_mine_fit_shared): eventur* typo; upward/ascending; high (not only
+        # FN-fit pass-1: eventur*; upward/ascending; high (not only
         # high-riding/high-positioned); mid peaking; laterality-before-lateral tenting;
-        # unilateral diaphragmatic elevation orders — see HUNT.md.
+        # unilateral diaphragmatic elevation orders.
+        # FN-fit pass-2 (HUNT.md wave 40): elevted; eventeration; hemi-typos
+        # (hemidiaphram / hemidiaphgragm / hemdiaphragm / hemidiaphramg);
+        # copula is/appears/remains high (not higher/highly); laterality-last
+        # high-riding; high left|right diaphragm (no hemi-); diaphragms elevated on
+        # the right|left.
         (?<!decreased\s)(?<!decrease\s)(?<!decreasing\s)(?<!less\s)(?<!reduced\s)(?<!diminished\s)
         (?<!no\s)(?<!without\s)(?<!not\s)
 
         (?:
-            # elevat / eventrat|eventur / high-riding / raised … hemi[ -]?diaphragm
+            # elevat|elevted / eventrat|eventerat|eventur / high-riding / raised
+            # … hemi[ -]?diaphragm (typo-tolerant hem/hemo + diaphram/diaphgragm)
             # covers: "elevation and peaking of the left hemidiaphragm",
             # "Elevated or herniated left hemidiaphragm", "Eventrated contour of …",
             # "elevation of the left hemi diaphragm",
             # "Elevation of the left posterior and lateral hemidiaphragm",
             # "Raised left hemidiaphragm", "interval raised left hemidiaphragm",
-            # "increased eventuration of the right hemidiaphragm"
-            (?:elevat\w*|event(?:rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing))
+            # "increased eventuration of the right hemidiaphragm",
+            # "Elevted right hemidiaphragm again noted",
+            # "Elevated right hemidiaphram", "elevation of the left hemdiaphragm"
+            (?:elev(?:at\w*|ted)|event(?:e?rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing))
             (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
             (?:the\s+)?(?:right|left|bilateral)?\s*
             (?:(?:(?:medial|lateral|central|anterior|posterior)\s+(?:and\s+)?){0,3})?
-            hemi[-\s]?diaphragm\w*
+            \bhem[io]?[-\s]?diaph(?:ragm|ram|gragm)\w*
             (?!\s+has\s+resolved)
             (?!\s+as\s+seen\s+on\s+prior)
 
@@ -35,27 +43,30 @@
             # "Raised contour of the right diaphragm"
             # Require laterality so bilateral "elevated diaphragms" from body habitus /
             # poor inspiration / low volumes stay out (prompt exclusion).
-            (?:elevat\w*|event(?:rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing))
+            (?:elev(?:at\w*|ted)|event(?:e?rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing))
             (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
             (?:the\s+)?(?:right|left)(?:-sided)?\s+
             (?:(?:dome|aspect|contour)\s+of\s+(?:the\s+)?)?
             (?:(?:(?:medial|lateral|central|anterior|posterior)\s+(?:and\s+)?){0,3})?
-            (?:hemi[-\s]?)?diaphragm\w*
+            (?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
             (?!\s+has\s+resolved)
             (?!\s+as\s+seen\s+on\s+prior)
         )
 
         |
 
-        # hemi[ -]?diaphragm … elevat / eventrat|eventur / high-riding / raised / peaking / tenting
+        # hemi[ -]?diaphragm … elevat / eventrat|eventerat|eventur / high-riding /
+        # raised / peaking / tenting
         # covers: "hemidiaphragm appears to be elevated",
         # "right hemidiaphragm suggest eventration",
-        # "The right hemidiaphragm is raised."
+        # "The right hemidiaphragm is raised.",
+        # "The right hemidiaphgragm is chronically elevated",
+        # "The right hemidiaphram also appears elevated"
         (?<!no\s)(?<!without\s)
-        (?:(?:right|left|bilateral)\s+)?hemi[-\s]?diaphragm\w*
+        (?:(?:right|left|bilateral)\s+)?\bhem[io]?[-\s]?diaph(?:ragm|ram|gragm)\w*
         (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|resolved)\b)\w+){0,6}[^\w.!?;:]+
         (?<!decreased\s)(?<!decrease\s)(?<!less\s)(?<!reduced\s)
-        (?:elevat\w*|event(?:rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing)|peaking|tent(?:ed|ing)?)
+        (?:elev(?:at\w*|ted)|event(?:e?rat|ur)\w*|high[-\s]?riding|rais(?:ed|ing)|peaking|tent(?:ed|ing)?)
         (?!\s+has\s+resolved)
 
         |
@@ -78,7 +89,7 @@
         (?:(?:medial|lateral|central|anterior|posterior|mid(?:dle)?)\s+)?
         (?:aspect\s+of\s+(?:the\s+)?)?
         (?:(?:right|left)\s+)?
-        (?:hemi[-\s]?)?diaphragm\w*
+        (?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
 
         |
 
@@ -88,10 +99,10 @@
         # via elevat→(left|right) diaphragm arms and dedicated unilateral arm below.
         (?<!no\s)(?<!without\s)(?<!not\s)
         (?:
-            hemi[-\s]?diaphragm\s+elevation|
+            \bhem[io]?[-\s]?diaph(?:ragm|ram|gragm)\s+elevation|
             (?<!bilateral\s)(?<!both\s)diaphragm\s+elevation|
-            diaphragmatic\s+event(?:rat|ur)\w*|
-            event(?:rat|ur)\w*|
+            diaphragmatic\s+event(?:e?rat|ur)\w*|
+            event(?:e?rat|ur)\w*|
             (?:(?:right|left)\s+)?diaphragmatic\s+hump|
             juxta[-\s]?phrenic\s+peak
         )
@@ -123,15 +134,24 @@
         (?<!no\s)(?<!without\s)
         (?:upward|cephalad|superior)\s+(?:displacement|bulge)\s+of\s+(?:the\s+)?
         (?:(?:right|left)\s+)?
-        (?:hemi[-\s]?)?diaphragm\w*
+        (?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
 
         |
 
         # ascending (hemi)diaphragm [on the right|left]
         # covers: "Ascending hemidiaphragm on the right"
         (?<!no\s)(?<!without\s)
-        ascending\s+(?:(?:right|left)\s+)?(?:hemi[-\s]?)?diaphragm\w*
+        ascending\s+(?:(?:right|left)\s+)?(?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
         (?:\s+on\s+the\s+(?:right|left))?
+
+        |
+
+        # laterality-last high-riding (not laterality-before, which other arms cover)
+        # covers: "High-riding diaphragm on the left"
+        # Require on-the-side so bilateral "high-riding diaphragms" stay out.
+        (?<!no\s)(?<!without\s)
+        high[-\s]?riding\s+(?:the\s+)?(?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
+        \s+on\s+(?:the\s+)?(?:right|left)\b
 
         |
 
@@ -142,21 +162,23 @@
         domed?\s+configur\w*
         (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
         (?:
-            (?:(?:right|left)\s+)?hemi[-\s]?diaphragm\w*
+            (?:(?:right|left)\s+)?\bhem[io]?[-\s]?diaph(?:ragm|ram|gragm)\w*
             |
-            (?:right|left)\s+diaphragm\w*
+            (?:right|left)\s+diaph(?:ragm|ram|gragm)\w*
         )
 
         |
 
-        # (right|left)[-sided] (hemi)?diaphragm is / appears / may be elevated|raised
-        # covers: "The left diaphragm is slightly elevated."
+        # (right|left)[-sided] (hemi)?diaphragm is / appears / remains / may be
+        # elevated|raised|high
+        # covers: "The left diaphragm is slightly elevated.",
+        # "The left hemidiaphragm is high." (not higher than / highly …)
         (?<!no\s)(?<!without\s)
-        (?:right|left)(?:-sided)?\s+(?:hemi[-\s]?)?diaphragm\s+
-        (?:(?:is|may\s+be)\s+|appears?\s+(?:to\s+be\s+)?)?
-        (?:(?:abnormally|mildly|moderately|slightly|markedly|minimally)\s+)?
+        (?:right|left)(?:-sided)?\s+(?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\s+
+        (?:(?:is|may\s+be|remains?)\s+|appears?\s+(?:to\s+be\s+)?)?
+        (?:(?:abnormally|mildly|moderately|slightly|markedly|minimally|chronically)\s+)?
         (?<!decreased\s)(?<!less\s)
-        (?:elevat\w*|rais(?:ed|ing))
+        (?:elev(?:at\w*|ted)|rais(?:ed|ing)|\bhigh\b)
 
         |
 
@@ -164,7 +186,7 @@
         # "High-positioned diaphragms" from poor inspiration / low volumes
         (?<!no\s)
         high[-\s]?position(?:ed)?\s+(?:of\s+)?(?:the\s+)?(?:right|left)\s+
-        (?:hemi[-\s]?)?diaphragm\w*
+        (?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
 
         |
 
@@ -173,23 +195,28 @@
         # "High position of the diaphragm obscures the right lower lobe …"
         (?<!no\s)
         high\s+position\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?
-        (?:hemi[-\s]?)?diaphragm\w*
+        (?:\bhem[io]?[-\s]?)?diaph(?:ragm|ram|gragm)\w*
 
         |
 
-        # bare "high (right|left) hemidiaphragm [contour]" (not high-riding / high-positioned)
-        # covers: "A high right hemidiaphragm contour is unchanged."
-        # Require hemi- — exclude "Slightly high diaphragms … body habitus".
-        # high-riding / high-positioned use hyphen or different arms (\bhigh\s+ won't eat them).
+        # bare "high (right|left) (hemi)diaphragm [contour]" (not high-riding /
+        # high-positioned). hemi optional only with laterality — exclude
+        # "Slightly high diaphragms … body habitus".
+        # covers: "A high right hemidiaphragm contour is unchanged.",
+        # "High left diaphragm."
         (?<!no\s)(?<!without\s)
-        \bhigh\s+(?:(?:right|left)\s+)?hemi[-\s]?diaphragm\w*(?:\s+contour)?
+        \bhigh\s+(?:
+            (?:(?:right|left)\s+)?\bhem[io]?[-\s]?diaph(?:ragm|ram|gragm)\w*(?:\s+contour)?
+            |
+            (?:right|left)\s+diaph(?:ragm|ram|gragm)s?\b
+        )
 
         |
 
         # common synonym: elevated (right|left) lung base ≈ elevated hemidiaphragm
         (?<!no\s)(?<!without\s)
         (?:right|left)\s+lung\s+base\s+
-        (?:is\s+)?(?:(?:mildly|moderately|slightly)\s+)?elevat\w*
+        (?:is\s+)?(?:(?:mildly|moderately|slightly)\s+)?elev(?:at\w*|ted)
 
         |
 
@@ -198,19 +225,20 @@
         # "Persistent elevation of the right lung base."
         (?<!no\s)(?<!without\s)(?<!not\s)
         (?<!decreased\s)(?<!decrease\s)(?<!less\s)(?<!reduced\s)
-        (?:elevat\w*|rais(?:ed|ing))
+        (?:elev(?:at\w*|ted)|rais(?:ed|ing))
         (?:[^\w.!?;:]+\w+){0,4}[^\w.!?;:]+
         (?:the\s+)?(?:right|left)\s+lung\s+base\w*
 
         |
 
-        # asymmetry / diaphragms … elevation of the (right|left) [ellipsis]
-        # covers: "Asymmetry of the diaphragms with elevation of the left."
+        # asymmetry / diaphragms … elevation of|elevated on the (right|left)
+        # covers: "Asymmetry of the diaphragms with elevation of the left.",
+        # "… height of the diaphragms, elevated on the right."
         # Guard non-diaphragm anatomy after laterality.
         (?<!no\s)(?<!without\s)
-        diaphragm\w*
+        diaph(?:ragm|ram|gragm)\w*
         (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
-        (?:elevat\w*|rais(?:ed|ing))\s+of\s+(?:the\s+)?(?:right|left)\b
+        (?:elev(?:at\w*|ted)|rais(?:ed|ing))\s+(?:of|on)\s+(?:the\s+)?(?:right|left)\b
         (?!\s+(?:lung|ventric\w*|atrium|heart|hilum|breast|arm|lobe|kidney|humer\w*|shoulder|base\b))
 
         |
@@ -223,7 +251,7 @@
         (?:the\s+)?diaphragm\s+
         (?:may\s+be\s+|appears?\s+(?:to\s+be\s+)?)
         (?:(?:mildly|moderately|slightly|abnormally)\s+)?
-        elevat\w*
+        elev(?:at\w*|ted)
         (?!\s+bilaterally)
         (?!\s+due\s+to\s+(?:low\s+lung\s+volumes?|poor\s+inspir))
     )

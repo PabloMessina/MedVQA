@@ -36,7 +36,22 @@
     "The differential for these findings included edema or infection.",
     "Widespread opacities compatible with pneumonia or edema.",
     "Patchy basal opacity possibly secondary to congestive heart failure.",
-    "Edematous changes throughout the right lung."
+    "Edematous changes throughout the right lung.",
+    "Edema of the right lung is present.",
+    "CHF pattern with probable progression.",
+    "There is CHF, which appears increased compared with the prior film.",
+    "Findings consistent with a volume overloaded state.",
+    "Opacification concerning for pulmonary overload pattern.",
+    "There is pulmonary-edema.",
+    "The lungs appear edematous.",
+    "The lungs are oedematous.",
+    "Perihilar interstitial pattern may represent COPD or edema.",
+    "The findings may reflect low-grade compensated CHF.",
+    "Bibasilar and right mid lung field infiltrates and or edema noted.",
+    "Cardiomegaly with midlung and lower lobe edema.",
+    "Interstitial lung changes could be related to chronic edema or fibrosis.",
+    "Edema associated with allergic lung reaction is also a consideration in the differential.",
+    "Overall edema of the lung parenchyma has decreased slightly but patchy opacity remains especially at the right base."
   ],
   "negatives": [
     "Cephalization without alveolar flooding.",

@@ -1,19 +1,30 @@
 \b(?:
         # tracheal + displacement noun/verb (skip resolved wet-read "… has improved")
-        # also: tracheal and mediastinal/esophageal shift
+        # also: tracheal and mediastinal/esophageal shift (either order)
+        # typo: trachial
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
         (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
-        tracheal(?:\s+and\s+(?:the\s+)?(?:mediastin\w*|esophag\w*))?
+        (?:(?:mediastin\w*|esophag\w*)\s+and\s+(?:the\s+)?)?trach(?:e|i)al(?:\s+and\s+(?:the\s+)?(?:mediastin\w*|esophag\w*))?
         \s+(?:deviat\w*|displac\w*|shift\w*|bow(?:ed|ing)?|retract\w*|deflect\w*|pull(?:ed|ing))\b
         (?!\s+has\s+improved)|
 
         # trachea / tracheal air column|shadow + optional "and esophagus/mediastinum"
-        # + copula/relative + optional degree (incl. chronically) + verb (incl. pushed)
+        # + copula/relative (incl. may be / has been) + optional degree (incl. laterally)
+        # + verb (incl. pushed)
         (?<!\bno\s)(?<!\bwithout\s)
         trachea(?:l\s+air\s+(?:column|shadow)|\s+and\s+(?:the\s+)?(?:esophag\w*|mediastin\w*|heart))?
-        (?:\s+(?:is|are|appears?|remain(?:s|ing)?|which\s+is|that\s+is))?
-        (?:\s+(?:still|again|now|also|further|slightly|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|marked(?:ly)?|somewhat|chronic(?:ally)?))*
+        (?:\s+(?:is|are|appears?|remain(?:s|ing)?|which\s+is|that\s+is|(?:has|have|had)\s+been|(?:may|might|can|could)\s+be))?
+        (?:\s+(?:still|again|now|also|further|slightly|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|marked(?:ly)?|somewhat|chronic(?:ally)?|laterally))*
         \s+(?:deviated|displaced|shifted|bowed|pulled|retracted|deflected|buckled|pushed)\b|
+
+        # locative of-midline without a shift verb (not rotation/positioning-only)
+        (?<!\bno\s)(?<!\bwithout\s)
+        trachea(?:l\s+air\s+(?:column|shadow))?
+        \s+(?:is|are|appears?|remain(?:s|ing)?|lies|sits|which\s+is|that\s+is|(?:has|have|had)\s+been|(?:may|might)\s+be)
+        (?:\s+(?:still|again|now|also|further|slightly|mild(?:ly)?|minimal(?:ly)?|somewhat))*
+        (?:\s+(?:located|situated))?
+        \s+to\s+the\s+(?:left|right)\s+of\s+(?:the\s+)?midline\b
+        (?!\s+(?:due\s+to|from|secondary\s+to|attributed\s+to)\s+(?:patient\s+)?(?:rotation|positioning|projection))|
 
         # deviation(s) / deflection / shift / … of the trachea
         # stacked site modifiers; tracheal air column/shadow alias
@@ -56,16 +67,17 @@
         (?:deviated|displaced|shifted|bowed)\s+trachea\b|
 
         # displacing/pulling/retracting/pushing (and compressing) the trachea
-        # 3sg displaces; optional "of"; site modifiers; heart/mediastinum/esophagus … and trachea
-        (?<!\bno\s)(?<!\bwithout\s)
-        (?:displac(?:es|ing|ed)|push(?:es|ing|ed)|pull(?:ing|ed)|retract(?:ing|ed)|deviat(?:ing|ed)|shift(?:ing|ed)|bow(?:ing|ed))
+        # 3sg displaces; infinitive/bare deviate; optional "of"; site modifiers
+        # (incl. calcified); heart/mediastinum/esophagus … and trachea
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        (?:displac(?:es|ing|ed)|push(?:es|ing|ed)|pull(?:ing|ed)|retract(?:ing|ed)|deviat(?:es|ing|ed|e)|shift(?:ing|ed)|bow(?:ing|ed))
         (?:\s+and\s+(?:compressing|narrowing|displacing|pulling|retracting|pushing))?
         \s+(?:of\s+)?(?:the\s+)?
         (?:
             (?:(?:heart|cardiac(?:\s+\w+)?|mediastin\w*|esophag\w*)[\s,]*){1,6}
             and\s+(?:the\s+)?
             |
-            (?:(?:left|right|upper|lower|mid|distal|proximal|cervical|superior|inferior)\s+)*
+            (?:(?:left|right|upper|lower|mid|distal|proximal|cervical|superior|inferior|calcified)\s+)*
         )
         trachea\b|
 

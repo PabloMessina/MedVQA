@@ -10,22 +10,33 @@
 # plaque; calcification of (the) hemidiaphragm(s); plaque-like calcified densit*/
 # calcifications; widen calcified plaque→asbestos span; projecting along/over
 # hemidiaphragm connectors. Do not chase bare pleural plaques.
+#
+# FN-fit pass-2 (hunt TPs): widen pleural↔calcif / calcif→fibrothorax windows;
+# calcinos* next to pleural; calcif along/seen along/present along hemidiaphragm
+# (block intra-abdominal / rather-than-pleural); hyphen hemi-diaphragm + laterality
+# in 5b; calcified apical cap; calcified plaque at lung base (aorta lookbehind).
 
 (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\babsent\s)(?<!\bdenies\s)
 (?<!\bnegative\sfor\s)
 (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
 (?<!\bno\ssign\sof\s)(?<!\bno\ssigns\sof\s)
 \b(?:
-        # 1. Pleural/plueral ... calcification(s)/califications/calcium
+        # 1. Pleural/plueral ... calcification(s)/califications/calcium/calcinosis
         pl(?:eu|ue)r[a-z]*
-        (?:[\s,;()/-]+[a-z-]+){0,5}
-        [\s,;()/-]+(?:calcif[a-z]*|calif[a-z]*|calcium)
+        (?:[\s,;()/-]+[a-z-]+){0,8}
+        [\s,;()/-]+(?:calcif[a-z]*|calif[a-z]*|calcium|calcinos\w*)
         |
-        # 2. Calcification(s)/califications/calcium ... pleural/plueral
-        (?:calcif[a-z]*|calif[a-z]*|calcium)
+        # 2. Calcification(s)/califications/calcium/calcinosis ... pleural/plueral
+        (?:calcif[a-z]*|calif[a-z]*|calcium|calcinos\w*)
         (?:[\s,;()/-]+[a-z-]+){0,8}
         [\s,;()/-]+pl(?:eu|ue)r[a-z]*
         (?:[\s,;()/-]+(?:in[\s,;()/-]+)?etiolog[a-z]*)?
+        |
+        # 2b. chest-wall calcific thickening ... pleural in origin (longer gap)
+        (?:calcif[a-z]*|calif[a-z]*|calcium)
+        (?:[\s,;()/-]+[a-z-]+){0,12}
+        [\s,;()/-]+pl(?:eu|ue)r[a-z]*
+        [\s,;()/-]+in[\s,;()/-]+origin
         |
         # 3. Calcified pleural plaque/thickening/scar/fibrosis
         (?:calcif[a-z]*|calif[a-z]*)
@@ -35,9 +46,10 @@
         [\s,;()/-]+(?:plaque[a-z]*|thicken[a-z]*|scar[a-z]*|fibro[a-z]*)
         |
         # 4. Calcific fibrothorax (pleural by definition; no "pleur*" token required)
+        # Apostrophe in separators: "patient's known history of fibrothorax"
         (?:calcif[a-z]*|calif[a-z]*)
-        (?:[\s,;()/-]+[a-z-]+){0,4}
-        [\s,;()/-]+fibrothorax
+        (?:[\s,;()/'’-]+[a-z-]+){0,14}
+        [\s,;()/'’-]+fibrothorax
         |
         fibrothorax
         (?:[\s,;()/-]+[a-z-]+){0,4}
@@ -50,29 +62,56 @@
         (?:[\s,;()/-]+[a-z-]+){0,3}
         [\s,;()/-]+(?:calcif[a-z]*|calif[a-z]*|calcium)
         |
-        # 5b. FN-fit: calcification of (the) hemidiaphragm(s) (narrow reverse;
-        # hemidiaphragm only — avoids hepatic/capsular calc over diaphragm)
+        # 5b. FN-fit: calcification of (the) (left|right) hemi-diaphragm(s)
+        # hemidiaphragm only — avoids hepatic/capsular calc over diaphragm
         (?:calcification|calification|calcifications|califications)
         [\s,;()/-]+of
-        (?:[\s,;()/-]+the)?
-        [\s,;()/-]+hemidiaphragm\w*
+        (?:[\s,;()/-]+(?:the|right|left|both|bilateral))*
+        [\s,;()/-]+hemi[\s-]*diaphragm\w*
+        |
+        # 5c. calcification (is again seen|are present|seen)? along (the) hemidiaphragm
+        # Prompt: HD projection only when localized to the pleura — block
+        # "intra-abdominal rather than pleural" in the same clause.
+        (?<!sub)(?<!infra)(?<!sub-)(?<!infra-)
+        (?:calcif[a-z]*|calif[a-z]*)
+        (?:[\s,;()/-]+(?:
+            linear|focal|scattered|dense|coarse|mild|stable|unchanged|again|
+            is|are|was|were|seen|present|noted|visualized|
+            along|on|over|the|left|right|both|bilateral
+        )){0,8}
+        [\s,;()/-]+hemi[\s-]*diaphragm\w*
+        (?![^.!?]{0,140}(?:
+            intra[\s-]?abdominal|rather\s+than\s+pleural|not\s+pleural|
+            abdominal\s+rather
+        ))
+        |
+        # 5d. calcified apical cap (apical pleural thickening; no pleural/plaque token)
+        (?:calcif[a-z]*|calif[a-z]*)
+        (?:[\s,;()/-]+(?:left|right|bilateral|both|the))?
+        [\s,;()/-]+apical
+        [\s,;()/-]+cap\w*
         |
         # 6. Lung base/diaphragm calcification (slash or space)
         lung[\s,;()/-]+base[\s,;()/-]+diaphragm\w*
         (?:[\s,;()/-]+[a-z-]+){0,2}
         [\s,;()/-]+(?:calcif[a-z]*|calif[a-z]*|calcium)
         |
-        # 7. Calcified/calcific plaque on/along/in/projecting hemidiaphragm|diaphragm|apex
-        # FN-fit: projecting|project between plaque and location
+        # 7. Calcified/calcific plaque on/along/in/at/projecting hemidiaphragm|diaphragm|apex|lung base
+        # FN-fit: projecting|project between plaque and location; lung base; at
+        (?<!atherosclerotic\ )(?<!atheroma\ )(?<!aortic\ )(?<!aorta\ )
         (?:calcif[a-z]*|calif[a-z]*)
         (?:[\s,;()/-]+[a-z-]+){0,3}
         [\s,;()/-]+plaque[a-z]*
         (?:[\s,;()/-]+(?:
-            along|on|over|in|of|the|left|right|bilateral|both|
+            along|on|over|in|at|of|the|left|right|bilateral|both|
             appears?|to|have|has|a|an|mild|stable|unchanged|again|noted|seen|
             project(?:ing|s|ed)?
         )){0,8}
-        [\s,;()/-]+(?:hemidiaphragm\w*|diaphragmat\w*|diaphragm\w*|(?:lung\s+)?apex\w*|\bapices?\b)
+        [\s,;()/-]+(?:
+            hemi[\s-]*diaphragm\w*|diaphragmat\w*|diaphragm\w*|
+            (?:lung\s+)?apex\w*|\bapices?\b|
+            lung[\s,;()/-]+bases?
+        )
         |
         # 7b. FN-fit: calcified(+laterality)+diaphragmatic|hemidiaphragmatic+plaque
         (?:calcif[a-z]*|calif[a-z]*)

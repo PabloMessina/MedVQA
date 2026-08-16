@@ -5,7 +5,9 @@ dataset's texts at most once per process. Sub-agents must use this module
 instead of calling ``load_mimiccxr_reports()`` (or siblings) in a loop.
 
 Also provides sample-gold FN lookup (stratum D) via ``sample_gold_fns`` /
-``sample_gold_fns.pkl`` under ``.agent/regex_refine/_fn_mine/``.
+``sample_gold_fns.pkl`` under ``.agent/regex_refine/_fn_mine/``, and
+``similar_tokens`` (Levenshtein neighbors over the keyword-index vocab) as a
+typo expander for ``keyword_candidates``.
 """
 
 from __future__ import annotations
@@ -62,7 +64,7 @@ _INDEX_CACHE_DIR = Path(PROJECT_ROOT) / ".agent" / "regex_refine" / "_fn_mine"
 _RECALL_SCAN_GLOB = "_recall_scan*"
 SAMPLE_GOLD_FNS_PATH = _INDEX_CACHE_DIR / "sample_gold_fns.pkl"
 FN_MINE_STATUS_PATH = Path(PROJECT_ROOT) / ".agent" / "regex_refine" / "fn_mine_status.json"
-SKIP_UNLESS_ASKED = ("tuberculosis", "pulmonary_vascular_congestion")
+SKIP_UNLESS_ASKED = ()
 MINI_TESTS_BY_CLASS_DIR = (
     Path(REGULAR_EXPRESSIONS_FOLDER) / "cxr_class_mini_tests" / "by_class"
 )
@@ -687,6 +689,135 @@ def keyword_candidates(
     return out
 
 
+_MIN_SIMILAR_QUERY_LEN = 6
+
+
+def _levenshtein_at_most(a: str, b: str, max_dist: int) -> int | None:
+    """Edit distance, or None if it would exceed ``max_dist``."""
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > max_dist:
+        return None
+    if la > lb:
+        a, b = b, a
+        la, lb = lb, la
+    prev = list(range(la + 1))
+    for i, cb in enumerate(b, 1):
+        cur = [i]
+        row_min = i
+        for j, ca in enumerate(a, 1):
+            cost = 0 if ca == cb else 1
+            v = prev[j - 1] + cost
+            ins = cur[j - 1] + 1
+            if ins < v:
+                v = ins
+            delete = prev[j] + 1
+            if delete < v:
+                v = delete
+            cur.append(v)
+            if v < row_min:
+                row_min = v
+        if row_min > max_dist:
+            return None
+        prev = cur
+    dist = prev[-1]
+    return dist if dist <= max_dist else None
+
+
+def _similar_query_anchor(query: str, *, min_query_len: int) -> str:
+    toks = _TOKEN_RE.findall(query.lower())
+    if not toks:
+        raise ValueError(f"query has no alphanumeric tokens: {query!r}")
+    anchor = max(toks, key=len)
+    if len(anchor) < min_query_len:
+        raise ValueError(
+            f"query token {anchor!r} is shorter than min_query_len={min_query_len} "
+            "(short strings collide; use a longer lexicon word)"
+        )
+    return anchor
+
+
+def similar_tokens(
+    query: str,
+    *,
+    dataset: str | None = None,
+    datasets: Sequence[str] | None = None,
+    k: int = 10,
+    max_dist: int | None = None,
+    min_query_len: int = _MIN_SIMILAR_QUERY_LEN,
+) -> list[dict]:
+    """Top-k vocab tokens by Levenshtein distance (typo expander for stratum C).
+
+    Uses the keyword-index vocabulary (unique tokens), not a full report scan.
+    Does **not** retrieve reports — pass chosen tokens into ``keyword_candidates``.
+    Refuses short queries (default ``min_query_len=6``). Distance 0 (exact) is omitted.
+
+    ``dataset`` or ``datasets`` must be from the hunt brief list. Default ``max_dist``
+    is 1 if the anchor is shorter than 8 characters, else 2.
+    """
+    if k <= 0:
+        return []
+    if dataset is not None and datasets is not None:
+        raise ValueError("pass dataset= or datasets=, not both")
+    if dataset is not None:
+        ds_list = [dataset]
+    elif datasets:
+        ds_list = list(datasets)
+    else:
+        raise ValueError("similar_tokens requires dataset= or datasets=")
+    unknown = [d for d in ds_list if d not in DATASETS]
+    if unknown:
+        raise ValueError(f"unknown dataset(s) {unknown!r}; expected one of {DATASETS}")
+
+    anchor = _similar_query_anchor(query, min_query_len=min_query_len)
+    if max_dist is None:
+        max_dist = 1 if len(anchor) < 8 else 2
+    if max_dist < 1:
+        raise ValueError("max_dist must be >= 1")
+
+    kw = load_keyword_index(build_if_missing=True)
+    # token -> (best_dist, n_docs, datasets_hit)
+    acc: dict[str, tuple[int, int, list[str]]] = {}
+    n_a = len(anchor)
+    for ds in ds_list:
+        vocab = kw.vocab.get(ds) or []
+        postings = kw.postings.get(ds) or {}
+        for tok in vocab:
+            if tok == anchor:
+                continue
+            if abs(len(tok) - n_a) > max_dist:
+                continue
+            dist = _levenshtein_at_most(anchor, tok, max_dist)
+            if dist is None or dist < 1:
+                continue
+            n_docs = len(postings.get(tok) or ())
+            prev = acc.get(tok)
+            if prev is None:
+                acc[tok] = (dist, n_docs, [ds])
+            else:
+                pdist, pn, pds = prev
+                acc[tok] = (
+                    min(pdist, dist),
+                    pn + n_docs,
+                    pds + [ds] if ds not in pds else pds,
+                )
+
+    ranked = sorted(acc.items(), key=lambda kv: (kv[1][0], -kv[1][1], kv[0]))
+    out: list[dict] = []
+    for tok, (dist, n_docs, ds_hit) in ranked[:k]:
+        out.append(
+            {
+                "token": tok,
+                "distance": dist,
+                "n_docs": n_docs,
+                "datasets": ds_hit,
+                "query": anchor,
+            }
+        )
+    return out
+
+
 def latest_recall_scan_dir() -> Path | None:
     root = Path(PROJECT_ROOT) / ".agent" / "regex_refine"
     if not root.is_dir():
@@ -1009,17 +1140,20 @@ def load_fn_mine_status(*, path: Path | None = None) -> dict:
             "skip_unless_asked": list(SKIP_UNLESS_ASKED),
             "classes": {},
         }
+    status["skip_unless_asked"] = list(SKIP_UNLESS_ASKED)
     classes = status.setdefault("classes", {})
     for cid in _regex_backed_class_ids():
         topo = _topology_entry(cid)
         if cid not in classes:
             classes[cid] = topo
+            classes[cid].setdefault("sfirst_fit", _empty_phase())
             continue
         entry = classes[cid]
         for key in ("n_children", "n_descendants", "children", "descendants", "is_leaf", "skip"):
             entry[key] = topo[key]
         entry.setdefault("hunt", _empty_phase())
         entry.setdefault("fit", _empty_phase())
+        entry.setdefault("sfirst_fit", _empty_phase())
     status["updated_at"] = datetime.now().isoformat(timespec="seconds")
     return status
 
@@ -1086,6 +1220,33 @@ def next_hunt_class_ids(*, limit: int = 5, include_skipped: bool = False) -> lis
     return [cid for _d, _c, cid in ready[:limit]]
 
 
+def next_sfirst_fit_class_ids(*, limit: int = 5) -> list[str]:
+    """Pass-2 S-first fit queue: descendants already sfirst-fit; leaves first, then highest n_accepted."""
+    tracker = load_fn_mine_status()
+    ready: list[tuple[int, int, int, str]] = []
+    for cid, entry in tracker["classes"].items():
+        hunt = entry.get("sfirst_hunt") or {}
+        if hunt.get("status") != "done":
+            continue
+        fit = entry.get("sfirst_fit") or {}
+        if (fit.get("status") or "pending") != "pending":
+            continue
+        descendants = entry.get("descendants") or []
+        if any(
+            ((tracker["classes"][d].get("sfirst_fit") or {}).get("status") or "pending")
+            != "done"
+            for d in descendants
+        ):
+            continue
+        n_accepted = hunt.get("n_accepted")
+        n_sort = -(n_accepted if n_accepted is not None else -1)
+        ready.append(
+            (entry.get("n_descendants", 0), n_sort, entry.get("n_children", 0), cid)
+        )
+    ready.sort()
+    return [cid for _d, _n, _c, cid in ready[:limit]]
+
+
 def next_fit_class_ids(*, limit: int = 5, include_skipped: bool = False) -> list[str]:
     """Hunt-done classes whose every descendant has already been fit (leaves first)."""
     tracker = load_fn_mine_status()
@@ -1125,11 +1286,22 @@ def fn_mine_status_summary() -> dict:
         counts["hunt_done"] += int(hs == "done")
         counts["fit_pending"] += int(fs == "pending")
         counts["fit_done"] += int(fs == "done")
+        sh = (entry.get("sfirst_hunt") or {}).get("status") or "pending"
+        sf = (entry.get("sfirst_fit") or {}).get("status") or "pending"
+        counts["sfirst_hunt_done"] = counts.get("sfirst_hunt_done", 0) + int(sh == "done")
+        counts["sfirst_fit_pending"] = counts.get("sfirst_fit_pending", 0) + int(
+            sf == "pending"
+        )
+        counts["sfirst_fit_done"] = counts.get("sfirst_fit_done", 0) + int(sf == "done")
+        counts["sfirst_fit_in_progress"] = counts.get("sfirst_fit_in_progress", 0) + int(
+            sf == "in_progress"
+        )
     return {
         "path": str(FN_MINE_STATUS_PATH),
         "counts": counts,
         "next_hunt": next_hunt_class_ids(limit=10),
         "next_fit": next_fit_class_ids(limit=10),
+        "next_sfirst_fit": next_sfirst_fit_class_ids(limit=10),
     }
 
 

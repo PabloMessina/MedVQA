@@ -11,7 +11,10 @@
     "Atelectasis with rounded morphology at the base.",
     "Atelectasis with rounded configuration.",
     "Atelectasis that appears rounded.",
-    "Atelectasis which appears rounded."
+    "Atelectasis which appears rounded.",
+    "The atelectasis is rounded and pleural-based.",
+    "Rounded collapse in the right lower lobe.",
+    "Atelectatic pseudomass in the posterior lung."
   ],
   "negatives": [
     "Peripheral pulmonary nodule in the right lung.",

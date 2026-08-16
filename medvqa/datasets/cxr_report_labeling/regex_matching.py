@@ -48,6 +48,74 @@ def collect_match_spans_for_class(
     return out
 
 
+def _iter_stem_spans(text: str, regex_class_name: str) -> List[Tuple[str, str]]:
+    """Yield ``(stem, span)`` for this composition node and matching descendants.
+
+    A compiled pattern attached to ``regex_class_name`` is the residual
+    ``<stem>.txt`` arm (``stem == regex_class_name``). String children recurse.
+    """
+    definition = _CLASS_NAME_TO_REGEX_PATTERNS[regex_class_name]
+    hits: List[Tuple[str, str]] = []
+    if isinstance(definition, list):
+        for item in definition:
+            if isinstance(item, re.Pattern):
+                s = match_span(item, text)
+                if s:
+                    hits.append((regex_class_name, s))
+            elif isinstance(item, str):
+                hits.extend(_iter_stem_spans(text, item))
+            else:
+                raise TypeError(
+                    f"Expected pattern or class name under {regex_class_name!r}, "
+                    f"got {type(item)}"
+                )
+    else:
+        s = match_span(definition, text)
+        if s:
+            hits.append((regex_class_name, s))
+    return hits
+
+
+def explain_regex_hits(
+    text: str,
+    class_ids: Sequence[str],
+) -> List[dict]:
+    """Named live hits for prompt classes (typically precomputed ``positive_classes``).
+
+    Each row is ``{class_id, stem, span, via_child}``:
+
+    - ``class_id``: prompt class being explained
+    - ``stem``: composition leaf / residual whose pattern fired
+    - ``span``: first matched substring for that stem (same as
+      :func:`collect_match_spans_for_class`)
+    - ``via_child``: True when ``stem != class_id`` (parent listed because a
+      child regex fired)
+
+    Classes missing from the composition table are skipped. A class in
+    ``class_ids`` with no live hit is omitted (caller can contrast with the
+    precomputed list after regex edits).
+    """
+    rows: List[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for class_id in class_ids:
+        if class_id not in _CLASS_NAME_TO_REGEX_PATTERNS:
+            continue
+        for stem, span in _iter_stem_spans(text, class_id):
+            key = (class_id, stem, span)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "class_id": class_id,
+                    "stem": stem,
+                    "span": span,
+                    "via_child": stem != class_id,
+                }
+            )
+    return rows
+
+
 def report_matches_prompt_class(
     text: str,
     class_id: str,

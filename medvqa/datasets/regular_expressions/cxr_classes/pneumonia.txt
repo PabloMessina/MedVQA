@@ -35,6 +35,13 @@
 # radiodensity→aspiration changes; potentially superimposed infection.
 # Dropped broad concern-for+PNA (indication FPs). Still no bare opacity.
 #
+# Pass-7 (fn_mine fit w46): lexicon holes only — typo pnuemonia+considered,
+# organism-named (mycoplasma/influenza/pneumococcal), round (not only rounded),
+# nosocomial/walking, bronchopneumonitis, post[- ]obstructive, pneumonic
+# consolidation, cannot-entirely-BE-excluded inversion, with-or-without
+# bronchopneumonia, Pneumocystis/PCP infection without trailing pneumonia.
+# Still no bare opacity / consolidation. Do not chase sample-gold D.
+#
 # Intervening tokens use word-hops ((?:[^\w.!?;:]+\w+){0,N}[^\w.!?;:]+) so
 # matches stay clause-local after whitespace normalization. Negation uses
 # stacked fixed-width lookbehinds (stdlib re limitation).
@@ -72,13 +79,14 @@
       (?<!\bpt\sintubated\swith\s)(?<!\bpossible\sviral\s)
       \b(?:
           bronchopneumonia|
-          (?:lobar|segmental|multifocal|m,?ultifocal|multisegmental|atypical|aspiration|infectious|bacterial|viral|fungal)\s+pneumonia|
+          bronchopneumonitis|
+          (?:lobar|segmental|multifocal|m,?ultifocal|multisegmental|atypical|aspiration|infectious|bacterial|viral|fungal|nosocomial|walking|mycoplasma|influenza|pneumococcal)\s+pneumonia|
           (?:covid[-\s]?19|covid19|sars[-\s]?cov[-\s]?2)\s+pneumonia|
-          (?:cavitary|necrotizing|rounded|neonatal|postobstructive|secondary|diffuse|(?:slowly\s+)?resolving|progressive|mild)\s+pneumonias?|
+          (?:cavitary|necrotizing|rounded|round|neonatal|post[-\s]?obstructive|secondary|diffuse|(?:slowly\s+)?resolving|progressive|mild)\s+pneumonias?|
           (?:right|left)\s+lung\s+pneumonia|
           aspiration\s+pneumonitis|
           infectious\s+pneumonitis|
-          postobstructive\s+pneumonitis|
+          post[-\s]?obstructive\s+pneumonitis|
           community[-\s]acquired\s+pneumonia|
           hospital[-\s]acquired\s+pneumonia|
           ventilator[-\s]associated\s+pneumonia|
@@ -202,7 +210,7 @@
           middle\s+lobe|
           (?:RLL|LLL|RUL|LUL|RML)
       )\b
-      (?:[^\w.!?;:]+(?:cavitary|necrotizing|covid[-\s]?19|covid19|mild|diffuse|patchy|focal|rounded))?
+      (?:[^\w.!?;:]+(?:cavitary|necrotizing|covid[-\s]?19|covid19|mild|diffuse|patchy|focal|rounded|round))?
       [^\w.!?;:]+
       \b(?:pneumonias?|pneumonitis|PNA)\b
   )
@@ -223,7 +231,7 @@
       (?!\s+or\s+fibrosis)
       (?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+
       (?:
-          cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|
+          cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)|
           (?:is\s+)?not\s+(?:be\s+)?(?:entirely\s+)?excluded|
           (?:can|should)\s+(?:also\s+|seriously\s+)?be\s+(?:seriously\s+|also\s+)?considered|
           must\s+be\s+suspected|
@@ -246,7 +254,7 @@
       (?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
       (?<!\bcannot\srule\sout\s)
       (?:
-          cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|
+          cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)|
           cannot\s+(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude)|
           (?:do\s+)?not\s+(?:entirely\s+)?exclude|
           should\s+(?:also\s+|seriously\s+)?be\s+(?:seriously\s+|also\s+)?considered|
@@ -334,8 +342,8 @@
           \b(?:infections?|infectious(?:\s+(?:process|etiology|in\s+etiology))?|aspiration)\b
           |
           (?:
-              (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
-              |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+              (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)
+              |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,8}[^\w.!?;:]+cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)
               |cannot\s+(?:(?:be\s+)?(?:ruled\s+out|excluded)|(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude))(?:\s+superimposed)?\s+(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+|recurrent\s+)?infections?
               |infections?\s+(?:is\s+)?not\s+(?:entirely\s+)?excluded
               |cannot\s+exclude\s+(?:superimposed\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|recurrent\s+)?infections?
@@ -433,8 +441,8 @@
       \b(?:opacit\w*|opacificat\w*|consolidat\w*|infiltrat\w*|air[\s-]?space\w*|airspace\w*|atelecta\w*|opacification|densit\w*)\b
       (?:[^\w.!?;:]+\w+){0,22}[^\w.!?;:]+
       (?:
-          (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
-          |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)
+          (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?infections?\s+cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)
+          |(?:superimposed\s+|underlying\s+|recurrent\s+)?infections?(?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)
           |although\s+(?:an?\s+)?(?:atypical\s+|early\s+|acute\s+|recurrent\s+)?infections?\s+(?:cannot\s+be\s+excluded|is\s+not\s+excluded)
           |cannot\s+(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude)(?:\s+superimposed)?\s+(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+|recurrent\s+)?(?:infections?|infectious\s+process)
           |infections?\s+(?:is\s+)?not\s+(?:entirely\s+)?excluded
@@ -462,12 +470,12 @@
           (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?
           (?:aspiration|infections?|infectious\s+process)
           \s+
-          (?:cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
+          (?:cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
           |
           (?:superimposed\s+|underlying\s+|recurrent\s+)?(?:an?\s+)?(?:atypical\s+|early\s+|developing\s+|acute\s+|extensive\s+)?
           (?:infections?|infectious\s+process)
           (?:[^\w.!?;:]+\w+){0,10}[^\w.!?;:]+
-          (?:cannot\s+(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
+          (?:cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)|(?:is\s+)?not\s+(?:entirely\s+)?excluded|is\s+difficult\s+to\s+exclude)
           |
           cannot\s+(?:(?:be\s+)?(?:completely\s+|entirely\s+)?(?:ruled\s+out|excluded)|(?:completely\s+|entirely\s+)?(?:rule\s+out|exclude))
           (?:[^\w.!?;:]+\w+){0,5}[^\w.!?;:]+
@@ -494,6 +502,7 @@
           active\s+pneumonia|
           concurrent\s+pneumonia|
           pneumonic\s+infiltrates?|
+          pneumonic\s+consolidat\w*|
           pneumonia\s+is\s+suspected|
           pneumonia\s+is\s+in\s+the\s+differential|
           pneumonia\s+would\s+be\s+a\s+consideration
@@ -688,5 +697,48 @@
       (?<!\bno\sconsolidation\s)(?<!\bno\sconsolidations\s)
       (?<!\bno\sopacities\s)(?<!\bno\sopacity\s)
       \bsuggests\s+either\s+(?:(?:an?\s+)?(?:acute\s+|early\s+)?)?(?:pneumonias?|pneumonitis|PNA|infection)\b
+  )
+
+  |
+
+  # --------------------------------------------------------------------------
+  # L. Pass-7 hunt residuals (fn_mine fit w46) — constructions A lookbehinds
+  #    or stems cannot absorb without indication / PCP-physician FPs.
+  # --------------------------------------------------------------------------
+  (?:
+      # L1. with or without (broncho)pneumonia — A has (?<!\bwithout\s)
+      (?<!\bno\s)(?<!\bnot\s)
+      \bwith\s+or\s+without\s+(?:broncho)?pneumonias?\b
+  )
+  |
+  (?:
+      # L2. attested typo pnuemonia + considered/cannot-exclude (not bare stem;
+      #     most corpus pnuemonia hits are indication eval/r/o)
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\brule\sout\s)(?<!\br/o\s)(?<!\bhistory\sof\s)(?<!\bevidence\sof\s)
+      \bpnuemonia\b
+      (?:[^\w.!?;:]+\w+){0,6}[^\w.!?;:]+
+      (?:
+          (?:can|could|should)\s+(?:also\s+)?be\s+considered|
+          cannot\s+(?:(?:be|completely|entirely)\s+){1,3}(?:ruled\s+out|excluded)
+      )
+  )
+  |
+  (?:
+      # L3. Pneumocystis / PCP / PJP without trailing pneumonia.
+      #     Do not bare-match PCP (primary care physician).
+      (?<!\bno\s)(?<!\bwithout\s)(?<!\bevaluate\sfor\s)(?<!\beval\sfor\s)
+      (?<!\bhistory\sof\s)(?<!\bh/o\s)(?<!\bto\ssuggest\s)
+      (?<!\breported\sto\s)(?<!\bpatient's\s)(?<!\bpatients\s)
+      (?<!\btx\sfor\s)(?<!\bbeing\stx\sfor\s)(?<!\btreated\sfor\s)
+      (?<!\btreatment\sfor\s)(?<!//\s)(?<!\bindication:\s)
+      (?:
+          \bpneumocystis(?:\s+(?:jirovecii|jiroveci|carinii))?\s+infection\b
+          |
+          \binfection\s+such\s+as\s+(?:pneumocystis|PCP|PJP)\b
+          |
+          (?:potentially|possibly|probably|likely|presumed(?:\s+to\s+be)?)\s+(?:PCP|PJP)\b
+          (?!\s+(?:physician|visit|called|notified))
+      )
   )
 )

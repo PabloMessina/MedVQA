@@ -6,15 +6,26 @@
 # FN-fit (fn_mine_fit_shared): long-span for aortic arch/knob/wall + forward bare aorta;
 # athero/vascular → bare aorta reverse; short-span 6→10; porcelain aorta;
 # guards: non/not/valve before calcif; granuloma/bronchial/hilar after calcif.
+# FN-fit pass-2 hunt TPs: aortoscler*; pipe-stem aorta; arch-first (tight);
+# PATH + calcfication* / clacified / \bcalc\b / Ca++.
 
     # Shared anatomy atoms (referenced via duplication; VERBOSE has no defines).
     # TAB = thoracic/ascending/descending and (upper) abdominal aorta/aortic.
-    # PATH = calcific / atherosclerotic / atheroma / sclero / plaque.
+    # PATH = calcific / atherosclerotic / atheroma / sclero / plaque
+    #      + calcfication* (missing-i) / clacified / \bcalc\b / Ca++.
 
     # ==============================================================================
-    # 0. PORCELAIN AORTA (severe circumferential aortic calcification synonym)
+    # 0. NAMED SYNONYMS (circumferential / sclerotic / pipe-stem aorta)
     # ==============================================================================
     \bporcelain\s+aorta\b
+
+    |
+
+    \bpipe[-\s]?stem\s+aorta\b
+
+    |
+
+    (?<!abdominal\s)(?<!abd\.\s)(?<!abd\s)\baortoscler\w*\b
 
     |
 
@@ -31,7 +42,10 @@
     (?!\s*(?:valve|valvular))
     (?:\W+\w+){0,14}\W+
     (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
-    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?:
+        \b(?:calcif\w*|calcfication\w*|calcinos\w*|calcium|clacified|calc|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+        | \bca\+\+
+    )
     (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
 
     |
@@ -41,7 +55,10 @@
     #    (bare aorta only via §2b athero/vascular — avoids cyst/granuloma FPs)
     # ==============================================================================
     (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
-    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?:
+        \b(?:calcif\w*|calcfication\w*|calcinos\w*|calcium|clacified|calc|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+        | \bca\+\+
+    )
     (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
     (?:\W+\w+){0,14}\W+
     (?<!\bno\s)
@@ -87,7 +104,27 @@
     (?!\s*(?:valve|valvular))
     (?:\W+\w+){0,10}\W+
     (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
-    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?:
+        \b(?:calcif\w*|calcfication\w*|calcinos\w*|calcium|clacified|calc|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+        | \bca\+\+
+    )
+    (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
+
+    |
+
+    # ==============================================================================
+    # 3b. Arch-first without "aortic" prefix (tight gap; zygomatic/neural/costal blocked)
+    #     Hunt: "Arch calcifications are again noted."
+    # ==============================================================================
+    (?<!zygomatic\s)(?<!neural\s)(?<!costal\s)
+    \barch\b
+    (?!\s*(?:valve|valvular))
+    (?:\W+\w+){0,1}\W+
+    (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
+    (?:
+        \b(?:calcif\w*|calcfication\w*|calcinos\w*|calcium|clacified|calc|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+        | \bca\+\+
+    )
     (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
 
     |
@@ -96,7 +133,10 @@
     # 4. SHORT-SPAN: pathology -> anatomy (keep ≤6; long reverse / §2b cover distant)
     # ==============================================================================
     (?<!non\s)(?<!non-)(?<!not\s)(?<!valve\s)
-    \b(?:calcif\w*|calcinos\w*|calcium|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+    (?:
+        \b(?:calcif\w*|calcfication\w*|calcinos\w*|calcium|clacified|calc|atherosclero\w*|atheroma\w*|sclero\w*|plaque\w*)\b
+        | \bca\+\+
+    )
     (?!\s*(?:valve|valvular|pleural|lymph|granuloma\w*|bronchial|hilar))
     (?:\W+\w+){0,6}\W+
     (?<!\bno\s)

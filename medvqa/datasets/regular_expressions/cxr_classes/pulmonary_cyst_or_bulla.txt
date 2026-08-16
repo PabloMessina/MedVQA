@@ -1,13 +1,19 @@
 \b(?:
         # Anatomical modifier + cyst / bulla / bleb
+        # FN-fit: RUL/LUL/… abbreviations before cyst
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
-        (?:pulmonary|lung|subpleural|apical|basal|parenchymal|bi[-\s]?apical|peripheral|regional|costophrenic|lobar|mid[-\s]?lung|intrapulmonary|cicatricial)
+        (?:pulmonary|lung|subpleural|apical|basal|parenchymal|bi[-\s]?apical|peripheral|regional|costophrenic|lobar|mid[-\s]?lung|intrapulmonary|cicatricial|rul|lul|rll|lll|rml)
         \s+(?:cysts?|bullae|bulla|blebs?)
         |
 
-        # Air cysts (explicit thin-walled pulmonary cysts)
+        # Laterality/lobe name + lobe cyst (not hepatic/caudate lobe cyst)
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
-        \bair[-\s]?cysts?\b
+        (?:(?:right|left|upper|middle|lower|mid)\s+){1,3}lobe\s+(?:cysts?|bullae|bulla|blebs?)
+        |
+
+        # Air cysts; air-filled / air filled cyst (intervening "filled")
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        \bair(?:[-\s]?cysts?|[-\s]filled\s+cysts?)\b
         |
 
         # Bare bulla / bullae (not bullous; not emphysema alone; not thick-walled cavity DDx)
@@ -21,15 +27,15 @@
         \bblebs?\b
         |
 
-        # Bullous heads (+ light intervening and-X / fibrotic|emphysematous|reticular|cystic)
-        # Heads: change/emphysema/disease/destruction/lung disease/COPD/formation/area/lesion/complex/airspace/transformation
+        # Bullous / bullus (typo) heads (+ light intervening and-X / fibrotic|emphysematous|reticular|cystic|pulmonary)
+        # Heads: change/emphysema/disease/destruction/lung disease/COPD/formation/area/lesion/complex/airspace/transformation/nature
         # Also: bullous versus/vs X (hedged bullous change)
         # Exclude dermatologic bullous pemphigoid
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
-        \bbullous\b(?!\s+pemphigoid)
+        \bbull(?:ous|us)\b(?!\s+pemphigoid)
         (?:
-            \s+(?:and\s+\w+\s+)?(?:(?:fibrotic|emphysematous|reticular|cystic)\s+)?
-            (?:chang\w*|emphysema\w*|diseas\w*|destruct\w*|lung\s+diseas\w*|COPD|formation|areas?|lesions?|complex(?:es)?|air\s*spaces?|transformation)
+            \s+(?:and\s+\w+\s+)?(?:(?:fibrotic|emphysematous|reticular|cystic|pulmonary)\s+)*
+            (?:chang\w*|emphysema\w*|diseas\w*|destruct\w*|lung\s+diseas\w*|COPD|formation|areas?|lesions?|complex(?:es)?|air\s*spaces?|transformation|nature)
             |
             \s+(?:versus|vs\.?)\s+\w+
             |
@@ -82,4 +88,36 @@
         |
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
         \bcystic\s+areas?\s+(?:in|within)\s+(?:the\s+)?(?:right|left|mid).{0,40}(?:lung|lobe|hemithorax)
+        |
+
+        # cyst-like / cystlike pulmonary lesion/lucency (not CF / cystic bronchiectasis)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        cyst[-\s]?like\s+(?:lesions?|lucenc\w*|opacit\w*|areas?|spaces?)
+        .{0,80}(?:lungs?|lobes?|apex|apices|bases?|zones?|hemithorax)
+        (?!.{0,220}(?:(?:cystic\s+)?bronchiectas|(?:cystic\s+)?fibrosis))
+        |
+
+        # Bare cyst + following pulmonary site (not extra-pulmonary cyst in/at kidney/liver/…)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?<!renal\s)(?<!hepatic\s)(?<!liver\s)(?<!pericardial\s)(?<!mediastinal\s)
+        (?<!bronchogenic\s)(?<!splenic\s)(?<!breast\s)(?<!bone\s)(?<!kidney\s)
+        (?<!thyroid\s)(?<!ovarian\s)(?<!adrenal\s)(?<!neck\s)
+        \bcysts?\b
+        \s+(?:at|in|within|of)\s+(?:the\s+)?(?:[\w\-]+\s+){0,5}
+        (?:apex|apices|bases?|lungs?|lobes?|zones?|hemithorax|lingula)
+        (?!\s+\w+\s+(?:kidney|renal|liver|hepatic|spleen|splenic|mediastin|pericard))
+        |
+
+        # Same-sentence lung site then hedged / DDx / consistent-with (small) cyst
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!no\sevidence\sof\s)
+        (?:lungs?|lobes?|apex|apices|hemithorax|zones?|bases?|rul|lul|rll|lll|rml)
+        [^.?!]{0,110}?
+        (?:
+            (?:possibly|possible|probably|likely)\s+cysts?
+            |
+            consistent\s+with\s+(?:(?:small|large|tiny|multiple|scattered)\s+)?cysts?
+            |
+            except\s+for\s+(?:a\s+|an\s+)?cysts?
+        )
+        (?!\s+(?:in|at|of|within)\s+(?:the\s+)?(?:kidney|renal|liver|hepatic|spleen|splenic|breast|mediastin|pericard|abdomen|neck|thyroid|adrenal|ovary|ovarian))
     )

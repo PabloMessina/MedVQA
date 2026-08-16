@@ -42,7 +42,13 @@
     "ICD extends to the region of the apex of the right ventricle.",
     "Leads of a left chest wall generator pack terminate in the right atrium and right ventricle.",
     "Leads of a left chest wall generator terminate in the right atrium and right ventricle.",
-    "Dual-lead pacing hardware with generator over the left chest."
+    "Dual-lead pacing hardware with generator over the left chest.",
+    "Left-sided prepectoral intracardiac device in situ with the lead tips in the right atrium and right ventricle.",
+    "A cardiac rhythm device projects over the left upper chest.",
+    "Right internal anterior chest wall pace maker in place.",
+    "There is an ICD.",
+    "ICD in situ.",
+    "A CRT device is present."
   ],
   "negatives": [
     "Temporary transvenous pacing catheter.",

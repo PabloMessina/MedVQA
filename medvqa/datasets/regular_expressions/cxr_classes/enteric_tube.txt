@@ -13,6 +13,9 @@
     # FN-fit (fn_mine_fit_shared): Dobhoff/enteric/NG *line*; bare Dobhoff+coiled;
     # tube-less NG followed/enters/devices; PEG projecting; gastrostomy device;
     # bare Keofeed; Salem sump / Levin; spaced NJ tube.
+    # FN-fit pass-2 (wave 39): nasoenteric; gastrojejunostomy; GJ/J/PEJ tubes;
+    # gastric decompression; Dobhoff courses/curling + Dobhoffs/typos;
+    # NG/OG/enteric typos (nasogratric, orograstric, orgastic, eneteric).
 
     (?:
         # ------------------------------------------------------------------
@@ -80,9 +83,15 @@
             (?<!\bno\sendotracheal\stube\sor\s)
             \b
             (?:
-                dobb?hoff(?:-?\s*type)?
+                dobb?hoffs?(?:-?\s*type)?
+                |
+                dobhof(?:-?\s*type)?
                 |
                 doboff(?:-?\s*type)?
+                |
+                dophoff(?:-?\s*type)?
+                |
+                dubhoff(?:-?\s*type)?
                 |
                 daubhoff
                 |
@@ -92,11 +101,19 @@
                 |
                 levin
                 |
-                (?:upper\s+)?enteric
+                (?:upper\s+)?(?:enteric|eneteric)
                 |
                 nasogastric
                 |
+                nasogratric
+                |
+                naso-?enterics?
+                |
                 orogastric
+                |
+                orograstric
+                |
+                orgastic
                 |
                 esophagogastric
                 |
@@ -107,6 +124,8 @@
                 nasoduodenal
                 |
                 gastrojejunal
+                |
+                gastrojejunostomy
                 |
                 gastric\s+jejunostomy
                 |
@@ -130,7 +149,7 @@
                 )?
                 \s+
                 (?:
-                    (?:drainage|feeding|enteric|suction)\s+
+                    (?:drainage|feeding|enteric|suction|decompression)\s+
                 )?
                 # FN-fit: enteric/Dobhoff/NG *line* as tube synonym
                 (?:tubes?|catheters?|lines?)
@@ -312,6 +331,8 @@
             (?:
                 peg
                 |
+                pej
+                |
                 gastrostomy
                 |
                 jejunostomy
@@ -366,7 +387,7 @@
             (?<!removal\sof\s)
             (?<!\bno\s)
             \b
-            (?:dobb?hoff|doboff|daubhoff|daub|replogle|keo-?\s*feed(?:ing)?)
+            (?:dobb?hoffs?|dobhof|doboff|dophoff|dubhoff|daubhoff|daub|replogle|keo-?\s*feed(?:ing)?)
             \b
             (?=
                 (?:(?![.!?]).){0,50}?\b(?:
@@ -381,6 +402,10 @@
                     ends?
                     |
                     extends?
+                    |
+                    courses?
+                    |
+                    coursing
                     |
                     stomach
                     |
@@ -397,6 +422,8 @@
                     coiled
                     |
                     curled
+                    |
+                    curling
                     |
                     migrated
                     |
@@ -495,7 +522,7 @@
             (?<!need\sfor\s)
             (?<!need\sfor\sa\s)
             \b
-            g-?\s*tubes?
+            (?:pej|gj|g|j)-?\s*tubes?
             \b
             (?!\s+placement\b)
             (?=
@@ -553,7 +580,7 @@
             (?<!need\sfor\sa\s)
             (?<!need\sfor\san\s)
             \b
-            (?:nasogastric|orogastric)
+            (?:nasogastric|nasogratric|orogastric|orograstric|orgastic|naso-?enterics?)
             \b
             (?!\s+(?:tubes?|catheters?)\b)
             (?=

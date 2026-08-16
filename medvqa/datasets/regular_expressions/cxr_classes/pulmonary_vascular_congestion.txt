@@ -117,6 +117,12 @@
           (?:pulmonary\s+or\s+mediastinal\s+|mediastinal\s+)?vascular\s+congest(?:ion|ed|ive)?\b
           |
           may\s+indicate\s+mild\s+congestion\b
+          |
+          # finding-first: congestion of (the) pulmonary/central vessels
+          congest(?:ion|ed)\s+of\s+(?:the\s+)?(?:(?:central|pulmonary|mediastinal|hilar|perihilar)\s+(?:and\s+)?){1,3}(?:vascul(?:ature|ar(?:ity)?)|vessels?|veins?|circulation)\b
+          |
+          # attested typo congesion (not congestoin — indication-only)
+          (?:(?:pulmonary|central|hilar|perihilar)\s+)?vasc(?:ular|ukar)?\s+congesion\b
       )
       (?!\s*(?:is\s+)?(?:has\s+)?(?:resolved|cleared|improved|normalized)(?:\b|,|\.|$))
       (?!\s+could\s+produce)
@@ -156,7 +162,7 @@
           |
           (?:pulmonary\s+and\s+mediastinal|mediastinal\s+and\s+pulmonary)\s+
           vascul(?:ature|ar(?:ity)?)?\s+
-          (?:are\s+|is\s+)?(?:mildly\s+)?engorged\b
+          (?:are\s+|is\s+|appears?\s+|remain(?:s)?\s+)?(?:(?:mildly|slightly|chronically|generally|still|diffusely|substantially)\s+){0,2}(?:more\s+)?engorged\b
           |
           engorg(?:ed|ement|ment|emetn)\s+
           (?:of\s+)?(?:the\s+)?
@@ -172,9 +178,13 @@
           |
           congested\s+pulmonary\s+vasculature\b
           |
-          pulmonary\s+vasculature\s+(?:is\s+|are\s+|appears?\s+|again\s+)?(?:still\s+|borderline\s+|mildly\s+|somewhat\s+|diffusely\s+|substantially\s+)?(?:more\s+)?(?:engorged|congested)\b
+          pulmonary\s+vasculature\s+(?:is\s+|are\s+|appears?\s+|again\s+|remain(?:s)?\s+)?(?:still\s+|borderline\s+|mildly\s+|slightly\s+|somewhat\s+|diffusely\s+|substantially\s+|chronically\s+|generally\s+)?(?:more\s+)?(?:engorged|congested)\b
           |
-          pulmonary\s+(?:and\s+mediastinal\s+)?vasculature\s+(?:are\s+|is\s+)?(?:mildly\s+|diffusely\s+|substantially\s+)?(?:more\s+)?engorged\b
+          pulmonary\s+(?:and\s+mediastinal\s+)?vasculature\s+(?:are\s+|is\s+|appears?\s+|remain(?:s)?\s+)?(?:mildly\s+|slightly\s+|diffusely\s+|substantially\s+|chronically\s+|generally\s+)?(?:more\s+)?engorged\b
+          |
+          pulmonary\s+circulation\s+(?:is\s+|are\s+|appears?\s+|remain(?:s)?\s+)?(?:(?:mildly|slightly|still|diffusely|chronically)\s+){0,2}engorged\b
+          |
+          central\s+vasculature\s+(?:is\s+|are\s+|appears?\s+|remain(?:s)?\s+)?(?:(?:mildly|slightly|still|diffusely|chronically|generally)\s+){0,2}engorged\b
           |
           pulmonary\s+vessels?\s+(?:are\s+)?(?:still\s+|mildly\s+|diffusely\s+)?engorged\b
           |
@@ -236,15 +246,20 @@
           (?:mild|slight|moderate|marked|new|persistent|stable|typical)\s+
       )?
       (?:
-          ceph+ali[sz](?:ation|ed)\b
+          # no trailing \b: glued "cephalizationparticularly"; (?<![a-z]) blocks encephalization
+          (?<![a-z])ceph+ali[sz](?:ation|ed)
           |
           cepphalized\s+flow\b
           |
-          (?:vascular|pulmonary\s+vascular)\s+re-?distribut(?:ion|ed)\b
+          (?:vascular|pulmonary\s+vascul(?:ar|ature))\s+re-?distribut(?:ion|ed)\b
           |
-          (?:upper[- ](?:zone|lobe)|cephalad)\s+(?:vascular\s+)?re-?distribut(?:ion|ed)\b
+          (?:upper[- ](?:lung\s+)?(?:zone|lobe)s?|cephalad|cephalic|apical|basoapical)\s+(?:vascular\s+)?re-?distribut(?:ion|ed)\b
           |
           re-?distribution\s+of\s+(?:the\s+)?(?:upper[- ]lobe\s+)?vasculature\b
+          |
+          re-?distribution\s+of\s+(?:the\s+)?pulmonary\s+(?:vasculature|vascularity|vessels?|blood\s+flow)\b
+          |
+          (?:basoapical\s+)?blood\s+flow\s+re-?distribut(?:ion|ed)\b
           |
           upper[- ]lobe\s+venous\s+diversion\b
           |

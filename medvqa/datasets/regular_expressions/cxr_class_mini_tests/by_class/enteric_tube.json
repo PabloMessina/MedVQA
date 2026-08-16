@@ -40,7 +40,22 @@
     "Levin tube tip below the diaphragm.",
     "Tip of NJ tube is likely post-pyloric.",
     "An enteric line courses below the diaphragm.",
-    "An NG line reaches far below the diaphragmatic level."
+    "An NG line reaches far below the diaphragmatic level.",
+    "A nasoenteric tube coils in the stomach.",
+    "Gastric decompression tube extends below the diaphragm.",
+    "Gastrojejunostomy tube remains in place.",
+    "GJ tube courses below the diaphragm.",
+    "J-tube is in place.",
+    "PEJ tube is in place.",
+    "The dobhoff courses below the diaphragm and is seen curling in the pyloric region.",
+    "Dobhoffs Tube is seen ending into the stomach body.",
+    "Dobhof tube terminates in the distal stomach.",
+    "The Dophoff tube tip is in the stomach.",
+    "Dubhoff catheter terminates at the GE junction.",
+    "Nasogratric tube terminates in the gastric fundus.",
+    "An orograstric tube terminates within the stomach.",
+    "Orgastic tube tip in the mid stomach.",
+    "Eneteric catheter tip terminates at the pylorus."
   ],
   "negatives": [
     "Endotracheal tube above the carina.",

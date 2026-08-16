@@ -13,6 +13,9 @@
     # collision). Do not chase PICC/CVC/line/device bad gold.
     # FN-fit (fn_mine_fit_shared): singular "line and tube" (plural-only hole);
     # findings-state T-tube (Montgomery/tracheal surgical; not ETT/enteric/chest).
+    # FN-fit pass-2 residual parent (children miss): framed trach verbs / short
+    # trach / ETT→trach swap / G-tube terminates / tube-less gastrostomy /
+    # gastrostomy catheter / pleural cavity on drainage catheter / tracheostpy.
 
     (?:
       (?:
@@ -135,49 +138,105 @@
             |
             trach(?:eostomy)?\s+(?:tubes?|cannulas?)
             |
+            # FN-fit pass-2: short trach (no tube/cannula) + presence.
+            # Attested: "trach is identified". Do not allow "trach in place"
+            # (indication-only). Keep mask/collar/site/defect/prior out.
+            (?<!prior\s)
+            (?<!old\s)
+            (?<!remote\s)
+            trach
+            (?!\s+defect\b)
+            (?!\s+scar\b)
+            (?!\s+site\b)
+            (?!\s+collar\b)
+            (?!\s+mask\b)
+            (?:
+                \s+is\s+identified
+                |
+                \s+identified
+                |
+                \s+is\s+present
+            )
+            |
             # tracheostomy device present without requiring "tube/cannula"
             # (avoid defect/scar/site/collar and prior/old/remote mentions)
             # Phase B5: framed residual from production OR-helper tracheostomy_tube
             # (DISCARD bare \btrach(?:eostomy)?\s+(?:tube|cannula)? — FP-prone on
             # defect / not-visualized; parent already covers tube|cannula forms).
+            # FN-fit pass-2: in situ / remains / identified / in place (no is) /
+            #   adequate|standard|acceptable position / device / ends;
+            #   typo tracheostpy (findings-grade).
             (?<!prior\s)
             (?<!old\s)
             (?<!remote\s)
-            tracheostomy
+            tracheost(?:omy|py)
             (?!\s+defect\b)
             (?!\s+scar\b)
             (?!\s+site\b)
             (?!\s+collar\b)
+            (?!\s+mask\b)
             (?:
-                \s+is\s+in\s+place
-                |
-                \s+is\s+present
-                |
-                \s+in\s+(?:satisfactory\s+)?position
-                |
-                \s+is\s+stable
-                |
-                \s+appears?
-                |
-                \s+projects
-                |
-                \s+and\b
+                (?:\s+devices?)?
+                (?:
+                    \s+is\s+in\s+place
+                    |
+                    \s+is\s+present
+                    |
+                    \s+is\s+identified
+                    |
+                    \s+is\s+in\s+(?:\w+\s+){0,3}position
+                    |
+                    \s+in\s+situ
+                    |
+                    \s+in\s+place
+                    |
+                    \s+in\s+(?:satisfactory|adequate|standard|acceptable)\s+position
+                    |
+                    \s+in\s+(?:satisfactory\s+)?position
+                    |
+                    \s+is\s+stable
+                    |
+                    \s+appears?
+                    |
+                    \s+projects
+                    |
+                    \s+remains?
+                    |
+                    \s+ends?
+                    |
+                    \s+and\b
+                )
             )
             |
             (?<!prior\s)
             (?<!old\s)
             (?<!remote\s)
-            has\s+(?:a\s+)?tracheostomy
+            has\s+(?:an?\s+)?(?:unchanged\s+)?tracheostomy
             (?!\s+defect\b)
             (?!\s+scar\b)
             (?!\s+site\b)
             (?!\s+collar\b)
             |
-            (?:stable|flexible)\s+tracheostomy
+            (?:stable|flexible|unchanged)\s+tracheostomy
             (?!\s+defect\b)
             |
             placement\s+of\s+(?:a\s+)?tracheostomy
             (?!\s+defect\b)
+            |
+            # FN-fit pass-2: current trach after ETT/ET swap (ETT child correctly
+            # negative on sibling-removal lookaheads).
+            replaced\s+(?:with|by)\s+(?:an?\s+)?(?:new\s+)?tracheostomy
+            (?!\s+defect\b)
+            |
+            # inverted / existential presence (children miss)
+            (?:again\s+)?seen\s+is\s+(?:the\s+|an?\s+)?tracheostomy
+            (?!\s+defect\b)
+            |
+            there\s+is\s+(?:an?\s+)?tracheostomy
+            (?!\s+defect\b)
+            (?!\s+scar\b)
+            (?!\s+site\b)
+            (?!\s+collar\b)
             |
             # common misspelling seen in gold
             trahceostomy
@@ -243,6 +302,8 @@
                     ends?
                     |
                     courses
+                    |
+                    terminates?
                 )\b
             )
             |
@@ -268,6 +329,28 @@
             )
             |
             (?:gastrostomy|jejunostomy|peg)\s+tubes?
+            |
+            # FN-fit pass-2: tube-less gastrostomy residual (enteric wants
+            # tube/device, not catheter / "is stable").
+            (?<!prior\s)
+            (?<!old\s)
+            (?<!remote\s)
+            (?<!\bs/p\s)
+            (?<!\bsp\s)
+            gastrostomy
+            (?!\s+procedure\b)
+            (?!\s+takedown\b)
+            (?=
+                (?:(?![.!?]).){0,50}?\b(?:
+                    (?:is|are)\s+stable
+                    |
+                    catheters?
+                    |
+                    (?:is|are)\s+partially\s+imaged
+                    |
+                    partially\s+imaged
+                )\b
+            )
             |
             # ---- Chest / pleural drainage ----
             (?:chest|thoracostomy|pleural|thoracic)\s+(?:drainage\s+)?(?:tubes?|drains?|catheters?|caths?)
@@ -380,6 +463,8 @@
                     (?:is|are)\s+stable
                     |
                     in\s+(?:stable|unchanged)\s+position
+                    |
+                    pleural\s+cavit(?:y|ies)
                 )\b
             )
             |

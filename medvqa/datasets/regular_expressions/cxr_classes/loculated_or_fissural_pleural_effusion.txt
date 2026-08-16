@@ -15,6 +15,11 @@
         # FN-mine fit: size ranges with "to", unhyphenated "moderate size",
         # peripheral/residual, area of, empyema/hemothorax, encapsulated,
         # loculation(s) of|within, pseudo-tumor, non-free-flowing.
+        # FN-mine fit pass-2: hyphen loculated-appearing / phantom-tumor;
+        # loculated (pocket|collection) of fluid; loculated rather than free;
+        # loculation(s) in + fissure target; inverted encysted; fissure
+        # (pleural) effusion; fluid marking of fissure; pleural loculation;
+        # pleural loculated collection; typos loculization / fssural / localated.
         # -----------------------------------------------------------------
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)(?<!\brather\sthan\s)
         (?:(?:moderate|small|large|tiny|mild)(?:[-\s]?sized)?\s+)?
@@ -25,9 +30,21 @@
             |
             \s+fluid\s+and\s+air
             |
-            (?!\s+(?:(?:right|left|bilateral|tiny|small|moderate|large|apical|basal|basilar|prior|right-sided|left-sided)\s+)*(?:pleural\s+)?(?:pneumotho|air\b))
-            # allow "loculated, right-sided ..." / "loculated and right ..."
-            [,\s]*(?:and\s+)?
+            # loculated pocket/collection of (pleural) fluid [and air]
+            # (not pocket of air/gas alone)
+            \s+(?:pockets?|collections?)\s+of\s+
+            (?:
+                (?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?fluid(?:\s+and\s+air)?
+                |
+                air\s+and\s+(?:pleural\s+)?fluid
+            )
+            |
+            # loculated rather than free(-flowing) effusion
+            \s+rather\s+than\s+free(?:[-\s]?flowing)?\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?effusions?
+            |
+            (?![,\s-]+(?:(?:right|left|bilateral|tiny|small|moderate|large|apical|basal|basilar|prior|right-sided|left-sided)\s+)*(?:pleural\s+)?(?:pneumotho|air\b))
+            # allow "loculated, right-sided ..." / "loculated-appearing" / "loculated and right ..."
+            [,\s-]*(?:and\s+)?
             (?:
                 (?:
                     (?:(?:right|left|bilateral)(?:[-\s]?sided)?|apical|basal|basilar|anterior(?:ly)?|posterior(?:ly)?|lateral(?:ly)?|posterolateral|anterolateral|subpulmonic|peripheral|residual|appearing|chest\s+wall|greater\s+than\s+(?:right|left)|and)
@@ -66,26 +83,29 @@
         (?:(?:right|left|bilateral|superior|inferior|apical|basal|basilar|upper|lower)\s+)*
         portion\s+of\s+(?:the\s+)?fissures?\s+(?:pleural\s+)?effusions?
         |
-        # Typo: locualted
+        # Typo: locualted / localated
         (?<!\bno\s)(?<!\bwithout\s)
-        (?:partially\s+)?locualt(?:ed|e)
+        (?:partially\s+)?(?:locualt|localat)(?:ed|e)
         \s*
-        (?:(?:right|left|bilateral)\s+)*
-        (?:pleural\s+)?(?:effusions?|fluid|collections?)
+        (?:(?:right|left|bilateral|basal|basilar|apical)\s+)*
+        (?:pleural\s+)?(?:effusions?|fluid|collections?|hydropneumotho?rax|hydrothorax|empyemas?)
         |
         # -----------------------------------------------------------------
-        # A2. Noun: loculation(s) of|within ... (pleural) fluid|effusion
+        # A2. Noun: loculation(s) of|within|in ... fluid|effusion|fissure
         # -----------------------------------------------------------------
-        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bneither\s)(?<!\bair\s)(?<!\bgas\s)
         (?:(?:evolving|new|stable|moderate|small|large|tiny|mild|apical|basal|basilar|anterior|posterior|lateral|peripheral|residual)\s+)*
+        (?:areas?\s+of\s+)?
         loculations?
-        \s+(?:of|within)\s+
+        \s+(?:of|within|in)\s+
         (?:(?:a|the|an)\s+)?
-        (?:(?:(?:right|left|bilateral)(?:[-\s]?sided)?|apical|basal|basilar|anterior|posterior|lateral|peripheral|residual|small|moderate|large|tiny|mild|chronic|new)\s+)*
+        (?:(?:(?:right|left|bilateral)(?:[-\s]?sided)?|apical|basal|basilar|anterior|posterior|lateral|peripheral|residual|small|moderate|large|tiny|mild|chronic|new|major|minor|oblique|horizontal|interlobar)\s+)*
         (?:
             (?:pleural\s+)?(?:effusions?|fluid|collections?|empyemas?|h[ae]motho?rax)
             |
             pleural\s+(?:fluid|collections?|pockets?)
+            |
+            fissures?
         )
         |
         # -----------------------------------------------------------------
@@ -99,7 +119,7 @@
         (?:(?:is|are|was|were|may\s+have|has|have)\s+(?:a\s+)?)?
         (?:(?:small|moderate|large|partial(?:ly)?|probable|probably|possible|possibly|multi[-\s]?)\s+)*
         (?<!\bno\s)(?<!\bwithout\s)
-        loculat(?:ed|e|ions?)
+        locul(?:at(?:ed|e|ions?)|i[sz]ations?)
         (?!\s+(?:(?:right|left|bilateral|tiny|small|moderate|large|apical|basal|basilar|prior)\s+)*(?:pleural\s+)?pneumotho)
         |
         # -----------------------------------------------------------------
@@ -111,6 +131,13 @@
         # D. Encysted / encapsulated / walled-off / local(ized) pleural collection
         # -----------------------------------------------------------------
         encysted\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        |
+        # inverted: (pleural) effusion/fluid is encysted
+        (?<!\bno\s)(?<!\bwithout\s)
+        (?:pleural\s+)?(?:effusions?|fluid|collections?)
+        (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,8})
+        (?:(?:is|are|was|were)\s+)?
+        encysted
         |
         encapsulat(?:ed|e)\s+(?:(?:right|left|bilateral)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
         |
@@ -125,7 +152,7 @@
         # -----------------------------------------------------------------
         # not "resolution of ... pleural effusions and fissural fluid"
         (?<!\beffusions\sand\s)
-        (?:fissural|interlobar|intrafissural|perifissural)\s+(?:(?:right|left)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
+        (?:fissural|fssural|interlobar|intrafissural|perifissural)\s+(?:(?:right|left)\s+)?(?:pleural\s+)?(?:effusions?|fluid|collections?)
         |
         entrapped\s+(?:(?:ellipsoid|lenticular|biconvex)\s+)?(?:peri)?fissural\s+fluid
         |
@@ -134,7 +161,7 @@
         (?:fluid|effusions?)
         (?:[\s,;:]+(?:[^\s.!?;]+[\s,;]+){0,8})
         (?:
-            (?:in|within|along|reaching|into)\s+
+            (?:in|within|along|reaching|into|marking\s+of)\s+
             |
             tracking\s+(?:along|within|in|into)\s+
         )
@@ -145,10 +172,10 @@
         (?:(?:major|minor|oblique|horizontal|lateral|interlobar)\s+){0,2}
         fissures?
         |
-        # inverted: (right/left) (major/minor/...) fissure fluid
+        # inverted: (right/left) (major/minor/...) fissure (pleural) fluid|effusion
         (?:(?:right|left)\s+)?
         (?:(?:major|minor|oblique|horizontal|interlobar)\s+)?
-        fissures?\s+fluid
+        fissures?\s+(?:pleural\s+)?(?:effusions?|fluid)
         |
         # fluid/effusion along lateral chest wall (loculated morphology cue)
         (?:fluid|effusions?)
@@ -183,5 +210,17 @@
         # -----------------------------------------------------------------
         (?:pleural\s+)?pseudo[-\s]?tumou?rs?
         |
-        (?:phantom|vanishing)\s+tumou?rs?
+        (?:phantom|vanishing)[-\s]?tumou?rs?
+        |
+        # -----------------------------------------------------------------
+        # G. Noun pleural loculation; pleural loculated collection
+        # -----------------------------------------------------------------
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bair\s)(?<!\bgas\s)
+        (?:(?:small|moderate|large|tiny|mild|left|right|bilateral|new|stable|apical|basal|posterior|anterior|lateral)\s+)*
+        pleural\s+loculations?
+        (?!\s+(?:of\s+)?(?:air|gas|pneumotho))
+        |
+        (?<!\bno\s)(?<!\bwithout\s)
+        pleural\s+loculat(?:ed|e)\s+(?:collections?|pockets?|effusions?|fluid)
+        (?!\s*(?:pneumotho|air\b))
     )

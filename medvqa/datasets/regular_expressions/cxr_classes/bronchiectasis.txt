@@ -3,21 +3,30 @@
 # Radiographic bronchial dilatation on the current CXR.
 #
 # Match: bronchiectasis / bronchiectatic / bronchiolectasis; tram-track(s)/
-#        tram tracking; ring shadows of dilated bronchi; finding-style
-#        dilated bronchus/bronchi/airways with hedge/size modifiers or
-#        left anchors (with/around/reflective + optional article);
-#        bronchial ectasia / dilatation; ectatic bronchi; dilatation/
-#        dilation/ectasia of bronchi; mild/persistent airways dilation;
-#        dilated pulmonary airways; varicose bronchi; signet-ring of
-#        dilated airways; bronchi appear dilated; "except for …
-#        bronchiectasis" after an unrelated clause-local negation.
+#        tram tracking; tramline(s) of dilated bronchi; ring shadows of
+#        dilated bronchi; finding-style dilated bronchus/bronchi/airways
+#        with hedge/size modifiers or left anchors (with/around/reflective
+#        + optional article); bronchial ectasia / dilatation; ectatic
+#        bronchi; dilatation/dilation/ectasia of bronchi or airways;
+#        mild/persistent airways dilation; dilated pulmonary airways;
+#        varicose bronchi; signet-ring of dilated airways; bronchi appear
+#        / are / is dilated; "except for … bronchiectasis" after an
+#        unrelated clause-local negation; contrastive but after no/clear-of.
+#
+# FN-fit pass-2 (fn_mine_fit_shared): no significant *acute* interval change
+#        pass-through; not significantly changed; findings consistent with
+#        history of <other>, including … bronchiectasis; contrastive but
+#        rescue; typo brochiectasis (+ neighbors except precision-guarded
+#        bronvchiectasis); tramline + dilated
+#        bronchi; bronchi are dilated; dilatation of the airways (plural).
 #
 # Do NOT match: indication / PMH / history-only; eval/assess/rule-out;
 #        differential lists; bare "ectasis" (atelectasis OCR); ungated
 #        "fluid/mucus within (severely) dilated bronchi"; CT/history alone;
 #        bronchial wall thickening / peribronchial cuffing alone;
 #        ectasia of the aorta; dilated pulmonary arteries; procedural
-#        post/status-post airway dilation; signet-ring cell cancer.
+#        post/status-post airway dilation; signet-ring cell cancer;
+#        bare tramlines without dilated-bronchi / bronchiectatic attribution.
 # ==============================================================================
 
 (?:
@@ -29,7 +38,12 @@
         (?:^|[.!?;\n])
         (?:
             (?:
-                (?=\b(?:no|without)\s+(?:significant\s+)?(?:interval\s+)?change\b)
+                (?=\b(?:no|without)\s+(?:significant\s+)?(?:acute\s+)?(?:interval\s+)?change\b)
+                [^.!?;\n]
+            )
+            |
+            (?:
+                (?=\bnot\s+(?:significantly\s+)?changed\b)
                 [^.!?;\n]
             )
             |
@@ -49,14 +63,14 @@
                 (?!\bhistory\s+of\b)
                 (?!\bhx\s+of\b)
                 (?!\bh/o\b)
-                (?!\bpmhx\b)
+                (?!\bpmhx?\b)
                 (?!\bclinical\s+history\b)
                 (?!\bindication\b)
                 (?!\bdifferential\b)
                 [^.!?;\n]
             )
         ){0,220}
-        \b(?:bronchiecta\w*|bronchiolecta\w*)\b
+        \b(?:bronchiecta\w*|bronchiolecta\w*|brochiecta\w*|bronchietasis|bronchiestasis|bronchiectesis|bronchiectatsis|bronchoectasis|bronciectasis|bronshiectasis)\b
         (?!\?)
         # MIMIC indication / PMH tails
         (?!\s*[.,;:]?\s*//)
@@ -69,16 +83,81 @@
         # ------------------------------------------------------------------
         \b(?:except\s+for|aside\s+from|other\s+than)\s+
         (?:(?:possible|probable|likely|mild|mildly|suspected)\s+)?
-        \b(?:bronchiecta\w*|bronchiolecta\w*)\b
+        \b(?:bronchiecta\w*|bronchiolecta\w*|brochiecta\w*|bronchietasis|bronchiestasis|bronchiectesis|bronchiectatsis|bronchoectasis|bronciectasis|bronshiectasis)\b
         (?!\?)
 
         |
 
         # ------------------------------------------------------------------
-        # 2. Tram-track / tram tracking / tramlines
+        # 1c. Current-film findings consistent with history of <other>,
+        #     including bronchiectasis (scan otherwise sticks at history of;
+        #     bare PMH/history-of-BE stays unmatched)
+        # ------------------------------------------------------------------
+        \b(?:(?:stable|unchanged|chronic)\s+)?findings?\s+consistent\s+with\s+
+        (?:the\s+)?(?:patient['’]s\s+)?history\s+of\s+
+        (?!(?:bronchiecta\w*|bronchiolecta\w*|brochiecta\w*|bronchietasis|bronchiestasis|bronchiectesis|bronchiectatsis|bronchoectasis|bronciectasis|bronshiectasis)\b)
+        [^.!?;\n]{0,80}?
+        \bincluding\s+
+        [^.!?;\n]{0,80}?
+        \b(?:bronchiecta\w*|bronchiolecta\w*|brochiecta\w*|bronchietasis|bronchiestasis|bronchiectesis|bronchiectatsis|bronchoectasis|bronciectasis|bronshiectasis)\b
+        (?!\?)
+        (?!\s*[.,;:]?\s*//)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 1d. Contrastive but: no/clear-of of *other* findings, then but …
+        #     bronchiectasis. Prefix forbids indication/history so
+        #     "INDICATION: … but bronchiectasis" cannot restart at but.
+        # ------------------------------------------------------------------
+        (?:^|[.!?;\n])
+        (?:
+            (?!\b(?:
+                indication|differential|
+                eval(?:uate)?\s+for|assess\s+for|
+                history\s+of|hx\s+of|h/o|pmhx?|clinical\s+history
+            )\b)
+            [^.!?;\n]
+        ){0,220}?
+        \bbut[,:]?\s+
+        (?:
+            (?!\b(?:
+                no|not|without|nor|neither|
+                free\s+of|clear\s+of|negative\s+for|
+                absent|absence\s+of|denies|
+                ruled\s+out|rule\s+out
+            )\b)
+            (?!\bresolution\s+of\b)
+            (?!\beval(?:uate)?\s+for\b)
+            (?!\bassess\s+for\b)
+            (?!\br/?o\b)
+            (?!\bplease\s+rule\s+out\b)
+            (?!\bconcern(?:ing)?\s+for\b)
+            (?!\bhistory\s+of\b)
+            (?!\bhx\s+of\b)
+            (?!\bh/o\b)
+            (?!\bpmhx?\b)
+            (?!\bclinical\s+history\b)
+            (?!\bindication\b)
+            (?!\bdifferential\b)
+            [^.!?;\n]
+        ){0,160}
+        \b(?:bronchiecta\w*|bronchiolecta\w*|brochiecta\w*|bronchietasis|bronchiestasis|bronchiectesis|bronchiectatsis|bronchoectasis|bronciectasis|bronshiectasis)\b
+        (?!\?)
+        (?!\s*[.,;:]?\s*//)
+
+        |
+
+        # ------------------------------------------------------------------
+        # 2. Tram-track / tram tracking / tramlines of dilated bronchi
         # ------------------------------------------------------------------
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
         \btram[-\s]?track(?:s|ing)?\b
+
+        |
+
+        (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+        \btram[\s-]?lines?\s+(?:shadows?\s+)?(?:of\s+)?dilated\s+(?:bronchus|bronchi|airways?)\b
 
         |
 
@@ -154,13 +233,14 @@
         |
 
         # ------------------------------------------------------------------
-        # 7. Dilatation/dilation/ectasia of (the) bronchi — plural only
-        #     (avoids procedural "dilation of bronchus"; aorta ectasia)
+        # 7. Dilatation/dilation/ectasia of (the) bronchi or airways
+        #     Plural only (avoids procedural "dilation of bronchus/airway";
+        #     aorta ectasia)
         # ------------------------------------------------------------------
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bhistory\sof\s)
         (?<!\bpost\s)(?<!\bafter\s)
         \b(?:(?:mild(?:ly)?|persistent(?:ly)?|focal|marked(?:ly)?|moderate(?:ly)?)\s+)*
-        (?:dilatation|dilation|ectasia)\s+of\s+(?:the\s+)?bronchi\b
+        (?:dilatation|dilation|ectasia)\s+of\s+(?:the\s+)?(?:bronchi|airways)\b
 
         |
 
@@ -192,8 +272,8 @@
         |
 
         # ------------------------------------------------------------------
-        # 11. Bronchi/bronchus/airways appear dilated
+        # 11. Bronchi/bronchus/airways appear / are / is dilated
         # ------------------------------------------------------------------
         (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-        \b(?:the\s+)?(?:bronchi|bronchus|airways?)\s+appear(?:s|ing)?\s+dilated\b
+        \b(?:the\s+)?(?:bronchi|bronchus|airways?)\s+(?:appear(?:s|ing)?|are|is)\s+dilated\b
     )

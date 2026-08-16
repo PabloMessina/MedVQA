@@ -3,12 +3,14 @@
 # Soft-tissue / subcutaneous / surgical emphysema or air|gas in chest wall,
 # neck, axillae, fascial/intramuscular planes on the current CXR.
 #
-# Match: subcut/SQ/Sub-Q emphysema|air|gas (optional site adjective / and-list);
+# Match: subcut/subcutis/SQ/Sub-Q emphysema|air|gas (optional site adjective /
+#        and-list, including supraclavicular and "base of the" neck);
 #        soft-tissue emphysema|air|gas (either order); chest-wall/neck/axilla
-#        air|gas (either order); fascial/intramuscular/paraspinous air;
+#        air|gas (either order); site-first chest-wall/neck/cervical emphysema;
+#        fascial/intramuscular/paraspinous air; intramuscular emphysema;
 #        surgical emphysema; gas|air in subcutaneous tissues; presternal;
-#        air outlining pectoral muscle (ginkgo-support); OCR emphsema;
-#        extrathoracic air|gas (FN-fit).
+#        air outlining pectoral muscle (ginkgo-support); OCR emphsema/emphesema;
+#        emphysematous + subcut/soft tissues; extrathoracic air|gas (FN-fit).
 #
 # Do NOT match: negated / fully resolved; indication-only "for subcut…";
 #        pulmonary emphysema / PTX / pneumomediastinum alone;
@@ -18,6 +20,9 @@
 # FN-fit (fn_mine_fit_shared): however,/with/and restarts; no…improvement of;
 #        narrow assess|eval for + responsible-for; almost/near residual post;
 #        extrathoracic air|gas.
+# FN-fit pass-2: site-first wall/neck/cervical emphysema; subcut/subcutis;
+#        subcut typos; emphesema; supraclavicular / base-of-the; intramuscular
+#        emphysema; emphysematous + subcut tissues.
 # ==============================================================================
 
 (?:
@@ -143,21 +148,26 @@
             #    "subcutaneous cervical and axillary emphysema",
             #    "subcutaneous presternal air"
             # --------------------------------------------------------------
-            \bs(?:ub)?(?:-)?(?:cutan\w*|q|sq|c)\s+
+            \b(?:
+                suncutaneous|subcutaenous|subcuatneous|subcuraneous|
+                subcuntaneous|subcutaeneous|
+                s(?:ub)?(?:-)?(?:cut(?:is|an\w*)?|q|sq|c)
+            )\s+
             (?:(?:and\s+)?(?:
                 cervical|chest|neck|axillary|axillae?|pectoral|wall|
                 soft|tissue|tissues|left|right|bilateral|bilat|
-                pre-?sternal|mediastinal|intramuscular
-            )\s+){0,5}
+                pre-?sternal|mediastinal|intramuscular|supraclavicular|
+                base|of|the
+            )\s+){0,6}
             (?:and\s+)?
-            (?:emph(?:y)?sem\w*|gas|air)\b
+            (?:emph(?:y|e)?sem\w*|gas|air)\b
 
             |
 
             # --------------------------------------------------------------
             # 2. Soft tissue(s) emphysema|gas|air (forward)
             # --------------------------------------------------------------
-            \bsoft[\s-]+tissues?\s+(?:emph(?:y)?sem\w*|gas|air)\b
+            \bsoft[\s-]+tissues?\s+(?:emph(?:y|e)?sem\w*|gas|air)\b
 
             |
 
@@ -165,7 +175,7 @@
             # 2b. Emphysema of (neck) soft tissues (reverse)
             #     "Emphysema of the right neck soft tissues"
             # --------------------------------------------------------------
-            \bemph(?:y)?sem\w*\s+
+            \bemph(?:y|e)?sem\w*\s+
             (?:(?:of|in|within)\s+(?:the\s+)?)?
             (?:(?:left|right|bilateral|bilat)\s+)?
             (?:(?:neck|chest|axillary|axillae?|wall)\s+)?
@@ -176,7 +186,20 @@
             # --------------------------------------------------------------
             # 2c. Cutaneous air|gas|emphysema (synonym of subcut)
             # --------------------------------------------------------------
-            \bcutaneous\s+(?:air|gas|emph(?:y)?sem\w*)\b
+            \bcutaneous\s+(?:air|gas|emph(?:y|e)?sem\w*)\b
+
+            |
+
+            # --------------------------------------------------------------
+            # 2d. Emphysematous (adjective) streaking/air in subcut/soft tissues
+            #     Pulmonary "emphysematous changes in the lobes" stays out
+            #     (requires subcut/soft-tissue site).
+            # --------------------------------------------------------------
+            \bemphysemat(?:ous|ic)\s+
+            (?:\w+\s+){0,4}
+            (?:in|within|of|along|over|throughout)\s+(?:the\s+)?
+            (?:(?:left|right|bilateral|bilat)\s+)?
+            (?:sub(?:cutaneous|cutan\w*|cutis)|soft[\s-]+tissues?)\b
 
             |
 
@@ -220,6 +243,20 @@
             |
 
             # --------------------------------------------------------------
+            # 4b. Site-first chest-wall / neck / cervical / intramuscular
+            #     + emphysema (slash or "and" site lists). Site↔air|gas is §4;
+            #     this binds emphysema so pulmonary emphysema stays out.
+            # --------------------------------------------------------------
+            \b(?:(?:left|right|bilateral|bilat)\s+)?
+            (?:chest\s+wall|neck|axillae?|supraclavicular|cervical|intramuscular)
+            (?:\s*/\s*(?:chest\s+wall|neck|axillae?|supraclavicular|cervical))?
+            (?:\s+and\s+(?:(?:left|right|bilateral|bilat)\s+)?
+                (?:chest\s+wall|neck|axillae?|supraclavicular|cervical))?
+            \s+emph(?:y|e)?sem\w*\b
+
+            |
+
+            # --------------------------------------------------------------
             # 5. Fascial / intramuscular / paraspinous air|gas
             # --------------------------------------------------------------
             \b(?:gas|air)\b
@@ -240,7 +277,7 @@
             # --------------------------------------------------------------
             # 6. Surgical emphysema (British / legacy)
             # --------------------------------------------------------------
-            \bsurgical\s+emph(?:y)?sem\w*\b
+            \bsurgical\s+emph(?:y|e)?sem\w*\b
 
             |
 
@@ -261,17 +298,17 @@
             # "has almost completely resolved" does not match this arm)
             (?:(?:has|have|is|are)\s+)(?:now\s+)?
             (?:(?:completely|essentially|fully|entirely)\s+)?
-            (?:resolved|resolves|cleared)
+            (?:resolved|resolves|cleared|disappeared)
             |
             # Intensifier + resolved only when not hedged by almost/nearly/near
             (?<!\balmost\s)(?<!\bnearly\s)(?<!\bnear\s)(?<!\bpartially\s)(?<!\bincompletely\s)
             (?:(?:completely|essentially|fully|entirely)\s+)
-            (?:resolved|resolves|cleared)
+            (?:resolved|resolves|cleared|disappeared)
             |
             # Bare resolved (not after hedge/intensifier token)
             (?<!\balmost\s)(?<!\bnearly\s)(?<!\bnear\s)(?<!\bpartially\s)(?<!\bincompletely\s)
             (?<!\bcompletely\s)(?<!\bessentially\s)(?<!\bfully\s)(?<!\bentirely\s)
-            (?:resolved|resolves|cleared)
+            (?:resolved|resolves|cleared|disappeared)
             |
             (?:is|are)\s+not\s+(?:seen|identified|detected|present|evident|appreciated|visualized)
             |

@@ -19,7 +19,12 @@
 # hardware, hardware in/within, radiopaque drain/bar, framed unnamed drain,
 # surgical-drain "overlies", SVC / vena-cava filter. Wave-28 residual: VNS /
 # LINQ abbrev, implanted|implantable … device, postoperative/base drains,
-# bare shunt catheter. Not child tube/line/pacer lexicons.
+# bare shunt catheter. Pass-2 hunt residual: VAD without left / assisting /
+# brand (HeartMate, Jarvik/JARVAC, HeartWare), ILR, spelled-out ECMO,
+# clips consistent-with, axillary/cutaneous staples, vascular/metallic coils,
+# cervical/sternal/rib plate, sternal plating, threaded/presence-framed screws,
+# hardware projects/overlying/for fusion, cervical hardware, tracheotomy,
+# laparoscopic/gastric band. Not child tube/line/pacer lexicons.
 #
 # Do NOT re-implement child lexicons. Do NOT match ECG electrodes/stickers,
 # O2 tubing, clothing artifacts, calcification, bare fracture, soft-tissue gas,
@@ -88,8 +93,10 @@
                 | monitoring\s+and\s+support\s+devices?
                 | medical\s+(?:hardware|devices?)
                 | (?:life\s+)?support\s+(?:equipment|apparatus)
-                | (?:trauma|fixation|fusion|spinal|orthopedic|orthopaedic|surgical|overlying|humerus|humeral|shoulder|support|stabilization)\s+hardware
-                | hardware\s+(?:is|are|appears?|intact|stable|visualized|identified|noted|present|again|components?|malfunction|in|within)
+                | (?:trauma|fixation|fusion|spinal|orthopedic|orthopaedic|surgical|overlying|humerus|humeral|shoulder|support|stabilization|cervical|lumbar|thoracic|sternal|rib)\s+hardware
+                | (?:cervical|lumbar|thoracic)\s+spine\s+hardware
+                | hardware\s+(?:is|are|appears?|intact|stable|visualized|identified|noted|present|again|components?|malfunction|in|within|projects?|overlying|overlies|transfixes)
+                | hardware\s+for\s+(?:fusion|fixation)
                 | lines?\s+and\s+(?:tubes?|surgical\s+materials?)
                 | tubes?\s+and\s+lines?
                 | remaining\s+lines(?:\s+and\s+surgical\s+materials?)?
@@ -99,13 +106,12 @@
 
                 # ----- clips / staples / coils / sutures / markers -----
                 | (?:surgical|cholecystectomy|post(?:-|\s)?cholecystectomy|mediastinal|axillary|hilar|
-                    post[-\s]?operative|postoperative)\s+clips?
-                | clips?\s+(?:are|is|again|noted|seen|present|visualized|in|from|project|overlie)
+                    post[-\s]?operative|postoperative|vascular)\s+clips?
+                | clips?\s+(?:are|is|again|noted|seen|present|visualized|in|from|project|overlie|consistent)
                 | tiny\s+clips?
-                | surgical\s+staples?
-                | (?:skin|subcutaneous)\s+staples?
+                | (?:surgical|skin|subcutaneous|axillary|cutaneous|laparotomy|cholecystectomy)\s+staples?
                 | staple\s+lines?
-                | embolization\s+coils?
+                | (?:embolization|vascular|metallic)\s+coils?
                 | (?:chain\s+)?sutures?(?:\s+(?:material|chain))?
                 | suture\s+(?:material|chain)
                 | surgical\s+chain
@@ -140,7 +146,11 @@
                 | ORIF\b
                 | cerclage\s+wires?
                 | osteosynthesis
-                | (?:lateral|orthopedic|orthopaedic)\s+plating
+                | (?:lateral|orthopedic|orthopaedic|sternal)\s+plating
+                | (?:cervical|sternal|rib|anterior\s+cervical)\s+plates?
+                | plates?\s+screws?\s+fixators?
+                | threaded\s+screws?
+                | screws?\s+(?:are|is)\s+(?:noted|seen|present|visualized|identified)
                 | anterior\s+cervical\s+(?:spine\s+)?fusion
 
                 # ----- joint / limb prosthesis -----
@@ -165,8 +175,14 @@
                 # ----- mechanical circulatory / loop recorder / ECMO -----
                 | (?:LVAD|IABP|ECMO|Impella)(?:\s+cannulas?)?
                 | intra[-\s]?aortic\s+balloon\s+(?:pumps?|catheters?)
-                | left\s+ventricular\s+assist\s+devices?
+                | (?:left\s+)?ventricular\s+assist(?:ing)?[-\s]?devices?
+                | HeartMates?
+                | HeartWares?
+                | Jarviks?
+                | JARVACs?
+                | extracorporeal\s+membrane\s+oxygenation(?:\s+cannulas?)?
                 | (?:implantable\s+)?loop\s+recorders?
+                | ILRs?\s+(?:projects?|overlies|is|are|noted|seen|present|devices?|recorders?)
                 | (?:vagus|vagal)(?:\s+nerve)?\s+stimulators?
                 | (?:neural|spinal|nerve|epicardial)\s+stimulators?
                 | stimulator\s+leads?
@@ -181,6 +197,7 @@
 
                 # ----- tracheostomy (production trach helper residual) -----
                 | tracheostom\w*
+                | tracheotom\w*
                 | trach\s+(?:tubes?|cannulas?)
 
                 # ----- other therapeutic residual -----
@@ -210,6 +227,7 @@
                 | (?:consistent\s+with|evidence\s+of)\s+CABG\b
                 | sequelae\s+of\s+CABG\b
                 | coronary\s+(?:artery\s+)?bypass(?:\s+grafts?)?
+                | (?:laparoscopic|gastric)\s+bands?
                 | (?:biliary|bronchial|metal)\s+stents?
                 | stents?\s+(?:in|are|is|again|noted|seen|visualized|projecting)
                 | surgical\s+XXXX

@@ -2,18 +2,23 @@
         # ==============================================================================
         # FN-fit (fn_mine_fit_shared): dextro/levoconvex(+ity); scolosis typo;
         #   thoracic curvature with convexity to L/R; apex-left/right angulation.
+        # Pass-2 hunt: regional `curve`; optional S-shaped hyphen; right-convex;
+        #   extra-l typos (scloliosis / levoscliosis); truncated scolios; config-first
+        #   S-shaped; level adjective in curvature-of-spine.
         # ==============================================================================
         # 1. Explicit diagnostic terms (incl. levo-/dextro-/roto-/kypho- prefixes)
         #    sc?ol(?:io)?(sis|tic) catches "scoliosis", typo "scolosis" (missing 'i'),
         #    and "levosoliosis" (missing 'c'). Prefixed adjectives (dextroscoliotic).
+        #    scl(?:ol)? catches extra-l "scloliosis" and missing-o "levoscliosis".
         #    \w* covers plurals (scolioses).
         # ==============================================================================
-        (?:[a-z]*sc?ol(?:io)?(?:sis|tic))\w*
+        (?:[a-z]*(?:sc?ol|scl(?:ol)?)(?:io)?(?:sis|tic))\w*
         |
         # ==============================================================================
-        # 2. Truncated dictation abbreviation: "scoli" as a standalone token
+        # 2. Truncated dictation: "scoli" / "scolios" as a standalone token
+        #    Trailing \b keeps this from swallowing "scoliosis" (arm 1).
         # ==============================================================================
-        scoli
+        scoli(?:os)?
         |
         # ==============================================================================
         # 3. Compound or spaced directional curvature words
@@ -36,26 +41,34 @@
         |
         # ==============================================================================
         # 5. Shape descriptors — S-shaped spine / curvature / deformity
-        #    Optional reverse(d) prefix; optional regional/level/convex adjectives
-        #    between S-shaped and the noun (thoracic, thoracolumbar, convex, …).
+        #    Optional reverse(d) prefix; hyphen or space ("S shaped"); optional
+        #    regional/level/convex adjectives between S-shaped and the noun.
         # ==============================================================================
-        (?:revers(?:e|ed)\s+)?s-shaped\s+(?:(?:upper|mid(?:dle)?|lower|thoracic|lumbar|thoracolumbar|convex)\s+)*(?:spine|curvatures?|deformit(?:y|ies))
+        (?:revers(?:e|ed)\s+)?s[- ]shaped\s+(?:(?:upper|mid(?:dle)?|lower|thoracic|lumbar|thoracolumbar|convex)\s+)*(?:spine|curvatures?|deformit(?:y|ies))
         |
         # ==============================================================================
-        # 5b. Predicative S-shaped spine ("The spine is S-shaped")
+        # 5b. Predicative S-shaped spine ("The spine is S-shaped" / "S shaped")
         # ==============================================================================
-        spine\s+is\s+(?:revers(?:e|ed)\s+)?s-shaped
+        spine\s+is\s+(?:revers(?:e|ed)\s+)?s[- ]shaped
         |
         # ==============================================================================
         # 5c. Curvature/angulation of a named spinal region in an S-shaped configuration
         #     (not bare "S-shaped configuration" — that can be hardware/device shape)
         # ==============================================================================
-        (?:curvatures?|angulation)\s+of\s+(?:the\s+)?(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+spine\s+in\s+an?\s+(?:revers(?:e|ed)\s+)?s-shaped\s+configuration
+        (?:curvatures?|angulation)\s+of\s+(?:the\s+)?(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+spine\s+in\s+an?\s+(?:revers(?:e|ed)\s+)?s[- ]shaped\s+configuration
+        |
+        # ==============================================================================
+        # 5d. Config-first reverse of 5c: "S-shaped configuration of the thoracic spine"
+        #     Requires named spinal region after "of" so "configuration over the spine"
+        #     (wire/device) does not fire.
+        # ==============================================================================
+        (?:revers(?:e|ed)\s+)?s[- ]shaped\s+configuration\s+of\s+(?:the\s+)?(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+spine
         |
         # ==============================================================================
         # 6. Curvature/convexity of the (regional) spine — exclude pure kyphotic/lordotic
+        #    Optional level adjective (upper/mid/lower) before the region.
         # ==============================================================================
-        (?<!kyphotic\s)(?<!lordotic\s)(?:curvatures?|convexit(?:y|ies))\s+(?:(?:of|in)\s+(?:the\s+)?)?(?:(?:thoracic|lumbar|thoracolumbar)\s+)?spine
+        (?<!kyphotic\s)(?<!lordotic\s)(?:curvatures?|convexit(?:y|ies))\s+(?:(?:of|in)\s+(?:the\s+)?)?(?:(?:upper|mid(?:dle)?|lower|mid-to-lower)\s+)?(?:(?:thoracic|lumbar|thoracolumbar)\s+)?spine
         |
         # ==============================================================================
         # 6b. Regional thoracic/spinal curvature with trailing convexity-to-side clause
@@ -63,6 +76,13 @@
         #     (requires spinal/thoracic region so mediastinal/heart convexity alone fails)
         # ==============================================================================
         (?:(?:upper|mid(?:dle)?|lower|mid-to-lower)\s+)*(?:thoracic|lumbar|thoracolumbar|spin(?:e|al))\s+curvatures?\s+with\s+convexity\s+to\s+the\s+(?:left|right)
+        |
+        # ==============================================================================
+        # 6c. Regional spinal *curve* (not only "curvature"): thoracolumbar curve;
+        #     "thoracic curve convex (to) the right"; "curve is … to the left".
+        #     Region-gated so mediastinal/heart/tube curves fail. Not kyphosis-only.
+        # ==============================================================================
+        (?<!kyphotic\s)(?<!lordotic\s)(?:(?:upper|mid(?:dle)?|lower|mid-to-lower)\s+)*(?:thoracic|lumbar|thoracolumbar|spin(?:e|al))\s+curves?
         |
         # ==============================================================================
         # 7. Reversed order: (regional) spine/spinal curvature (not kyphotic/lordotic)
@@ -91,6 +111,12 @@
         # 10. Explicit directional convex-right/left thoracic (spinal) curvature
         # ==============================================================================
         convex[-\s](?:right|left)\s+(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+(?:spin(?:e|al)\s+)?curvatures?
+        |
+        # ==============================================================================
+        # 10b. Word-order reverse: right/left convex (hyphen or space) thoracic curvature
+        #      e.g. "right convex thoracic curvature" / "right-convex thoracic curvature"
+        # ==============================================================================
+        (?:right|left)[-\s]convex\s+(?:(?:upper|mid(?:dle)?|lower)\s+)?(?:thoracic|lumbar|thoracolumbar)\s+(?:spin(?:e|al)\s+)?curvatures?
         |
         # ==============================================================================
         # 11. Deviation of the spine only (not trachea / aorta / heart)

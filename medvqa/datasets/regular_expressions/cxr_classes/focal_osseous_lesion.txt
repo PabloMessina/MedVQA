@@ -119,6 +119,44 @@
         sclerotic\s+(?:\w+\s+){0,2}vertebral\s+bod(?:y|ies)|
         # Multifocal sclerotic abnormalities … metastases
         sclerotic\s+abnormalit(?:y|ies).{0,100}metastas\w*|
-        increased\s+densit(?:y|ies).{0,80}(?:ribs?|vertebral).{0,60}metastas\w*
+        increased\s+densit(?:y|ies).{0,80}(?:ribs?|vertebral).{0,60}metastas\w*|
+
+        # FN-fit (fn_mine_fit_shared): approved hunt TPs (wave 36)
+        # punched-out lucent/lytic myeloma morphology
+        punched-?out\s+(?:lucent|lytic|osseous|lesions?)|
+        # named exostosis (word-boundary; osteochondromatosis does not contain this stem)
+        exostos(?:is|es)\b|
+        # rib destruction / erosion (prod has bony/osseous/cortical destruction only)
+        # Prefix form so "No definite associated rib destruction" is caught by
+        # outer (?<!\bno\sdefinite\s) at "associated"/"adjacent"; short form
+        # blocked when those modifiers immediately precede "rib".
+        (?:(?:adjacent|associated|definite|obvious)\s+ribs?\s+(?:destruction|erosions?)|
+         (?<!\bassociated\s)(?<!\badjacent\s)(?<!\bdefinite\s)(?<!\bobvious\s)
+         ribs?\s+(?:destruction|erosions?))|
+        # intraosseous lesion/ganglion/cystic/mass (not IO access needle)
+        intraosseous\s+(?:lesions?|ganglion|cystic|mass)|
+        # sclerotic/lytic/osseous/bony mass (not bare "bone mass" DDx)
+        (?:sclerotic|lytic|blastic|osteolytic|osteoblastic|osseous|bony)\s+mass(?:es)?|
+        # abbreviation mets; require a nearby named bone (blocks indication-only
+        # "Also bony mets" / evaluate-for without a current-film site)
+        (?<!\bevaluate\sfor\s)(?<!\bhistory\sof\s)(?<!\br/o\s)(?<!\brule\sout\s)
+        (?:osseous|bone|bony|sclerotic|lytic|blastic|skeletal)\s+mets\b
+        .{0,60}(?:scapula|scapular|ribs?|humerus|humeral|clavicle|clavicular|vertebral|spine|glenoid|acromion)|
+        # copula: (T12) vertebral body is … sclerotic (not adj-first; not compression)
+        vertebral\s+bod(?:y|ies)\s+(?:is|are)\s+(?:\w+\s+){0,2}sclerotic|
+        # expanded rib/clavicle (not expanded lungs / aorta)
+        (?:ribs?|clavicle)\s+(?:is|are)\s+expanded|
+        # hedge: fracture or lytic/sclerotic lesion ("No fracture or …" blocked by (?<!\bno\s))
+        fracture\s+or\s+(?:a\s+)?(?:lytic|sclerotic|destructive)\s+lesions?|
+        # adj + optional laterality + named-bone site + lesion
+        (?:lytic|sclerotic|blastic|lucent|osteolytic|osteoblastic)\s+(?:(?:right|left|bilateral|both)\s+)?(?:scapular|clavicular|humeral)\s+lesions?|
+        # site lesion without adj (prod has bare rib lesions only)
+        (?<!\blytic\s)(?<!\bsclerotic\s)(?<!\blucent\s)(?<!\bblastic\s)
+        (?<!\bor\s)
+        (?:scapular|clavicular|humeral)\s+lesions?|
+        # focus of sclerosis in named bone (not "sclerotic focus" word order)
+        (?:focus|foci)\s+of\s+sclerosis.{0,80}(?:humerus|humeral|ribs?|clavicle|scapula|glenoid|vertebral)|
+        # named fibrous dysplasia
+        fibrous\s+dysplasia
     )
 )

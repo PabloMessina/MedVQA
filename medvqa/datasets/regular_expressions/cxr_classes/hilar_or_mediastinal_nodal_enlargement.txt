@@ -2,12 +2,14 @@
 # hilar_or_mediastinal_nodal_enlargement
 # Explicit hilar/mediastinal adenopathy, lymphadenopathy, or enlarged nodes.
 #
-# Match: location-qualified or central/intrathoracic adenopathy; enlarged /
-# prominent / bulky hilar|mediastinal|paratracheal|pretracheal nodes; lymph-node
-# enlargement / nodal enlargement; lymph-node / nodal mass or conglomerate;
-# sized/large located nodes; location-qualified LAD; calcified nodes with
-# enlargement; peritracheal mediastinal widening → adenopathy; paratracheal
-# mass/bulge with nodal language; hedged DDx (or/versus; attributable/represent).
+# Match: location-qualified or central/intrathoracic adenopathy (incl. typos);
+# enlarged / prominent / bulky located nodes (incl. copula / location-after);
+# lymph-node enlargement / nodal enlargement / nodal disease; lymph-node /
+# nodal mass or conglomerate (station-first or finding-first); sized/large
+# located nodes; location-qualified LAD; calcified nodes with enlargement;
+# peritracheal mediastinal widening → adenopathy; paratracheal mass/bulge
+# with nodal language; hedged DDx (or/versus; attributable/represent).
+# Stations include prevascular.
 #
 # Do NOT match: bare hilar prominence/enlargement/fullness; mediastinal widening
 # without nodal attribution; calcified lymph nodes without adenopathy wording;
@@ -35,7 +37,7 @@
         (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
         (?:(?:right|left|bilateral)\s+)?
         (?:hilar|mediastinal|paratracheal)\s+or\s+(?:hilar|mediastinal|paratracheal)\s+
-        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?:(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)|nodal\s+disease)
         (?!\s*\?)(?!\s*:\s*none)
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -63,6 +65,7 @@
             | paratracheal
             | peritracheal
             | pretracheal
+            | prevascular
             | subcarinal
             | suprahilar
             | infrahilar
@@ -77,7 +80,7 @@
             | right[-\s]sided
             | left[-\s]sided
         )\s+
-        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?:(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)|nodal\s+disease)
         (?!\s*\?)(?!\s*:\s*none)
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -99,7 +102,7 @@
         (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)
         (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
         (?:central|extensive|bulky|symmetric|symmetrical|intrathoracic|multifocal)\s+
-        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)
         (?!\s*\?)(?!\s*:\s*none)
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -127,7 +130,7 @@
         (?<!\bno\ssuggestion\sof\s)(?<!\bless\slikely\s)
         (?<!\bsuggest\snew\s)(?<!\bunderlying\s)(?<!\bthe\s)
         (?<!\bhilar\s)(?<!\bmediastinal\s)(?<!\bmediastonal\s)(?<!\bparatracheal\s)
-        (?<!\bperitracheal\s)(?<!\bpretracheal\s)(?<!\bsubcarinal\s)
+        (?<!\bperitracheal\s)(?<!\bpretracheal\s)(?<!\bprevascular\s)(?<!\bsubcarinal\s)
         (?<!\binfrahilar\s)(?<!\bsuprahilar\s)(?<!\bcentral\s)(?<!\bthoracic\s)
         (?<!\bextensive\s)(?<!\bbulky\s)(?<!\benlarged\s)
         (?<!\baortopulmonary\s)(?<!\baortopulmonic\s)
@@ -135,7 +138,7 @@
         (?<!\binguinal\s)(?<!\bpelvic\s)(?<!\bsidewall\s)(?<!\bretroperitoneal\s)
         (?<!\bsupraclavicular\s)(?<!\binternal\smammary\s)(?<!\bmesenteric\s)
         (?<!\bintra\sthoracic\s)(?<!\bintrathoracic\s)
-        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)
         (?!\s*\?)(?!\s*:\s*none)
         (?!\s+elsewhere)(?!\s+shown\s+on)(?!\s+seen\s+on\s+prior)
         (?!\s*,\s*or\s+(?:a\s+)?mass(?:es)?)
@@ -153,7 +156,7 @@
         (?:(?:single|a|an|mildly|mild|moderately|pathologically)\s+)?
         (?:enlarged|prominent|bulky)\s+
         (?:(?:right|left|bilateral)\s+)?
-        (?:hilar|mediastinal|paratracheal|pretracheal|subcarinal|peritracheal)\s+
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular|subcarinal|peritracheal)\s+
         (?:lymph[\s\-]?nodes?|nodes?)\b
 
         |
@@ -189,7 +192,7 @@
         # 8. Paratracheal mass/bulge with nodal / adenopathy language nearby
         (?:(?:right|left|lower|upper)\s+)?(?:para|peri)?tracheal(?:\s+mediastinal)?\s+(?:mass|bulge|buldge)
         (?:(?![.!?])(?:.){0,90}?)
-        (?:nodal|(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy))
+        (?:nodal|(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy))
 
         |
 
@@ -213,8 +216,8 @@
         (?:
             # congestion/vascularity OR/VERSUS lymphadenopathy (optional adj)
             (?:(?:mass|masses)\s+(?:or|versus)\s+|(?<!\bmass\s)(?<!\bmasses\s)\b(?:or|versus)\s+)
-            (?:(?:mild|extensive|bulky|underlying|possible|probable)\s+)?
-            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            (?:(?:mild|extensive|bulky|underlying|possible|probable|known)\s+)?
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
             |
             # attribution verbs → optional intervening DDx → (underlying) adenopathy
             (?:
@@ -233,25 +236,25 @@
             \s+
             (?:
                 # direct: underlying adenopathy / mass or adenopathy
-                (?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
+                (?:(?:a|an|mild|possible|probable|underlying|suspected|known)\s+)?
                 (?:(?:mass|masses)\s+or\s+)?
-                (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement|(?:nodule/)?lymph[\s\-]?nodes?)
+                (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?:nodule/)?lymph[\s\-]?nodes?|(?<!\bav\s)nodal\s+disease)
                 |
                 # gap then or/versus (optional adj) lymphadenopathy
                 [^.]{0,70}?
                 \b(?:or|versus)\s+
-                (?:(?:mild|extensive|bulky|underlying|possible|probable)\s+)?
-                (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+                (?:(?:mild|extensive|bulky|underlying|possible|probable|known)\s+)?
+                (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
             )
             |
             # secondary to X or/versus lymphadenopathy
             (?:may\s+be\s+)?secondary\s+to\s+[^.]{0,70}?
-            \b(?:or|versus)\s+(?:(?:mild|extensive|bulky|underlying)\s+)?
-            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            \b(?:or|versus)\s+(?:(?:mild|extensive|bulky|underlying|known)\s+)?
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
             |
             # prominence of the hila and (underlying) lymphadenopathy
-            \band\s+(?:(?:underlying|possible|probable)\s+)?
-            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            \band\s+(?:(?:underlying|possible|probable|known)\s+)?
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
         )
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -279,10 +282,10 @@
                 | consistent\s+with
                 | perhaps\s+related\s+to
             )
-            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
-            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected|known)\s+)?
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
             |
-            \bor\s+(?:lymphadenopathy|adenopathy)
+            \bor\s+(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|(?<!\bav\s)nodal\s+disease)
         )
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -294,11 +297,11 @@
         (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
         (?<!\bevidence\sof\s)(?<!\bevidence\sfor\s)(?<!\bnegative\sfor\s)
         (?:
-            (?:the\s+)?(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+            (?:the\s+)?(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)
             \s+at\s+the\s+aortopulmon(?:ic|ary)(?:\s+(?:level|window))?
             |
             aortopulmon(?:ic|ary)(?:\s+(?:level|window))?\s+
-            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)
         )
         (?!\s*\?)(?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -319,8 +322,8 @@
         )
         [^.]{0,90}?
         \bor\s+(?:(?:right|left|bilateral)\s+)?
-        (?:hilar|mediastinal|mediastonal|paratracheal|pretracheal|peritracheal)\s+
-        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly)|luymphadenopathy|lymphadopathy)
+        (?:hilar|mediastinal|mediastonal|paratracheal|pretracheal|prevascular|peritracheal)\s+
+        (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy)
         (?!\s*\?)(?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
         (?!\s+shown\s+on)
@@ -336,9 +339,9 @@
         [^.]{0,100}?
         (?:
             (?:could\s+be\s+due\s+to|due\s+to|secondary\s+to|related\s+to)\s+
-            [^.]{0,70}?\bor\s+(?:lymphadenopathy|adenopathy)
+            [^.]{0,70}?\bor\s+(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|(?<!\bav\s)nodal\s+disease)
             |
-            \bor\s+(?:lymphadenopathy|adenopathy)
+            \bor\s+(?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|(?<!\bav\s)nodal\s+disease)
         )
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -367,11 +370,11 @@
                 | compatible\s+with
                 | consistent\s+with
             )
-            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected)\s+)?
-            (?:lymphadenopathy|adenopathy|lymphoid\s+enlargement)
+            \s+(?:(?:a|an|mild|possible|probable|underlying|suspected|known)\s+)?
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|lymphoid\s+enlargement|(?<!\bav\s)nodal\s+disease)
             |
             \bor\s+(?:(?:mild|extensive|bulky|underlying)\s+)?
-            (?:lymphadenopathy|adenopathy)
+            (?:(?:lymph[\s\-]?)?adeno(?:pathy|pathic|pathies|megaly|pathay|athy|apathy)|luymphadenopathy|lymphadopathy|lymphadenoapthy|lymphadenpathy|lymphadenopthy|lyphadenopathy|lympadenopathy|lymphadenomathy|lymphadenopaty|lymphaenopathy|lymphadenoatphy|(?<!\bav\s)nodal\s+disease)
         )
         (?!\s+is\s+not\s+(?:totally\s+|entirely\s+|completely\s+)?excluded)
         (?!\s+cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?(?:excluded|ruled\s+out))
@@ -385,7 +388,7 @@
         (?:(?:mild|mildly|moderate|moderately|slight|slightly)\s+)?
         enlargement\s+of\s+
         (?:(?:the\s+)?(?:right|left|bilateral)\s+)?
-        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular|peritracheal|subcarinal)\s+
         (?:lymph[\s\-]?nodes?|nodes?)\b
 
         |
@@ -394,8 +397,8 @@
         (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
         (?<!r/o\s)(?<!\brule\sout\s)
         (?:(?:right|left|bilateral|rounded|large|stable)\s+)?
-        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
-        (?:lymph[\s\-]?node\s+mass(?:es)?|nodal\s+mass(?:es)?|lymph[\s\-]?node\s+conglomerate)\b
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular|peritracheal|subcarinal)\s+
+        (?:lymph[\s\-]?node\s+mass(?:es)?|nodal\s+mass(?:es)?|lymph[\s\-]?node\s+conglomerate|nodal\s+conglomerate)\b
 
         |
 
@@ -407,7 +410,7 @@
             | (?:large|bulky|pathologic(?:ally)?)\s+
         )
         (?:(?:right|left|bilateral)\s+)?
-        (?:hilar|mediastinal|paratracheal|pretracheal|peritracheal|subcarinal)\s+
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular|peritracheal|subcarinal)\s+
         (?:lymph[\s\-]?nodes?|nodes?)\b
 
         |
@@ -416,7 +419,7 @@
         (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
         calcified\s+
         (?:(?:right|left|bilateral)\s+)?
-        (?:hilar|mediastinal|paratracheal|pretracheal)\s+
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular)\s+
         (?:lymph[\s\-]?nodes?|nodes?)
         [^.]{0,80}?
         (?:enlarged|enlargement|adenopathy|lymphadenopathy)\b
@@ -434,10 +437,47 @@
             | mediastinal
             | paratracheal
             | pretracheal
+            | prevascular
             | mediastinal\ and\ hilar
             | hilar\ and\ mediastinal
         )\s+
         LAD\b
         (?!\s+cannot)(?!\s+is\s+not)
+
+        |
+
+        # 21. Copula: located (lymph) nodes are/is enlarged / prominent / bulky
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+        (?:the\s+)?(?:(?:right|left|bilateral)\s+)?
+        (?:hilar|mediastinal|paratracheal|pretracheal|prevascular|peritracheal|subcarinal)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)
+        \s+(?:are|is)\s+
+        (?:(?:mildly|mild|moderately|pathologically)\s+)?
+        (?:enlarged|prominent|bulky)\b
+
+        |
+
+        # 22. Enlarged / prominent / bulky (lymph) nodes at/in a named station
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!\bno\ssignificant\s)(?<!\bno\sdefinite\s)
+        (?:(?:mildly|mild|moderately|pathologically)\s+)?
+        (?:enlarged|prominent|bulky)\s+
+        (?:lymph[\s\-]?nodes?|nodes?)
+        \s+(?:at|in|of|within)\s+(?:the\s+)?
+        (?:(?:right|left|bilateral)\s+)?
+        (?:hilum|hila|hilar(?:\s+region)?|mediastinum|mediastinal|paratracheal|pretracheal|prevascular|subcarinal)\b
+
+        |
+
+        # 23. Finding-first nodal / lymph-node conglomerate with chest location
+        (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
+        (?<!r/o\s)(?<!\brule\sout\s)
+        (?:(?:a|an)\s+)?
+        (?:nodal|lymph[\s\-]?node)\s+conglomerate
+        [^.]{0,90}?
+        (?:in|of|within|involving)\s+(?:the\s+)?
+        (?:(?:right|left|bilateral|anterior|middle|posterior|superior)\s+)?
+        (?:mediastinum|mediastinal|hilum|hila|hilar|prevascular|paratracheal)\b
 
 )

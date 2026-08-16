@@ -40,7 +40,8 @@
         (?<!\bchemotherapy-induced\s)
         (?<!\btold\she\shas\s)
         (?<!\btold\sshe\shas\s)
-        interstitial\s+lung\s+disease
+        # attested typos: interstital / intersitial / insterstitial / interstial
+        (?:inters(?:ti(?:ti)?al|tital|itial)|insterstitial)\s+lung\s+disease
     |
         # "Chronic interstitial disease" used as ILD-equivalent diagnosis
         # (not "interstitial process/markings/abnormalities")
@@ -71,26 +72,36 @@
         (?<!\bknown\shistory\sof\s)
         (?:
             UIP\s+pattern|
-            pattern\s+of\s+(?:a\s+)?UIP\b|
-            # compatible/consistent with (+ optional patient's / known / reported diagnosis of)
-            (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|the\s+)?(?:patient(?:'s)?\s+)?)?(?:known\s+)?(?:reported\s+)?(?:diagnosis\s+of\s+)?(?:an?\s+)?(?:UIP|NSIP|IPF|ILD)\b|
-            (?:patient\s+(?:with|is)\s+)?known\s+(?:for\s+)?(?:UIP|NSIP|IPF|ILD)\b|
-            progression\s+of\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
-            # likely/probable/possible + acronym (e.g. "likely NSIP")
-            (?:likely|probable|possible)\s+(?:UIP|NSIP|IPF|ILD)\b|
-            # from ILD / secondary to NSIP (attribution framing)
-            (?:likely\s+|possibly\s+)?from\s+(?:(?:an?\s+|known\s+)?)?ILD\b|
-            secondary\s+to\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
             NSIP\s+pattern|
             IPF\s+pattern|
+            ILD\s+pattern|
+            pattern\s+of\s+(?:a\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            pattern\s+suggestive\s+of\s+(?:an?\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            suggestive\s+of\s+(?:an?\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            # compatible/consistent/in keeping with (+ given/known history or diagnosis)
+            # Match starts at compatible/… so history-of / diagnosis-of lookbehinds
+            # do not kill current-film “compatible with (given) history/diagnosis of …”
+            (?:consistent|compatible|in\s+keeping)\s+with\s+(?:(?:an?\s+|the\s+)?(?:patient(?:'s)?\s+)?)?(?:(?:given\s+|known\s+|reported\s+)?(?:history\s+of\s+|diagnosis\s+of\s+)?)?(?:an?\s+)?(?:UIP|NSIP|IPF|ILD|idiopathic\s+pulmonary\s+fibrosis|(?:inters(?:ti(?:ti)?al|tital|itial)|insterstitial)\s+lung\s+disease)\b|
+            (?:patient\s+(?:with|is)\s+)?known\s+(?:for\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            progression\s+of\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
+            exacerbation\s+of\s+(?:(?:an?\s+|known\s+|chronic\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
+            # likely/probable/possible + acronym (e.g. "likely NSIP")
+            (?:likely|probable|possible)\s+(?:UIP|NSIP|IPF|ILD)\b|
+            # from ILD / secondary to / due to NSIP (attribution framing)
+            (?:likely\s+|possibly\s+|potentially\s+)?from\s+(?:(?:an?\s+|known\s+)?)?ILD\b|
+            (?:secondary\s+to|due\s+to)\s+(?:(?:an?\s+|known\s+)?)?(?:UIP|NSIP|IPF|ILD)\b|
             # framed bare ILD (findings-of / chronic / such-as) — not INDICATION-only token
             findings\s+of\s+(?:(?:an?\s+|early\s+|chronic\s+)?)?ILD\b|
             (?:chronic|early)\s+ILD\b|
             such\s+as\s+ILD\b|
-            # HP only when framed (avoid bare DDx-list tokens)
-            such\s+as\s+hypersensitivity\s+pneumonitis|
-            (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|known\s+)?)?hypersensitivity\s+pneumonitis|
-            (?:diagnosis\s+of|known)\s+hypersensitivity\s+pneumonitis
+            # cannot-exclude / not-excluded on ILD acronyms (not only interstitial pneumonia)
+            (?:UIP|NSIP|IPF|ILD)\s+(?:cannot\s+be\s+(?:totally\s+|entirely\s+|completely\s+)?excluded|(?:is\s+)?not\s+excluded)|
+            cannot\s+exclude\s+(?:an?\s+)?(?:UIP|NSIP|IPF|ILD)\b|
+            # HP: framed + current-film DDx (not bare indication tokens)
+            such\s+as\s+(?:(?:[\w/-]+\s+){0,6}(?:or\s+)?)?hypersensitivity\s+pneumonitis|
+            (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|known\s+)?)?(?:(?:[\w/-]+\s+){0,6}(?:or\s+)?)?hypersensitivity\s+pneumonitis|
+            (?:diagnosis\s+of|known)\s+hypersensitivity\s+pneumonitis|
+            hypersensitivity\s+pneumonitis\s+(?:is\s+)?(?:a\s+)?(?:differential\s+)?consideration
         )
     |
         # Affirmative / hedged unnamed interstitial pneumonia (typo: Interstial)
@@ -101,8 +112,9 @@
         (?:
             # verb/hedge BEFORE disease (optional intervening modifiers / short DDx glue)
             (?:
-                (?:consistent|compatible)\s+with\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?|
-                (?:may\s+|might\s+|could\s+)?(?:suggest|reflect|represent|indicate)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?|
+                (?:consistent|compatible|in\s+keeping)\s+with\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+)*)?|
+                (?:may\s+|might\s+|could\s+)?(?:suggest|reflect|represent|indicate)\s+(?:(?:an?\s+|early\s+|atypical[/\s]*|bilateral\s+|diffuse\s+)*)?|
+                (?:(?:could\s+|may\s+|might\s+)?(?:be\s+a\s+)?manifestation\s+of\s+(?:(?:an?\s+|early\s+|atypical[/\s]*|bilateral\s+|diffuse\s+)*)?)|
                 (?:consider|concerning\s+for|worrisome\s+for|suspicious\s+for)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+|slowly\s+progressing\s+)*)?|
                 (?:probable|possible|likely)\s+(?:(?:an?\s+|early\s+|bilateral\s+|diffuse\s+|superimposed\s+)?(?:(?:\w+\s+){0,4}(?:or|versus|vs\.?)\s+)?)?|
                 # versus/vs — allow bare IP (hunt: edema versus interstitial pneumonia)

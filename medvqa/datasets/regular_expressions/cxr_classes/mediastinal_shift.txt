@@ -8,9 +8,12 @@
 # Gaps are clause-local ([^\w.!?;:]) to avoid cross-sentence FPs.
 # Stdlib re lookbehinds are fixed-width: enumerate modifier/list negations.
 # Section 5 drops project* (gas "projecting to the right" is not displacement).
-# pull/drawn only with anatomy + toward/to (not bare tube "pulled back").
+# pull/drawn: anatomy + toward/to OR leftward/rightward (not bare tube "pulled back").
 # FN-fit w19: migrat* on mediastinal/heart arms only (not lead/stent/wire);
 # agentive moving|pushing|pulling the mediastinum/heart (not trachea-only).
+# FN-fit hunt: compact cardiac shift; shift of midline structures (verb-first only,
+# not anatomy-first — head-CT "Midline structures are shifted"); off the midline;
+# copula remains/stays; pulled leftward without to|toward.
 # ==============================================================================
 
 # Shared fragments (expanded inline; stdlib re has no defines):
@@ -18,11 +21,14 @@
 #            cardiomediastinal…
 #   SHIFT:   shift\w* | hift\w* | shoft\w* | deviat\w* | displac\w* | push\w*
 #            | migrat\w* (compact / direction-first / verb…anatomy / has-migrated)
-#            | pull(?:ed|ing) | drawn  (pull/drawn: anatomy+toward arm only)
+#            | pull(?:ed|ing) | drawn  (pull/drawn: anatomy+toward|ward)
 #            | moving|pushing|pulling the mediastinum (agentive arm)
+#            | cardiac shift (compact); shift of midline structures (verb-first)
 
 # ------------------------------------------------------------------------------
-# 1. Compact: mediastinal / cardiomediastinal shift|deviation|displacement
+# 1. Compact: mediastinal / cardiomediastinal / cardiac shift|deviation|…
+#    cardiac limited to shift* (not silhouette). left/rightward lookbehinds so
+#    "no leftward cardiac shift" does not fire (match starts at cardiac).
 # ------------------------------------------------------------------------------
 (?:
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bnor\s)(?<!\bneither\s)
@@ -46,8 +52,16 @@
     (?<!\bdoes\snot\sshow\s)(?<!\bdoes\snot\sdemonstrate\s)
     (?<!\bhistory\sof\s)(?<!\bresolved\s)(?<!\bresolution\sof\s)
     (?<!\bforeign\sbody\sor\s)(?<!\bbody\sor\s)
-    \b(?:mediastinal|cardiomediastinal)\s+
-    (?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|migrat\w*)\b
+    (?<!\bwithout\sappreciable\sleftward\s)(?<!\bwithout\sappreciable\srightward\s)
+    (?<!\bwithout\ssignificant\sleftward\s)(?<!\bwithout\ssignificant\srightward\s)
+    (?<!\bno\sappreciable\sleftward\s)(?<!\bno\sappreciable\srightward\s)
+    (?<!\bwithout\sleftward\s)(?<!\bwithout\srightward\s)
+    (?<!\bno\sleftward\s)(?<!\bno\srightward\s)
+    \b(?:
+        (?:mediastinal|cardiomediastinal)\s+
+        (?:shift\w*|hift\w*|shoft\w*|deviat\w*|displac\w*|migrat\w*)|
+        cardiac\s+(?:shift\w*|hift\w*|shoft\w*)
+    )\b
 )
 
 |
@@ -194,7 +208,7 @@
         [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|midline\b)\w+
     ){0,6}?
     [^\w.!?;:]+
-    \b(?:lies|is|appears?|seems?|locat\w*|situat\w*)\b
+    \b(?:lies|is|appears?|seems?|locat\w*|situat\w*|remain(?:s|ed)?|stay(?:s|ed)?)\b
     (?:
         [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b)\w+
     ){0,4}?
@@ -202,7 +216,7 @@
     \b(?:
         to\s+the\s+(?:left|right)(?:\s+of\s+midline)?|
         toward(?:s)?\s+(?:the\s+)?(?:left|right)|
-        off\s+midline|
+        off\s+(?:the\s+)?midline|
         in(?:to)?\s+the\s+(?:left|right)\s+(?:hemithorax|chest|side)
     )\b
     (?!\s+(?:due\s+to|secondary\s+to|from|from\s+patient|attributable\s+to)\s+
@@ -260,8 +274,9 @@
 |
 
 # ------------------------------------------------------------------------------
-# 8. Anatomy pulled / drawn toward (prompt includes pull; not bare tube "pulled
-#    back"). Tight copula+toward so NG/ETT retraction does not fire.
+# 8. Anatomy pulled / drawn toward or leftward/rightward (prompt includes pull;
+#    not bare tube "pulled back"). Copula words allowed; still require
+#    to|toward|ward so "pulled back" / NG-ETT retraction do not fire.
 # ------------------------------------------------------------------------------
 (?:
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
@@ -273,10 +288,13 @@
         cardiomediastinal(?:\s+(?:silhouett\w*|contours?|structures?))?|
         cardiomediastinum
     )\b
-    [^\w.!?;:]{1,40}
+    (?:
+        [^\w.!?;:]+(?!without\b|no\b|not\b|denies\b|absent\b|neither\b)\w+
+    ){0,5}?
+    [^\w.!?;:]+
     \b(?:pull(?:ed|ing)|drawn)\b
     [^\w.!?;:]{1,20}
-    \b(?:to|toward(?:s)?)\b
+    \b(?:to|toward(?:s)?|(?:left|right)[- ]?ward)\b
     (?!\s+(?:the\s+)?(?:carina|stomach|antrum|pylorus|duodenum|gej))
 )
 
@@ -327,4 +345,21 @@
         cardiomediastinal(?:\s+(?:silhouett\w*|contours?|structures?))?|
         cardiomediastinum
     )\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 11. Verb-first: shift of (the) midline structures (prompt: central thoracic
+#     structures). Anatomy-first "Midline structures are shifted" omitted —
+#     that construction is head-CT, not CXR mediastinal shift.
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
+    (?<!\bno\ssignificant\s)(?<!\bno\sappreciable\s)
+    (?<!\bno\sassociated\s)(?<!\bno\ssubstantial\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    (?<!\bno\smass[- ]effect\sor\s)
+    (?<!\bwithout\smass[- ]effect\sor\s)
+    \b(?:shift\w*|hift\w*|shoft\w*)\s+of\s+(?:the\s+)?midline\s+structures?\b
 )

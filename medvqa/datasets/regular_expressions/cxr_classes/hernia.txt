@@ -42,7 +42,7 @@
         # "known X hernia" blocked here (indication-only); still allow
         # "known LARGE hiatal" / "known unchanged large hiatal" (adjective intervenes).
         (?<!\bknown\s)(?<!\bwith\sknown\s)
-        \b(?:hiatal|hiatus|para-?esophageal|peri-?esophageal|diaphragmatic|
+        \b(?:hiatal|hiatus|para-?esophageal|peri-?esophageal|diaphragm(?:atic)?|
             sliding|rolling)\s+hernia\w*
         (?!\s+has\s+now\s+been\s+corrected)
         (?!\s+has\s+been\s+corrected)
@@ -50,15 +50,15 @@
         |
         # Laterality prefix so "with a right Bochdalek" starts at "right" and
         # dodges the indication lookbehind (?<!\bwith\sa\sright\s).
-        \b(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:morgagni|bochdalek)(?:\s+hernia\w*)?
+        \b(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:morgagni|morgani|bochdalek|bokdalek|bochdaleck)(?:\s+hernia\w*)?
         |
-        # 2. Gastric / stomach herniation + intrathoracic stomach
+        # 2. Gastric / hepatic / stomach herniation + intrathoracic viscera
         # (allow "known intrathoracic stomach" as current finding restatement)
-        \bgastric\s+herni\w*
+        \b(?:gastric|hepatic)\s+herni\w*
         |
         \bherni\w*\s+(?:of\s+)?(?:the\s+)?(?:stomach|gastr\w*)
         |
-        \bintra-?thoracic\s+stomach
+        \bintra-?thoracic\s+(?:stomach|bowel|colon(?:ic)?|viscera|gut)
         |
         # 3. Lung herniation (adjacent + intervening laterality + clause words)
         \b(?:lung|pulmonary)\s+herni\w*
@@ -78,7 +78,7 @@
         # 4. Viscera / bowel / omentum / fat / liver / gut herniating into thorax
         # Subject–verb: "bowel are/have herniated through (hemi)diaphragm/defect"
         \b(?:omental\s+fat|omentum|bowel|colon(?:ic)?|intestin\w*|viscera|gut|
-            stomach|gastr\w*|liver|abdominal\s+contents?)\s+
+            stomach|gastr\w*|liver|(?:intra-?)?abdominal\s+contents?)\s+
           (?:(?:is|are|was|were|has|have|(?:has|have|had)\s+been)\s+)?
           herniat\w*\s+(?:into|in|through|to|across)\s+
           (?:(?:the|a|an)\s+)?(?:anterior\s+|posterior\s+|right\s+|left\s+|lateral\s+|lower\s+|basal\s+)?
@@ -90,7 +90,7 @@
         # herniation of [portion of] (large|small) viscera/contents/liver … thorax/diaphragm
         \bherniat\w*\s+(?:of\s+)?(?:(?:a\s+|the\s+)?(?:portion|part|loops?)\s+of\s+(?:the\s+)?)?(?:the\s+)?
           (?:(?:large|small)\s+)?(?:bowel|colon(?:ic)?|intestin\w*|oment(?:um|al)|viscera|stomach|gastr\w*|
-             liver|abdominal\s+contents?|gut)
+             liver|(?:intra-?)?abdominal\s+contents?|gut)
           (?:(?![.!?]).){0,50}?
           \b(?:chest|thorax|hemithorax|mediastin\w*|lung|(?:hemi)?diaphragm|chest\s+wall)
         |
@@ -101,6 +101,14 @@
         # herniation of the (left|right) (hemi)diaphragm
         \bherniat\w*\s+(?:of\s+)?(?:the\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:hemi)?diaphrag\w*
         |
+        # herniation through (known) diaphragmatic rent/defect (viscus unnamed)
+        \bherniat\w*\s+through\s+(?:(?:the|a|an)\s+)?(?:known\s+)?
+          (?:
+            (?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:hemi)?diaphragm(?:atic)?\s+(?:rent|defect)
+            |
+            (?:rent|defect)\s+(?:in|of)\s+(?:the\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:hemi)?diaphrag\w*
+          )
+        |
         # bowel / loops of bowel within hemithorax (either word order)
         \b(?:(?:gas[\s-]?filled\s+)?loops?\s+of\s+)?(?:bowel|colon(?:ic)?|intestin\w*|oment(?:um|al)|viscera|gut)\s+
           (?:(?:loops?|structures?)\s+)?
@@ -108,6 +116,14 @@
           (?:chest|thorax|hemithorax|mediastin\w*)
         |
         \bcolonic\s+interposition\b
+        |
+        # intra-abdominal contents occupying lung/thorax (attribution; not Chilaiditi)
+        \b(?:lung|hemithorax|chest|thorax)\b
+          (?:(?![.!?]).){0,70}?
+          (?:(?:likely|probably|possibly|may)\s+)?
+          (?:reflect|represent|suggest|indicat)\w*\s+
+          (?:(?:likely|probably|possibly)\s+)?
+          intra-?abdominal\s+contents?\b
         |
         # 5. Stomach / intra-abdominal fat into lung/thorax with hernia cue
         \b(?:stomach|intra-?abdominal\s+fat)\b
@@ -167,6 +183,10 @@
             \s+(?:in|within)\s+(?:the\s+)?retrocardiac\s+(?:region|area|space)
             |
             \s+projecting\s+over\s+(?:the\s+)?(?:(?:left|right)\s+)?hemithorax
+            |
+            \s+through\s+(?:(?:the|a|an)\s+)?(?:(?:left|right)(?:-sided|\ssided)?\s+)?(?:hemi)?diaphrag\w*
+            |
+            \s+involving\s+(?:(?![.!?]).){0,50}?(?:hemi)?diaphrag\w*
           )
     )
 )

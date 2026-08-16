@@ -4,32 +4,32 @@
         # Core: calcified pulmonary/lung/lingular/mid-lung nodule or granuloma
         # FN-fit (fn_mine_fit_shared): mid/upper/lower before lung(zone)/midlung;
         #   adj after location (pulmonary small granulomas); size before granuloma;
-        #   dense|rounded hedges before calcified
+        #   dense|rounded|well hedges; calcified-appearing; old|healed|chronic
         (?<!un)(?<!non)(?<!non-)(?<!non\s)
-        (?:(?:likely|probably|possibly|densely|fully|partially|dense|rounded|ovoid)\s+)?calcified\s+
+        (?:(?:likely|probably|possibly|densely|fully|partially|dense|rounded|ovoid|well)\s+)?calcified(?:-appearing)?\s+
             (?:(?:less\s+than|greater\s+than|up\s+to)\s+)?
             (?:[\d.]+\s*-?\s*(?:mm|cm)\s+)?
             (?:(?:right|left|bilateral|both)\s+)?
             (?:(?:mid|upper|lower|middle)\s+)?
             (?:(?:lung(?:\s+zone)?|midlung|pulmonary|lingular?|granulomatous|apical|basilar|basal|parenchymal)\s+)?
-            (?:(?:small|tiny|dense|round(?:ed)?|punctate|benign|lobulated|ovoid)\s+)*
+            (?:(?:small|tiny|dense|round(?:ed)?|punctate|benign|lobulated|ovoid|old|healed|chronic)\s+)*
             (?:[\d.]+\s*-?\s*(?:mm|cm)\s+)?
             (?:(?:pulmonary\s+|lung\s+|parenchymal\s+)?(?:nodular\s+(?:densit(?:y|ies)|foci|focus|opacit(?:y|ies))|nodules?|granuloma(?:s|ta)?))
             (?!\s+(?:at|in|of|within)\s+(?:the\s+)?(?:dome\s+of\s+(?:the\s+)?)?(?:liver|hepatic|spleen|splenic|buttock|kidney|renal|adrenal))
         |
         (?:pulmonary\s+|lung\s+|lingular?\s+)?
         (?<!un)(?<!non)(?<!non-)(?<!non\s)
-        (?:(?:likely|probably|possibly|densely|fully|partially)\s+)?calcified\s+
-            (?:(?:small|tiny|dense|round|punctate|benign|lobulated)\s+)*
+        (?:(?:likely|probably|possibly|densely|fully|partially|well)\s+)?calcified(?:-appearing)?\s+
+            (?:(?:small|tiny|dense|round|punctate|benign|lobulated|old|healed|chronic)\s+)*
             (?:nodules?|granuloma(?:s|ta)?)
             (?!\s+(?:at|in|of|within)\s+(?:the\s+)?(?:dome\s+of\s+(?:the\s+)?)?(?:liver|hepatic|spleen|splenic|buttock|kidney|renal|adrenal))
         |
-        # Calcified Ghon / Ranke
+        # Calcified Ghon / Ranke (possessive Ranke's)
         calcified\s+ghon|
-        ranke\s+complex|
+        ranke(?:['’]s)?\s+complex|
         granuloma(?:s|ta)?\s+with\s+calcification|
-        # Nodule with (central) calcification (intrapulmonary when lobe/lung follows nearby)
-        nodules?\s+with\s+(?:(?:central|partial|dense|punctate)\s+)?calcifications?
+        # Nodule with (central|popcorn) calcification (intrapulmonary when lobe/lung follows nearby)
+        nodules?\s+with\s+(?:(?:central|partial|dense|punctate|popcorn)\s+)?calcifications?
         |
         # Calcific nodule / calcific nodular density (intrapulmonary CXR idiom)
         calcific\s+(?:pulmonary\s+|lung\s+)?(?:nodules?|granuloma(?:s|ta)?)
@@ -55,12 +55,12 @@
             (?:\s+\w+){0,4}?
             \s+(?:within|in)\s+(?:(?:both|the|bilateral)\s+)?lungs?
         |
-        # Calcified (nodular) opacities in lung fields / lungs
+        # Calcified (nodular) opacities in lung fields / lungs / mid zone
         calcified\s+(?:nodular\s+)?opacit(?:y|ies)
             (?:\s+\w+){0,6}?
             \s+(?:within|in|over|throughout)\s+(?:the\s+)?
-            (?:(?:bilateral|both)\s+)?
-            (?:lung\s+fields?|lungs?|(?:(?:right|left)\s+)?(?:(?:upper|lower|middle)\s+)?(?:lobe|lung))
+            (?:(?:bilateral|both|right|left)\s+)?
+            (?:lung\s+fields?|lungs?|(?:(?:right|left)\s+)?(?:(?:upper|lower|middle|mid)\s+)?(?:lobe|lung|zone)|midzone)
         |
         # FN-fit: calcified opacities within (right/left) chest … representing granulomas
         # (bare "chest" without granuloma attribution excluded — wall/soft-tissue risk)
@@ -162,19 +162,66 @@
         # Lung / pulmonary calcifications (granuloma synonym proxy)
         (?:lung|pulmonary)\s+calcifications?
         |
-        # Nodule ... may/possibly/likely be calcified (clause-local)
-        # Do not add "may contain calcium" (uncertain; not stated calcified nodule)
-        nodules?
-            (?:\s+\w+){0,12}?
+        # Nodule/granuloma/nodular density ... may/possibly/likely be calcified
+        # (semicolon-tolerant gap; do not add "may contain calcium")
+        (?:nodules?|granuloma(?:s|ta)?|nodular\s+densit(?:y|ies))
+            (?:[\s;]+\w+){0,16}?
             \s+(?:which\s+)?(?:may|might|could|possibly|likely|probably)\s+be\s+calcified
         |
-        # Nodule / nodular opacity appears/is calcified (FN-fit: longer gap; nodular opacity)
-        (?:nodules?|nodular\s+opacit(?:y|ies))
+        # Nodule / nodular opacity / granuloma appears/is/that-are calcified
+        # Lookbehinds: not hilar/hepatic/liver/splenic granuloma
+        (?<!hilar\s)(?<!hepatic\s)(?<!liver\s)(?<!splenic\s)
+        (?:nodules?|nodular\s+opacit(?:y|ies)|granuloma(?:s|ta)?)
             (?:\s+\w+){0,14}?
-            \s+(?:appears?|is|are)\s+(?:partially\s+)?calcified
+            \s+(?:(?:that|which)\s+)?(?:appears?|is|are)\s+(?:(?:partially|densely|fully|well)\s+)?calcified
         |
         # FN-fit: trailing ", partially calcified" after nodule (no is/are/appears)
         (?:parenchymal\s+)?nodules?
             (?:\s+\w+){0,12}?
             ,\s*(?:partially\s+|fully\s+|densely\s+)?calcified
+        |
+        # Bare calcification in/over/projecting over lung … granuloma attribution
+        # (not hilar/mediastinal/pleural/aortic; (?!tous) blocks granulomatous disease)
+        (?<!hilar\s)(?<!mediastinal\s)(?<!paratracheal\s)(?<!pleural\s)(?<!aortic\s)
+        (?:(?:punctate|rounded|focal|small|tiny|dense|ovoid)\s+)*
+        calcifications?
+            (?:\s+[\w.,-]+){0,6}?
+            \s+(?:in|within|over|overlying|project(?:s|ing)?\s+over)
+            (?:\s+(?:the|a|an|medial|lateral))*
+            \s+(?:(?:right|left|bilateral|both)\s+)?
+            (?:(?:mid\s+to\s+)?(?:upper|lower|middle|mid)\s+)?
+            (?:lobe|lung(?:\s+(?:fields?|zones?|bases?|apices?))?|apex|apices|bases?(?!\s+of\s+(?:the\s+)?(?:(?:right|left)\s+)?(?:hemi)?thorax)|midlung(?:\s+zone)?)
+            ,?
+            (?:\s+[\w.,-]+){0,8}?
+            \s+(?:
+                (?:(?:(?:is|are)\s+)?(?:likely|probably|possibly)\s+(?:a\s+)?)granuloma(?:s|ta)?(?!tous)
+                |
+                (?:(?:likely|probably|possibly|most)\s+)?(?:reflects?|suggesting|suggests?|represent(?:s|ing)?|consistent\s+with|compatible\s+with|most\s+consistent\s+with)
+                (?:\s+(?:a|an|small|tiny|old|chronic|healed))*
+                \s+granuloma(?:s|ta)?(?!tous)
+            )
+        |
+        # Location-first: in (left mid upper) lung, calcifications suggesting granulomas
+        (?:in|within)\s+(?:the\s+)?
+            (?:(?:left|right|bilateral|both)\s+)?
+            (?:(?:mid|upper|lower|middle)\s+)*
+            (?:lung(?:\s+(?:fields?|zones?))?|lobe|apex|apices|midlung)
+            [\s,]+
+            (?:(?:several|multiple|scattered|few|tiny|small|punctate)\s+)*
+            calcifications?
+            \s+(?:suggesting|suggests?|reflects?|representing|likely)
+            (?:\s+(?:a|an|old|chronic))*
+            \s+granuloma(?:s|ta)?(?!tous)
+        |
+        # Focal calcification overlying rib(s) … likely granulomas (CXR projection idiom)
+        (?<!hilar\s)(?<!pleural\s)
+        (?:(?:unchanged|stable|focal|punctate|small|tiny|rounded)\s+)*
+        calcifications?
+            \s+overlying\s+
+            .{0,90}?
+            \bribs?
+            .{0,80}?
+            (?:(?:is|are)\s+)?(?:likely|probably|possibly|consistent\s+with|compatible\s+with)
+            (?:\s+(?:a|an))*
+            \s+granuloma(?:s|ta)?(?!tous)
     )

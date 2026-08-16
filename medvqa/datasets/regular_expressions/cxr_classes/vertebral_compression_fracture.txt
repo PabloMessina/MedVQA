@@ -4,6 +4,8 @@
 # wedge fracture of vertebrae / compressed vertebral body / vertebra|vertebral
 # plana / anterior vertebral compression / named-level compression of T#/L# /
 # compressive / compression-wedge deformity / plural "vertebral compressions" /
+# singular "vertebral compression" / hyphen compression-fracture / T# VCF /
+# comp fx of T# / currently described known compression fracture /
 # compression fx / spine- or vertebral-scoped wedge deformity /
 # vertebroplasty / kyphoplasty / vertebral or cement augmentation.
 # Do NOT match bare spine/vertebral fractures, nonspecific height loss/wedging/
@@ -31,22 +33,39 @@
     (?<!\beval\sfor\s)(?<!\bevaluate\sfor\s)(?<!\br/o\s)(?<!\brule\sout\s)
     (?<!\?\s)
     \b(?:
-        # Vertebral-qualified compression fracture / deformity
-        # (fracture/deformity optional only after "vertebral body compression")
-        # Also plural noun "vertebral compressions" (+ optional deformities).
-        vertebral\s+body\s+(?:wedge\s+)?compression(?:\s+(?:fractures?|fx|deformit\w*))?|
-        vertebral\s+compressions(?:\s+deformit\w*)?|
-        vertebral\s+(?:wedge\s+)?compression\s+(?:fractures?|fx|deformit\w*)|
-        compression\s+vertebral\s+(?:body\s+)?(?:fractures?|fx)|
+        # Vertebral-qualified compression fracture / deformity.
+        # Typo stems: vertbral / vetebral / vertebrael (via vertebr\w*) / etc.
+        # Hyphen: compression-fracture / compression-deformity.
+        (?:vertebr\w*|vertbral|vetebral|verterbral|veterbral|vertbrae|veterbra|vertabra)\s+body\s+(?:wedge\s+)?compression(?:[- ]+(?:fractures?|fx|deformit\w*))?|
+        (?:vertebr\w*|vertbral|vetebral|verterbral|veterbral|vertbrae|veterbra|vertabra)\s+compressions(?:[- ]+deformit\w*)?|
+        (?:vertebr\w*|vertbral|vetebral|verterbral|veterbral|vertbrae|veterbra|vertabra)\s+(?:wedge\s+)?compression[- ]+(?:fractures?|fx|deformit\w*)|
+        # Singular "vertebral compression" without fracture/deformity: require a
+        # location/presence tail so "no … thoracic vertebral compression" (no
+        # following in/at/present) does not fire.
+        (?:vertebr\w*|vertbral|vetebral|verterbral|veterbral|vertbrae|veterbra|vertabra)\s+(?:wedge\s+)?compression
+        \s+(?:present|din|(?:one|two|several|multiple)\s+of|(?:in|of)\s+(?:the\s+)?|at\s+[tl]\d)|
+        compression[- ]+vertebral\s+(?:body\s+)?(?:fractures?|fx)|
 
         # Bare compression fracture/deformity (not immediately after
         # vertebral/body/wedge, which are covered above). Full "fracture(s)" /
         # "deformit*" stay unconstrained; bare "fx" requires level or "of …"
         # framing so indication-only "new compression fx" does not fire.
+        # Hyphen compression-fracture. Keep (?<!\bknown\s) on this arm;
+        # currently described "known … involving/unchanged/stable" is below.
         (?<!\bvertebral\s)(?<!\bbody\s)(?<!\bwedge\s)
-        compression\s+(?:fractures?|deformit\w*)|
+        compression[- ]+(?:fractures?|deformit\w*)|
         (?<!\+)[tl]\d{1,2}\s+compression\s+fx\b|
         compression\s+fx\s+(?:of\s+(?:the\s+)?(?:[tl]\d{1,2}\b|(?:vertebral\s+)?bod(?:y|ies)|vertebrae?|vertebr\w*)|[tl]\d{1,2}\b)|
+        # Currently visible "known" compression fracture (match starts at known,
+        # so the known-lookbehind does not fire). Require a current-description
+        # tail so "known VCF not well seen" / CT-only stay out.
+        known\s+compression[- ]+(?:fractures?|deformit\w*|fx)
+        (?:\s+\w+){0,8}?
+        \s+(?:involv\w*|unchanged|stable|again\s+noted|redemonstrat\w*|persistent)|
+        # Named-level VCF acronym (not accession tokens like VcFtg / VCFOBS).
+        [tl]\d{1,2}\s+vcf\b|
+        # Shorthand "comp fx of T#/L#" (not indication-list "T7 comp fx").
+        comp\s+fx\s+of\s+(?:the\s+)?[tl]\d{1,2}\b|
 
         # Wedge compression (qualified) and reverse "compression wedge deformity"
         wedge\s+compression(?:\s+(?:fractures?|fx|deformit\w*))?|
@@ -58,12 +77,22 @@
         # Wedge fracture(s) of vertebrae (not nonspecific wedging)
         wedge\s+fractures?|
 
-        # Partially/mildly/minimally/… compressed vertebral body (adverb required
-        # so "do not see any definitely compressed vertebrae" does not fire)
-        (?:partial(?:ly)?|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|severe(?:ly)?|complete(?:ly)?)\s+
+        # Partially/mildly/minimally/wedge/… compressed vertebral body.
+        # Degree adverb (or "wedge") required on this arm so
+        # "do not see any definitely compressed vertebrae" does not fire.
+        (?:partial(?:ly)?|mild(?:ly)?|minimal(?:ly)?|moderate(?:ly)?|severe(?:ly)?|complete(?:ly)?|wedge)\s+
         compressed\s+
         (?:\w+\s+){0,4}
         (?:thoracic\s+|lumbar\s+|midthoracic\s+|mid-thoracic\s+)?
+        (?:vertebral\s+bod(?:y|ies)|vertebrae?|vertebr\w*)\b|
+
+        # No-adverb "compressed" only with named T#/L# or thoracic/lumbar region
+        # (not bare "compressed vertebrae" — lung/vessel / negation risk).
+        compressed\s+[tl]\d{1,2}\s+
+        (?:vertebral\s+bod(?:y|ies)|vertebrae?|vertebr\w*)\b|
+        compressed\s+
+        (?:(?:mid(?:dle)?|lower|upper|mid\s+lower)\s+)*
+        (?:thoracic\s+|lumbar\s+|midthoracic\s+|mid-thoracic\s+)
         (?:vertebral\s+bod(?:y|ies)|vertebrae?|vertebr\w*)\b|
 
         # Compression of a (qualifier) thoracic/lumbar vertebra, named T#/L#,

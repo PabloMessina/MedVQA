@@ -472,6 +472,25 @@ def submit_gemini_batch(
     }
 
 
+def _expand_batch_response_rows(metadata: Dict, parsed_output) -> List[Dict]:
+    """One parsed API response → one jsonl row per fanout uid (or a single row)."""
+    fanout = metadata.get("fanout") or []
+    if not fanout:
+        return [{"metadata": metadata, "parsed_response": parsed_output}]
+    rows = []
+    for item in fanout:
+        row_meta = {
+            k: v
+            for k, v in metadata.items()
+            if k not in ("fanout", "fanout_uids")
+        }
+        row_meta["uid"] = item["uid"]
+        if "dataset" in item:
+            row_meta["dataset"] = item["dataset"]
+        rows.append({"metadata": row_meta, "parsed_response": parsed_output})
+    return rows
+
+
 def collect_gemini_batch(
     *,
     batch_job_record_path: str,
@@ -600,6 +619,9 @@ def collect_gemini_batch(
     postprocessed_responses = []
     api_responses = []
     error_messages = []
+    n_api_parsed = 0
+    n_fanout_gt1 = 0
+    custom_id_counts: Dict[str, int] = {}
     for line in file_content.splitlines():
         line = line.strip()
         if not line:
@@ -607,36 +629,22 @@ def collect_gemini_batch(
         api_response = json.loads(line)
         api_responses.append(api_response)
         metadata = {"query": None}
+        custom_id = api_response.get("custom_id")
+        if custom_id:
+            custom_id_counts[custom_id] = custom_id_counts.get(custom_id, 0) + 1
         try:
             custom_id = api_response["custom_id"]
             metadata = dict(custom_id_to_metadata[custom_id])
             # OpenAI-compat batch output shape
             text = api_response["response"]["body"]["choices"][0]["message"]["content"]
             parsed_output = parse_output(text)
+            n_api_parsed += 1
             fanout = metadata.get("fanout") or []
-            if fanout:
-                for item in fanout:
-                    row_meta = {
-                        k: v
-                        for k, v in metadata.items()
-                        if k not in ("fanout", "fanout_uids")
-                    }
-                    row_meta["uid"] = item["uid"]
-                    if "dataset" in item:
-                        row_meta["dataset"] = item["dataset"]
-                    postprocessed_responses.append(
-                        {
-                            "metadata": row_meta,
-                            "parsed_response": parsed_output,
-                        }
-                    )
-            else:
-                postprocessed_responses.append(
-                    {
-                        "metadata": metadata,
-                        "parsed_response": parsed_output,
-                    }
-                )
+            if len(fanout) > 1:
+                n_fanout_gt1 += 1
+            postprocessed_responses.extend(
+                _expand_batch_response_rows(metadata, parsed_output)
+            )
         except Exception as e:
             api_response_string = json.dumps(api_response)
             q = metadata.get("query")
@@ -649,23 +657,56 @@ def collect_gemini_batch(
         for i in random.sample(range(len(error_messages)), min(5, len(error_messages))):
             logger.error(error_messages[i])
 
+    n_api = len(api_responses)
+    n_rows = len(postprocessed_responses)
+    n_parse_failed = len(error_messages)
+    n_unique_custom_ids = len(custom_id_counts)
+    n_duplicate_custom_ids = sum(1 for n in custom_id_counts.values() if n > 1)
+    n_extra_from_fanout = n_rows - n_api_parsed
+    collect_counts = {
+        "n_api_responses": n_api,
+        "n_unique_custom_ids": n_unique_custom_ids,
+        "n_duplicate_custom_ids": n_duplicate_custom_ids,
+        "n_parsed": n_api_parsed,
+        "n_parse_failed": n_parse_failed,
+        "n_fanout_gt1": n_fanout_gt1,
+        "n_rows_after_fanout": n_rows,
+        "n_extra_from_fanout": n_extra_from_fanout,
+    }
+
     if not postprocessed_responses:
         logger.warning(
-            f"None of the {len(api_responses)} API responses could be parsed."
+            "Collect: n_api_responses=%d n_parsed=0 n_parse_failed=%d; nothing to save",
+            n_api,
+            n_parse_failed,
         )
         n_saved = 0
     else:
-        n_processed = len(postprocessed_responses)
-        n_total = len(api_responses)
         logger.info(
-            f"Succesfully processed {n_processed} of {n_total} API responses. "
-            f"Saving processed texts to {ANSI_MAGENTA_BOLD}{save_filepath}{ANSI_RESET}"
+            "Collect before fanout: n_api_responses=%d n_unique_custom_ids=%d "
+            "n_parsed=%d n_parse_failed=%d n_duplicate_custom_ids=%d",
+            n_api,
+            n_unique_custom_ids,
+            n_api_parsed,
+            n_parse_failed,
+            n_duplicate_custom_ids,
+        )
+        logger.info(
+            "Collect after fanout: n_queries_with_fanout>1=%d n_rows=%d n_extra_rows=%d. "
+            "Saving to %s%s%s",
+            n_fanout_gt1,
+            n_rows,
+            n_extra_from_fanout,
+            ANSI_MAGENTA_BOLD,
+            save_filepath,
+            ANSI_RESET,
         )
         save_jsonl(postprocessed_responses, save_filepath, append=True)
-        n_saved = n_processed
+        n_saved = n_rows
 
     job_record["collected_at"] = get_timestamp()
     job_record["n_saved"] = n_saved
+    job_record["collect_counts"] = collect_counts
     save_json(job_record, batch_job_record_path)
 
     return {
@@ -676,6 +717,7 @@ def collect_gemini_batch(
         "done": True,
         "job_record": job_record,
         "n_saved": n_saved,
+        "collect_counts": collect_counts,
         "batch_output_filepath": output_save_path,
         "save_filepath": save_filepath,
     }

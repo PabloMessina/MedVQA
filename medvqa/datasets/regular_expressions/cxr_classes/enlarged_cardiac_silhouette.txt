@@ -80,6 +80,9 @@
 
         # Heart / cardiac size → enlarged / increased / larger / borderline
         # Skip gap tokens: technique (FN-fit: "generous heart size technique …").
+        # Do not put bare "large" here: long gap FP-matches "heart size … large
+        # (effusion|pulmonary arteries)". Copular "cardiac size is large" is the
+        # LARGE HEART arm instead.
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:heart|cardiac)\s+size
         (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|normal|technique)\b)\w+){0,10}[^\w.!?;:]+
@@ -131,11 +134,17 @@
 
 
         # LARGE HEART / Heart is/remains/appears large (not heart border/failure).
+        # FN-fit: cardiac size is/remains/appears large; adjective-first
+        # enlarged/large cardiac|heart size ("ENLARGED CARDIAC SIZE").
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!\bor\s)
         (?:
             large\s+heart\b(?!\s+(?:border|failure|borders?))
             |
             heart\s+(?:size\s+)?(?:is\s+|remains?\s+|appears?\s+|being\s+)?(?:still\s+|quite\s+|very\s+)?large\b
+            |
+            cardiac\s+size\s+(?:is\s+|remains?\s+|appears?\s+|being\s+)?(?:still\s+|quite\s+|very\s+)?large\b
+            |
+            (?:enlarg\w*|large)\s+(?:heart|cardiac)\s+size\b
         )
 
         |
@@ -160,13 +169,18 @@
 
 
         # Globular configuration of/to (the) heart / cardiac shadow/silhouette/size.
+        # FN-fit: subject-first "heart has a globular configuration".
         (?<!no\s)(?<!not\s)(?<!without\s)
-        globular\s+configuration\s+(?:of|to)\s+(?:the\s+)?
         (?:
-            (?:cardiac|heart)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|shadow|contour|size)
+            globular\s+configuration\s+(?:of|to)\s+(?:the\s+)?
+            (?:
+                (?:cardiac|heart)\s+(?:silhouette|sillouete|sillhouette|silhoutte|silouette|shadow|contour|size)
+                |
+                heart(?:\s+size)?
+            )\b
             |
-            heart(?:\s+size)?
-        )\b
+            heart\s+has\s+(?:a\s+)?globular\s+configuration\b
+        )
 
         |
 
@@ -234,7 +248,8 @@
         # Named chamber enlargement / dilatation (not isolated hypertrophy / LVH).
         # Also biatrial / biventricular / (right-/left-sided) (cardiac) chamber
         # enlargement (hunt lexicon). Hedged "possible/apparent" allowed (prompt).
-        # FN-fit: enlargement of (the) left/right atrial contour.
+        # FN-fit: enlargement of (the) left/right ventricle|atrium|atrial contour;
+        # LV/LA/RV/RA enlargement (space required so LVH does not fire).
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:
             (?:left|right)\s+(?:ventricular|atrial)\s+(?:enlarg\w*|dilat\w*)
@@ -247,20 +262,48 @@
             |
             (?:(?:left|right)[\s-]?sided\s+|(?:left|right)\s+cardiac\s+|cardiac\s+)?chamber\s+(?:enlarg\w*|dilat\w*)
             |
-            (?:enlarg\w*|dilat\w*)\s+of\s+(?:the\s+)?(?:left|right)\s+atrial\s+contour\b
+            (?:enlarg\w*|dilat\w*)\s+of\s+(?:the\s+)?(?:left|right)\s+
+            (?:ventricle|atrium|ventricular\s+chamber|atrial\s+chamber|atrial\s+contour)\b
+            |
+            \b(?:LV|LA|RV|RA)\s+(?:enlarg\w*|dilat\w*)\b
         )
 
         |
 
 
         # Elevated / increased / borderline cardiothoracic ratio (CTR) / index
+        # FN-fit: CT / C/T ratio; adjective-first increased CTR; increase in (the)
+        # cardiothoracic ratio. Numeric-only CTR (no size adjective) stays out.
         (?<!no\s)(?<!not\s)(?<!without\s)(?<!normal\s)
         (?:
-            (?:elevated|increased|high|enlarged|borderline)\s+(?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)
+            (?:elevated|increased|high|enlarged|borderline)\s+
+            (?:
+                (?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)
+                |
+                (?:ct|c/t)\s+ratio
+                |
+                \bctr\b
+            )
             |
-            (?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)\s+(?:is\s+|appears?\s+|measuring\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|enlarged|borderline)
+            (?:
+                (?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)
+                |
+                (?:ct|c/t)\s+ratio
+                |
+                \bctr\b
+            )
+            \s+(?:is\s+|appears?\s+|measuring\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|enlarged|borderline)
             |
             \bctr\s+(?:is\s+|appears?\s+)?(?:\w+\s+){0,3}(?:elevated|increased|high|>|greater)
+            |
+            (?:increase|increased)\s+in\s+(?:the\s+)?
+            (?:
+                (?:cardiothoracic|cardio[\s-]?thoracic)\s+(?:ratio|index)
+                |
+                (?:ct|c/t)\s+ratio
+                |
+                \bctr\b
+            )
         )
 
         |

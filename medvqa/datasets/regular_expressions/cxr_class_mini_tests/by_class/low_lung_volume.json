@@ -34,7 +34,22 @@
     "Less than full inspiration.",
     "Not fully inspired.",
     "Incompletely inspired lungs.",
-    "Limited lung volumes."
+    "Limited lung volumes.",
+    "The degree of inspiration is shallow.",
+    "Decreased inspiration.",
+    "Streaky opacities at both bases likely reflecting a diminished inspiration rather than an acute process.",
+    "Continued poor lung volumes with bilateral hazy opacities.",
+    "Poor lung volumes on today's exam.",
+    "Upright low-volume chest radiograph.",
+    "Low volume chest film with vascular crowding and streaky bibasilar atelectasis.",
+    "The film was obtained in expiration.",
+    "Both images obtained in expiration, accounting for the crowded bronchovascular markings diffusely.",
+    "Inspiration is suboptimal.",
+    "The level of inspiration is suboptimal.",
+    "Inspiration is shallow on the frontal film.",
+    "Decreased lung expansion.",
+    "Limited chest expansion.",
+    "Lung volumes small."
   ],
   "negatives": [
     "Right lower lobe atelectasis with focal volume loss.",

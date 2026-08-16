@@ -11,6 +11,10 @@
 #   - vascular access / intravascular line language
 #   - FN-fit (fn_mine_fit_shared): residual vascular catheter(s)/line(s);
 #     IV / I.V. / intravenous line(s) — not CVC/PICC child lexicon
+#   - FN-fit pass-2: IV/intravenous catheter; midline catheter; venous access
+#     port; PAC + tip/line; bare Swan + presence gate; pulmonary arterial;
+#     anatomy-first catheter-in-PA; UAC / intra-arterial catheter (not bare
+#     arterial catheter). Do not copy CVC PICC/dialysis/port-a-cath lexicon.
 #   - arterial monitoring lines; rare PCVC / introduction-sheath spellings
 #   - tempered "no appreciable change … lines and tubes"; partial withdrawal
 #
@@ -168,13 +172,27 @@
                     |
                     (?:ij|i\.j\.|internal\s+jugular)\s+swans?
                     |
-                    pulmonary\s+artery\s+(?:catheters?|lines?)
+                    # bare Swan / Swans (Ganz optional); finding-style presence
+                    # (not indication "swan in place")
+                    swans?
+                    (?=(?:(?![.!?]).){0,48}?\b(?:
+                        remain(?:s|ing)?|tips?|position(?:ed|ing)?|
+                        overlies|projects?|unchanged|standard|terminat\w*
+                    )\b)
+                    |
+                    pulmonary\s+arter(?:y|ial)\s+(?:catheters?|lines?)
                     |
                     pulmonary\s+catheters?
                     |
                     right\s+heart\s+catheters?
                     |
                     pa\s+(?:catheters?|lines?)
+                    |
+                    # PAC acronym (not pacemaker); require tip/catheter/line
+                    pac(?:\s+(?:tip|catheters?|lines?))
+                    |
+                    # anatomy-first PA location
+                    catheters?\s+in\s+(?:the\s+)?(?:(?:main|right|left|central)\s+)?pulmonary\s+arter(?:y|ies)
                 )\b
 
                 |
@@ -209,7 +227,11 @@
                     |
                     intravascular\s+(?:catheters?|lines?)
                     |
-                    (?:iv|i\.v\.|intravenous)\s+lines?
+                    (?:iv|i\.v\.|intravenous)\s+(?:lines?|catheters?)
+                    |
+                    midline\s+(?:catheters?|lines?)
+                    |
+                    venous\s+access\s+ports?
                     |
                     (?:external\s+(?:jugular\s+)?)?angiocatheters?
                     |
@@ -225,6 +247,12 @@
                     (?:radial\s+|femoral\s+|brachial\s+)?arterial\s+lines?
                     |
                     a-lines?
+                    |
+                    umbilical\s+arterial\s+(?:catheters?|lines?)
+                    |
+                    uacs?
+                    |
+                    intra-?arterial\s+(?:catheters?|lines?)
                 )\b
 
                 |

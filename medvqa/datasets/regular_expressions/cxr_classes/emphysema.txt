@@ -2,15 +2,19 @@
 # emphysema
 # Pulmonary emphysema / emphysematous change on the current CXR.
 #
-# Match: emphysema / emphysematous / emphysematic (OCR: enphysema*, emphyesema,
-#        truncated emphysem); bullous/paraseptal/centrilobular emphysema;
-#        emphysematous lungs/changes; radiographic COPD/emphysema(tous) slash-joins.
+# Match: emphysema / emphysematous / emphysematic / emphysemic / emphysemous
+#        (OCR/typos: enphysema*, emphyesema, empysema, emphesema(tous),
+#        emphysesma, emphysemetous, truncated emphysem); bullous/paraseptal/
+#        centrilobular emphysema; emphysematous lungs/changes; radiographic
+#        COPD/emphysema(tous) slash-joins; current-film baseline emphysema
+#        (chronic substrate on this CXR) and "noted to have emphysema".
 #
 # Do NOT match (prompt): bare COPD/COAD/chronic bronchitis; hyperinflation /
 # hyperexpansion / bullae / blebs / bullous disease alone; subcutaneous /
 # soft-tissue / surgical / chest-wall / mediastinal / interstitial emphysema;
-# emphysematous cholecystitis; history/indication/baseline-only; MIMIC
-# indication tails ending in "//"; PMH comorbidity slash-lists.
+# emphysematous cholecystitis; history/indication-only (incl. history of
+# baseline emphysema); MIMIC indication tails ending in "//"; PMH comorbidity
+# slash-lists. Do not treat mediastinal *shift* as mediastinal emphysema.
 # ==============================================================================
 
 \b(?:
@@ -46,25 +50,45 @@
         (?<!\binterstitial\s)
         (?<!\bcervical\s)
         (?<!\borbital\s)
-        # Post-op SQ screen / prior-exam attribution; COPD/ handled in path B
+        # Post-op SQ screen; COPD/ handled in path B
         (?<!\bpost\sop\s)
         (?<!\bpost-op\s)
         (?<!\bcopd/)
-        (?<!\bnoted\sto\shave\s)
-        # History / indication / PMH (not a current CXR call)
+        # History / indication / PMH (not a current CXR call).
+        # Current-film "baseline emphysema" and present-tense "noted to have
+        # emphysema" are allowed; block prior-exam "was/previously noted to
+        # have", patient's-baseline clinical context, and history-of /
+        # person-with baseline phrasing.
+        (?<!\bwas\snoted\sto\shave\s)
+        (?<!\bpreviously\snoted\sto\shave\s)
+        (?<!\bpatient['’]s\sbaseline\s)
+        (?<!\bpatients\sbaseline\s)
         (?<!\bhistory\sof\s)
         (?<!\bhx\sof\s)
         (?<!\bh/o\s)
-        (?<!\bbaseline\s)
+        (?<!\bhistory\sof\sbaseline\s)
+        (?<!\bhx\sof\sbaseline\s)
+        (?<!\bh/o\sbaseline\s)
         (?<!\bwoman\swith\s)
         (?<!\bman\swith\s)
         (?<!\bfemale\swith\s)
         (?<!\bmale\swith\s)
-        # Stem: emphysema(s) / emphysematous / emphysematic (+ OCR enphysema*,
-        # emphyesema transposed, truncated emphysem). Longer forms first.
-        # Bound the stem so \w* cannot backtrack past a failed lookahead
-        # (e.g. emphysematous cholecystitis → emphysematou).
-        (?:e[mn]physema(?:s|tous|tic)?|emphyesema|emphysem)\b
+        (?<!\bwoman\swith\sbaseline\s)
+        (?<!\bman\swith\sbaseline\s)
+        (?<!\bfemale\swith\sbaseline\s)
+        (?<!\bmale\swith\sbaseline\s)
+        # Stem: emphysema(s) / emphysematous / emphysematic / emphysemic /
+        # emphysemous / emphysemetous (+ OCR enphysema*, emphyesema,
+        # empysema, emphesema(tous), emphysesma, truncated emphysem).
+        # Longer forms first. Bound the stem so \w* cannot backtrack past a
+        # failed lookahead (e.g. emphysematous cholecystitis → emphysematou).
+        (?:
+            e[mn]physem(?:a(?:tous|tic|s)?|etous|ous|ic)?
+            |emphyesema
+            |empysema(?:tous|tic|s)?
+            |emphesema(?:tous|tic|s)?
+            |emphysesma
+        )\b
         (?!\s+(?:cholecyst\w*|colitis|gastritis|cystitis|pyelonephritis|pancreatitis))
         # Soft-tissue site after the stem: "emphysema of the right neck …"
         (?!\s+(?:of|in)\s+(?:the\s+)?(?:(?:right|left|bilateral)\s+)?(?:neck|face|orbit\w*|soft\s+tissues?)\b)
@@ -86,12 +110,21 @@
         (?<!\bh/o\s)
         (?<!\bpmhx\sof\s)
         (?<!\bpmh\sof\s)
-        (?<!\bbaseline\s)
-        (?<!\bnoted\sto\shave\s)
+        (?<!\bwas\snoted\sto\shave\s)
+        (?<!\bpreviously\snoted\sto\shave\s)
+        (?<!\bpatient['’]s\sbaseline\s)
+        (?<!\bpatients\sbaseline\s)
+        (?<!\bhistory\sof\sbaseline\s)
+        (?<!\bhx\sof\sbaseline\s)
+        (?<!\bh/o\sbaseline\s)
         (?<!\bwoman\swith\s)
         (?<!\bman\swith\s)
         (?<!\bfemale\swith\s)
         (?<!\bmale\swith\s)
+        (?<!\bwoman\swith\sbaseline\s)
+        (?<!\bman\swith\sbaseline\s)
+        (?<!\bfemale\swith\sbaseline\s)
+        (?<!\bmale\swith\sbaseline\s)
         COPD/e[mn]physema(?:s|tous|tic)?\b
         # Block PMH comorbidity lists: "COPD/emphysema, HTN, pHTN"
         (?!\s*,\s)

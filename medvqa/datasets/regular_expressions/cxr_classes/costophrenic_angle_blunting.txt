@@ -18,6 +18,11 @@
 # FN-fit hunt lexicon (wave 28):
 # - costrophrenic typo (cost(?:r?o)-?phrenic); angels typo for angles;
 #   costophrenic sulcal blunting; bare costodiaphragmatic blunt* compound
+# FN-fit hunt lexicon (wave 46 / S-first):
+# - not/no-longer sharp; rounded (anatomy-first only — not "rounded opacity");
+#   CPAs plural; C-P hyphen; costphrenic/costophenic/costohrenic/costophrnic/
+#   costopohrenic/constrophrenic; blulting/bluting/blunging;
+#   pleural sulcus/sulci (+ lateral/posterior/costal pleural sulcus)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -30,6 +35,9 @@
 #    "Blunting of the left CPA" / "... costophrenic gutters" / "... area|focus"
 #    "Loss of the right costophrenic sulcus"
 #    "Blunting of the left costrophrenic angle" / "... costophrenic angels"
+#    "Blunting of the left costphrenic/costophenic/... angle" (typos)
+#    "Blulting/bluting/blunging of the ... costophrenic ..."
+#    "Blunting of the left pleural sulcus" / "lateral costal pleural sulcus"
 # ------------------------------------------------------------------------------
 (?:
     (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
@@ -40,21 +48,21 @@
     (?<!\bpreviously\s)(?<!\bprior\s)
     (?<!\bevaluate\sfor\s)(?<!\brule\sout\s)
     (?<!\beffusion\sor\s)
-    \b(?:blunt\w*|obscur\w*|efface\w*|occlu\w*|obliterat\w*|clos(?:e[sd]?|ure)|hazy|haziness|indistinct|blur\w*)\b
+    \b(?:blunt\w*|blulting|bluting|blunging|obscur\w*|efface\w*|occlu\w*|obliterat\w*|clos(?:e[sd]?|ure)|hazy|haziness|indistinct|blur\w*)\b
     (?:
         [^\w.!?;:]+\w+
     ){0,9}
     [^\w.!?;:]+
     \b(?:
-        (?:cost(?:r?o)-?phrenic|c\.?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)
+        (?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|c[.\-]?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)
         |
-        cpa(?:\s+(?:angles?|angels?))?
+        cpas?(?:\s+(?:angles?|angels?))?
         |
-        pleural\s+(?:sinus(?:es)?|recess(?:es)?)
+        pleural\s+(?:sinus(?:es)?|recess(?:es)?|sulci|sulcus)
         |
         phrenic\s+(?:angles?|angels?|sinus(?:es)?)
         |
-        (?:posterior|lateral|anterior)\s+(?:left|right|bilateral)?\s*(?:sulci|sulcus|recess(?:es)?|gutter(?:s)?)
+        (?:posterior|lateral|anterior)\s+(?:left|right|bilateral)?\s*(?:costal\s+)?(?:pleural\s+)?(?:sulci|sulcus|recess(?:es)?|gutter(?:s)?)
     )\b
 )
 
@@ -67,6 +75,8 @@
 #    "Both costophrenic XXXX are blunted"
 #    "costophrenic angle is indistinct / somewhat blurring"
 #    "The left costophrenic gutter is blunted"
+#    "The left C-P angle is blunted" / "The CPAs are blunted"
+#    "The costophrenic angles are rounded"  (NOT action-first: rounded opacity)
 #    "Costophrenic angles are not blunted"  -> blocked by (?<!\bnot\s)
 # ------------------------------------------------------------------------------
 (?:
@@ -74,15 +84,15 @@
     (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
     (?<!\bnegative\sfor\s)(?<!\bfree\sof\s)
     \b(?:
-        (?:cost(?:r?o)-?phrenic|c\.?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)
+        (?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|c[.\-]?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)
         |
-        cpa(?:\s+(?:angles?|angels?))?
+        cpas?(?:\s+(?:angles?|angels?))?
         |
-        pleural\s+(?:sinus(?:es)?|recess(?:es)?)
+        pleural\s+(?:sinus(?:es)?|recess(?:es)?|sulci|sulcus)
         |
         phrenic\s+(?:angles?|angels?|sinus(?:es)?)
         |
-        (?:posterior|lateral|anterior)\s+(?:left|right|bilateral)?\s*(?:sulci|sulcus|recess(?:es)?|gutter(?:s)?)
+        (?:posterior|lateral|anterior)\s+(?:left|right|bilateral)?\s*(?:costal\s+)?(?:pleural\s+)?(?:sulci|sulcus|recess(?:es)?|gutter(?:s)?)
     )\b
     (?:
         [^\w.!?;:]+\w+
@@ -90,7 +100,33 @@
     [^\w.!?;:]+
     (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
     (?<!\bno\slonger\s)
-    \b(?:blunt\w*|obscur\w*|efface\w*|occlu\w*|obliterat\w*|clos(?:e[sd]?|ure)|hazy|haziness|indistinct|blur\w*)\b
+    \b(?:blunt\w*|blulting|bluting|blunging|obscur\w*|efface\w*|occlu\w*|obliterat\w*|clos(?:e[sd]?|ure)|hazy|haziness|indistinct|blur\w*|round(?:ed|ing))\b
+)
+
+|
+
+# ------------------------------------------------------------------------------
+# 2b. Anatomy ... not sharp / no longer sharp
+#     Prompt definition: loss of the normally sharp costophrenic angle.
+#     "The left costophrenic angle is not sharp"
+#     Do NOT treat bare "are sharp" or "not sharply seen" as a hit
+#     (`\bsharp\b` excludes sharply; dedicated arm excludes un-negated sharp).
+# ------------------------------------------------------------------------------
+(?:
+    (?<!\bno\s)(?<!\bwithout\s)
+    (?<!\bno\sevidence\sof\s)(?<!\bwithout\sevidence\sof\s)
+    \b(?:
+        (?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|c[.\-]?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)
+        |
+        cpas?(?:\s+(?:angles?|angels?))?
+        |
+        pleural\s+(?:sinus(?:es)?|recess(?:es)?|sulci|sulcus)
+    )\b
+    (?:
+        [^\w.!?;:]+\w+
+    ){0,7}
+    [^\w.!?;:]+
+    (?:(?:is|are|appears?|remain(?:s|ed|ing)?)\s+)?(?:no\s+longer\s+|not\s+)sharp\b
 )
 
 |
@@ -102,19 +138,19 @@
 # ------------------------------------------------------------------------------
 (?:
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bno\sevidence\sof\s)
-    \b(?:obliteration|closure|loss)\s+of\s+(?:the\s+)?(?:left|right|bilateral)?\s*(?:(?:cost(?:r?o)-?phrenic|c\.?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)|cpa(?:\s+(?:angles?|angels?))?)\b
+    \b(?:obliteration|closure|loss)\s+of\s+(?:the\s+)?(?:left|right|bilateral)?\s*(?:(?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|c[.\-]?p\.?|costo-?\s*diaphragmatic)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?|areas?|foc(?:us|i)|margins?)|cpas?(?:\s+(?:angles?|angels?))?)\b
     |
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-    \bblunted\s+(?:the\s+)?(?:left|right|bilateral)?\s*(?:c\.?p\.?|cost(?:r?o)-?phrenic|cpa)\s*(?:angles?|angels?|sulci|sulcus|xxxx|gutter(?:s)?)?\b
+    \bblunted\s+(?:the\s+)?(?:left|right|bilateral)?\s*(?:c[.\-]?p\.?|cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|cpas?)\s*(?:angles?|angels?|sulci|sulcus|xxxx|gutter(?:s)?)?\b
     |
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-    \b(?:left|right|bilateral)?\s*(?:cost(?:r?o)-?phrenic|c\.?p\.?|cpa)\s+xxxx\s+blunt\w*\b
+    \b(?:left|right|bilateral)?\s*(?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|c[.\-]?p\.?|cpas?)\s+xxxx\s+blunt\w*\b
     |
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)(?<!\bno\sevidence\sof\s)
-    \b(?:(?:left|right|bilateral|posterior|anterior|lateral)\s+)*(?:cost(?:r?o)-?phrenic|costo-?\s*diaphragmatic|cpa)(?:\s+sulcal)?\s+blunt\w*\b
+    \b(?:(?:left|right|bilateral|posterior|anterior|lateral)\s+)*(?:cost(?:r?o)-?phrenic|costphrenic|costophenic|costohrenic|costophrnic|costopohrenic|constrophrenic|costo-?\s*diaphragmatic|cpas?)(?:\s+sulcal)?\s+blunt\w*\b
     |
     (?<!\bno\s)(?<!\bwithout\s)(?<!\bnot\s)
-    \b(?:minimal|small|mild|trace|moderate|marked)?\s*(?:left|right|bilateral)?\s*cpa(?:\s+(?:angles?|angels?))?\s+blunt\w*\b
+    \b(?:minimal|small|mild|trace|moderate|marked)?\s*(?:left|right|bilateral)?\s*cpas?(?:\s+(?:angles?|angels?))?\s+blunt\w*\b
 )
 
 |
@@ -131,12 +167,12 @@
     ){0,8}
     [^\w.!?;:]+
     (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)
-    \b(?:obscur\w*|blunt\w*|obliterat\w*|efface\w*)\b
+    \b(?:obscur\w*|blunt\w*|blulting|bluting|blunging|obliterat\w*|efface\w*)\b
     (?:
         [^\w.!?;:]+\w+
     ){0,3}
     [^\w.!?;:]+
-    \b(?:the\s+)?(?:cost(?:r?o)-?phrenic\s+|c\.?p\.?\s+|cpa\s+)?(?:angles?|angels?)\b
+    \b(?:the\s+)?(?:cost(?:r?o)-?phrenic\s+|costphrenic\s+|c[.\-]?p\.?\s+|cpas?\s+)?(?:angles?|angels?)\b
 )
 
 |
@@ -187,7 +223,7 @@
     \b(?:
         (?:posterior|lateral|anterior|costophrenic|cost(?:r?o)-?phrenic)?\s*(?:pleural\s+)?(?:sinus(?:es)?|sulci|sulcus|recess(?:es)?|gutter(?:s)?)
         |
-        (?:left|right|bilateral)?\s*(?:cost(?:r?o)-?phrenic|c\.?p\.?|cpa)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?)?
+        (?:left|right|bilateral)?\s*(?:cost(?:r?o)-?phrenic|c[.\-]?p\.?|cpas?)\s+(?:angles?|angels?|sulci|sulcus|sinus(?:es)?|recess(?:es)?|xxxx|gutter(?:s)?)?
     )\b
     |
     (?<!\bno\s)(?<!\bnot\s)(?<!\bwithout\s)(?<!\bany\s)

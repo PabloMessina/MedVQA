@@ -182,15 +182,19 @@
         #    Residual parent (FN-fit fn_mine_fit_shared): intervening but/stable;
         #    mediastinal↔cardiac order; superior mediastinal; bare cardiomediastinum
         #    remains/stably; increased silhouette size; broad/large; bare mediastinal
-        #    silhouette enlargement-of. Avoid prominent-PA / technique.
+        #    silhouette enlargement-of. Pass-2: CMS shadow/borders; parent typos
+        #    silhoutte/sillouette; increase in CMS silhouette/caliber; anatomy-first
+        #    increased in size; mass/adenopathy stated to widen/enlarge CMS.
+        #    Avoid prominent-PA / technique / apparent low-volume / child lexicons.
         #    Token: cardio[\s-]?mediastinal | cardiac and (superior) mediastinal |
         #           mediastinal and cardiac
+        #    CMS shape: silhouette|silhoutte|sillouette|contour|shadow|border(s)
         # ------------------------------------------------------------------
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:enlarged|widened|dilated|large\b|\bbroad\b)
         (?:\s+(?:and|but)\s+(?:ill-defined|poorly[\s-]?defined|indistinct|stable|unchanged|persistent))?
         \s+(?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+
-        (?:silhouette|contour)s?\b
+        (?:silhouette|silhoutte|sillouette|contour|shadow|borders?)s?\b
         (?![^\n.!?;:]{0,90}technique[- ]related)
         (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
 
@@ -198,10 +202,10 @@
 
         (?<!no\s)(?<!not\s)(?<!without\s)
         (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+
-        (?:silhouette|contour)s?
+        (?:silhouette|silhoutte|sillouette|contour|shadow|borders?)s?
         (?:[^\w.!?;:]+(?!(?:without|no|not|denies|absent|unlikely|normal|unremarkable)\b)\w+){0,6}[^\w.!?;:]+
         (?<!\bnot\s)(?<!\bno\s)(?<!\bwithout\s)(?<!not\sappear\s)
-        (?:enlarg\w*|widen(?:ed|ing)|\bwide\b|dilat\w*|\blarge\b|\blarger\b|\bbroad\b)\b
+        (?:enlarg\w*|widen(?:ed|ing)|\bwide\b|dilat\w*|\blarge\b|\blarger\b|\bbroad\b|increased\s+in\s+size)\b
         (?!\s+is\s+unlikely)
         (?![^\n.!?;:]{0,90}technique[- ]related)
         (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
@@ -213,7 +217,7 @@
         (?:[^\w.!?;:]+\w+){0,3}[^\w.!?;:]+of[^\w.!?;:]+
         (?:the[^\w.!?;:]+)?
         (?:(?:post-?operative|postop(?:erative)?)[^\w.!?;:]+)?
-        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|contour)s?\b
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|silhoutte|sillouette|contour|shadow|borders?)s?\b
 
         |
 
@@ -228,7 +232,7 @@
         increased\s+
         (?:
             (?:size\s+of\s+(?:the\s+)?)?
-            (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|contour)s?
+            (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)\s+(?:silhouette|silhoutte|sillouette|contour|shadow)s?
             (?:\s+size)?
             |
             size\s+of\s+(?:the\s+)?
@@ -236,6 +240,19 @@
             mediastinal\s+(?:silhouette|contour)s?
         )\b
         (?![^\n.!?;:]{0,90}technique[- ]related)
+
+        |
+
+        # Increase in (the) CMS silhouette / caliber / size (not increased-size-of;
+        # not apparent / low-volume exaggeration)
+        (?<!no\s)(?<!not\s)(?<!without\s)(?<!decreased\s)(?<!reduced\s)
+        (?<!apparent\s)(?<!no\sinterval\s)
+        (?:(?:mild(?:ly)?|moderate(?:ly)?|marked(?:ly)?|slight(?:ly)?|interval|persistent(?:ly)?)\s+)*
+        increase\s+in\s+(?:the\s+)?
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal|mediastinal\s+and\s+(?:(?:superior|upper)\s+)?cardiac)
+        \s+(?:silhouette|silhoutte|sillouette|contour|shadow|caliber|size)s?\b
+        (?![^\n.!?;:]{0,90}technique[- ]related)
+        (?![^\n.!?;:]{0,80}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of|account(?:ing)?\s+(?:in\s+part\s+)?for)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low(?:er)?\s+(?:lung\s+)?volume|poor\s+inspirat|projection|magnification))
 
         |
 
@@ -336,6 +353,17 @@
         (?!\s+(?:central\s+)?(?:pulmonary\s+)?arter)
         (?![^\n.!?;:]{0,90}technique[- ]related)
         (?![^\n.!?;:]{0,70}(?:due\s+(?:at\s+least\s+in\s+part\s+)?to|secondary\s+to|exaggerat\w*|because\s+of)[^\n.!?;:]{0,50}(?:technique|positioning|rotation|low\s+lung|poor\s+inspirat|projection|magnification))
+
+        |
+
+        # Mass / adenopathy stated to widen or enlarge the combined CMS silhouette
+        # (prompt: do not infer from mass/adenopathy/PA alone)
+        (?<!no\s)(?<!not\s)(?<!without\s)
+        (?:mass(?:es)?|adenopathy|lymphadenopathy)
+        \s+(?:widen[s]?|enlarges?)
+        \s+(?:the\s+)?
+        (?:cardio[\s-]?mediastinal|cardiac\s+(?:and\s+(?:(?:superior|upper|lower)\s+)?)?mediastinal)
+        \s+(?:silhouette|silhoutte|sillouette|contour|shadow)s?\b
 
         |
 

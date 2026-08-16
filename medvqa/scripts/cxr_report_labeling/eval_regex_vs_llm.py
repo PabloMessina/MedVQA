@@ -3,6 +3,13 @@
 Matching reuses :func:`batch_match_prompt_classes` (same multiprocessing path as
 ``apply_regex_to_dataset`` / full-dataset precompute). Use ``--lightweight`` for
 metrics-only scans (no per-class FP/FN jsonl dumps).
+
+``no_finding`` has no regex. On a full eval (default class list) it is scored as a
+proxy: predict positive iff **no** regex-backed class matched the report, vs LLM
+``no_finding`` gold (same definitely/likely-true binary as other classes). Pass
+``no_finding`` in ``--classes`` to include it on a subset run; omit it to skip.
+The any-hit union always uses every regex-backed class, not the ``--classes``
+subset.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ from medvqa.datasets.cxr_report_labeling.class_registry import (
     build_class_registry,
 )
 from medvqa.datasets.cxr_report_labeling.label_semantics import (
+    NORMAL_CLASS,
     llm_label_to_binary_positive,
 )
 from medvqa.datasets.cxr_report_labeling.paths import (
@@ -147,6 +155,41 @@ def _metrics_entry(tp: int, fp: int, fn: int, tn: int) -> dict:
     }
 
 
+def _regex_backed_ids(registry: ClassRegistry) -> List[str]:
+    return [c for c in registry.class_ids() if registry.by_id()[c].has_regex]
+
+
+def _union_matched_idxs(matched_by_class: Dict[str, set]) -> set:
+    any_hit: set = set()
+    for idxs in matched_by_class.values():
+        any_hit.update(idxs)
+    return any_hit
+
+
+def _matched_class_ids_for_idx(
+    matched_by_class: Dict[str, set],
+    idx: int,
+    regex_ids: Sequence[str],
+) -> List[str]:
+    return [c for c in regex_ids if idx in (matched_by_class.get(c) or ())]
+
+
+def _collect_spans_for_classes(
+    text: str,
+    class_ids: Sequence[str],
+    registry: ClassRegistry,
+) -> List[str]:
+    spans: List[str] = []
+    seen: set = set()
+    for class_id in class_ids:
+        _, hit_spans = report_matches_prompt_class(text, class_id, registry)
+        for s in hit_spans:
+            if s not in seen:
+                seen.add(s)
+                spans.append(s)
+    return spans
+
+
 def evaluate_regex_vs_llm(
     *,
     run_id: str = DEFAULT_RUN_ID,
@@ -181,14 +224,31 @@ def evaluate_regex_vs_llm(
     registry = ClassRegistry.load(registry_path) if os.path.exists(registry_path) else build_class_registry()
 
     ann = load_annotations_flexible(annotations_path)
-    ids = list(class_ids) if class_ids is not None else [
-        c for c in registry.class_ids() if registry.by_id()[c].has_regex
-    ]
+    regex_ids = _regex_backed_ids(registry)
+    if class_ids is None:
+        score_regex_ids = list(regex_ids)
+        include_no_finding = True
+    else:
+        requested = list(class_ids)
+        include_no_finding = NORMAL_CLASS in requested
+        score_regex_ids = [c for c in requested if c != NORMAL_CLASS]
+        unknown = [c for c in score_regex_ids if c not in registry.by_id()]
+        if unknown:
+            raise KeyError(f"Unknown class_ids: {unknown}")
+        not_regex = [c for c in score_regex_ids if not registry.by_id()[c].has_regex]
+        if not_regex:
+            raise ValueError(f"Classes have no regex (cannot match): {not_regex}")
+
+    # no_finding proxy needs the union of *all* regex-backed hits, not a subset.
+    match_ids = list(regex_ids) if include_no_finding else list(score_regex_ids)
 
     logger.info(
-        "Matching %d classes × %d samples (num_processes=%d, lightweight=%s)",
-        len(ids),
+        "Matching %d classes × %d samples (score_regex=%d, no_finding=%s, "
+        "num_processes=%d, lightweight=%s)",
+        len(match_ids),
         len(texts),
+        len(score_regex_ids),
+        include_no_finding,
         num_processes,
         lightweight,
     )
@@ -196,12 +256,12 @@ def evaluate_regex_vs_llm(
     matched_by_class = batch_match_prompt_classes(
         texts,
         registry,
-        class_ids=ids,
+        class_ids=match_ids,
         num_processes=num_processes,
-    )
+    ) if match_ids else {}
 
     metrics = {}
-    for class_id in ids:
+    for class_id in score_regex_ids:
         matched_idxs = matched_by_class.get(class_id) or set()
         tp = fp = fn = tn = 0
         fp_uids: List[str] = []
@@ -266,6 +326,93 @@ def evaluate_regex_vs_llm(
                     + "\n"
                 )
 
+    if include_no_finding:
+        any_hit = _union_matched_idxs(matched_by_class)
+        tp = fp = fn = tn = 0
+        fp_uids = []
+        fn_uids = []
+        n_missing_gold = 0
+        for uid, idx in uid_to_idx.items():
+            key = (uid, NORMAL_CLASS)
+            if key not in ann:
+                n_missing_gold += 1
+                continue
+            gold_pos = llm_label_to_binary_positive(ann[key]["label"])
+            pred_pos = idx not in any_hit
+            if pred_pos and gold_pos:
+                tp += 1
+            elif pred_pos and not gold_pos:
+                fp += 1
+                if not lightweight:
+                    fp_uids.append(uid)
+            elif (not pred_pos) and gold_pos:
+                fn += 1
+                if not lightweight:
+                    fn_uids.append(uid)
+            else:
+                tn += 1
+        entry = _metrics_entry(tp, fp, fn, tn)
+        entry["prediction"] = "regex_empty"
+        metrics[NORMAL_CLASS] = entry
+        logger.info(
+            "no_finding proxy (regex_empty): P=%.3f R=%.3f F1=%.3f "
+            "TP=%d FP=%d FN=%d TN=%d missing_gold=%d",
+            entry["precision"],
+            entry["recall"],
+            entry["f1"],
+            tp,
+            fp,
+            fn,
+            tn,
+            n_missing_gold,
+        )
+        if not lightweight:
+            stem = NORMAL_CLASS
+            fp_path = os.path.join(eval_dir, f"{stem}_fp.jsonl")
+            fn_path = os.path.join(eval_dir, f"{stem}_fn.jsonl")
+            with open(fp_path, "w", encoding="utf-8") as f:
+                for uid in fp_uids:
+                    f.write(
+                        json.dumps(
+                            {
+                                "uid": uid,
+                                "class_id": NORMAL_CLASS,
+                                "report_text": samples_by_uid[uid]["report_text"],
+                                "llm": ann[(uid, NORMAL_CLASS)],
+                                "regex_spans": [],
+                                "matched_via_classes": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            with open(fn_path, "w", encoding="utf-8") as f:
+                for uid in fn_uids:
+                    idx = uid_to_idx[uid]
+                    via = _matched_class_ids_for_idx(
+                        matched_by_class, idx, regex_ids
+                    )
+                    text = samples_by_uid[uid]["report_text"]
+                    f.write(
+                        json.dumps(
+                            {
+                                "uid": uid,
+                                "class_id": NORMAL_CLASS,
+                                "report_text": text,
+                                "llm": ann[(uid, NORMAL_CLASS)],
+                                "regex_spans": _collect_spans_for_classes(
+                                    text, via, registry
+                                ),
+                                "matched_via_classes": via,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+
+    scored_ids = list(score_regex_ids) + (
+        [NORMAL_CLASS] if include_no_finding else []
+    )
     out_path = os.path.join(eval_dir, "metrics_per_class.json")
     save_json(metrics, out_path)
     groups_path = os.path.join(eval_dir, "refinement_groups.json")
@@ -279,10 +426,11 @@ def evaluate_regex_vs_llm(
             "annotations_path": os.path.abspath(annotations_path),
             "n_samples": len(texts),
             "n_annotation_keys": len(ann),
-            "n_classes": len(ids),
+            "n_classes": len(scored_ids),
             "num_processes": num_processes,
             "lightweight": lightweight,
-            "class_ids": ids,
+            "class_ids": scored_ids,
+            "no_finding_proxy": "regex_empty" if include_no_finding else None,
         },
         meta_path,
     )
@@ -303,7 +451,16 @@ def main():
         ),
     )
     parser.add_argument("--model_name", default="gemini-2.5-flash-lite")
-    parser.add_argument("--classes", nargs="+", default=None)
+    parser.add_argument(
+        "--classes",
+        nargs="+",
+        default=None,
+        help=(
+            "Class ids to score. Default: all regex-backed classes plus "
+            "no_finding (regex-empty proxy). Include no_finding explicitly to "
+            "score it on a subset run; omit it to skip."
+        ),
+    )
     parser.add_argument("--backup", action="store_true")
     parser.add_argument(
         "--num_processes",

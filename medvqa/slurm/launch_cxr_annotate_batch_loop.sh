@@ -4,13 +4,16 @@
 # Examples:
 #   ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
 #   TIME=3-00:00:00 CHUNK_SIZE=2000 MAX_TOKENS_PER_REQUEST=2048 ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
-#   MAX_CHUNKS=1 TIME=4:00:00 ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh   # smoke
+#   JOB_SOURCE=regex_positives DATASETS=iuxray MAX_CHUNKS=1 TIME=4:00:00 ./medvqa/slurm/launch_cxr_annotate_batch_loop.sh
 #
 # Env overrides:
 #   TIME MEM CPUS CONDA_ENV RUN_ID SAMPLES_PATH MODEL_NAME API_KEY_NAME
 #   CHUNK_SIZE MAX_CHUNKS MAX_TOKENS_PER_REQUEST TEMPERATURE
 #   SKIP_ANNOTATION_PATHS  # space-separated prior jsonl(s) for leftover-only runs
 #   CONFIG_EXTRA REASONING_EFFORT  # Gemini 3 thinking_level via OpenAI-compat reasoning_effort
+#   JOB_SOURCE  # samples | regex_positives | no_finding
+#   DATASETS    # required for regex_positives / no_finding (exactly one corpus, e.g. iuxray)
+#   COMPACT_LABELS_PATH  # optional compact jsonl for job_source=no_finding
 #   SUBMIT_BACKOFF_INITIAL_S SUBMIT_BACKOFF_MAX_S
 #   POST_COLLECT_SLEEP_S BATCH_POLL_INTERVAL_S TARGET_NODE
 
@@ -33,6 +36,9 @@ TEMPERATURE=${TEMPERATURE:-0}
 SKIP_ANNOTATION_PATHS=${SKIP_ANNOTATION_PATHS:-""}
 CONFIG_EXTRA=${CONFIG_EXTRA:-""}
 REASONING_EFFORT=${REASONING_EFFORT:-""}
+JOB_SOURCE=${JOB_SOURCE:-"samples"}
+DATASETS=${DATASETS:-""}
+COMPACT_LABELS_PATH=${COMPACT_LABELS_PATH:-""}
 SUBMIT_BACKOFF_INITIAL_S=${SUBMIT_BACKOFF_INITIAL_S:-60}
 SUBMIT_BACKOFF_MAX_S=${SUBMIT_BACKOFF_MAX_S:-900}
 POST_COLLECT_SLEEP_S=${POST_COLLECT_SLEEP_S:-60}
@@ -45,6 +51,12 @@ if [ -n "$TARGET_NODE" ]; then
 fi
 
 JOB_NAME="cxr_annotate_loop"
+if [ "$JOB_SOURCE" != "samples" ]; then
+    JOB_NAME="cxr_annotate_${JOB_SOURCE}"
+    if [ -n "$DATASETS" ]; then
+        JOB_NAME="${JOB_NAME}_${DATASETS// /_}"
+    fi
+fi
 LOG_DIR="/mnt/workspace/$USER/slurm-out"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/${JOB_NAME}-%j.out"
@@ -69,6 +81,18 @@ fi
 if [ -n "$REASONING_EFFORT" ]; then
     EXTRA_ARGS="$EXTRA_ARGS --reasoning_effort $(printf '%q' "$REASONING_EFFORT")"
 fi
+if [ -n "$JOB_SOURCE" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --job_source $(printf '%q' "$JOB_SOURCE")"
+fi
+if [ -n "$DATASETS" ]; then
+    # shellcheck disable=SC2086
+    for d in $DATASETS; do
+        EXTRA_ARGS="$EXTRA_ARGS --datasets $(printf '%q' "$d")"
+    done
+fi
+if [ -n "$COMPACT_LABELS_PATH" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --compact_labels_path $(printf '%q' "$COMPACT_LABELS_PATH")"
+fi
 
 TEMP_SCRIPT=$(mktemp)
 
@@ -86,7 +110,7 @@ $NODE_DIRECTIVE
 echo "Job started on \$(hostname) at \$(date)"
 echo "Repo: $REPO_ROOT"
 echo "Resources: Time=$TIME Mem=$MEM CPUs=$CPUS Node=${TARGET_NODE:-Any}"
-echo "Loop: RUN_ID=$RUN_ID MODEL=$MODEL_NAME CHUNK_SIZE=$CHUNK_SIZE MAX_TOKENS_PER_REQUEST=$MAX_TOKENS_PER_REQUEST TEMPERATURE=$TEMPERATURE MAX_CHUNKS=${MAX_CHUNKS:-unlimited}"
+echo "Loop: RUN_ID=$RUN_ID MODEL=$MODEL_NAME JOB_SOURCE=$JOB_SOURCE DATASETS=${DATASETS:-samples} CHUNK_SIZE=$CHUNK_SIZE MAX_TOKENS_PER_REQUEST=$MAX_TOKENS_PER_REQUEST TEMPERATURE=$TEMPERATURE MAX_CHUNKS=${MAX_CHUNKS:-unlimited}"
 echo "SKIP_ANNOTATION_PATHS=${SKIP_ANNOTATION_PATHS:-none}"
 echo "REASONING_EFFORT=${REASONING_EFFORT:-default}"
 
