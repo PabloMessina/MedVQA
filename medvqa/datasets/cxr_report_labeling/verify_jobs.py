@@ -36,7 +36,7 @@ from medvqa.datasets.cxr_report_labeling.schemas import (
     annotation_query_hash,
     report_text_hash,
 )
-from medvqa.utils.files_utils import load_jsonl
+from medvqa.utils.files_utils import iter_jsonl, load_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +104,23 @@ def load_failed_query_hashes(path: Optional[str]) -> Set[str]:
     out: Set[str] = set()
     if not path or not os.path.exists(path):
         return out
-    for item in load_jsonl(path):
+    for item in iter_jsonl(path):
         qh = item.get("query_hash") if isinstance(item, dict) else None
         if not qh and isinstance(item, dict):
             qh = item.get("custom_id")
         if isinstance(qh, str) and qh:
             out.add(qh)
+    return out
+
+
+def load_failed_query_hashes_union(paths: Sequence[Optional[str]]) -> Set[str]:
+    out: Set[str] = set()
+    seen: Set[str] = set()
+    for path in paths:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        out.update(load_failed_query_hashes(path))
     return out
 
 

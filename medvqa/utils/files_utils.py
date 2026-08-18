@@ -4,7 +4,7 @@ import logging
 import os
 import pickle
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Iterator, List, Optional, Union
 
 import yaml
 from tqdm import tqdm
@@ -77,14 +77,36 @@ def load_json(path):
         return json.load(f)
 
 
-def load_jsonl(path):
+def iter_jsonl(path) -> Iterator[dict]:
+    """Yield JSONL objects one row at a time (does not materialize the file)."""
     if isinstance(path, Path):
         path = str(path)
     assert os.path.exists(path)
     assert os.path.isfile(path)
-    assert path.endswith('.jsonl')
-    with open(path, 'r') as f:
-        return [json.loads(line) for line in f]
+    assert path.endswith(".jsonl")
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def count_jsonl_rows(path) -> int:
+    """Count non-empty JSONL lines without parsing."""
+    if isinstance(path, Path):
+        path = str(path)
+    if not os.path.isfile(path):
+        return 0
+    n = 0
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                n += 1
+    return n
+
+
+def load_jsonl(path):
+    return list(iter_jsonl(path))
 
 
 def load_pickle(path):

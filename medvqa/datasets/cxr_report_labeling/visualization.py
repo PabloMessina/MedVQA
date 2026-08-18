@@ -1152,7 +1152,8 @@ _LABEL_COLORS = {
     "unknown": "#6b7280",
     "likely false": "#d97706",
     "definitely false": "#b91c1c",
-    "unmentioned": "#9ca3af",
+    "regex_unmatched": "#9ca3af",
+    "unmentioned": "#9ca3af",  # legacy compact jsonl
 }
 
 
@@ -1435,7 +1436,8 @@ def inspect_final_labels_for_report(
 ):
     """ipywidgets browser over ``final_labels/<dataset>_sparse.jsonl``.
 
-    Missing classes are ``unmentioned`` (not listed). Optional live regex spans
+    Non-candidate classes are ``regex_unmatched`` in compact jsonl (omitted here).
+    Optional live regex spans
     for non-``no_finding`` sparse classes.
     """
     import ipywidgets as widgets

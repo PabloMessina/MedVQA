@@ -128,15 +128,36 @@ def get_verify_annotations_path(
     )
 
 
-def get_failed_query_hashes_path(
+def get_legacy_failed_query_hashes_path(
     run_id: str,
     model_name: str,
     config_slug: str,
 ) -> str:
-    """Same-config failed ``query_hash`` sidecar (not reused across model/config)."""
+    """Unscoped sidecar used by parallel loops before per-dataset split (read-only)."""
     return os.path.join(
         get_llm_annotations_dir(run_id, model_name, config_slug),
         "failed_query_hashes.jsonl",
+    )
+
+
+def get_failed_query_hashes_path(
+    run_id: str,
+    model_name: str,
+    config_slug: str,
+    dataset: Optional[str] = None,
+    *,
+    job_source: Optional[str] = None,
+) -> str:
+    """Failed ``query_hash`` sidecar for this config + dataset/job_source (write target)."""
+    if job_source == "no_finding" and dataset:
+        name = f"failed_query_hashes_no_finding_{dataset}.jsonl"
+    elif dataset:
+        name = f"failed_query_hashes_{dataset}.jsonl"
+    else:
+        name = "failed_query_hashes_samples.jsonl"
+    return os.path.join(
+        get_llm_annotations_dir(run_id, model_name, config_slug),
+        name,
     )
 
 

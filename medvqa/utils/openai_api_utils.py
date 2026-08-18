@@ -285,8 +285,13 @@ def prepare_batch_requests(
     custom_ids: Optional[List[str]] = None,
     pending_metadata_path: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    file_tag: Optional[str] = None,
 ) -> Dict:
-    """Write OpenAI-format batch JSONL locally (no API calls). Keep the file for inspection."""
+    """Write OpenAI-format batch JSONL locally (no API calls). Keep the file for inspection.
+
+    ``file_tag`` is inserted into tmp filenames so parallel loops (different
+    datasets / job sources) cannot clobber the same timestamped path.
+    """
     assert texts is not None and len(texts) > 0, "texts must be a non-empty list"
     assert system_instructions, "system_instructions must be provided"
     assert model_name, "model_name must be provided"
@@ -315,16 +320,20 @@ def prepare_batch_requests(
         )
 
     timestamp = get_timestamp()
+    tag = ""
+    if file_tag:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(file_tag)).strip("._") or "tag"
+        tag = f"_{safe}"
     if api_type == "gemini":
         batch_dir = _gemini_batch_dir(tmp_dir)
         batch_api_requests_filepath = os.path.join(
-            batch_dir, f"batch_requests_{timestamp}.jsonl"
+            batch_dir, f"batch_requests_{timestamp}{tag}.jsonl"
         )
     else:
         batch_dir = os.path.join(tmp_dir, "openai", "batch_api")
         os.makedirs(batch_dir, exist_ok=True)
         batch_api_requests_filepath = os.path.join(
-            tmp_dir, "openai", f"batch_api_requests_{timestamp}.jsonl"
+            tmp_dir, "openai", f"batch_api_requests_{timestamp}{tag}.jsonl"
         )
 
     logger.info(f"Saving batch API requests to {batch_api_requests_filepath}")
@@ -333,7 +342,7 @@ def prepare_batch_requests(
     if batch_job_record_path is None:
         batch_job_record_path = os.path.join(
             batch_dir if api_type == "gemini" else batch_dir,
-            f"batch_job_prepare_{timestamp}.json",
+            f"batch_job_prepare_{timestamp}{tag}.json",
         )
 
     job_record = {
@@ -751,6 +760,7 @@ def orchestrate_api_calls(
     custom_ids: Optional[List[str]] = None,
     pending_metadata_path: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    batch_file_tag: Optional[str] = None,
 ):
     """Runs the common boilerplate for orchestrating API calls.
 
@@ -780,6 +790,7 @@ def orchestrate_api_calls(
                         custom_ids=custom_ids,
                         pending_metadata_path=pending_metadata_path,
                         reasoning_effort=reasoning_effort,
+                        file_tag=batch_file_tag,
                     )
                 if stage == "submit":
                     assert batch_job_record_path, (

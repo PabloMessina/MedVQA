@@ -247,7 +247,7 @@ Phase 2 coordinator tunes `lung_opacity.txt` + OR edges after the barrier.
 
 - Slurm loop: `medvqa/slurm/launch_cxr_annotate_batch_loop.sh` / job family `cxr_annotate_loop`
 - Log pattern: `/mnt/workspace/$USER/slurm-out/cxr_annotate_loop-<jobid>.out`
-- Progress: `cache/.../api_tmp/gemini/batch_api/loop_progress.jsonl`
+- Progress: `cache/.../api_tmp/gemini/batch_api/loop_progress_<job_source>_<dataset>.jsonl`
 - Model: `gemini-2.5-flash-lite`; key env: `GEMINI_API_KEY`; chunk_size 2000
 - Working agreement: agents author code; user runs Slurm/API
 - Live annotations ≈**192k** lines (still growing — chunk 102 in flight as of 2026-08-09 ~09:34 local; stamp `20260809_014008` froze ≈132k)

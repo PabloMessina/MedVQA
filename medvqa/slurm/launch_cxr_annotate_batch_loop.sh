@@ -22,7 +22,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 TIME=${TIME:-"3-00:00:00"}
-MEM=${MEM:-"16G"}
+MEM=${MEM:-"32G"}
 CPUS=${CPUS:-4}
 CONDA_ENV=${CONDA_ENV:-"py313"}
 RUN_ID=${RUN_ID:-"v1_k1200_iu400"}
@@ -70,9 +70,12 @@ if [ -n "$MAX_CHUNKS" ]; then
     EXTRA_ARGS="$EXTRA_ARGS --max_chunks $MAX_CHUNKS"
 fi
 if [ -n "$SKIP_ANNOTATION_PATHS" ]; then
+    # One flag + all paths. Repeated --skip_annotation_paths with nargs='+'
+    # used to keep only the last path (dropped sample gold on leftover runs).
+    EXTRA_ARGS="$EXTRA_ARGS --skip_annotation_paths"
     # shellcheck disable=SC2086
     for p in $SKIP_ANNOTATION_PATHS; do
-        EXTRA_ARGS="$EXTRA_ARGS --skip_annotation_paths $(printf '%q' "$p")"
+        EXTRA_ARGS="$EXTRA_ARGS $(printf '%q' "$p")"
     done
 fi
 if [ -n "$CONFIG_EXTRA" ]; then

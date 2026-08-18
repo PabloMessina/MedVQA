@@ -2,7 +2,7 @@
 
 Candidate gate: class C is a candidate if C or any ontology descendant is in
 ``positive_classes`` (jsonl hits ∪ DAG ancestors). Non-candidates are
-``unmentioned`` even if sample LLM gold exists.
+``regex_unmatched`` even if sample LLM gold exists.
 
 Presence entailment among ``{C} ∪ matched descendants``: ``definitely true`` >
 ``likely true``. Else C's own LLM if C matched. Else descendant-only
@@ -30,7 +30,7 @@ from medvqa.datasets.cxr_report_labeling.label_semantics import (
     LLM_LABELS,
     NORMAL_CLASS,
     NPZ_LABEL_TO_UINT8,
-    RELEASED_UNMENTIONED,
+    RELEASED_REGEX_UNMATCHED,
     RESOLUTION_LLM_FAILED,
     RESOLUTION_NO_FINDING_AUTO,
     RESOLUTION_NO_FINDING_LLM,
@@ -44,6 +44,7 @@ from medvqa.datasets.cxr_report_labeling.paths import (
     get_failed_query_hashes_path,
     get_final_labels_dir,
     get_full_regex_matches_path,
+    get_legacy_failed_query_hashes_path,
     get_results_run_dir,
     resolve_sample_annotations_path,
     resolve_verify_annotations_path,
@@ -60,7 +61,7 @@ from medvqa.datasets.cxr_report_labeling.schemas import (
 )
 from medvqa.datasets.cxr_report_labeling.verify_jobs import (
     expand_candidate_classes,
-    load_failed_query_hashes,
+    load_failed_query_hashes_union,
     matched_via_tags,
     parsed_response_ok,
 )
@@ -83,11 +84,14 @@ class LlmIndex:
         self.by_uid_class: Dict[Tuple[str, str], dict] = {}
         self.by_content_key: Dict[str, dict] = {}
 
-    def add_row(self, row: dict) -> None:
+    def add_row(self, row: dict, expected_dataset: Optional[str] = None) -> None:
         parsed = row.get("parsed_response")
         if not parsed_response_ok(parsed):
             return
         meta = row.get("metadata") or {}
+        ds = meta.get("dataset")
+        if expected_dataset and ds and ds != expected_dataset:
+            return
         uid, class_id = meta.get("uid"), meta.get("class_id")
         rec = {
             "label": normalize_nli_label(parsed.get("label")),
@@ -114,17 +118,30 @@ class LlmIndex:
         return None
 
 
-def _load_llm_index(paths: Sequence[str]) -> LlmIndex:
+def _load_llm_index(
+    paths: Sequence[str], expected_dataset: Optional[str] = None
+) -> LlmIndex:
     index = LlmIndex()
     for path in paths:
         if not path or not os.path.exists(path):
             logger.info("LLM path missing (skipped): %s", path)
             continue
         n = 0
+        n_skip_ds = 0
         for row in load_jsonl(path):
-            index.add_row(row)
+            meta = (row.get("metadata") or {})
+            ds = meta.get("dataset")
+            if expected_dataset and ds and ds != expected_dataset:
+                n_skip_ds += 1
+                continue
+            index.add_row(row, expected_dataset=expected_dataset)
             n += 1
-        logger.info("Loaded %d rows from %s", n, path)
+        logger.info(
+            "Loaded %d rows from %s (skipped_other_dataset=%d)",
+            n,
+            path,
+            n_skip_ds,
+        )
     return index
 
 
@@ -211,28 +228,32 @@ def materialize_final_labels(
             stage=stage,
         )
     llm_annotation_paths = list(llm_annotation_paths)
-    llm_index = _load_llm_index(llm_annotation_paths)
+    llm_index = _load_llm_index(llm_annotation_paths, expected_dataset=dataset)
 
     inferred_model, inferred_fp = _infer_model_config(llm_annotation_paths)
     use_model = inferred_model or model_name
     config_fingerprint = inferred_fp or annotation_config_fingerprint()
 
-    sidecar_path = None
+    sidecar_paths: List[Optional[str]] = []
     if config_slug:
-        sidecar_path = get_failed_query_hashes_path(run_id, model_name, config_slug)
+        sidecar_paths.append(
+            get_failed_query_hashes_path(
+                run_id, model_name, config_slug, dataset=dataset
+            )
+        )
+        sidecar_paths.append(
+            get_legacy_failed_query_hashes_path(run_id, model_name, config_slug)
+        )
     else:
-        sidecar_path = _sidecar_for_verify(run_id, model_name, dataset)
+        sidecar_paths.append(_sidecar_for_verify(run_id, model_name, dataset))
         nf_verify = resolve_verify_annotations_path(
             run_id, model_name, dataset, no_finding=True
         )
-        # Same config dir as regex verify (failed hashes are per config, not per file)
-        if sidecar_path and not os.path.isfile(sidecar_path):
-            alt = os.path.join(os.path.dirname(nf_verify), "failed_query_hashes.jsonl")
-            if os.path.isfile(alt):
-                sidecar_path = alt
-    failed_hashes = load_failed_query_hashes(sidecar_path)
+        alt = os.path.join(os.path.dirname(nf_verify), "failed_query_hashes.jsonl")
+        sidecar_paths.append(alt)
+    failed_hashes = load_failed_query_hashes_union(sidecar_paths)
     logger.info(
-        "Fail sidecar %s (%d hashes)", sidecar_path, len(failed_hashes)
+        "Fail sidecar union %s (%d hashes)", sidecar_paths, len(failed_hashes)
     )
 
     reports_by_uid = load_reports_by_uid(dataset)
@@ -285,7 +306,7 @@ def materialize_final_labels(
             own_matched = class_id in jsonl_pos
             is_cand = class_id in candidates
             if not is_cand:
-                labels[class_id] = RELEASED_UNMENTIONED
+                labels[class_id] = RELEASED_REGEX_UNMATCHED
                 continue
 
             n_candidates += 1
@@ -395,7 +416,7 @@ def materialize_final_labels(
             f"Refuse to release {dataset}: {len(missing_required)} regex-candidate "
             f"cell(s) lack LLM and are not fail-sidecar leftovers. "
             f"Examples: {missing_required[:8]!r}. "
-            "Do not map missing → unmentioned. Finish verify or retry leftovers "
+            "Do not map missing → regex_unmatched. Finish verify or retry leftovers "
             "with a new model/config."
         )
 
@@ -522,7 +543,7 @@ def materialize_final_labels(
             for cid, j in col.items():
                 lab = labs.get(cid)
                 if lab is None:
-                    # Fail-sidecar leftover (or no_finding pending): not unmentioned
+                    # Fail-sidecar leftover (or no_finding pending): not regex_unmatched
                     mat[i, j] = 255
                 else:
                     mat[i, j] = NPZ_LABEL_TO_UINT8.get(lab, 255)
@@ -550,7 +571,7 @@ def materialize_final_labels(
         "n_sparse_rows": len(sparse_rows),
         "n_fail_sidecar_leftovers": n_fail_leftover,
         "n_failed_query_hashes": len(failed_hashes),
-        "fail_sidecar_path": sidecar_path,
+        "fail_sidecar_paths": [p for p in sidecar_paths if p],
         "n_no_finding_auto": n_nf_auto,
         "n_no_finding_llm": n_nf_llm,
         "n_no_finding_fail": n_nf_fail,

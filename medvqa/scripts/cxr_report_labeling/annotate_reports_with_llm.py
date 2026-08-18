@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -26,6 +27,7 @@ from medvqa.datasets.cxr_report_labeling.paths import (
     get_failed_query_hashes_path,
     get_final_labels_dir,
     get_full_regex_matches_path,
+    get_legacy_failed_query_hashes_path,
     get_results_run_dir,
     get_sample_annotations_path,
     get_verify_annotations_path,
@@ -52,12 +54,18 @@ from medvqa.datasets.cxr_report_labeling.verify_jobs import (
     iter_no_finding_intents,
     iter_regex_positive_intents,
     load_failed_query_hashes,
+    load_failed_query_hashes_union,
     parsed_response_ok,
 )
-from medvqa.utils.files_utils import load_json, load_jsonl, save_json
+from medvqa.utils.files_utils import (
+    count_jsonl_rows,
+    iter_jsonl,
+    load_json,
+    load_jsonl,
+    save_json,
+)
 from medvqa.utils.logging_utils import setup_logging
 from medvqa.utils.openai_api_utils import (
-    GPT_IS_ACTING_WEIRD_REGEX,
     orchestrate_api_calls,
     resolve_gemini_reasoning_effort,
 )
@@ -173,8 +181,6 @@ def _load_annotation_json_obj(text: str) -> dict:
 
 def parse_llm_model_output(text: str) -> dict:
     assert isinstance(text, str)
-    if GPT_IS_ACTING_WEIRD_REGEX.search(text):
-        raise RuntimeError(f"GPT is protesting: {text}")
     json_obj = _load_annotation_json_obj(text)
     for key in _ANNOTATION_JSON_KEYS:
         assert key in json_obj, f"Missing {key} in {text}"
@@ -238,6 +244,42 @@ def _annotations_path(
     return path
 
 
+def _batch_file_tag(job_source: str, dataset: Optional[str]) -> str:
+    ds = dataset or "samples"
+    raw = f"{job_source}_{ds}"
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._") or "job"
+
+
+def _fail_sidecar_write_path(
+    run_id: str,
+    model_name: str,
+    config_slug: str,
+    *,
+    job_source: str,
+    dataset: Optional[str],
+) -> Path:
+    return Path(
+        get_failed_query_hashes_path(
+            run_id,
+            model_name,
+            config_slug,
+            dataset=dataset,
+            job_source=job_source,
+        )
+    )
+
+
+def _load_failed_hashes_for_job(
+    write_path: Path,
+    run_id: str,
+    model_name: str,
+    config_slug: str,
+) -> Set[str]:
+    """Dataset sidecar (writes) plus legacy unscoped file (read-only)."""
+    legacy = get_legacy_failed_query_hashes_path(run_id, model_name, config_slug)
+    return load_failed_query_hashes_union([str(write_path), legacy])
+
+
 def _batch_dir(run_id: str) -> Path:
     path = Path(get_cache_run_dir(run_id)) / "api_tmp" / "gemini" / "batch_api"
     path.mkdir(parents=True, exist_ok=True)
@@ -266,7 +308,7 @@ def _load_done_query_hashes(path: Path) -> Set[str]:
     done: Set[str] = set()
     if not path.exists():
         return done
-    for item in load_jsonl(str(path)):
+    for item in iter_jsonl(str(path)):
         if not _parsed_response_ok(item.get("parsed_response")):
             continue
         meta = item.get("metadata") or {}
@@ -284,7 +326,7 @@ def _load_skip_content_keys(paths: Optional[Sequence[str]]) -> Set[str]:
         if not path or not os.path.exists(path):
             logger.warning("skip_annotation_path missing: %s", path)
             continue
-        for item in load_jsonl(path):
+        for item in iter_jsonl(path):
             if not _parsed_response_ok(item.get("parsed_response")):
                 continue
             meta = item.get("metadata") or {}
@@ -294,34 +336,44 @@ def _load_skip_content_keys(paths: Optional[Sequence[str]]) -> Set[str]:
     return skip
 
 
-def _load_query_hash_cache(path: Path) -> Dict[str, dict]:
-    """query_hash → {parsed_response, metadata_template} for local fan-out."""
+_FANOUT_DROP_META = {
+    "query",
+    "fanout",
+    "fanout_uids",
+    "uid",
+    "dataset",
+}
+
+
+def _load_fanout_state(path: Path) -> Tuple[Dict[str, dict], Set[Tuple[str, str]]]:
+    """One streaming pass: query_hash cache (no bulky ``query``) + uid/class pairs."""
     cache: Dict[str, dict] = {}
+    pairs: Set[Tuple[str, str]] = set()
     if not path.exists():
-        return cache
-    for item in load_jsonl(str(path)):
+        return cache, pairs
+    for item in iter_jsonl(str(path)):
         parsed = item.get("parsed_response")
         if not _parsed_response_ok(parsed):
             continue
         meta = item.get("metadata") or {}
         qh = meta.get("query_hash")
         if qh and qh not in cache:
-            cache[qh] = {"parsed_response": parsed, "metadata": meta}
-    return cache
-
-
-def _existing_uid_class_pairs(path: Path) -> Set[Tuple[str, str]]:
-    pairs: Set[Tuple[str, str]] = set()
-    if not path.exists():
-        return pairs
-    for item in load_jsonl(str(path)):
-        if not _parsed_response_ok(item.get("parsed_response")):
-            continue
-        meta = item.get("metadata") or {}
+            slim = {k: v for k, v in meta.items() if k not in _FANOUT_DROP_META}
+            cache[qh] = {"parsed_response": parsed, "metadata": slim}
         uid = meta.get("uid")
         class_id = meta.get("class_id")
         if uid and class_id:
             pairs.add((uid, class_id))
+    return cache, pairs
+
+
+def _load_query_hash_cache(path: Path) -> Dict[str, dict]:
+    cache, _ = _load_fanout_state(path)
+    return cache
+
+
+def _existing_uid_class_pairs(path: Path) -> Set[Tuple[str, str]]:
+    _, pairs = _load_fanout_state(path)
     return pairs
 
 
@@ -468,10 +520,9 @@ def ensure_local_fanout_rows_from_intents(
     config_fingerprint: str,
 ) -> dict:
     """Append uid rows for query_hashes already cached but missing this uid."""
-    cache = _load_query_hash_cache(save_path)
+    cache, existing = _load_fanout_state(save_path)
     if not cache:
         return {"n_fanout_appended": 0}
-    existing = _existing_uid_class_pairs(save_path)
     by_id = registry.by_id()
     appended = 0
     with open(save_path, "a", encoding="utf-8") as f:
@@ -594,18 +645,19 @@ def _single_dataset_for_job_source(
 
 
 def _record_collect_failures(
-    pending_path: Path, save_path: Path, sidecar: Path
+    pending_path: Path, save_path: Path, sidecar: Path, already: Optional[Set[str]] = None
 ) -> dict:
     if not pending_path.exists():
         return {"n_failed_recorded": 0, "n_pending": 0, "path": str(sidecar)}
     pending_hashes: List[str] = []
-    for job in load_jsonl(str(pending_path)):
+    for job in iter_jsonl(str(pending_path)):
         qh = job.get("custom_id") or (job.get("metadata") or {}).get("query_hash")
         if qh:
             pending_hashes.append(qh)
     ok = _load_done_query_hashes(save_path)
-    already = load_failed_query_hashes(str(sidecar))
-    new_failed = [h for h in pending_hashes if h not in ok and h not in already]
+    already_set = set(already or ())
+    already_set.update(load_failed_query_hashes(str(sidecar)))
+    new_failed = [h for h in pending_hashes if h not in ok and h not in already_set]
     n = append_failed_query_hashes(str(sidecar), new_failed)
     logger.info(
         "Fail sidecar: pending=%d newly_failed=%d path=%s",
@@ -691,6 +743,219 @@ def _load_intents_for_job_source(
     return intents, extra
 
 
+def flatten_skip_annotation_paths(paths: Optional[Sequence]) -> Optional[List[str]]:
+    """Flatten ``--skip_annotation_paths`` from nargs='+' and/or repeated flags.
+
+    The Slurm launcher used to emit ``--skip_annotation_paths A --skip_annotation_paths B``.
+    With ``nargs='+'`` only (no append), argparse kept B and dropped A.
+    """
+    if not paths:
+        return None
+    out: List[str] = []
+    for item in paths:
+        if isinstance(item, (list, tuple)):
+            out.extend(str(p) for p in item if p)
+        elif item:
+            out.append(str(item))
+    return out or None
+
+
+def _gold_skip_paths(
+    run_id: str,
+    model_name: str,
+    job_source: str,
+    skip_annotation_paths: Optional[Sequence[str]],
+) -> List[str]:
+    skip_paths: List[str] = list(skip_annotation_paths or [])
+    if job_source != JOB_SOURCE_SAMPLES:
+        gold = resolve_sample_annotations_path(run_id, model_name)
+        if gold not in skip_paths:
+            skip_paths.append(gold)
+    return skip_paths
+
+
+def _filter_jobs_excluding_hashes(
+    jobs_all: List[dict],
+    done: Set[str],
+    failed: Set[str],
+) -> Tuple[List[dict], int, int]:
+    """Drop unique jobs whose query_hash is done or failed. Counts are fanout sizes."""
+    remaining: List[dict] = []
+    n_skipped_done = 0
+    n_skipped_failed = 0
+    for job in jobs_all:
+        qh = job.get("custom_id") or (job.get("metadata") or {}).get("query_hash")
+        n_int = len((job.get("metadata") or {}).get("fanout") or []) or 1
+        if qh in done:
+            n_skipped_done += n_int
+            continue
+        if qh in failed:
+            n_skipped_failed += n_int
+            continue
+        remaining.append(job)
+    return remaining, n_skipped_done, n_skipped_failed
+
+
+@dataclass
+class AnnotationLoopCache:
+    """Static corpus + remaining unique jobs for one overnight loop.
+
+    ``jobs_all`` is sorted by query_hash and excludes gold-skip / already-done /
+    already-failed hashes at cache-build time. Each prepare re-filters against
+    the growing verify jsonl and fail sidecar, then slices ``CHUNK_SIZE``.
+    """
+
+    registry: ClassRegistry
+    dataset: Optional[str]
+    samples: List[dict]
+    intents: List[dict]
+    intent_extra: dict
+    skip_content_keys: Set[str]
+    jobs_all: List[dict]
+    n_uid_intents: int
+    n_skipped_content: int
+    n_skipped_done_base: int
+    n_skipped_failed_base: int
+    config_extra: Optional[str]
+    config_fingerprint: str
+    config_slug: str
+    reasoning_effort: Optional[str]
+    system_instructions: str
+
+
+def build_annotation_loop_cache(
+    *,
+    run_id: str,
+    model_name: str,
+    job_source: str,
+    datasets: Optional[Sequence[str]] = None,
+    samples_path: Optional[str] = None,
+    skip_annotation_paths: Optional[Sequence[str]] = None,
+    compact_labels_path: Optional[str] = None,
+    temperature: float = 0.0,
+    max_tokens_per_request: int = 2048,
+    config_extra: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    class_ids: Optional[Sequence[str]] = None,
+    uids: Optional[Sequence[str]] = None,
+    api_type: str = "gemini",
+) -> AnnotationLoopCache:
+    """Load reports/matches/intents/gold-skip once; build remaining unique jobs."""
+    dataset = _single_dataset_for_job_source(job_source, datasets)
+    results_dir = get_results_run_dir(run_id)
+    samples: List[dict] = []
+    if job_source == JOB_SOURCE_SAMPLES:
+        if samples_path is None:
+            samples_path = os.path.join(results_dir, "samples.jsonl")
+        samples = load_jsonl(samples_path)
+
+    registry_path = os.path.join(results_dir, "class_registry.json")
+    if os.path.exists(registry_path):
+        registry = ClassRegistry.load(registry_path)
+    else:
+        registry = build_class_registry()
+        registry.save(registry_path)
+
+    if api_type == "gemini":
+        reasoning_effort = resolve_gemini_reasoning_effort(
+            model_name, reasoning_effort
+        )
+    elif reasoning_effort is not None and not str(reasoning_effort).strip():
+        reasoning_effort = None
+    config_extra = _config_extra_with_reasoning(config_extra, reasoning_effort)
+    config_fingerprint = annotation_config_fingerprint(
+        temperature=temperature,
+        max_tokens_per_request=max_tokens_per_request,
+        extra=config_extra,
+    )
+    config_slug = annotation_config_slug(
+        registry.system_prompt_hash,
+        temperature=temperature,
+        max_tokens_per_request=max_tokens_per_request,
+        extra=config_extra,
+    )
+
+    logger.info(
+        "Loop cache: loading intents job_source=%s dataset=%s",
+        job_source,
+        dataset,
+    )
+    intents, intent_extra = _load_intents_for_job_source(
+        job_source=job_source,
+        run_id=run_id,
+        samples=samples,
+        registry=registry,
+        class_ids=class_ids,
+        uids=uids,
+        dataset=dataset,
+        compact_labels_path=compact_labels_path,
+    )
+    skip_keys = _load_skip_content_keys(
+        _gold_skip_paths(run_id, model_name, job_source, skip_annotation_paths)
+    )
+    save_path = _annotations_path(
+        run_id,
+        model_name,
+        system_prompt_hash=registry.system_prompt_hash,
+        temperature=temperature,
+        max_tokens_per_request=max_tokens_per_request,
+        config_extra=config_extra,
+        job_source=job_source,
+        dataset=dataset,
+    )
+    fail_sidecar = _fail_sidecar_write_path(
+        run_id,
+        model_name,
+        config_slug,
+        job_source=job_source,
+        dataset=dataset,
+    )
+    logger.info("Loop cache: streaming done hashes from %s", save_path)
+    done = _load_done_query_hashes(save_path)
+    failed = _load_failed_hashes_for_job(fail_sidecar, run_id, model_name, config_slug)
+    logger.info(
+        "Loop cache: building unique jobs (intents=%d done=%d failed=%d skip_keys=%d)",
+        len(intents),
+        len(done),
+        len(failed),
+        len(skip_keys),
+    )
+    jobs_all, job_stats = build_annotation_jobs_from_intents(
+        intents,
+        registry,
+        model_name=model_name,
+        config_fingerprint=config_fingerprint,
+        already_done_query_hashes=done,
+        skip_content_keys=skip_keys,
+        failed_query_hashes=failed,
+    )
+    cache = AnnotationLoopCache(
+        registry=registry,
+        dataset=dataset,
+        samples=samples,
+        intents=intents,
+        intent_extra=intent_extra,
+        skip_content_keys=skip_keys,
+        jobs_all=jobs_all,
+        n_uid_intents=job_stats["n_uid_intents"],
+        n_skipped_content=job_stats["n_skipped_skip_content_key"],
+        n_skipped_done_base=job_stats["n_skipped_done_query_hash"],
+        n_skipped_failed_base=job_stats["n_skipped_failed_query_hash"],
+        config_extra=config_extra,
+        config_fingerprint=config_fingerprint,
+        config_slug=config_slug,
+        reasoning_effort=reasoning_effort,
+        system_instructions=load_system_prompt_text(),
+    )
+    logger.info(
+        "Loop cache ready: remaining_unique=%d n_uid_intents=%d config_slug=%s",
+        len(jobs_all),
+        cache.n_uid_intents,
+        config_slug,
+    )
+    return cache
+
+
 def run_annotation(
     *,
     run_id: str = DEFAULT_RUN_ID,
@@ -718,6 +983,7 @@ def run_annotation(
     job_source: str = JOB_SOURCE_SAMPLES,
     datasets: Optional[Sequence[str]] = None,
     compact_labels_path: Optional[str] = None,
+    loop_cache: Optional[AnnotationLoopCache] = None,
 ) -> dict:
     """Annotate reports with LLM (content-addressed query_hash cache).
 
@@ -747,36 +1013,44 @@ def run_annotation(
     dataset = _single_dataset_for_job_source(job_source, datasets)
     results_dir = get_results_run_dir(run_id)
     samples: List[dict] = []
-    if job_source == JOB_SOURCE_SAMPLES:
-        if samples_path is None:
-            samples_path = os.path.join(results_dir, "samples.jsonl")
-        if batch_mode not in ("submit", "collect"):
-            samples = load_jsonl(samples_path)
-    registry_path = os.path.join(results_dir, "class_registry.json")
-    if os.path.exists(registry_path):
-        registry = ClassRegistry.load(registry_path)
+    if loop_cache is not None:
+        registry = loop_cache.registry
+        samples = loop_cache.samples
+        config_extra = loop_cache.config_extra
+        config_fingerprint = loop_cache.config_fingerprint
+        config_slug = loop_cache.config_slug
+        reasoning_effort = loop_cache.reasoning_effort
     else:
-        registry = build_class_registry()
-        registry.save(registry_path)
+        if job_source == JOB_SOURCE_SAMPLES:
+            if samples_path is None:
+                samples_path = os.path.join(results_dir, "samples.jsonl")
+            if batch_mode not in ("submit", "collect"):
+                samples = load_jsonl(samples_path)
+        registry_path = os.path.join(results_dir, "class_registry.json")
+        if os.path.exists(registry_path):
+            registry = ClassRegistry.load(registry_path)
+        else:
+            registry = build_class_registry()
+            registry.save(registry_path)
 
-    if api_type == "gemini":
-        reasoning_effort = resolve_gemini_reasoning_effort(
-            model_name, reasoning_effort
+        if api_type == "gemini":
+            reasoning_effort = resolve_gemini_reasoning_effort(
+                model_name, reasoning_effort
+            )
+        elif reasoning_effort is not None and not str(reasoning_effort).strip():
+            reasoning_effort = None
+        config_extra = _config_extra_with_reasoning(config_extra, reasoning_effort)
+        config_fingerprint = annotation_config_fingerprint(
+            temperature=temperature,
+            max_tokens_per_request=max_tokens_per_request,
+            extra=config_extra,
         )
-    elif reasoning_effort is not None and not str(reasoning_effort).strip():
-        reasoning_effort = None
-    config_extra = _config_extra_with_reasoning(config_extra, reasoning_effort)
-    config_fingerprint = annotation_config_fingerprint(
-        temperature=temperature,
-        max_tokens_per_request=max_tokens_per_request,
-        extra=config_extra,
-    )
-    config_slug = annotation_config_slug(
-        registry.system_prompt_hash,
-        temperature=temperature,
-        max_tokens_per_request=max_tokens_per_request,
-        extra=config_extra,
-    )
+        config_slug = annotation_config_slug(
+            registry.system_prompt_hash,
+            temperature=temperature,
+            max_tokens_per_request=max_tokens_per_request,
+            extra=config_extra,
+        )
     save_path = _annotations_path(
         run_id,
         model_name,
@@ -787,8 +1061,15 @@ def run_annotation(
         job_source=job_source,
         dataset=dataset,
     )
-    fail_sidecar = Path(
-        get_failed_query_hashes_path(run_id, model_name, config_slug)
+    fail_sidecar = _fail_sidecar_write_path(
+        run_id,
+        model_name,
+        config_slug,
+        job_source=job_source,
+        dataset=dataset,
+    )
+    failed_already = _load_failed_hashes_for_job(
+        fail_sidecar, run_id, model_name, config_slug
     )
     tmp_dir = os.path.join(get_cache_run_dir(run_id), "api_tmp")
     pending_path = save_path.with_suffix(".pending.jsonl")
@@ -836,7 +1117,7 @@ def run_annotation(
             info["batch"] = batch_info
             return info
 
-        before_count = len(load_jsonl(str(save_path))) if save_path.exists() else 0
+        before_count = count_jsonl_rows(str(save_path)) if save_path.exists() else 0
         job_rec = load_json(job_record_path)
         if not job_rec.get("pending_metadata_path") and pending_path.exists():
             job_rec["pending_metadata_path"] = str(pending_path)
@@ -855,24 +1136,28 @@ def run_annotation(
             model_name=model_name,
         )
         info["batch"] = batch_info
-        after_count = len(load_jsonl(str(save_path))) if save_path.exists() else 0
+        after_count = count_jsonl_rows(str(save_path)) if save_path.exists() else 0
         info["n_rows_after"] = after_count
         info["n_new_rows"] = after_count - before_count
         info["fail_sidecar"] = _record_collect_failures(
-            pending_path, save_path, fail_sidecar
+            pending_path, save_path, fail_sidecar, already=failed_already
         )
         return info
 
-    intents, intent_extra = _load_intents_for_job_source(
-        job_source=job_source,
-        run_id=run_id,
-        samples=samples,
-        registry=registry,
-        class_ids=class_ids,
-        uids=uids,
-        dataset=dataset,
-        compact_labels_path=compact_labels_path,
-    )
+    if loop_cache is not None:
+        intents = loop_cache.intents
+        intent_extra = loop_cache.intent_extra
+    else:
+        intents, intent_extra = _load_intents_for_job_source(
+            job_source=job_source,
+            run_id=run_id,
+            samples=samples,
+            registry=registry,
+            class_ids=class_ids,
+            uids=uids,
+            dataset=dataset,
+            compact_labels_path=compact_labels_path,
+        )
 
     fanout_info = ensure_local_fanout_rows_from_intents(
         intents,
@@ -883,22 +1168,37 @@ def run_annotation(
     )
 
     done = _load_done_query_hashes(save_path)
-    skip_paths: List[str] = list(skip_annotation_paths or [])
-    if job_source != JOB_SOURCE_SAMPLES:
-        gold = resolve_sample_annotations_path(run_id, model_name)
-        if gold not in skip_paths:
-            skip_paths.append(gold)
-    skip_keys = _load_skip_content_keys(skip_paths)
-    failed = load_failed_query_hashes(str(fail_sidecar))
-    jobs, job_stats = build_annotation_jobs_from_intents(
-        intents,
-        registry,
-        model_name=model_name,
-        config_fingerprint=config_fingerprint,
-        already_done_query_hashes=done,
-        skip_content_keys=skip_keys,
-        failed_query_hashes=failed,
-    )
+    failed = failed_already
+    if loop_cache is not None:
+        skip_keys = loop_cache.skip_content_keys
+        remaining, n_new_done, n_new_fail = _filter_jobs_excluding_hashes(
+            loop_cache.jobs_all, done, failed
+        )
+        loop_cache.jobs_all = remaining
+        loop_cache.n_skipped_done_base += n_new_done
+        loop_cache.n_skipped_failed_base += n_new_fail
+        jobs = remaining
+        job_stats = {
+            "n_uid_intents": loop_cache.n_uid_intents,
+            "n_unique_queries": len(jobs),
+            "n_skipped_done_query_hash": loop_cache.n_skipped_done_base,
+            "n_skipped_skip_content_key": loop_cache.n_skipped_content,
+            "n_skipped_failed_query_hash": loop_cache.n_skipped_failed_base,
+        }
+    else:
+        skip_paths: List[str] = _gold_skip_paths(
+            run_id, model_name, job_source, skip_annotation_paths
+        )
+        skip_keys = _load_skip_content_keys(skip_paths)
+        jobs, job_stats = build_annotation_jobs_from_intents(
+            intents,
+            registry,
+            model_name=model_name,
+            config_fingerprint=config_fingerprint,
+            already_done_query_hashes=done,
+            skip_content_keys=skip_keys,
+            failed_query_hashes=failed,
+        )
     if max_queries is not None:
         jobs = jobs[:max_queries]
 
@@ -938,7 +1238,11 @@ def run_annotation(
 
     texts = [j["query"] for j in jobs]
     custom_ids = [j["custom_id"] for j in jobs]
-    system_instructions = load_system_prompt_text()
+    system_instructions = (
+        loop_cache.system_instructions
+        if loop_cache is not None
+        else load_system_prompt_text()
+    )
     description = batch_description or f"cxr_annotate_{run_id}_{model_name}"
 
     if batch_mode == "prepare":
@@ -958,6 +1262,7 @@ def run_annotation(
             custom_ids=custom_ids,
             pending_metadata_path=str(pending_path),
             reasoning_effort=reasoning_effort,
+            batch_file_tag=_batch_file_tag(job_source, dataset),
         )
         pointer = {
             "batch_job_record_path": batch_info["batch_job_record_path"],
@@ -983,7 +1288,7 @@ def run_annotation(
         return info
 
     # Interactive (non-batch): call API once per unique query, then fan-out locally.
-    before_count = len(load_jsonl(str(save_path))) if save_path.exists() else 0
+    before_count = count_jsonl_rows(str(save_path)) if save_path.exists() else 0
     raw_path = save_path.with_suffix(".interactive_raw.jsonl")
     if raw_path.exists():
         raw_path.unlink()
@@ -1035,7 +1340,7 @@ def run_annotation(
     if raw_path.exists():
         raw_path.unlink()
 
-    after_count = len(load_jsonl(str(save_path))) if save_path.exists() else 0
+    after_count = count_jsonl_rows(str(save_path)) if save_path.exists() else 0
     info["n_rows_after"] = after_count
     info["n_new_rows"] = after_count - before_count
     info["n_fanout_appended"] = n_appended
@@ -1077,9 +1382,11 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
         "--skip_annotation_paths",
+        action="append",
         nargs="+",
         default=None,
-        help="Prior annotation jsonl(s); skip successful content_keys",
+        help="Prior annotation jsonl(s); skip successful content_keys. "
+        "Repeat the flag or pass several paths after one flag.",
     )
     parser.add_argument(
         "--config_extra",
@@ -1130,7 +1437,7 @@ def main():
         batch_description=args.batch_description,
         max_tokens_per_request=args.max_tokens_per_request,
         temperature=args.temperature,
-        skip_annotation_paths=args.skip_annotation_paths,
+        skip_annotation_paths=flatten_skip_annotation_paths(args.skip_annotation_paths),
         config_extra=args.config_extra,
         reasoning_effort=args.reasoning_effort,
         job_source=args.job_source,

@@ -28,6 +28,9 @@ from medvqa.datasets.cxr_report_labeling.verify_jobs import (
 )
 from medvqa.scripts.cxr_report_labeling.annotate_reports_with_llm import (
     DEFAULT_MODEL_NAME,
+    AnnotationLoopCache,
+    build_annotation_loop_cache,
+    flatten_skip_annotation_paths,
     run_annotation,
 )
 from medvqa.utils.logging_utils import setup_logging
@@ -39,13 +42,15 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _progress_path(run_id: str) -> Path:
+def _progress_path(run_id: str, job_source: str = "samples", dataset: Optional[str] = None) -> Path:
+    ds = dataset or "samples"
+    name = f"loop_progress_{job_source}_{ds}.jsonl"
     path = (
         Path(get_cache_run_dir(run_id))
         / "api_tmp"
         / "gemini"
         / "batch_api"
-        / "loop_progress.jsonl"
+        / name
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
@@ -80,6 +85,7 @@ def submit_with_backoff(
     job_source: str = JOB_SOURCE_SAMPLES,
     datasets: Optional[list] = None,
     compact_labels_path: Optional[str] = None,
+    loop_cache: Optional[AnnotationLoopCache] = None,
 ) -> Dict[str, Any]:
     """Call batch_mode=submit, retrying on 429 with exponential backoff."""
     sleep_s = backoff_initial_s
@@ -104,6 +110,7 @@ def submit_with_backoff(
                 job_source=job_source,
                 datasets=datasets,
                 compact_labels_path=compact_labels_path,
+                loop_cache=loop_cache,
             )
             info["submit_attempts"] = attempt
             info["n_429_waits"] = n_429
@@ -148,7 +155,10 @@ def run_batch_loop(
     if samples_path is None:
         samples_path = os.path.join(get_results_run_dir(run_id), "samples.jsonl")
 
-    progress_path = _progress_path(run_id)
+    ds = None
+    if datasets:
+        ds = list(datasets)[0] if len(list(datasets)) == 1 else "_".join(datasets)
+    progress_path = _progress_path(run_id, job_source=job_source, dataset=ds)
     logger.info(
         "Starting annotation batch loop run_id=%s model=%s job_source=%s datasets=%s "
         "chunk_size=%d max_tokens_per_request=%d temperature=%s progress=%s skip_paths=%s "
@@ -181,6 +191,22 @@ def run_batch_loop(
         "chunks": [],
     }
 
+    logger.info("Building annotation loop cache (reports, matches, intents, remaining jobs)")
+    loop_cache = build_annotation_loop_cache(
+        run_id=run_id,
+        model_name=model_name,
+        job_source=job_source,
+        datasets=datasets,
+        samples_path=samples_path,
+        skip_annotation_paths=skip_annotation_paths,
+        compact_labels_path=compact_labels_path,
+        temperature=temperature,
+        max_tokens_per_request=max_tokens_per_request,
+        config_extra=config_extra,
+        reasoning_effort=reasoning_effort,
+        api_type="gemini",
+    )
+
     while True:
         if max_chunks is not None and chunks_done >= max_chunks:
             logger.info("Reached max_chunks=%d; stopping", max_chunks)
@@ -207,6 +233,7 @@ def run_batch_loop(
             job_source=job_source,
             datasets=datasets,
             compact_labels_path=compact_labels_path,
+            loop_cache=loop_cache,
         )
         n_queued = int(prep.get("n_jobs_queued") or 0)
         n_uid = prep.get("n_uid_intents")
@@ -259,6 +286,7 @@ def run_batch_loop(
             job_source=job_source,
             datasets=datasets,
             compact_labels_path=compact_labels_path,
+            loop_cache=loop_cache,
         )
         batch = submit_info.get("batch") or {}
         batch_id = batch.get("batch_id")
@@ -290,6 +318,7 @@ def run_batch_loop(
             job_source=job_source,
             datasets=datasets,
             compact_labels_path=compact_labels_path,
+            loop_cache=loop_cache,
         )
         collect_batch = collect_info.get("batch") or {}
         n_saved = collect_batch.get("n_saved")
@@ -380,9 +409,11 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument(
         "--skip_annotation_paths",
+        action="append",
         nargs="+",
         default=None,
-        help="Prior annotation jsonl(s); skip successful content_keys (leftover-only runs)",
+        help="Prior annotation jsonl(s); skip successful content_keys (leftover-only runs). "
+        "Repeat the flag or pass several paths after one flag.",
     )
     parser.add_argument("--config_extra", default=None)
     parser.add_argument(
@@ -421,7 +452,7 @@ def main():
         batch_poll_interval_s=args.batch_poll_interval_s,
         max_tokens_per_request=args.max_tokens_per_request,
         temperature=args.temperature,
-        skip_annotation_paths=args.skip_annotation_paths,
+        skip_annotation_paths=flatten_skip_annotation_paths(args.skip_annotation_paths),
         config_extra=args.config_extra,
         reasoning_effort=args.reasoning_effort,
         job_source=args.job_source,

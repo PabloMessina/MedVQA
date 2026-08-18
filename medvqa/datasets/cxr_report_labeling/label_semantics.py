@@ -12,6 +12,9 @@ LLM_LABELS = (
     "definitely false",
 )
 
+REGEX_UNMATCHED = "Regex Unmatched"
+RELEASED_REGEX_UNMATCHED = "regex_unmatched"
+# Deprecated released name; kept as read alias for older materialized jsonl/npz metadata.
 UNMENTIONED = "Unmentioned"
 RELEASED_UNMENTIONED = "unmentioned"
 
@@ -25,7 +28,7 @@ PRESENCE_RANK = {
 }
 
 NPZ_LABEL_TO_UINT8 = {
-    RELEASED_UNMENTIONED: 0,
+    RELEASED_REGEX_UNMATCHED: 0,
     "definitely true": 1,
     "likely true": 2,
     "unknown": 3,
@@ -49,6 +52,7 @@ CHEXPERT_LIKE_COLLAPSE = {
     "unknown": "unmentioned",
     UNMENTIONED.lower(): "unmentioned",
     "unmentioned": "unmentioned",
+    RELEASED_REGEX_UNMATCHED: "unmentioned",
 }
 
 SUPPORT_DEVICES_CLASS = "support_device_present"
@@ -82,8 +86,8 @@ def normalize_nli_label(label: Optional[str]) -> Optional[str]:
     if label is None:
         return None
     key = label.strip().lower()
-    if key == "unmentioned":
-        return RELEASED_UNMENTIONED
+    if key in (RELEASED_UNMENTIONED, RELEASED_REGEX_UNMATCHED):
+        return RELEASED_REGEX_UNMATCHED
     if key in LLM_LABELS:
         return key
     return None
@@ -94,9 +98,9 @@ def final_label_for_class(
     regex_matched: bool,
     llm_label: Optional[str],
 ) -> str:
-    """Released label: regex miss -> Unmentioned; regex hit -> LLM 5-way label."""
+    """Released label: non-candidate -> Regex Unmatched; regex hit -> LLM 5-way label."""
     if not regex_matched:
-        return UNMENTIONED
+        return REGEX_UNMATCHED
     if llm_label is None:
         raise ValueError("regex matched but llm_label is missing")
     normalized = normalize_nli_label(llm_label)
